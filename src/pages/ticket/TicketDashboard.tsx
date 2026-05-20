@@ -1,0 +1,744 @@
+import React, { useMemo } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { DashboardBackground } from "@/components/DashboardBackground";
+import { toast } from "sonner";
+import {
+  AlertCircle,
+  ArrowDownRight,
+  ArrowUpRight,
+  BarChart3,
+  CheckCircle2,
+  ClipboardList,
+  Clock,
+  FileText,
+  Flame,
+  MessageSquare,
+  Plus,
+  RefreshCw,
+  ShieldAlert,
+  Tag,
+  User,
+  XCircle,
+} from "lucide-react";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface Ticket {
+  id: number;
+  subject: string;
+  priority: "Low" | "Medium" | "High" | "Urgent";
+  issue_details: string;
+  customer_name: string;
+  customer_phone: string;
+  company_id: number | null;
+  project_id: number | null;
+  attachment_path: string | null;
+  status: "Pending" | "Resolved";
+  created_at?: string;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const fmtDate = (d?: string | null) =>
+  d
+    ? new Date(d).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : "—";
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function StatCard({
+  label,
+  value,
+  sub,
+  icon: Icon,
+  iconColor = "text-emerald-600",
+  iconBg = "bg-emerald-500/10",
+  trend,
+  onClick,
+}: {
+  label: string;
+  value: string | number;
+  sub: string;
+  icon: React.ElementType;
+  iconColor?: string;
+  iconBg?: string;
+  trend?: "up" | "down" | "neutral";
+  onClick?: () => void;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      className={`rounded-2xl border border-border bg-card p-5 flex flex-col gap-4 transition-all duration-200 ${
+        onClick
+          ? "cursor-pointer hover:shadow-lg hover:-translate-y-0.5 hover:border-primary/20"
+          : ""
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground leading-tight">
+          {label}
+        </span>
+        <div
+          className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center`}
+        >
+          <Icon size={15} className={iconColor} />
+        </div>
+      </div>
+      <div>
+        <div className="text-3xl font-bold font-heading text-foreground leading-none">
+          {value}
+        </div>
+        <div className="flex items-center gap-1 mt-1">
+          {trend === "up" && (
+            <ArrowUpRight size={12} className="text-emerald-500" />
+          )}
+          {trend === "down" && (
+            <ArrowDownRight size={12} className="text-red-500" />
+          )}
+          <span className="text-[11px] text-muted-foreground leading-tight">
+            {sub}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatSkeleton() {
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 animate-pulse">
+      <div className="flex items-center justify-between mb-3">
+        <div className="h-3 w-24 bg-muted rounded" />
+        <div className="w-8 h-8 bg-muted rounded-lg" />
+      </div>
+      <div className="h-7 w-20 bg-muted rounded mb-2" />
+      <div className="h-3 w-32 bg-muted rounded" />
+    </div>
+  );
+}
+
+function SectionHeader({
+  icon: Icon,
+  title,
+  sub,
+  action,
+  onAction,
+}: {
+  icon: React.ElementType;
+  title: string;
+  sub?: string;
+  action?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center gap-2.5">
+        <Icon size={16} className="text-muted-foreground" />
+        <span className="text-sm font-heading font-semibold text-foreground">
+          {title}
+        </span>
+        {sub && (
+          <span className="text-xs text-muted-foreground hidden sm:inline">
+            {sub}
+          </span>
+        )}
+      </div>
+      {action && onAction && (
+        <button
+          onClick={onAction}
+          className="text-xs text-primary hover:underline font-heading"
+        >
+          {action} →
+        </button>
+      )}
+    </div>
+  );
+}
+
+function EmptyState({ label }: { label: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
+      <ClipboardList size={28} className="mb-2 opacity-30" />
+      <span className="text-xs">{label}</span>
+    </div>
+  );
+}
+
+function TableSkeleton({
+  rows = 4,
+  cols = 4,
+}: {
+  rows?: number;
+  cols?: number;
+}) {
+  return (
+    <div className="p-4 space-y-2">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex gap-3 animate-pulse">
+          {Array.from({ length: cols }).map((_, j) => (
+            <div key={j} className="h-6 bg-muted rounded flex-1" />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const priorityConfig: Record<
+  string,
+  { label: string; cls: string; bar: string }
+> = {
+  Urgent: {
+    label: "Urgent",
+    cls: "bg-red-500/10 text-red-600 border-red-400/20",
+    bar: "bg-red-500",
+  },
+  High: {
+    label: "High",
+    cls: "bg-orange-500/10 text-orange-600 border-orange-400/20",
+    bar: "bg-orange-500",
+  },
+  Medium: {
+    label: "Medium",
+    cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+    bar: "bg-amber-500",
+  },
+  Low: {
+    label: "Low",
+    cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",
+    bar: "bg-blue-500",
+  },
+};
+
+function PriorityBadge({ priority }: { priority: string }) {
+  const cfg = priorityConfig[priority] ?? {
+    label: priority,
+    cls: "bg-muted text-muted-foreground border-border",
+    bar: "bg-muted",
+  };
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}
+    >
+      {cfg.label}
+    </span>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const cls =
+    status === "Resolved"
+      ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/20"
+      : "bg-amber-500/10 text-amber-600 border-amber-400/20";
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}
+    >
+      {status}
+    </span>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+export default function TicketDashboard() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const {
+    data: tickets = [],
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isFetching,
+  } = useQuery<Ticket[]>({
+    queryKey: ["tickets"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/tickets");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || `HTTP ${res.status}`);
+      }
+      return res.json();
+    },
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: 30_000,
+    retry: 1,
+  });
+
+  const resolveMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetchWithAuth(`/api/tickets/resolve/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error("Failed to resolve ticket");
+    },
+    onSuccess: () => {
+      toast.success("Ticket resolved");
+      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+    },
+    onError: () => toast.error("Failed to resolve ticket"),
+  });
+
+  // ── Derived stats ────────────────────────────────────────────────────────
+  const stats = useMemo(() => {
+    const total = tickets.length;
+    const pending = tickets.filter((t) => t.status === "Pending").length;
+    const resolved = tickets.filter((t) => t.status === "Resolved").length;
+    const urgent = tickets.filter(
+      (t) => t.priority === "Urgent" && t.status === "Pending",
+    ).length;
+    const high = tickets.filter(
+      (t) => t.priority === "High" && t.status === "Pending",
+    ).length;
+    const resolvedPct = total > 0 ? Math.round((resolved / total) * 100) : 0;
+
+    const priorityCounts: Record<string, number> = {
+      Urgent: 0,
+      High: 0,
+      Medium: 0,
+      Low: 0,
+    };
+    tickets
+      .filter((t) => t.status === "Pending")
+      .forEach((t) => {
+        if (t.priority in priorityCounts) priorityCounts[t.priority]++;
+      });
+
+    const recentPending = tickets
+      .filter((t) => t.status === "Pending")
+      .slice(0, 6);
+    const recentResolved = tickets
+      .filter((t) => t.status === "Resolved")
+      .slice(0, 6);
+
+    return {
+      total,
+      pending,
+      resolved,
+      urgent,
+      high,
+      resolvedPct,
+      priorityCounts,
+      recentPending,
+      recentResolved,
+    };
+  }, [tickets]);
+
+  return (
+    <>
+      <Breadcrumbs items={["Dashboard", "Tickets"]} />
+      <div className="relative p-6 space-y-8">
+        <DashboardBackground />
+
+        {/* ── Header ─────────────────────────────────────────────────────── */}
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Ticket Overview
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Track, manage and resolve support tickets across all projects
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate("/ticket/create")}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+            >
+              <Plus size={13} />
+              New Ticket
+            </button>
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
+              />
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {/* ── Error banner ────────────────────────────────────────────────── */}
+        {isError && !tickets.length && (
+          <div className="px-4 py-3 rounded-lg bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
+            <AlertCircle size={15} />
+            Failed to load ticket data
+            {(error as Error)?.message ? `: ${(error as Error).message}` : ""}.
+            Please refresh.
+          </div>
+        )}
+
+        {/* ── Stat cards ──────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {isLoading ? (
+            Array.from({ length: 4 }).map((_, i) => <StatSkeleton key={i} />)
+          ) : (
+            <>
+              <StatCard
+                label="Total Tickets"
+                value={stats.total}
+                sub={`${stats.resolvedPct}% resolved`}
+                icon={MessageSquare}
+                iconColor="text-primary"
+                iconBg="bg-primary/10"
+                trend="neutral"
+                onClick={() => navigate("/ticket/my-tickets")}
+              />
+              <StatCard
+                label="Pending"
+                value={stats.pending}
+                sub={`${stats.urgent} urgent · ${stats.high} high priority`}
+                icon={Clock}
+                iconColor="text-amber-600"
+                iconBg="bg-amber-500/10"
+                trend={stats.pending > 0 ? "down" : "neutral"}
+                onClick={() => navigate("/ticket/pending")}
+              />
+              <StatCard
+                label="Resolved"
+                value={stats.resolved}
+                sub={`${stats.resolvedPct}% of all tickets`}
+                icon={CheckCircle2}
+                iconColor="text-emerald-600"
+                iconBg="bg-emerald-500/10"
+                trend="up"
+                onClick={() => navigate("/ticket/resolved")}
+              />
+              <StatCard
+                label="Urgent / High"
+                value={stats.urgent + stats.high}
+                sub={`${stats.urgent} urgent · ${stats.high} high`}
+                icon={Flame}
+                iconColor="text-red-600"
+                iconBg="bg-red-500/10"
+                trend={stats.urgent + stats.high > 0 ? "down" : "neutral"}
+              />
+            </>
+          )}
+        </div>
+
+        {/* ── Priority breakdown + Resolution rate ────────────────────────── */}
+        {!isLoading && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Resolution rate pill */}
+            <div className="rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center shrink-0">
+                <CheckCircle2 size={18} className="text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Resolution Rate</p>
+                <p className="text-lg font-heading font-bold text-foreground leading-tight mt-0.5">
+                  {stats.resolvedPct}%
+                </p>
+              </div>
+            </div>
+            <div className="rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
+                <Clock size={18} className="text-amber-600" />
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Open Tickets</p>
+                <p className="text-lg font-heading font-bold text-foreground leading-tight mt-0.5">
+                  {stats.pending}
+                </p>
+              </div>
+            </div>
+            <div className="rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center shrink-0">
+                <ShieldAlert size={18} className="text-red-600" />
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">
+                  Critical (Urgent + High)
+                </p>
+                <p className="text-lg font-heading font-bold text-foreground leading-tight mt-0.5">
+                  {stats.urgent + stats.high}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Pending + Resolved tables ───────────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Pending tickets */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="px-5 py-4 border-b border-border">
+              <SectionHeader
+                icon={Clock}
+                title="Pending Tickets"
+                sub="Awaiting resolution"
+                action="View all"
+                onAction={() => navigate("/ticket/pending")}
+              />
+            </div>
+            {isLoading ? (
+              <TableSkeleton rows={4} cols={4} />
+            ) : !stats.recentPending.length ? (
+              <EmptyState label="No pending tickets — all clear!" />
+            ) : (
+              <div className="divide-y divide-border">
+                {stats.recentPending.map((t) => (
+                  <div
+                    key={t.id}
+                    className="px-5 py-3 flex items-start justify-between gap-3 hover:bg-muted/30 transition-colors group"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {t.subject}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <User
+                          size={10}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <span className="text-[11px] text-muted-foreground truncate">
+                          {t.customer_name || "—"}
+                        </span>
+                        {t.created_at && (
+                          <span className="text-[11px] text-muted-foreground hidden sm:inline">
+                            · {fmtDate(t.created_at)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <PriorityBadge priority={t.priority} />
+                      <button
+                        onClick={() => resolveMutation.mutate(t.id)}
+                        disabled={resolveMutation.isPending}
+                        title="Mark as resolved"
+                        className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors opacity-0 group-hover:opacity-100"
+                      >
+                        <CheckCircle2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Resolved tickets */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="px-5 py-4 border-b border-border">
+              <SectionHeader
+                icon={CheckCircle2}
+                title="Recently Resolved"
+                sub="Last 6 closures"
+                action="View all"
+                onAction={() => navigate("/ticket/resolved")}
+              />
+            </div>
+            {isLoading ? (
+              <TableSkeleton rows={4} cols={4} />
+            ) : !stats.recentResolved.length ? (
+              <EmptyState label="No resolved tickets yet" />
+            ) : (
+              <div className="divide-y divide-border">
+                {stats.recentResolved.map((t) => (
+                  <div
+                    key={t.id}
+                    className="px-5 py-3 flex items-start justify-between gap-3 hover:bg-muted/30 transition-colors"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {t.subject}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <User
+                          size={10}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <span className="text-[11px] text-muted-foreground truncate">
+                          {t.customer_name || "—"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <PriorityBadge priority={t.priority} />
+                      <StatusBadge status={t.status} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Priority breakdown + Quick actions ─────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Priority breakdown */}
+          <div className="rounded-xl border border-border bg-card p-5">
+            <SectionHeader
+              icon={Tag}
+              title="Pending by Priority"
+              sub="open tickets only"
+            />
+            {isLoading ? (
+              <div className="space-y-2 animate-pulse">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="h-5 bg-muted rounded" />
+                ))}
+              </div>
+            ) : stats.pending === 0 ? (
+              <p className="text-xs text-muted-foreground py-2">
+                No pending tickets
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {(["Urgent", "High", "Medium", "Low"] as const).map((p) => {
+                  const count = stats.priorityCounts[p] ?? 0;
+                  const pct =
+                    stats.pending > 0
+                      ? Math.round((count / stats.pending) * 100)
+                      : 0;
+                  const cfg = priorityConfig[p];
+                  return (
+                    <div key={p} className="space-y-0.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-foreground font-medium">{p}</span>
+                        <span className="text-muted-foreground">
+                          {count} · {pct}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${cfg.bar} transition-all duration-500`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+                <p className="text-xs text-muted-foreground pt-1">
+                  {stats.pending} total pending · {stats.total} total
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Status overview */}
+          <div className="rounded-xl border border-border bg-card p-5">
+            <SectionHeader icon={BarChart3} title="Status Overview" />
+            {isLoading ? (
+              <div className="space-y-2 animate-pulse">
+                {Array.from({ length: 2 }).map((_, i) => (
+                  <div key={i} className="h-5 bg-muted rounded" />
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {[
+                  {
+                    label: "Pending",
+                    count: stats.pending,
+                    color: "bg-amber-500",
+                  },
+                  {
+                    label: "Resolved",
+                    count: stats.resolved,
+                    color: "bg-emerald-500",
+                  },
+                ].map(({ label, count, color }) => {
+                  const pct =
+                    stats.total > 0
+                      ? Math.round((count / stats.total) * 100)
+                      : 0;
+                  return (
+                    <div key={label} className="space-y-0.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-foreground font-medium">
+                          {label}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {count} · {pct}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${color} transition-all duration-500`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+                <p className="text-xs text-muted-foreground pt-1">
+                  {stats.resolvedPct}% resolution rate · {stats.total} total
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Quick actions */}
+          <div className="rounded-xl border border-border bg-card p-5">
+            <SectionHeader icon={BarChart3} title="Quick Actions" />
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                {
+                  label: "Create Ticket",
+                  icon: Plus,
+                  path: "/ticket/create",
+                  color: "text-primary",
+                  bg: "bg-primary/10",
+                },
+                {
+                  label: "My Tickets",
+                  icon: FileText,
+                  path: "/ticket/my-tickets",
+                  color: "text-blue-600",
+                  bg: "bg-blue-500/10",
+                },
+                {
+                  label: "Pending",
+                  icon: Clock,
+                  path: "/ticket/pending",
+                  color: "text-amber-600",
+                  bg: "bg-amber-500/10",
+                },
+                {
+                  label: "Resolved",
+                  icon: CheckCircle2,
+                  path: "/ticket/resolved",
+                  color: "text-emerald-600",
+                  bg: "bg-emerald-500/10",
+                },
+              ].map(({ label, icon: Icon, path, color, bg }) => (
+                <button
+                  key={path}
+                  onClick={() => navigate(path)}
+                  className="flex flex-col items-center gap-2.5 py-4 px-2 rounded-2xl border border-border hover:bg-muted hover:border-primary/20 transition-all duration-150 active:scale-95 group"
+                >
+                  <div
+                    className={`w-10 h-10 rounded-xl ${bg} flex items-center justify-center group-hover:scale-110 transition-transform`}
+                  >
+                    <Icon size={15} className={color} />
+                  </div>
+                  <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
+                    {label}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}

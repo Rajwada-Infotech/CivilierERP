@@ -2,7 +2,11 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";
 import { useNavigate, useLocation } from "react-router-dom";
 import { LogoFull } from "../Logo";
-import { useModule, MODULE_DASHBOARD_ROUTES, type Module } from "@/contexts/ModuleContext";
+import {
+  useModule,
+  MODULE_DASHBOARD_ROUTES,
+  type Module,
+} from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavbarCollapse } from "./AppLayout";
 import { ReminderBell } from "@/components/navbar/ReminderBell";
@@ -38,6 +42,7 @@ import {
   TrendingUp,
   ClipboardList,
   Wrench,
+  MessageSquare,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
@@ -205,15 +210,9 @@ const followupSetupItems = [
     color: "text-indigo-500",
   },
   {
-    icon: FileText,
-    label: "Follow-up Log",
-    path: "/followup/follow-ups/log",
-    color: "text-violet-500",
-  },
-  {
     icon: Activity,
     label: "Pending Tasks",
-    path: "/followup/follow-ups/tasks",
+    path: "/followup/setup/pending-tasks",
     color: "text-purple-500",
   },
 ];
@@ -253,6 +252,8 @@ const adminSetupItems = [
     color: "text-emerald-500",
   },
 ];
+
+// ─── Setup Dropdown (desktop) ──────────────────────────────────────────────
 
 const SetupDropdown = ({
   open,
@@ -327,7 +328,11 @@ const SetupDropdown = ({
               onClose();
             }}
             className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all duration-150 active:scale-95
-              ${location.pathname === path ? "border-primary/40 bg-primary/[0.06]" : "border-transparent hover:border-border hover:bg-muted/60"}`}
+              ${
+                location.pathname === path
+                  ? "border-primary/40 bg-primary/[0.06]"
+                  : "border-transparent hover:border-border hover:bg-muted/60"
+              }`}
           >
             <div
               className={`w-8 h-8 rounded-lg flex items-center justify-center bg-muted/50 group-hover:bg-muted transition-colors ${location.pathname === path ? "bg-primary/10" : ""}`}
@@ -343,6 +348,8 @@ const SetupDropdown = ({
     </div>
   </Dropdown>
 );
+
+// ─── User Menu ────────────────────────────────────────────────────────────────
 
 const UserMenuContent: React.FC<{
   currentUser: ReturnType<typeof useAuth>["currentUser"];
@@ -393,15 +400,10 @@ const UserMenuContent: React.FC<{
     <button
       onMouseDown={() => {
         onClose();
-        if (isSuperAdmin) {
-          navigate("/superadmin/profile");
-        } else if (isDba) {
-          navigate("/dba/profile");
-        } else if (currentUser?.role === "admin") {
-          navigate("/admin/profile");
-        } else {
-          navigate("/user/profile");
-        }
+        if (isSuperAdmin) navigate("/superadmin/profile");
+        else if (isDba) navigate("/dba/profile");
+        else if (currentUser?.role === "admin") navigate("/admin/profile");
+        else navigate("/user/profile");
       }}
       className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground"
     >
@@ -415,6 +417,273 @@ const UserMenuContent: React.FC<{
     </button>
   </>
 );
+
+// ─── Module color helpers ──────────────────────────────────────────────────────
+
+const MODULE_STYLES: Record<
+  string,
+  {
+    active: string;
+    iconWrap: string;
+    iconColor: string;
+    pip: string;
+    chipActive: string;
+    chipText: string;
+  }
+> = {
+  finance: {
+    active:
+      "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800",
+    iconWrap: "bg-blue-100 dark:bg-blue-900/40",
+    iconColor: "text-blue-700 dark:text-blue-300",
+    pip: "bg-blue-500",
+    chipActive:
+      "bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800",
+    chipText: "text-blue-700 dark:text-blue-300",
+  },
+  material: {
+    active:
+      "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800",
+    iconWrap: "bg-emerald-100 dark:bg-emerald-900/40",
+    iconColor: "text-emerald-700 dark:text-emerald-300",
+    pip: "bg-emerald-500",
+    chipActive:
+      "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800",
+    chipText: "text-emerald-700 dark:text-emerald-300",
+  },
+  followup: {
+    active:
+      "bg-violet-50 dark:bg-violet-950/30 border-violet-200 dark:border-violet-800",
+    iconWrap: "bg-violet-100 dark:bg-violet-900/40",
+    iconColor: "text-violet-700 dark:text-violet-300",
+    pip: "bg-violet-500",
+    chipActive:
+      "bg-violet-50 dark:bg-violet-950/40 border-violet-200 dark:border-violet-800",
+    chipText: "text-violet-700 dark:text-violet-300",
+  },
+  engineering: {
+    active:
+      "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800",
+    iconWrap: "bg-amber-100 dark:bg-amber-900/40",
+    iconColor: "text-amber-700 dark:text-amber-300",
+    pip: "bg-amber-500",
+    chipActive:
+      "bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800",
+    chipText: "text-amber-700 dark:text-amber-300",
+  },
+  ticket: {
+    active:
+      "bg-pink-50 dark:bg-pink-950/30 border-pink-200 dark:border-pink-800",
+    iconWrap: "bg-pink-100 dark:bg-pink-900/40",
+    iconColor: "text-pink-700 dark:text-pink-300",
+    pip: "bg-pink-500",
+    chipActive:
+      "bg-pink-50 dark:bg-pink-950/40 border-pink-200 dark:border-pink-800",
+    chipText: "text-pink-700 dark:text-pink-300",
+  },
+  admin: {
+    active:
+      "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800",
+    iconWrap: "bg-blue-100 dark:bg-blue-900/40",
+    iconColor: "text-blue-700 dark:text-blue-300",
+    pip: "bg-blue-500",
+    chipActive:
+      "bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800",
+    chipText: "text-blue-700 dark:text-blue-300",
+  },
+};
+
+// ─── Redesigned Module Dropdown content ───────────────────────────────────────
+
+const ModuleDropdownContent = ({
+  moduleOptions,
+  activeModule,
+  isAdminPage,
+  isDbaPage,
+  isAdmin,
+  isDba,
+  handleModuleSwitch,
+  onNavigate,
+  onClose,
+}: {
+  moduleOptions: Array<{
+    id: NonNullable<Module>;
+    name: string;
+    icon: React.ElementType;
+    desc: string;
+    route: string;
+  }>;
+  activeModule: Module;
+  isAdminPage: boolean;
+  isDbaPage: boolean;
+  isAdmin: boolean;
+  isDba: boolean;
+  handleModuleSwitch: (name: string, id: Module, route: string) => void;
+  onNavigate: (p: string) => void;
+  onClose: () => void;
+}) => (
+  <>
+    {/* Header */}
+    <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+      <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+        Switch module
+      </span>
+      <LayoutGrid size={13} className="text-muted-foreground" />
+    </div>
+
+    {/* 2-col module grid */}
+    <div
+      className="grid gap-1.5 p-2"
+      style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}
+    >
+      {moduleOptions.map((m) => {
+        const isActive = activeModule === m.id && !isAdminPage;
+        const style = MODULE_STYLES[m.id] ?? MODULE_STYLES.finance;
+        return (
+          <button
+            key={m.id}
+            onMouseDown={() =>
+              handleModuleSwitch(m.name, m.id as Module, m.route)
+            }
+            className={`group relative w-full min-w-0 flex items-center gap-2 px-2.5 py-2.5 rounded-xl border transition-all duration-150 active:scale-[0.98] text-left
+              ${
+                isActive
+                  ? `${style.active} border`
+                  : "border-transparent hover:border-border hover:bg-muted/50"
+              }`}
+          >
+            <div
+              className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors
+              ${isActive ? style.iconWrap : "bg-muted group-hover:bg-muted/80"}`}
+            >
+              <m.icon
+                size={15}
+                className={
+                  isActive
+                    ? style.iconColor
+                    : "text-muted-foreground group-hover:text-foreground"
+                }
+              />
+            </div>
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <p
+                className={`text-[13px] font-heading font-medium leading-none whitespace-nowrap
+                ${isActive ? style.iconColor : "text-foreground"}`}
+              >
+                {m.name}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-1 leading-snug line-clamp-2">
+                {m.desc}
+              </p>
+            </div>
+            {isActive && (
+              <span
+                className={`absolute top-2 right-2 w-1.5 h-1.5 rounded-full flex-shrink-0 ${style.pip}`}
+              />
+            )}
+          </button>
+        );
+      })}
+    </div>
+
+    {/* Admin / DBA rows */}
+    {(isAdmin || isDba) && (
+      <div className="border-t border-border px-2 pb-2 pt-1.5 flex flex-col gap-1">
+        {isAdmin && (
+          <button
+            onMouseDown={() =>
+              handleModuleSwitch(
+                "Admin",
+                "admin",
+                MODULE_DASHBOARD_ROUTES.admin,
+              )
+            }
+            className={`group w-full flex items-center gap-2.5 px-3 py-2 rounded-xl border transition-all duration-150 active:scale-[0.98] text-left
+              ${
+                isAdminPage
+                  ? `${MODULE_STYLES.admin.active} border`
+                  : "border-transparent hover:border-border hover:bg-muted/50"
+              }`}
+          >
+            <div
+              className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0
+              ${isAdminPage ? MODULE_STYLES.admin.iconWrap : "bg-muted group-hover:bg-muted/80"}`}
+            >
+              <ShieldCheck
+                size={14}
+                className={
+                  isAdminPage
+                    ? MODULE_STYLES.admin.iconColor
+                    : "text-muted-foreground group-hover:text-foreground"
+                }
+              />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p
+                className={`text-[13px] font-heading font-medium leading-none ${isAdminPage ? MODULE_STYLES.admin.iconColor : "text-foreground"}`}
+              >
+                Admin
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                Users, rights & config
+              </p>
+            </div>
+            {isAdminPage && (
+              <span
+                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${MODULE_STYLES.admin.pip}`}
+              />
+            )}
+          </button>
+        )}
+        {isDba && (
+          <button
+            onMouseDown={() => {
+              onNavigate("/dba");
+              onClose();
+            }}
+            className={`group w-full flex items-center gap-2.5 px-3 py-2 rounded-xl border transition-all duration-150 active:scale-[0.98] text-left
+              ${
+                isDbaPage
+                  ? `${MODULE_STYLES.material.active} border`
+                  : "border-transparent hover:border-border hover:bg-muted/50"
+              }`}
+          >
+            <div
+              className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0
+              ${isDbaPage ? MODULE_STYLES.material.iconWrap : "bg-muted group-hover:bg-muted/80"}`}
+            >
+              <Database
+                size={14}
+                className={
+                  isDbaPage
+                    ? MODULE_STYLES.material.iconColor
+                    : "text-muted-foreground group-hover:text-foreground"
+                }
+              />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p
+                className={`text-[13px] font-heading font-medium leading-none ${isDbaPage ? MODULE_STYLES.material.iconColor : "text-foreground"}`}
+              >
+                DBA Console
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                DB tools, ads & reminders
+              </p>
+            </div>
+            {isDbaPage && (
+              <span
+                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${MODULE_STYLES.material.pip}`}
+              />
+            )}
+          </button>
+        )}
+      </div>
+    )}
+  </>
+);
+
+// ─── TopNavbar ────────────────────────────────────────────────────────────────
 
 export const TopNavbar = () => {
   const navigate = useNavigate();
@@ -431,7 +700,6 @@ export const TopNavbar = () => {
   const [userOpen, setUserOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
-
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isDba = currentUser?.role === "dba";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
@@ -440,7 +708,6 @@ export const TopNavbar = () => {
     (location.pathname.startsWith("/admin") ||
       location.pathname.startsWith("/users") ||
       ADMIN_PATHS.some((p) => location.pathname.startsWith(p)));
-
   const isDbaPage = isDba && location.pathname.startsWith("/dba");
 
   const RoleIcon = isSuperAdmin
@@ -517,6 +784,7 @@ export const TopNavbar = () => {
       setBellOpen(false);
     }
   }, [setupConfig.available]);
+
   const toggleMod = useCallback(() => {
     setModuleOpen((p) => !p);
     setSetupOpen(false);
@@ -524,6 +792,7 @@ export const TopNavbar = () => {
     setThemeOpen(false);
     setBellOpen(false);
   }, []);
+
   const toggleTheme = useCallback(() => {
     setThemeOpen((p) => !p);
     setSetupOpen(false);
@@ -531,6 +800,7 @@ export const TopNavbar = () => {
     setUserOpen(false);
     setBellOpen(false);
   }, []);
+
   const toggleUser = useCallback(() => {
     setUserOpen((p) => !p);
     setSetupOpen(false);
@@ -538,6 +808,7 @@ export const TopNavbar = () => {
     setThemeOpen(false);
     setBellOpen(false);
   }, []);
+
   const toggleBell = useCallback(() => {
     setBellOpen((p) => !p);
     setSetupOpen(false);
@@ -546,20 +817,21 @@ export const TopNavbar = () => {
     setThemeOpen(false);
   }, []);
 
-  const handleModuleSwitch = async (
-    name: string,
-    id: Module,
-    route: string,
-  ) => {
-    setModuleOpen(false);
-    setSwitchingTo(name);
-    setModuleSwitching(true);
-    await new Promise((r) => setTimeout(r, 350));
-    setActiveModule(id);
-    navigate(route);
-    setModuleSwitching(false);
-    setSwitchingTo(null);
-  };
+  const handleModuleSwitch = useCallback(
+    async (name: string, id: Module, route: string) => {
+      // Close all dropdowns synchronously first to beat useClickOutside on touch
+      setModuleOpen(false);
+      setSetupOpen(false);
+      setSwitchingTo(name);
+      setModuleSwitching(true);
+      await new Promise((r) => setTimeout(r, 300));
+      setActiveModule(id);
+      navigate(route);
+      setModuleSwitching(false);
+      setSwitchingTo(null);
+    },
+    [navigate, setActiveModule, setModuleSwitching],
+  );
 
   const navBtnCls = (active: boolean) =>
     `flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${active ? "bg-muted text-foreground" : "hover:bg-muted text-foreground"}`;
@@ -570,7 +842,6 @@ export const TopNavbar = () => {
     icon: React.ElementType;
     desc: string;
     route: string;
-    color: string;
   }> = [
     {
       id: "finance",
@@ -578,7 +849,6 @@ export const TopNavbar = () => {
       icon: TrendingUp,
       desc: "Ledger, payments & BRS",
       route: MODULE_DASHBOARD_ROUTES.finance,
-      color: "text-primary",
     },
     {
       id: "material",
@@ -586,7 +856,6 @@ export const TopNavbar = () => {
       icon: Package,
       desc: "GRN, PO & work orders",
       route: MODULE_DASHBOARD_ROUTES.material,
-      color: "text-emerald-500",
     },
     {
       id: "followup",
@@ -594,7 +863,6 @@ export const TopNavbar = () => {
       icon: Calendar,
       desc: "Sales, agreements & CRM",
       route: MODULE_DASHBOARD_ROUTES.followup,
-      color: "text-indigo-500",
     },
     {
       id: "engineering",
@@ -602,14 +870,24 @@ export const TopNavbar = () => {
       icon: Wrench,
       desc: "Projects, work orders & site",
       route: MODULE_DASHBOARD_ROUTES.engineering,
-      color: "text-orange-500",
+    },
+    {
+      id: "ticket",
+      name: "Ticket",
+      icon: MessageSquare,
+      desc: "Support & issue tracking",
+      route: MODULE_DASHBOARD_ROUTES.ticket,
     },
   ];
+
+  // Close mobile menu on route change
+  useEffect(() => {}, [location.pathname]);
 
   return (
     <>
       {logoutOverlay}
       <header className="fixed top-0 left-0 right-0 h-14 z-50 grid grid-cols-[auto_1fr_auto] items-center gap-2 px-3 sm:px-4 border-b border-border bg-card/80 backdrop-blur-lg">
+        {/* Logo */}
         <button
           onClick={() => navigate("/home")}
           className="flex items-center hover:opacity-80 transition-opacity shrink-0 min-w-0"
@@ -617,6 +895,7 @@ export const TopNavbar = () => {
           <LogoFull />
         </button>
 
+        {/* Desktop nav */}
         <div className="hidden md:flex items-center justify-end gap-1 min-w-0">
           <button
             onClick={() => setNavCollapsed(!navCollapsed)}
@@ -670,11 +949,12 @@ export const TopNavbar = () => {
               <span>Widgets</span>
             </button>
 
+            {/* ── Redesigned Module Dropdown ── */}
             <Dropdown
               open={moduleOpen}
               onClose={closeModule}
-              className="right-0 p-1.5"
-              style={{ minWidth: "17rem" }}
+              className="right-0 p-0 overflow-hidden"
+              style={{ minWidth: "22rem" }}
               trigger={
                 <button
                   onClick={toggleMod}
@@ -693,118 +973,17 @@ export const TopNavbar = () => {
                 </button>
               }
             >
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-3 pt-2 pb-2">
-                Switch Module
-              </p>
-              {moduleOptions.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => handleModuleSwitch(m.name, m.id as Module, m.route)}
-                  className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${activeModule === m.id && !isAdminPage ? "bg-primary/10" : "hover:bg-muted"}`}
-                >
-                  <span
-                    className={`flex items-center justify-center w-7 h-7 rounded-md bg-muted group-hover:bg-muted-foreground/10 ${activeModule === m.id && !isAdminPage ? "bg-primary/15" : ""}`}
-                  >
-                    <m.icon
-                      size={14}
-                      className={
-                        activeModule === m.id && !isAdminPage
-                          ? m.color
-                          : "text-muted-foreground group-hover:text-foreground"
-                      }
-                    />
-                  </span>
-                  <div className="flex-1 text-left">
-                    <p
-                      className={`text-sm font-heading font-medium leading-none ${activeModule === m.id && !isAdminPage ? m.color : "text-foreground"}`}
-                    >
-                      {m.name}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                      {m.desc}
-                    </p>
-                  </div>
-                  {activeModule === m.id && !isAdminPage && (
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${m.id === "finance" ? "bg-primary" : m.id === "material" ? "bg-emerald-500" : m.id === "engineering" ? "bg-orange-500" : "bg-indigo-500"}`}
-                    />
-                  )}
-                </button>
-              ))}
-              {isAdmin && (
-                <>
-                  <div className="mx-3 my-1.5 border-t border-border" />
-                  <button
-                    onClick={() =>
-                      handleModuleSwitch(
-                        "Admin",
-                        "admin",
-                        MODULE_DASHBOARD_ROUTES.admin,
-                      )
-                    }
-                    className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${isAdminPage ? "bg-blue-500/10 text-blue-600" : "hover:bg-muted"}`}
-                  >
-                    <span
-                      className={`flex items-center justify-center w-7 h-7 rounded-md bg-muted group-hover:bg-muted-foreground/10 ${isAdminPage ? "bg-blue-500/15" : ""}`}
-                    >
-                      <ShieldCheck
-                        size={14}
-                        className={
-                          isAdminPage
-                            ? "text-blue-500"
-                            : "text-muted-foreground group-hover:text-foreground"
-                        }
-                      />
-                    </span>
-                    <div className="flex-1 text-left">
-                      <p className="text-sm font-heading font-medium leading-none">
-                        Admin
-                      </p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">
-                        Users, rights & config
-                      </p>
-                    </div>
-                  </button>
-                </>
-              )}
-              {isDba && (
-                <>
-                  <div className="mx-3 my-1.5 border-t border-border" />
-                  <button
-                    onClick={() => {
-                      navigate("/dba");
-                      setModuleOpen(false);
-                    }}
-                    className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${isDbaPage ? "bg-emerald-500/10 text-emerald-600" : "hover:bg-muted"}`}
-                  >
-                    <span
-                      className={`flex items-center justify-center w-7 h-7 rounded-md bg-muted group-hover:bg-muted-foreground/10 ${isDbaPage ? "bg-emerald-500/15" : ""}`}
-                    >
-                      <Database
-                        size={14}
-                        className={
-                          isDbaPage
-                            ? "text-emerald-500"
-                            : "text-muted-foreground group-hover:text-foreground"
-                        }
-                      />
-                    </span>
-                    <div className="flex-1 text-left">
-                      <p
-                        className={`text-sm font-heading font-medium leading-none ${isDbaPage ? "text-emerald-600" : ""}`}
-                      >
-                        DBA Console
-                      </p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">
-                        DB tools, ads & reminders
-                      </p>
-                    </div>
-                    {isDbaPage && (
-                      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-emerald-500" />
-                    )}
-                  </button>
-                </>
-              )}
+              <ModuleDropdownContent
+                moduleOptions={moduleOptions}
+                activeModule={activeModule}
+                isAdminPage={isAdminPage}
+                isDbaPage={isDbaPage}
+                isAdmin={isAdmin}
+                isDba={isDba}
+                handleModuleSwitch={handleModuleSwitch}
+                onNavigate={navigate}
+                onClose={closeModule}
+              />
             </Dropdown>
           </div>
 
@@ -860,12 +1039,14 @@ export const TopNavbar = () => {
           </Dropdown>
         </div>
 
+        {/* Mobile right side */}
         <div className="flex md:hidden items-center gap-1 justify-end">
           <ReminderBell
             open={bellOpen}
             onToggle={toggleBell}
             onClose={closeBell}
           />
+
           <Dropdown
             open={userOpen}
             onClose={closeUser}
