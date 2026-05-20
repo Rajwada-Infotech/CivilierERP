@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -26,12 +26,13 @@ import {
   Hash,
   BadgeCheck,
   StickyNote,
+  CreditCard,
+  Globe,
 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,7 +49,28 @@ import { Textarea } from "@/components/ui/textarea";
 
 type LogType = "email" | "call" | "sms" | "note" | "payment";
 
-interface ApplicantRecord {
+// AccountHeadMaster-based applicant (from /api/applicants)
+interface LegacyApplicant {
+  LHeadId: number;
+  LHeadCode: string | null;
+  LHeadName: string;
+  LHeadType: string;
+  LHeadStatus: number;
+  LHeadPhone?: string | null;
+  LHeadEmail?: string | null;
+  LHeadAddress?: string | null;
+  LHeadContactPerson?: string | null;
+  LHeadPaymentTerms?: string | null;
+  LGST?: string | null;
+  LGSTState?: string | null;
+  LCountry?: string | null;
+  LBelongsTo?: string | null;
+  LDescription?: string | null;
+  LBranchName?: string | null;
+}
+
+// FollowupApplicants-based (from /api/followup-applicants)
+interface FollowupApplicant {
   Id: number;
   ApplicantNo?: string | null;
   ApplicantName?: string | null;
@@ -56,9 +78,7 @@ interface ApplicantRecord {
   Email?: string | null;
   City?: string | null;
   Source?: string | null;
-  ProjectId?: number | null;
   ProjectName?: string | null;
-  CompanyId?: number | null;
   CompanyName?: string | null;
   PreferredUnitType?: string | null;
   BudgetAmount?: number | null;
@@ -78,13 +98,8 @@ interface UnitSelectionRecord {
   FloorName?: string | null;
   UnitType?: string | null;
   AreaSqFt?: number | null;
-  RatePerSqFt?: number | null;
   TotalValue?: number | null;
-  BookingAmount?: number | null;
-  SelectionDate?: string | null;
   Status?: string | null;
-  ProjectName?: string | null;
-  Notes?: string | null;
   CreatedAt?: string | null;
 }
 
@@ -95,12 +110,8 @@ interface AgreementRecord {
   AgreementValue?: number | null;
   AdvanceAmount?: number | null;
   BalanceAmount?: number | null;
-  RegistrationDate?: string | null;
   Status?: string | null;
-  ProjectName?: string | null;
   UnitNo?: string | null;
-  SelectionNo?: string | null;
-  Notes?: string | null;
   CreatedAt?: string | null;
 }
 
@@ -111,7 +122,6 @@ interface LogRecord {
   customer: string;
   amount: number | null;
   notes: string;
-  user: string;
   createdAt: string;
 }
 
@@ -119,7 +129,6 @@ interface ReminderRecord {
   id: number;
   tenantName: string;
   message?: string | null;
-  module?: string | null;
   dueDate?: string | null;
   status: "sent" | "overdue" | "scheduled";
   amountDue?: number | null;
@@ -136,9 +145,7 @@ interface LogFormState {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmt(v?: string | null) {
-  return v || "—";
-}
+const fmt = (v?: string | null) => v || "—";
 function fmtDate(v?: string | null) {
   if (!v) return "—";
   const d = new Date(v);
@@ -164,8 +171,7 @@ function fmtDateTime(v?: string | null) {
       });
 }
 function fmtMoney(v?: number | null) {
-  if (typeof v !== "number") return "—";
-  return `₹${v.toLocaleString("en-IN")}`;
+  return typeof v === "number" ? `₹${v.toLocaleString("en-IN")}` : "—";
 }
 function initials(name: string) {
   return name
@@ -191,20 +197,9 @@ function avatarColor(name: string) {
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
 }
 
-// ─── Status configs ───────────────────────────────────────────────────────────
-
-const APPLICANT_STATUS: Record<string, { pill: string }> = {
-  Active: {
-    pill: "bg-emerald-500/10 text-emerald-600 border border-emerald-400/20",
-  },
-  Inactive: { pill: "bg-red-500/10 text-red-500 border border-red-400/20" },
-  Interested: {
-    pill: "bg-blue-500/10 text-blue-600 border border-blue-400/20",
-  },
-  Booked: {
-    pill: "bg-violet-500/10 text-violet-600 border border-violet-400/20",
-  },
-  Closed: { pill: "bg-slate-500/10 text-slate-500 border border-slate-400/20" },
+const STATUS_PILL: Record<number, string> = {
+  1: "bg-emerald-500/10 text-emerald-600 border border-emerald-400/20",
+  0: "bg-red-500/10 text-red-500 border border-red-400/20",
 };
 
 const LOG_TYPE_CONFIG: Record<
@@ -244,40 +239,6 @@ const REMINDER_STATUS: Record<string, string> = {
   scheduled: "bg-amber-500/10 text-amber-600 border-amber-400/20",
 };
 
-// ─── API fetchers ─────────────────────────────────────────────────────────────
-
-async function fetchApplicant(id: string): Promise<ApplicantRecord> {
-  const r = await fetchWithAuth(`/api/followup-applicants/${id}`);
-  if (!r.ok) throw new Error("Failed to load applicant");
-  return r.json();
-}
-async function fetchUnitSelections(id: string): Promise<UnitSelectionRecord[]> {
-  const r = await fetchWithAuth(
-    `/api/followup-unit-selections?applicantId=${id}`,
-  );
-  if (!r.ok) throw new Error("Failed to load unit selections");
-  const d = await r.json();
-  return Array.isArray(d?.data) ? d.data : d;
-}
-async function fetchAgreements(id: string): Promise<AgreementRecord[]> {
-  const r = await fetchWithAuth(`/api/followup-agreements?applicantId=${id}`);
-  if (!r.ok) throw new Error("Failed to load agreements");
-  const d = await r.json();
-  return Array.isArray(d?.data) ? d.data : d;
-}
-async function fetchLogs(id: string): Promise<LogRecord[]> {
-  const r = await fetchWithAuth(`/api/followup-log?refId=${id}`);
-  if (!r.ok) throw new Error("Failed to load logs");
-  return r.json();
-}
-async function fetchReminders(id: string): Promise<ReminderRecord[]> {
-  const r = await fetchWithAuth(
-    `/api/tenant-reminders?module=applicant&refId=${id}`,
-  );
-  if (!r.ok) throw new Error("Failed to load reminders");
-  return r.json();
-}
-
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function InfoRow({
@@ -289,6 +250,7 @@ function InfoRow({
   value: string;
   icon?: typeof Phone;
 }) {
+  if (!value || value === "—") return null;
   return (
     <div className="flex items-start gap-3 py-2.5 border-b border-border last:border-0">
       {Icon && (
@@ -301,7 +263,7 @@ function InfoRow({
         <p className="text-[11px] text-muted-foreground leading-none mb-0.5">
           {label}
         </p>
-        <p className="text-[13px] font-medium text-foreground truncate">
+        <p className="text-[13px] font-medium text-foreground break-words">
           {value}
         </p>
       </div>
@@ -349,9 +311,7 @@ function UnitCard({ unit }: { unit: UnitSelectionRecord }) {
           </p>
         </div>
         {unit.Status && (
-          <span
-            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${APPLICANT_STATUS[unit.Status]?.pill ?? "bg-muted text-muted-foreground border-border"}`}
-          >
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-400/20">
             {unit.Status}
           </span>
         )}
@@ -468,23 +428,18 @@ function LogEntry({ log }: { log: LogRecord }) {
             {log.notes}
           </p>
         )}
-        {log.customer && (
-          <p className="text-[11px] text-muted-foreground mt-0.5">
-            by {log.customer}
-          </p>
-        )}
       </div>
     </div>
   );
 }
 
-// ─── Quick Log Form ───────────────────────────────────────────────────────────
+// ─── Quick Log Panel ──────────────────────────────────────────────────────────
 
 function QuickLogPanel({
-  applicantId,
+  refId,
   applicantName,
 }: {
-  applicantId: number;
+  refId: number;
   applicantName: string;
 }) {
   const queryClient = useQueryClient();
@@ -510,9 +465,7 @@ function QuickLogPanel({
     },
     onSuccess: () => {
       toast.success("Log entry saved");
-      queryClient.invalidateQueries({
-        queryKey: ["followup-logs", String(applicantId)],
-      });
+      queryClient.invalidateQueries({ queryKey: ["detail-logs", refId] });
       setForm({
         date: "",
         type: "note",
@@ -532,8 +485,7 @@ function QuickLogPanel({
           onClick={() => setOpen(true)}
           className="w-full flex items-center gap-2 text-[13px] text-muted-foreground hover:text-foreground border border-dashed border-border hover:border-primary/40 rounded-lg px-3 py-2.5 transition-colors"
         >
-          <Plus size={13} />
-          Add call, email, note or payment…
+          <Plus size={13} /> Add call, email, note or payment…
         </button>
       ) : (
         <div className="space-y-3">
@@ -605,7 +557,7 @@ function QuickLogPanel({
                   type: form.type,
                   customer: form.customer.trim(),
                   amount: form.amount ? Number(form.amount) : undefined,
-                  refId: applicantId,
+                  refId,
                   notes: form.notes.trim() || undefined,
                 })
               }
@@ -637,92 +589,97 @@ export default function ApplicantDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { id } = useParams<{ id: string }>();
-  const applicantId = id ?? "";
+  const location = useLocation();
 
-  const {
-    data: applicant,
-    isLoading,
-    isError,
-  } = useQuery({
-    queryKey: ["followup-applicant", applicantId],
-    queryFn: () => fetchApplicant(applicantId),
-    enabled: Boolean(applicantId),
+  // The list page passes the full applicant object via router state
+  const stateApplicant = location.state?.applicant as
+    | LegacyApplicant
+    | undefined;
+
+  // Use state data immediately; also fetch followup record if one exists by name match
+  const applicant = stateApplicant;
+  const name = applicant?.LHeadName || "Applicant";
+  const refId = applicant?.LHeadId ?? Number(id) ?? 0;
+
+  // Try to find a matching FollowupApplicants record by LHeadId used as refId
+  const { data: followupRecord } = useQuery<FollowupApplicant | null>({
+    queryKey: ["followup-applicant-by-ref", refId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(
+        `/api/followup-applicants?search=${encodeURIComponent(name)}&pageSize=5`,
+      );
+      if (!r.ok) return null;
+      const d = await r.json();
+      const list: FollowupApplicant[] = d.data ?? [];
+      return list.find((a) => a.ApplicantName === name) ?? null;
+    },
+    enabled: Boolean(name && name !== "Applicant"),
+    retry: false,
   });
 
-  const { data: unitSelections = [] } = useQuery({
-    queryKey: ["followup-unit-selections", applicantId],
-    queryFn: () => fetchUnitSelections(applicantId),
-    enabled: Boolean(applicantId),
+  const followupId = followupRecord?.Id;
+
+  const { data: unitSelections = [] } = useQuery<UnitSelectionRecord[]>({
+    queryKey: ["detail-units", followupId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(
+        `/api/followup-unit-selections?applicantId=${followupId}`,
+      );
+      if (!r.ok) return [];
+      const d = await r.json();
+      return Array.isArray(d?.data) ? d.data : d;
+    },
+    enabled: Boolean(followupId),
   });
 
-  const { data: agreements = [] } = useQuery({
-    queryKey: ["followup-agreements", applicantId],
-    queryFn: () => fetchAgreements(applicantId),
-    enabled: Boolean(applicantId),
+  const { data: agreements = [] } = useQuery<AgreementRecord[]>({
+    queryKey: ["detail-agreements", followupId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(
+        `/api/followup-agreements?applicantId=${followupId}`,
+      );
+      if (!r.ok) return [];
+      const d = await r.json();
+      return Array.isArray(d?.data) ? d.data : d;
+    },
+    enabled: Boolean(followupId),
   });
 
-  const { data: logs = [] } = useQuery({
-    queryKey: ["followup-logs", applicantId],
-    queryFn: () => fetchLogs(applicantId),
-    enabled: Boolean(applicantId),
+  const { data: logs = [] } = useQuery<LogRecord[]>({
+    queryKey: ["detail-logs", refId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`/api/followup-log?refId=${refId}`);
+      if (!r.ok) return [];
+      return r.json();
+    },
+    enabled: Boolean(refId),
   });
 
-  const { data: reminders = [] } = useQuery({
-    queryKey: ["followup-reminders", applicantId],
-    queryFn: () => fetchReminders(applicantId),
-    enabled: Boolean(applicantId),
+  const { data: reminders = [] } = useQuery<ReminderRecord[]>({
+    queryKey: ["detail-reminders", refId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(
+        `/api/tenant-reminders?module=applicant&refId=${refId}`,
+      );
+      if (!r.ok) return [];
+      return r.json();
+    },
+    enabled: Boolean(refId),
+    retry: false,
   });
 
   const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["detail-units", followupId] });
     queryClient.invalidateQueries({
-      queryKey: ["followup-applicant", applicantId],
+      queryKey: ["detail-agreements", followupId],
     });
-    queryClient.invalidateQueries({
-      queryKey: ["followup-unit-selections", applicantId],
-    });
-    queryClient.invalidateQueries({
-      queryKey: ["followup-agreements", applicantId],
-    });
-    queryClient.invalidateQueries({ queryKey: ["followup-logs", applicantId] });
-    queryClient.invalidateQueries({
-      queryKey: ["followup-reminders", applicantId],
-    });
+    queryClient.invalidateQueries({ queryKey: ["detail-logs", refId] });
+    queryClient.invalidateQueries({ queryKey: ["detail-reminders", refId] });
   };
 
-  // ─── Derived ──────────────────────────────────────────────────────────────
+  // ─── No state — nothing to show ───────────────────────────────────────────
 
-  const name = applicant?.ApplicantName || "Applicant";
-  const statusCfg = applicant?.Status
-    ? APPLICANT_STATUS[applicant.Status]
-    : null;
-
-  const totalDealValue = agreements.reduce(
-    (s, a) => s + (a.AgreementValue ?? 0),
-    0,
-  );
-  const totalBalance = agreements.reduce(
-    (s, a) => s + (a.BalanceAmount ?? 0),
-    0,
-  );
-  const overdueCount = reminders.filter((r) => r.status === "overdue").length;
-
-  // ─── States ───────────────────────────────────────────────────────────────
-
-  if (isLoading) {
-    return (
-      <>
-        <DashboardBackground />
-        <div className="relative z-10 p-6 flex items-center justify-center min-h-[60vh]">
-          <div className="flex items-center gap-3 text-muted-foreground">
-            <Loader2 size={20} className="animate-spin" />
-            <span className="text-sm">Loading applicant…</span>
-          </div>
-        </div>
-      </>
-    );
-  }
-
-  if (isError || !applicant) {
+  if (!applicant) {
     return (
       <>
         <DashboardBackground />
@@ -743,6 +700,19 @@ export default function ApplicantDetail() {
       </>
     );
   }
+
+  // ─── Derived ──────────────────────────────────────────────────────────────
+
+  const isActive = applicant.LHeadStatus === 1;
+  const totalDealValue = agreements.reduce(
+    (s, a) => s + (a.AgreementValue ?? 0),
+    0,
+  );
+  const totalBalance = agreements.reduce(
+    (s, a) => s + (a.BalanceAmount ?? 0),
+    0,
+  );
+  const overdueCount = reminders.filter((r) => r.status === "overdue").length;
 
   return (
     <>
@@ -776,13 +746,11 @@ export default function ApplicantDetail() {
                   <h1 className="text-2xl font-heading font-bold text-foreground leading-tight">
                     {name}
                   </h1>
-                  {statusCfg && (
-                    <span
-                      className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${statusCfg.pill}`}
-                    >
-                      {applicant.Status}
-                    </span>
-                  )}
+                  <span
+                    className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${STATUS_PILL[applicant.LHeadStatus] ?? "bg-muted text-muted-foreground border border-border"}`}
+                  >
+                    {isActive ? "Active" : "Inactive"}
+                  </span>
                   {overdueCount > 0 && (
                     <span className="flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-500/10 text-red-500 border border-red-400/20">
                       <Bell size={10} /> {overdueCount} overdue
@@ -790,8 +758,8 @@ export default function ApplicantDetail() {
                   )}
                 </div>
                 <p className="text-[12px] text-muted-foreground mt-0.5">
-                  {fmt(applicant.ApplicantNo)} · {fmt(applicant.ProjectName)} ·
-                  Assigned to {fmt(applicant.AssignedToName)}
+                  {fmt(applicant.LHeadCode)}
+                  {applicant.LBranchName ? ` · ${applicant.LBranchName}` : ""}
                 </p>
               </div>
             </div>
@@ -800,8 +768,7 @@ export default function ApplicantDetail() {
             onClick={refresh}
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 hover:bg-muted transition-colors mt-1"
           >
-            <RefreshCw size={13} />
-            Refresh
+            <RefreshCw size={13} /> Refresh
           </button>
         </div>
 
@@ -814,6 +781,7 @@ export default function ApplicantDetail() {
               value: agreements.length,
               accent: "text-violet-600",
               bg: "bg-violet-500/10",
+              small: false,
             },
             {
               icon: <Home size={16} />,
@@ -821,6 +789,7 @@ export default function ApplicantDetail() {
               value: unitSelections.length,
               accent: "text-blue-600",
               bg: "bg-blue-500/10",
+              small: false,
             },
             {
               icon: <IndianRupee size={16} />,
@@ -861,90 +830,118 @@ export default function ApplicantDetail() {
 
         {/* ── Three-column layout ── */}
         <div className="grid grid-cols-1 xl:grid-cols-[320px_1fr_300px] gap-5">
-          {/* ── LEFT: Profile ── */}
+          {/* LEFT: Profile */}
           <div className="space-y-4">
             <SectionCard title="Applicant Profile" icon={UserRound}>
               <div>
-                {applicant.PrimaryMobile && (
-                  <InfoRow
-                    label="Mobile"
-                    value={applicant.PrimaryMobile}
-                    icon={Phone}
-                  />
-                )}
-                {applicant.Email && (
-                  <InfoRow label="Email" value={applicant.Email} icon={Mail} />
-                )}
-                {applicant.City && (
-                  <InfoRow label="City" value={applicant.City} icon={MapPin} />
-                )}
-                {applicant.Source && (
-                  <InfoRow
-                    label="Source"
-                    value={applicant.Source}
-                    icon={Hash}
-                  />
-                )}
-                {applicant.PreferredUnitType && (
-                  <InfoRow
-                    label="Preferred Unit"
-                    value={applicant.PreferredUnitType}
-                    icon={Home}
-                  />
-                )}
-                {applicant.BudgetAmount && (
-                  <InfoRow
-                    label="Budget"
-                    value={fmtMoney(applicant.BudgetAmount)}
-                    icon={IndianRupee}
-                  />
-                )}
                 <InfoRow
-                  label="Company"
-                  value={fmt(applicant.CompanyName)}
+                  label="Mobile"
+                  value={fmt(applicant.LHeadPhone)}
+                  icon={Phone}
+                />
+                <InfoRow
+                  label="Email"
+                  value={fmt(applicant.LHeadEmail)}
+                  icon={Mail}
+                />
+                <InfoRow
+                  label="Address"
+                  value={fmt(applicant.LHeadAddress)}
+                  icon={MapPin}
+                />
+                <InfoRow
+                  label="Contact Person"
+                  value={fmt(applicant.LHeadContactPerson)}
+                  icon={UserRound}
+                />
+                <InfoRow label="GST" value={fmt(applicant.LGST)} icon={Hash} />
+                <InfoRow
+                  label="GST State"
+                  value={fmt(applicant.LGSTState)}
                   icon={Building2}
                 />
                 <InfoRow
-                  label="Project"
-                  value={fmt(applicant.ProjectName)}
+                  label="Country"
+                  value={fmt(applicant.LCountry)}
+                  icon={Globe}
+                />
+                <InfoRow
+                  label="Belongs To"
+                  value={fmt(applicant.LBelongsTo)}
                   icon={Layers}
                 />
                 <InfoRow
-                  label="Created"
-                  value={fmtDateTime(applicant.CreatedAt)}
-                  icon={CalendarDays}
+                  label="Payment Terms"
+                  value={fmt(applicant.LHeadPaymentTerms)}
+                  icon={CreditCard}
                 />
-                {applicant.UpdatedAt && (
-                  <InfoRow
-                    label="Last Updated"
-                    value={fmtDateTime(applicant.UpdatedAt)}
-                    icon={Clock}
-                  />
-                )}
-                {applicant.CreatedBy && (
-                  <InfoRow
-                    label="Created By"
-                    value={applicant.CreatedBy}
-                    icon={UserRound}
-                  />
-                )}
+                <InfoRow
+                  label="Branch"
+                  value={fmt(applicant.LBranchName)}
+                  icon={Building2}
+                />
               </div>
-              {applicant.Notes && (
+              {applicant.LDescription && (
                 <div className="mt-3 bg-muted/40 rounded-lg p-3">
                   <p className="text-[11px] text-muted-foreground mb-1">
-                    Notes
+                    Description
                   </p>
                   <p className="text-[12px] text-foreground leading-snug">
-                    {applicant.Notes}
+                    {applicant.LDescription}
                   </p>
+                </div>
+              )}
+              {/* Followup record extra info */}
+              {followupRecord && (
+                <div className="mt-3 pt-3 border-t border-border space-y-0">
+                  <InfoRow
+                    label="City"
+                    value={fmt(followupRecord.City)}
+                    icon={MapPin}
+                  />
+                  <InfoRow
+                    label="Source"
+                    value={fmt(followupRecord.Source)}
+                    icon={Hash}
+                  />
+                  <InfoRow
+                    label="Budget"
+                    value={fmtMoney(followupRecord.BudgetAmount)}
+                    icon={IndianRupee}
+                  />
+                  <InfoRow
+                    label="Preferred Unit"
+                    value={fmt(followupRecord.PreferredUnitType)}
+                    icon={Home}
+                  />
+                  <InfoRow
+                    label="Assigned To"
+                    value={fmt(followupRecord.AssignedToName)}
+                    icon={UserRound}
+                  />
+                  <InfoRow
+                    label="Project"
+                    value={fmt(followupRecord.ProjectName)}
+                    icon={Layers}
+                  />
+                  <InfoRow
+                    label="Company"
+                    value={fmt(followupRecord.CompanyName)}
+                    icon={Building2}
+                  />
+                  <InfoRow
+                    label="Created"
+                    value={fmtDateTime(followupRecord.CreatedAt)}
+                    icon={CalendarDays}
+                  />
                 </div>
               )}
             </SectionCard>
 
-            <QuickLogPanel applicantId={applicant.Id} applicantName={name} />
+            <QuickLogPanel refId={refId} applicantName={name} />
           </div>
 
-          {/* ── CENTRE: Unit Selections + Agreements ── */}
+          {/* CENTRE: Unit Selections + Agreements */}
           <div className="space-y-4">
             <SectionCard
               title="Unit Selections"
@@ -953,7 +950,7 @@ export default function ApplicantDetail() {
             >
               {unitSelections.length === 0 ? (
                 <p className="text-[12px] text-muted-foreground text-center py-6">
-                  No unit selections yet.
+                  No unit selections linked.
                 </p>
               ) : (
                 unitSelections.map((u) => <UnitCard key={u.Id} unit={u} />)
@@ -975,7 +972,7 @@ export default function ApplicantDetail() {
             </SectionCard>
           </div>
 
-          {/* ── RIGHT: Log + Reminders ── */}
+          {/* RIGHT: Log + Reminders + Sales Journey */}
           <div className="space-y-4">
             <SectionCard
               title="Follow-Up Log"
@@ -1037,7 +1034,6 @@ export default function ApplicantDetail() {
               )}
             </SectionCard>
 
-            {/* Milestone tracker */}
             <SectionCard title="Sales Journey" icon={BadgeCheck}>
               {[
                 { label: "Lead Created", done: true },
@@ -1046,10 +1042,7 @@ export default function ApplicantDetail() {
                   label: "Agreement Signed",
                   done: agreements.some((a) => a.Status === "Signed"),
                 },
-                {
-                  label: "Registration",
-                  done: agreements.some((a) => !!a.RegistrationDate),
-                },
+                { label: "Registration", done: false },
                 { label: "Handover", done: false },
               ].map((step, i) => (
                 <div
