@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
+import { useTicketSync } from "@/hooks/useTicketSync";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   AlertCircle,
@@ -11,12 +11,10 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock,
-  Flame,
   Paperclip,
   Plus,
   RefreshCw,
   Search,
-  ShieldAlert,
   User,
   X,
 } from "lucide-react";
@@ -30,10 +28,30 @@ interface Ticket {
   issue_details: string;
   customer_name: string;
   customer_phone: string;
-  status: "Pending" | "Resolved" | "InProgress";
+  status: "Pending" | "Resolved" | "InProgress" | "Closed";
   created_at?: string;
   attachment_path?: string | null;
 }
+
+type StatusFilter = "Open" | "Pending" | "InProgress" | "Resolved" | "Closed" | "All";
+
+const STATUS_TABS: StatusFilter[] = [
+  "Open",
+  "Pending",
+  "InProgress",
+  "Resolved",
+  "Closed",
+  "All",
+];
+
+const STATUS_LABELS: Record<StatusFilter, string> = {
+  Open: "Open",
+  Pending: "Pending",
+  InProgress: "In Progress",
+  Resolved: "Resolved",
+  Closed: "Closed",
+  All: "All",
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -246,6 +264,7 @@ const MyTickets: React.FC = () => {
   const isAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
 
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("Open");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
 
   const {
@@ -266,8 +285,17 @@ const MyTickets: React.FC = () => {
     refetchOnWindowFocus: true,
   });
 
+  useTicketSync(refetch);
+
   const tickets = useMemo(() => {
     let list = [...allTickets];
+    if (statusFilter === "Open") {
+      list = list.filter(
+        (t) => t.status === "Pending" || t.status === "InProgress",
+      );
+    } else if (statusFilter !== "All") {
+      list = list.filter((t) => t.status === statusFilter);
+    }
     if (priorityFilter !== "all")
       list = list.filter((t) => t.priority === priorityFilter);
     if (search.trim()) {
@@ -280,9 +308,22 @@ const MyTickets: React.FC = () => {
       );
     }
     return list;
-  }, [allTickets, priorityFilter, search]);
+  }, [allTickets, statusFilter, priorityFilter, search]);
 
-  const urgentCount = allTickets.filter((t) => t.priority === "Urgent").length;
+  const openTickets = allTickets.filter(
+    (t) => t.status === "Pending" || t.status === "InProgress",
+  );
+  const urgentCount = openTickets.filter((t) => t.priority === "Urgent").length;
+  const tabCounts: Record<StatusFilter, number> = {
+    Open: openTickets.length,
+    Pending: allTickets.filter((t) => t.status === "Pending").length,
+    InProgress: allTickets.filter((t) => t.status === "InProgress").length,
+    Resolved: allTickets.filter((t) => t.status === "Resolved").length,
+    Closed: allTickets.filter((t) => t.status === "Closed").length,
+    All: allTickets.length,
+  };
+  const isFiltered =
+    statusFilter !== "Open" || priorityFilter !== "all" || search.trim();
 
   return (
     <>
@@ -303,7 +344,10 @@ const MyTickets: React.FC = () => {
                 My Tickets
               </h1>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {allTickets.length} ticket{allTickets.length !== 1 ? "s" : ""}
+                {openTickets.length} open ticket{openTickets.length !== 1 ? "s" : ""}
+                {allTickets.length !== openTickets.length && (
+                  <span className="ml-1.5">- {allTickets.length} total</span>
+                )}
                 {urgentCount > 0 && (
                   <span className="text-red-500 ml-1.5 font-medium">
                     · {urgentCount} urgent
@@ -338,6 +382,24 @@ const MyTickets: React.FC = () => {
             <AlertCircle size={14} /> Failed to load tickets. Try refreshing.
           </div>
         )}
+
+        {/* Status tabs */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {STATUS_TABS.map((status) => (
+            <button
+              key={status}
+              onClick={() => setStatusFilter(status)}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-heading font-medium transition-all ${
+                statusFilter === status
+                  ? "bg-primary text-primary-foreground"
+                  : "border border-border text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {STATUS_LABELS[status]}
+              <span className="ml-1 opacity-70">{tabCounts[status]}</span>
+            </button>
+          ))}
+        </div>
 
         {/* Filters */}
         <div className="flex items-center gap-2 flex-wrap">
@@ -401,11 +463,11 @@ const MyTickets: React.FC = () => {
           <div className="rounded-xl border border-border bg-card py-16 flex flex-col items-center gap-3 text-muted-foreground">
             <CheckCircle2 size={32} className="opacity-20" />
             <p className="text-sm">
-              {search || priorityFilter !== "all"
+              {isFiltered
                 ? "No tickets match your filters"
-                : "No tickets yet"}
+                : "No open tickets"}
             </p>
-            {!search && priorityFilter === "all" && (
+            {!isFiltered && (
               <button
                 onClick={() => navigate("/ticket/create")}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity mt-1"
@@ -424,7 +486,7 @@ const MyTickets: React.FC = () => {
 
         {!isLoading &&
           tickets.length > 0 &&
-          (search || priorityFilter !== "all") && (
+          isFiltered && (
             <p className="text-xs text-muted-foreground text-center">
               Showing {tickets.length} of {allTickets.length} tickets
             </p>
