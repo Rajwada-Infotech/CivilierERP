@@ -147,7 +147,9 @@ export default function ApiIntegration() {
       api.id === id
         ? {
             ...api,
-            status: api.status === "active" ? "inactive" : "active",
+            status: (api.status === "active" ? "inactive" : "active") as
+              | "active"
+              | "inactive",
           }
         : api,
     );
