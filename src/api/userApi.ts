@@ -18,6 +18,7 @@ export interface User {
   RoleId?: number;
   created_datetime: string;
   discontinue: boolean;
+  can_accept_tickets?: boolean;
   last_login?: string | null;
   tenant_id?: string | null;
   tenantId?: string | null;

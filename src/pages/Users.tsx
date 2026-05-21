@@ -28,6 +28,7 @@ interface User {
   RoleId: number;
   created_datetime: string;
   discontinue: boolean;
+  can_accept_tickets?: boolean;
 }
 
 // ─── API calls ────────────────────────────────────────────────────────────────
@@ -49,6 +50,7 @@ const addUserApi = async (user: {
   email: string;
   RoleId: number;
   password: string;
+  can_accept_tickets?: boolean;
 }) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
@@ -83,6 +85,19 @@ const updateUserApi = async (id: number, data: Partial<User>) => {
       );
     }
     throw new Error(body?.error || "Failed to update user");
+  }
+  return res.json();
+};
+
+const updateTicketAcceptanceApi = async (id: number, canAccept: boolean) => {
+  const res = await fetch(`${BASE_URL}/${id}/permissions`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify({ can_accept_tickets: canAccept }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error || "Failed to update ticket acceptance");
   }
   return res.json();
 };
@@ -129,6 +144,10 @@ function buildUserColumns(
   setEditUserId: (id: number) => void,
   setViewUserId: (id: number) => void,
   updateMutation: { mutate: (args: { id: number; data: any }) => void },
+  ticketAccessMutation: {
+    mutate: (args: { id: number; canAccept: boolean }) => void;
+    isPending?: boolean;
+  },
   deleteMutation: { mutate: (id: number) => void },
 ): ColumnDef<User, unknown>[] {
   return [
@@ -156,6 +175,46 @@ function buildUserColumns(
           {row.original.roleName ?? roles.find((r) => r.RId === row.original.RoleId)?.RName ?? "—"}
         </span>
       ),
+    },
+    {
+      accessorKey: "can_accept_tickets",
+      header: "Ticket Access",
+      cell: ({ row }) => {
+        const user = row.original;
+        const canAccept =
+          !!user.can_accept_tickets ||
+          ["admin", "super_admin", "dba"].includes(user.role);
+        const lockedByRole = ["admin", "super_admin", "dba"].includes(user.role);
+        return (
+          <button
+            type="button"
+            disabled={lockedByRole || ticketAccessMutation.isPending}
+            onClick={() =>
+              ticketAccessMutation.mutate({
+                id: user.id,
+                canAccept: !user.can_accept_tickets,
+              })
+            }
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition ${
+              canAccept
+                ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            } ${lockedByRole ? "opacity-70 cursor-not-allowed" : ""}`}
+            title={
+              lockedByRole
+                ? "Privileged roles can always accept tickets"
+                : "Toggle ticket acceptance"
+            }
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                canAccept ? "bg-blue-500" : "bg-muted-foreground"
+              }`}
+            />
+            {canAccept ? "Can accept" : "No accept"}
+          </button>
+        );
+      },
     },
     {
       accessorKey: "discontinue",
@@ -237,6 +296,16 @@ const Users = () => {
     onError: (err: Error) => toast.error(err.message),
   });
 
+  const ticketAccessMutation = useMutation({
+    mutationFn: ({ id, canAccept }: { id: number; canAccept: boolean }) =>
+      updateTicketAcceptanceApi(id, canAccept),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      toast.success("Ticket acceptance updated.");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: deleteUserApi,
     onSuccess: () => {
@@ -253,6 +322,7 @@ const Users = () => {
     RoleId: 0,
     password: "",
     isActive: true,
+    canAcceptTickets: false,
   });
 
   const [editUserId, setEditUserId] = useState<number | null>(null);
@@ -261,8 +331,8 @@ const Users = () => {
   const [showPass, setShowPass] = useState(false);
 
   const columns = useMemo(
-    () => buildUserColumns(roles, deleteConfirmId, setDeleteConfirmId, setEditUserId, setViewUserId, updateMutation, deleteMutation),
-    [roles, deleteConfirmId, deleteMutation.isPending],
+    () => buildUserColumns(roles, deleteConfirmId, setDeleteConfirmId, setEditUserId, setViewUserId, updateMutation, ticketAccessMutation, deleteMutation),
+    [roles, deleteConfirmId, deleteMutation.isPending, ticketAccessMutation.isPending],
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -276,6 +346,7 @@ const Users = () => {
           RoleId: user.RoleId ?? 0,
           password: "",
           isActive: !user.discontinue,
+          canAcceptTickets: !!user.can_accept_tickets,
         });
         setDrawerOpen(true);
       }
@@ -314,6 +385,7 @@ const Users = () => {
           email: form.email.trim(),
           RoleId: form.RoleId,
           discontinue: !form.isActive,
+          can_accept_tickets: form.canAcceptTickets,
         },
       });
     } else {
@@ -322,12 +394,20 @@ const Users = () => {
         email: form.email.trim(),
         RoleId: form.RoleId,
         password: form.password,
+        can_accept_tickets: form.canAcceptTickets,
       });
     }
   };
 
   const resetForm = () => {
-    setForm({ name: "", email: "", RoleId: 0, password: "", isActive: true });
+    setForm({
+      name: "",
+      email: "",
+      RoleId: 0,
+      password: "",
+      isActive: true,
+      canAcceptTickets: false,
+    });
     setEditUserId(null);
     setShowPass(false);
   };
@@ -568,6 +648,33 @@ const Users = () => {
                 </span>
               </div>
 
+              <div className="flex items-center gap-2.5 p-3.5 rounded-lg bg-muted/50 border border-border">
+                <input
+                  type="checkbox"
+                  name="canAcceptTickets"
+                  id="canAcceptTickets"
+                  aria-label="Can Accept Tickets"
+                  checked={form.canAcceptTickets}
+                  onChange={handleChange}
+                  className="h-4 w-4 accent-primary"
+                />
+                <label
+                  htmlFor="canAcceptTickets"
+                  className="text-sm text-foreground cursor-pointer select-none flex-1"
+                >
+                  Can accept tickets
+                </label>
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    form.canAcceptTickets
+                      ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {form.canAcceptTickets ? "Enabled" : "Off"}
+                </span>
+              </div>
+
               {/* Drawer footer */}
               <div className="flex gap-3 mt-auto pt-4 border-t border-border">
                 <button
@@ -647,6 +754,15 @@ const Users = () => {
                     "en-IN",
                     { day: "numeric", month: "short", year: "numeric" },
                   )}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Ticket Accept</span>
+                <span className="font-medium text-foreground">
+                  {viewedUser.can_accept_tickets ||
+                  ["admin", "super_admin", "dba"].includes(viewedUser.role)
+                    ? "Allowed"
+                    : "Not allowed"}
                 </span>
               </div>
               <div className="flex justify-between">

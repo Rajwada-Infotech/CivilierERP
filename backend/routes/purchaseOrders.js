@@ -5,6 +5,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
+const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -249,10 +250,12 @@ router.get(
 // ── GET /:id ──────────────────────────────────────────────────────────────────
 router.get("/:id", async (req, res) => {
   try {
+    const id = requireValidId(req, res);
+    if (!id) return;
     const pool = getPool();
     const result = await pool
       .request()
-      .input("PurchaseOrderID", sql.Int, parseInt(req.params.id, 10)).query(`
+      .input("PurchaseOrderID", sql.Int, id).query(`
         ${PO_SELECT}
         WHERE po.PurchaseOrderID = @PurchaseOrderID
       `);
@@ -263,7 +266,7 @@ router.get("/:id", async (req, res) => {
     // Also return normalised line items for the new form
     const lineItems = await pool
       .request()
-      .input("POID", sql.Int, parseInt(req.params.id, 10)).query(`
+      .input("POID", sql.Int, id).query(`
         SELECT
           Id, PurchaseOrderID, ItemId, ItemName, ItemCode, Description,
           Quantity, ReceivedQty, UomId, UomName, Rate, Discount, TaxPct,
@@ -538,7 +541,8 @@ router.post("/", async (req, res) => {
 
 // ── PUT /:id  (Update) ────────────────────────────────────────────────────────
 router.put("/:id", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = requireValidId(req, res);
+  if (!id) return;
   const {
     PurchaseOrderNo,
     PODate,
@@ -650,9 +654,9 @@ router.put("/:id", async (req, res) => {
         WHERE PurchaseOrderID = @PurchaseOrderID
       `);
 
-    if (result.rowsAffected[0] === 0) {
+    if (!checkRowsAffected(result, res, "Purchase order")) {
       await transaction.rollback();
-      return res.status(404).json({ error: "Purchase order not found" });
+      return;
     }
 
     // Sync normalised child table
@@ -677,16 +681,17 @@ router.put("/:id", async (req, res) => {
 // PurchaseOrderItems child rows are cascade-deleted by FK constraint
 router.delete("/:id", async (req, res) => {
   try {
+    const id = requireValidId(req, res);
+    if (!id) return;
     const pool = getPool();
     const result = await pool
       .request()
-      .input("PurchaseOrderID", sql.Int, parseInt(req.params.id, 10))
+      .input("PurchaseOrderID", sql.Int, id)
       .query(
         "DELETE FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @PurchaseOrderID",
       );
 
-    if (result.rowsAffected[0] === 0)
-      return res.status(404).json({ error: "Purchase order not found" });
+    if (!checkRowsAffected(result, res, "Purchase order")) return;
 
     await bumpCacheVersion("purchase-orders");
     res.json({ message: "Purchase order deleted successfully" });
@@ -699,7 +704,8 @@ router.delete("/:id", async (req, res) => {
 // ── Approval routes ───────────────────────────────────────────────────────────
 
 router.put("/:id/submit", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = requireValidId(req, res);
+  if (!id) return;
   try {
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
@@ -718,7 +724,8 @@ router.put("/:id/submit", async (req, res) => {
 });
 
 router.put("/:id/approve", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = requireValidId(req, res);
+  if (!id) return;
   try {
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
@@ -739,7 +746,8 @@ router.put("/:id/approve", async (req, res) => {
 });
 
 router.put("/:id/reject", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = requireValidId(req, res);
+  if (!id) return;
   const { note } = req.body;
   try {
     const userEmail = requireUserName(req, res);
