@@ -253,7 +253,13 @@ export const ActivityBrowserProvider: React.FC<{
     }) => {
       const sessionId = localStorage.getItem("currentSessionId");
       const user = getStoredUser();
-      if (!sessionId || !user.id) return;
+      if (!sessionId) {
+        console.warn("Skipping activity action log: missing currentSessionId", {
+          action,
+        });
+        return;
+      }
+      if (!user.id) return;
 
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
