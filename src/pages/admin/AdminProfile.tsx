@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -23,7 +24,6 @@ import {
   Lock,
   Save,
   ShieldCheck,
-  Mail,
   Loader2,
   Shield,
   Users,
@@ -78,7 +78,6 @@ const ADMIN_PERMISSIONS = [
     icon: Lock,
   },
 ];
-
 
 // ─── Activity table columns ───────────────────────────────────────────────────
 const ACTIVITY_COLUMNS = [

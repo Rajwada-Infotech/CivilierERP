@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -33,13 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useFinYear } from "@/contexts/FinYearContext";
@@ -1206,7 +1200,10 @@ const FormModal: React.FC<FormModalProps> = ({
   const isEdit = record !== null;
   const [form, setForm] = useState<FormState>(
     isEdit
-      ? { ...recordToForm(record!), FinYear: (record as any)?.FinYear ?? activeFinYear ?? "" }
+      ? {
+          ...recordToForm(record!),
+          FinYear: (record as any)?.FinYear ?? activeFinYear ?? "",
+        }
       : defaultForm(activeFinYear),
   );
   const [items, setItems] = useState<BoqItem[]>(
@@ -1450,7 +1447,10 @@ const FormModal: React.FC<FormModalProps> = ({
                   </SelectTrigger>
                   <SelectContent className="z-[300]">
                     {finYears.map((fy) => (
-                      <SelectItem key={String(fy.id ?? fy.year)} value={fy.year}>
+                      <SelectItem
+                        key={String(fy.id ?? fy.year)}
+                        value={fy.year}
+                      >
                         {fy.year}
                         {fy.status === "Active" ? " - Active" : ""}
                       </SelectItem>
@@ -1797,9 +1797,9 @@ const DetailModal: React.FC<DetailModalProps> = ({
               }}
             >
               <span style={{ fontSize: 13, fontWeight: 500, flex: 1 }}>
-                {record.Status === "Pending" ? (
-                  "Awaiting admin approval from the Approval Inbox."
-                ) : null}
+                {record.Status === "Pending"
+                  ? "Awaiting admin approval from the Approval Inbox."
+                  : null}
                 {record.Status === "Approved" &&
                   `✓ Approved${record.ApprovedBy ? ` by ${record.ApprovedBy}` : ""}.`}
                 {record.Status === "Rejected" &&
@@ -2199,16 +2199,18 @@ export default function BOQ() {
         .map((row, idx) => {
           const name =
             type === "item"
-              ? row.itemName ?? row.ItemName
-              : row.activityName ?? row.ActivityName;
+              ? (row.itemName ?? row.ItemName)
+              : (row.activityName ?? row.ActivityName);
           const code =
             type === "item"
-              ? row.itemCode ?? row.ItemCode
-              : row.activityCode ?? row.ActivityCode;
+              ? (row.itemCode ?? row.ItemCode)
+              : (row.activityCode ?? row.ActivityCode);
           const qty = row.quantity ?? row.Quantity ?? "";
           const uom = row.uomName ?? row.UomName ?? "";
           const rate = Number(row.rate ?? row.Rate ?? 0);
-          const amount = Number(row.amount ?? row.LineAmount ?? row.Amount ?? 0);
+          const amount = Number(
+            row.amount ?? row.LineAmount ?? row.Amount ?? 0,
+          );
           return `<tr>
             <td>${idx + 1}</td>
             <td>${name || ""}</td>

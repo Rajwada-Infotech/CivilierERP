@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
+import { useState, useEffect } from "react";
 import { useAuth, PAGE_DEFINITIONS } from "@/contexts/AuthContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -23,7 +24,6 @@ import {
   Activity,
   Lock,
   Save,
-  Mail,
   Shield,
   Loader2,
   CheckCircle2,
@@ -43,7 +43,6 @@ const ACTION_COLORS: Record<string, string> = {
   delete: "bg-red-500/10 text-red-500 border-red-400/30",
   export: "bg-purple-500/10 text-purple-500 border-purple-400/30",
 };
-
 
 // ─── Activity table columns ───────────────────────────────────────────────────
 const ACTIVITY_COLUMNS = [
