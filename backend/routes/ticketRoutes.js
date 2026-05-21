@@ -1,6 +1,6 @@
 /**
  * ticketRoutes.js
- * Full ticket workflow: create → assign → comment → resolve/close
+ * Full ticket workflow: create → assign → comment → resolve/close/reopen
  * Auth-protected — all endpoints require valid JWT (via global authMiddleware in server.js).
  * Role-gated endpoints explicitly checked with allowRoles().
  */
@@ -12,16 +12,6 @@ const allowRoles = require("../middleware/role");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-
-// ─── Socket.IO — lazy-loaded (same pattern as userActivity.js) ───────────────
-let _getIo = null;
-function getIo() {
-  if (!_getIo) _getIo = require("../socket").getIo;
-  return _getIo();
-}
-function emitTicketUpdate(action, ticketId) {
-  try { getIo().emit("ticket:updated", { action, ticketId }); } catch (_) { /* not ready */ }
-}
 
 // ─── Multer setup ─────────────────────────────────────────────────────────────
 const UPLOAD_DIR = path.join(__dirname, "../uploads/tickets");
@@ -242,7 +232,7 @@ async function createTicketHandler(req, res) {
         });
     }
 
-    const createResult = await pool
+    await pool
       .request()
       .input("subject", sql.NVarChar(500), subject)
       .input("priority", sql.NVarChar(50), priority ?? "Medium")
@@ -266,13 +256,10 @@ async function createTicketHandler(req, res) {
           @company_id, @project_id,
           @attachment_path, 'Pending',
           @created_by, @created_by_id
-        );
-        SELECT SCOPE_IDENTITY() AS id;
+        )
       `);
 
-    const newId = createResult.recordset[0]?.id ?? null;
     res.json({ success: true });
-    emitTicketUpdate("created", newId);
   } catch (err) {
     console.error("[Tickets POST /create]", err.message);
     res.status(500).json({ error: err.message });
@@ -311,7 +298,6 @@ router.put(
       `);
 
       res.json({ success: true });
-      emitTicketUpdate("assigned", id);
     } catch (err) {
       console.error("[Tickets PUT /assign]", err.message);
       res.status(500).json({ error: err.message });
@@ -320,12 +306,13 @@ router.put(
 );
 
 // ─── PUT /api/tickets/resolve/:id ────────────────────────────────────────────
+// Accepts rating (1–5) and review_remarks in addition to resolution_note
 router.put("/resolve/:id", async (req, res) => {
   try {
     const actor = userFromReq(req);
     const pool = getPool();
     const id = parseInt(req.params.id);
-    const { resolution_note } = req.body;
+    const { resolution_note, rating, review_remarks } = req.body;
 
     const access = await getAccessibleTicket(pool, id, actor);
     if (access.status === 404)
@@ -350,15 +337,20 @@ router.put("/resolve/:id", async (req, res) => {
         WHERE id = @id
       `);
 
-    if (resolution_note?.trim()) {
+    // Build comment from resolution note + review
+    const commentParts = [];
+    if (resolution_note?.trim())
+      commentParts.push(`[Resolved] ${resolution_note.trim()}`);
+    if (rating)
+      commentParts.push(
+        `[Review ${rating}★]${review_remarks?.trim() ? " " + review_remarks.trim() : ""}`,
+      );
+
+    if (commentParts.length > 0) {
       await pool
         .request()
         .input("ticket_id", sql.Int, id)
-        .input(
-          "comment",
-          sql.NVarChar(sql.MAX),
-          `[Resolved] ${resolution_note.trim()}`,
-        )
+        .input("comment", sql.NVarChar(sql.MAX), commentParts.join("\n"))
         .input("author_name", sql.NVarChar(255), actor.name)
         .input("author_id", sql.Int, actor.id)
         .input("author_role", sql.NVarChar(50), actor.role).query(`
@@ -368,9 +360,44 @@ router.put("/resolve/:id", async (req, res) => {
     }
 
     res.json({ success: true });
-    emitTicketUpdate("resolved", id);
   } catch (err) {
     console.error("[Tickets PUT /resolve]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── PUT /api/tickets/reopen/:id ─────────────────────────────────────────────
+// Moves a Resolved or Closed ticket back to Pending status
+router.put("/reopen/:id", async (req, res) => {
+  try {
+    const actor = userFromReq(req);
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+
+    const access = await getAccessibleTicket(pool, id, actor);
+    if (access.status === 404)
+      return res.status(404).json({ error: "Ticket not found" });
+    if (access.status === 403)
+      return res.status(403).json({ error: "Access denied" });
+
+    await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query(`
+        UPDATE dbo.tickets
+        SET status          = 'Pending',
+            resolved_by     = NULL,
+            resolved_by_id  = NULL,
+            resolution_note = NULL,
+            resolved_at     = NULL,
+            closed_at       = NULL,
+            updated_at      = SYSUTCDATETIME()
+        WHERE id = @id
+      `);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[Tickets PUT /reopen]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -393,7 +420,6 @@ router.put(
       `);
 
       res.json({ success: true });
-      emitTicketUpdate("closed", id);
     } catch (err) {
       console.error("[Tickets PUT /close]", err.message);
       res.status(500).json({ error: err.message });
@@ -450,7 +476,6 @@ router.post("/comment/:id", async (req, res) => {
       );
 
     res.json({ success: true });
-    emitTicketUpdate("commented", id);
   } catch (err) {
     console.error("[Tickets POST /comment]", err.message);
     res.status(500).json({ error: err.message });
