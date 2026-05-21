@@ -1,4 +1,5 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -1795,7 +1796,6 @@ const Payment: React.FC = () => {
     data: dbData,
     isLoading,
     isError,
-    error,
     refetch: refetchPayments,
   } = useQuery({
     queryKey: [

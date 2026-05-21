@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, useInView, useAnimation } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -7,7 +7,6 @@ import {
   HardHat,
   Building2,
   Layers,
-  TrendingUp,
   ClipboardList,
   Hammer,
   ArrowRight,
@@ -526,7 +525,6 @@ function buildActivityFeed(data: HomeDashboardData): ActivityItem[] {
 
 export default function Home() {
   const { currentUser } = useAuth();
-  const navigate = useNavigate();
 
   const firstName = currentUser?.name?.split(" ")[0] ?? "User";
   const role = currentUser?.role;

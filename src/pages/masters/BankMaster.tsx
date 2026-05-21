@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -130,7 +130,7 @@ const bankTypeBadge: Record<string, string> = {
 
 // ─── Column Builder ─────────────────────────────────────────────────────────
 function buildColumns(
-  editingId: string | null,
+  _editingId: string | null,
   deleteId: string | null,
   onEdit: (bank: BankRecord) => void,
   onDeleteRequest: (id: string) => void,
