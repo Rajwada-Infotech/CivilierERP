@@ -970,7 +970,37 @@ const PurchaseOrderMaster: React.FC = () => {
     }
   };
 
-  const handleApprovalSuccess = async () => {
+  const handleApprovalSuccess = async (
+    recordId?: string,
+    action?: "submit" | "approve" | "reject",
+  ) => {
+    // Optimistically update the cached row status so the UI reflects
+    // the change immediately without waiting for the refetch round-trip.
+    if (recordId && action) {
+      const nextStatus =
+        action === "submit"
+          ? "Pending"
+          : action === "approve"
+            ? "Approved"
+            : "Rejected";
+
+      queryClient.setQueriesData<any>(
+        { queryKey: ["purchase-orders"] },
+        (old: any) => {
+          if (!old?.data) return old;
+          return {
+            ...old,
+            data: old.data.map((row: any) =>
+              String(row.PurchaseOrderID) === recordId
+                ? { ...row, Status: nextStatus }
+                : row,
+            ),
+          };
+        },
+      );
+    }
+
+    // Then invalidate so the server state syncs in the background.
     await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
   };
 
@@ -1221,7 +1251,9 @@ const PurchaseOrderMaster: React.FC = () => {
                             recordId={item._id}
                             endpoint="/api/purchase-orders"
                             submitOnly
-                            onSuccess={handleApprovalSuccess}
+                            onSuccess={(action) =>
+                              handleApprovalSuccess(item._id, action)
+                            }
                           />
                           <button
                             onClick={() => goToView(item)}
@@ -1345,36 +1377,10 @@ const PurchaseOrderMaster: React.FC = () => {
         )}
         {isReadOnly && (
           <div className="flex items-center gap-2">
-            <ApprovalActions
-              status={listData.find((r) => r._id === editingId)?.status ?? null}
-              recordId={editingId ?? ""}
-              endpoint="/api/purchase-orders"
-              onSuccess={async (action) => {
-                await handleApprovalSuccess();
-                // Refresh the in-form status display
-                const updated = dbItems.find(
-                  (d) => String(d.PurchaseOrderID) === editingId,
-                );
-                if (updated) {
-                  goToView({
-                    _id: String(updated.PurchaseOrderID ?? ""),
-                    poNumber: updated.PurchaseOrderNo ?? "",
-                    poDate: updated.PODate ?? "",
-                    supplierName: updated.SupplierName ?? "",
-                    companyName: updated.CompanyName ?? "",
-                    projectName: updated.ProjectName ?? "",
-                    totalAmount: Number(updated.TotalAmount ?? 0),
-                    status:
-                      action === "submit"
-                        ? "Pending"
-                        : action === "approve"
-                          ? "Approved"
-                          : "Rejected",
-                    docNo: updated.DocNo ?? "",
-                    remarks: updated.Remarks ?? "",
-                  });
-                }
-              }}
+            <StatusChip
+              status={
+                listData.find((r) => r._id === editingId)?.status ?? "Draft"
+              }
             />
             <button
               onClick={handlePrint}
