@@ -44,6 +44,7 @@ export interface AppUser {
   role: UserRole;
   initials: string;
   avatarUrl?: string | null;
+  can_accept_tickets?: boolean;
   pagePermissions: PagePermission[];
   isActive: boolean;
 }
@@ -64,6 +65,7 @@ export interface LoginResponse {
     name: string;
     email: string;
     role: UserRole;
+    can_accept_tickets?: boolean;
     discontinue: boolean;
   };
 }

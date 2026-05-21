@@ -68,6 +68,16 @@ function makeStore(prefix) {
   });
 }
 
+function isLocalRequest(req) {
+  const ip = req.ip || req.socket?.remoteAddress || "";
+  return (
+    ip === "::1" ||
+    ip === "127.0.0.1" ||
+    ip === "::ffff:127.0.0.1" ||
+    ip.includes("127.0.0.1")
+  );
+}
+
 // ─── ALL routes ─────────────────────────────────────────────────────────────
 const ALL_ROUTES = [
   { path: "/api/roles", file: "./routes/roles" },
@@ -209,6 +219,7 @@ async function createApp() {
       max: 10,
       message: { error: "Too many login attempts. Try again later." },
       store: makeStore("rl:login:"),
+      skip: (req) => isDev && isLocalRequest(req),
       standardHeaders: true,
       legacyHeaders: false,
     });

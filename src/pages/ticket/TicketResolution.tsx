@@ -108,7 +108,7 @@ const statusCfg: Record<Status, { cls: string; label: string }> = {
   },
   InProgress: {
     cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",
-    label: "In Progress",
+    label: "Resolving",
   },
   Resolved: {
     cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
@@ -538,7 +538,7 @@ export default function TicketResolution() {
             />
             <StatPill
               icon={RefreshCw}
-              label="In Progress"
+              label="Resolving"
               value={inProgressCount}
               color="text-blue-600"
               bg="bg-blue-500/5"
@@ -609,7 +609,7 @@ export default function TicketResolution() {
                       : "border border-border text-muted-foreground hover:bg-muted",
                   )}
                 >
-                  {s === "InProgress" ? "In Progress" : s}
+                  {s === "InProgress" ? "Resolving" : s}
                 </button>
               ))}
             </div>

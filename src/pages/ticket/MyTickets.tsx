@@ -48,7 +48,7 @@ const STATUS_TABS: StatusFilter[] = [
 const STATUS_LABELS: Record<StatusFilter, string> = {
   Open: "Open",
   Pending: "Pending",
-  InProgress: "In Progress",
+  InProgress: "Resolving",
   Resolved: "Resolved",
   Closed: "Closed",
   All: "All",
@@ -118,12 +118,13 @@ function StatusBadge({ status }: { status: string }) {
     InProgress: "bg-blue-500/10 text-blue-600 border-blue-400/20",
   };
   const Icon = status === "Resolved" ? CheckCircle2 : Clock;
+  const label = status === "InProgress" ? "Resolving" : status;
   return (
     <span
       className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${map[status] ?? "bg-muted text-muted-foreground border-border"}`}
     >
       <Icon size={10} />
-      {status}
+      {label}
     </span>
   );
 }

@@ -97,6 +97,7 @@ export const AuthProvider = ({
       if (!parsed.initials)
         parsed.initials = AuthUtils.getInitials(parsed.name ?? "");
       if (typeof parsed.isActive === "undefined") parsed.isActive = true;
+      parsed.can_accept_tickets = !!parsed.can_accept_tickets;
       parsed.id = String(parsed.id);
       return parsed;
     } catch {
@@ -126,6 +127,7 @@ export const AuthProvider = ({
           email: u.email,
           role: u.role as UserRole,
           initials: AuthUtils.getInitials(u.name),
+          can_accept_tickets: !!u.can_accept_tickets,
           pagePermissions:
             Array.isArray(u.pagePermissions) && u.pagePermissions.length > 0
               ? u.pagePermissions
@@ -176,6 +178,7 @@ export const AuthProvider = ({
         ...data.user,
         id: String(data.user.id),
         initials: AuthUtils.getInitials(data.user.name),
+        can_accept_tickets: !!data.user.can_accept_tickets,
         // Use DB-stored permissions for 'user' role; fall back to role-based defaults
         // for privileged roles (super_admin / admin / dba) which always get FULL_ACCESS.
         pagePermissions:

@@ -74,7 +74,7 @@ const statusConfig: Record<string, { cls: string; label: string }> = {
   },
   InProgress: {
     cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",
-    label: "In Progress",
+    label: "Resolving",
   },
   Resolved: {
     cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
@@ -195,7 +195,7 @@ const STATUS_TABS: StatusFilter[] = [
 const TAB_LABELS: Record<StatusFilter, string> = {
   "All Tickets": "All",
   Pending: "Pending",
-  InProgress: "In Progress",
+  InProgress: "Resolving",
   Resolved: "Resolved",
   Closed: "Closed",
 };
