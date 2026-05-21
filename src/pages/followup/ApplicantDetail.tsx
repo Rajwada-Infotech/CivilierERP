@@ -145,6 +145,10 @@ interface LogFormState {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+interface ApiErrorPayload {
+  error?: string;
+}
+
 const fmt = (v?: string | null) => v || "—";
 function fmtDate(v?: string | null) {
   if (!v) return "—";
@@ -459,8 +463,8 @@ function QuickLogPanel({
         body: JSON.stringify(payload),
       });
       if (!r.ok) {
-        const e = await r.json().catch(() => ({}));
-        throw new Error((e as any).error || "Failed to save");
+        const e = (await r.json().catch(() => ({}))) as ApiErrorPayload;
+        throw new Error(e.error || "Failed to save");
       }
     },
     onSuccess: () => {
@@ -599,7 +603,8 @@ export default function ApplicantDetail() {
   // Use state data immediately; also fetch followup record if one exists by name match
   const applicant = stateApplicant;
   const name = applicant?.LHeadName || "Applicant";
-  const refId = applicant?.LHeadId ?? Number(id) ?? 0;
+  const refId = applicant?.LHeadId ?? Number(id);
+
 
   // Try to find a matching FollowupApplicants record by LHeadId used as refId
   const { data: followupRecord } = useQuery<FollowupApplicant | null>({
