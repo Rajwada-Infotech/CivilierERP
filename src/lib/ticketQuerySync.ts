@@ -1,11 +1,19 @@
 import type { QueryClient } from "@tanstack/react-query";
 
+/**
+ * All query key roots used across the ticket module.
+ * Keep this in sync with every useQuery({ queryKey }) in:
+ *   - TicketDashboard.tsx      → "ticket-dashboard"
+ *   - AllTickets.tsx           → "tickets"
+ *   - MyTickets.tsx            → "tickets"
+ *   - PendingTickets.tsx       → "tickets"
+ *   - ResolvedTickets.tsx      → "tickets"
+ *   - TicketResolution.tsx     → "admin-resolution-tickets"
+ */
 const TICKET_QUERY_ROOTS = new Set([
   "ticket-dashboard",
-  "my-tickets",
-  "admin-tickets",
-  "admin-ticket-stats",
-  "admin-ticket-detail",
+  "tickets",
+  "admin-resolution-tickets",
 ]);
 
 export function invalidateTicketQueries(queryClient: QueryClient) {
