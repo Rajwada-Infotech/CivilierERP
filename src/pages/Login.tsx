@@ -24,6 +24,12 @@ const ROLE_HINTS = [
     color: "#8b5cf6",
   },
   {
+    role: "Engineer",
+    email: "engineer@civilier.com",
+    password: "engineer123",
+    color: "#14b8a6",
+  },
+  {
     role: "User",
     email: "shivam123@gmail.com",
     password: "user123",
@@ -1167,11 +1173,14 @@ export default function Login() {
                         className="w-2 h-2 rounded-full shrink-0"
                         style={{ background: h.color }}
                       />
-                      <span className="text-xs font-medium text-slate-700 w-28 shrink-0">
+                      <span className="text-xs font-medium text-slate-700 w-24 sm:w-28 shrink-0">
                         {h.role}
                       </span>
-                      <span className="text-xs text-slate-500 truncate">
+                      <span className="text-xs text-slate-500 truncate flex-1 min-w-0">
                         {h.email}
+                      </span>
+                      <span className="text-xs font-medium text-slate-500 shrink-0">
+                        {h.password}
                       </span>
                     </button>
                   ))}
