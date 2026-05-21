@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -78,7 +79,6 @@ const DBA_PERMISSIONS = [
     icon: Terminal,
   },
 ];
-
 
 // ─── Activity table columns ───────────────────────────────────────────────────
 const ACTIVITY_COLUMNS = [

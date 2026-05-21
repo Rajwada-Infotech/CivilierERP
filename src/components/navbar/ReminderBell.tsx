@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from "react";
+import React from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Bell,
@@ -26,7 +27,11 @@ const TYPE_META: Record<string, ReminderMeta> = {
   tds: { icon: FileWarning, label: "TDS", color: "text-rose-500" },
   grn: { icon: Package, label: "GRN", color: "text-emerald-500" },
   emi_installment: { icon: Lock, label: "EMI", color: "text-purple-500" },
-  material_request: { icon: ClipboardList, label: "MR", color: "text-blue-500" },
+  material_request: {
+    icon: ClipboardList,
+    label: "MR",
+    color: "text-blue-500",
+  },
 };
 
 interface ReminderBellProps {
@@ -128,8 +133,8 @@ export const ReminderBell = ({
             </span>
             <button
               onClick={(e) => {
-                  e.stopPropagation();
-                  if (!isLocked) refresh(true);
+                e.stopPropagation();
+                if (!isLocked) refresh(true);
               }}
               disabled={loading || isLocked}
               className={`p-1.5 rounded-md transition-all ${isLocked ? "bg-red-50 text-red-400" : "hover:bg-background"}`}
