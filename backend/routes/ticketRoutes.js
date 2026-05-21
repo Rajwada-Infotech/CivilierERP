@@ -20,7 +20,13 @@ function getIo() {
   return _getIo();
 }
 function emitTicketUpdate(action, ticketId) {
-  try { getIo().emit("ticket:updated", { action, ticketId }); } catch (_) { /* not ready */ }
+  try {
+    getIo().emit("ticket:updated", { action, ticketId });
+  } catch (err) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[Tickets socket emit]", err.message);
+    }
+  }
 }
 
 // ─── Multer setup ─────────────────────────────────────────────────────────────
@@ -54,12 +60,49 @@ function userFromReq(req) {
   return {
     id: req.user?.userId ?? req.user?.id ?? null,
     name: req.user?.name ?? req.user?.username ?? "Unknown",
-    role: req.user?.role ?? "user",
+    role: allowRoles.normalizeRole(req.user?.role),
   };
 }
 
 function isTicketAdmin(role) {
-  return ["admin", "super_admin", "dba"].includes(role);
+  return ["admin", "super_admin", "dba"].includes(allowRoles.normalizeRole(role));
+}
+
+function requireActor(req, res) {
+  const actor = userFromReq(req);
+  if (!actor.id) {
+    res.status(401).json({ error: "Authentication required" });
+    return null;
+  }
+  return actor;
+}
+
+function parseTicketId(param) {
+  const id = Number(param);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function sendTicketAccessError(res, access) {
+  if (access.status === 404) {
+    return res.status(404).json({ error: "Ticket not found" });
+  }
+  if (access.status === 403) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+  return null;
+}
+
+async function addCommentToTicket(pool, ticketId, comment, actor) {
+  await pool
+    .request()
+    .input("ticket_id", sql.Int, ticketId)
+    .input("comment", sql.NVarChar(sql.MAX), comment)
+    .input("author_name", sql.NVarChar(255), actor.name)
+    .input("author_id", sql.Int, actor.id)
+    .input("author_role", sql.NVarChar(50), actor.role).query(`
+      INSERT INTO dbo.ticket_comments (ticket_id, comment, author_name, author_id, author_role)
+      VALUES (@ticket_id, @comment, @author_name, @author_id, @author_role)
+    `);
 }
 
 async function getAccessibleTicket(pool, id, actor) {
@@ -84,6 +127,12 @@ async function getAccessibleTicket(pool, id, actor) {
 // Returns ALL tickets — for admins
 router.get("/", async (req, res) => {
   try {
+    const actor = requireActor(req, res);
+    if (!actor) return;
+    if (!isTicketAdmin(actor.role)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT t.*,
@@ -101,6 +150,12 @@ router.get("/", async (req, res) => {
 // ─── GET /api/tickets/stats ───────────────────────────────────────────────────
 router.get("/stats", async (req, res) => {
   try {
+    const actor = requireActor(req, res);
+    if (!actor) return;
+    if (!isTicketAdmin(actor.role)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT
@@ -125,8 +180,8 @@ router.get("/stats", async (req, res) => {
 // Personal ticket queue for the Ticket module.
 async function myTicketsHandler(req, res) {
   try {
-    const actor = userFromReq(req);
-    if (!actor.id) return res.status(401).json({ error: "Unauthorized" });
+    const actor = requireActor(req, res);
+    if (!actor) return;
     const pool = getPool();
 
     const result = await pool.request().input("userId", sql.Int, actor.id)
@@ -174,14 +229,14 @@ router.get(
 // ─── GET /api/tickets/:id ─────────────────────────────────────────────────────
 router.get("/:id", async (req, res) => {
   try {
-    const actor = userFromReq(req);
+    const actor = requireActor(req, res);
+    if (!actor) return;
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseTicketId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid ticket id" });
     const access = await getAccessibleTicket(pool, id, actor);
-    if (access.status === 404)
-      return res.status(404).json({ error: "Ticket not found" });
-    if (access.status === 403)
-      return res.status(403).json({ error: "Access denied" });
+    const accessError = sendTicketAccessError(res, access);
+    if (accessError) return accessError;
 
     const comments = await pool
       .request()
@@ -208,20 +263,60 @@ router.post("/upload", upload.array("file", 20), (req, res) => {
 });
 
 // ─── GET /api/tickets/file/:filename ─────────────────────────────────────────
-// Serve uploaded attachment files — PUBLIC, no auth needed (browser <img src>)
-function serveTicketFile(req, res) {
-  const filename = path.basename(req.params.filename); // prevent path traversal
-  const filePath = path.join(UPLOAD_DIR, filename);
-  if (!fs.existsSync(filePath))
-    return res.status(404).json({ error: "File not found" });
-  res.sendFile(filePath);
+// Serve uploaded attachment files after checking ticket access.
+async function serveTicketFile(req, res) {
+  try {
+    const actor = requireActor(req, res);
+    if (!actor) return;
+
+    const filename = path.basename(req.params.filename);
+    if (!/^[\w.-]+$/.test(filename)) {
+      return res.status(400).json({ error: "Invalid filename" });
+    }
+
+    const uploadRoot = path.resolve(UPLOAD_DIR);
+    const filePath = path.resolve(uploadRoot, filename);
+    if (!filePath.startsWith(`${uploadRoot}${path.sep}`)) {
+      return res.status(400).json({ error: "Invalid filename" });
+    }
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    const pool = getPool();
+    const ticketResult = await pool
+      .request()
+      .input("fileUrl", sql.NVarChar(512), `%/api/tickets/file/${filename}%`)
+      .input("fileName", sql.NVarChar(255), `%${filename}%`)
+      .query(`
+        SELECT TOP 1 *
+        FROM dbo.tickets
+        WHERE attachment_path LIKE @fileUrl OR attachment_path LIKE @fileName
+        ORDER BY id DESC
+      `);
+
+    if (!ticketResult.recordset.length) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    const ticket = ticketResult.recordset[0];
+    const access = await getAccessibleTicket(pool, ticket.id, actor);
+    const accessError = sendTicketAccessError(res, access);
+    if (accessError) return accessError;
+
+    res.sendFile(filePath);
+  } catch (err) {
+    console.error("[Tickets GET /file/:filename]", err.message);
+    res.status(500).json({ error: err.message });
+  }
 }
 router.get("/file/:filename", serveTicketFile);
 
 // ─── POST /api/tickets  (also accepts /create for backward compat) ─────────────
 async function createTicketHandler(req, res) {
   try {
-    const actor = userFromReq(req);
+    const actor = requireActor(req, res);
+    if (!actor) return;
     const pool = getPool();
     const {
       subject,
@@ -288,7 +383,8 @@ router.put(
   async (req, res) => {
     try {
       const pool = getPool();
-      const id = parseInt(req.params.id);
+      const id = parseTicketId(req.params.id);
+      if (!id) return res.status(400).json({ error: "Invalid ticket id" });
       const { assigned_to_id, assigned_to } = req.body;
 
       if (!assigned_to_id || !assigned_to) {
@@ -297,7 +393,7 @@ router.put(
           .json({ error: "assigned_to_id and assigned_to are required" });
       }
 
-      await pool
+      const result = await pool
         .request()
         .input("id", sql.Int, id)
         .input("assigned_to", sql.NVarChar(255), assigned_to)
@@ -309,6 +405,10 @@ router.put(
             updated_at     = SYSUTCDATETIME()
         WHERE id = @id
       `);
+
+      if (result.rowsAffected?.[0] === 0) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
 
       res.json({ success: true });
       emitTicketUpdate("assigned", id);
@@ -322,18 +422,18 @@ router.put(
 // ─── PUT /api/tickets/resolve/:id ────────────────────────────────────────────
 router.put("/resolve/:id", async (req, res) => {
   try {
-    const actor = userFromReq(req);
+    const actor = requireActor(req, res);
+    if (!actor) return;
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseTicketId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid ticket id" });
     const { resolution_note } = req.body;
 
     const access = await getAccessibleTicket(pool, id, actor);
-    if (access.status === 404)
-      return res.status(404).json({ error: "Ticket not found" });
-    if (access.status === 403)
-      return res.status(403).json({ error: "Access denied" });
+    const accessError = sendTicketAccessError(res, access);
+    if (accessError) return accessError;
 
-    await pool
+    const result = await pool
       .request()
       .input("id", sql.Int, id)
       .input("resolved_by", sql.NVarChar(255), actor.name)
@@ -350,21 +450,17 @@ router.put("/resolve/:id", async (req, res) => {
         WHERE id = @id
       `);
 
+    if (result.rowsAffected?.[0] === 0) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+
     if (resolution_note?.trim()) {
-      await pool
-        .request()
-        .input("ticket_id", sql.Int, id)
-        .input(
-          "comment",
-          sql.NVarChar(sql.MAX),
-          `[Resolved] ${resolution_note.trim()}`,
-        )
-        .input("author_name", sql.NVarChar(255), actor.name)
-        .input("author_id", sql.Int, actor.id)
-        .input("author_role", sql.NVarChar(50), actor.role).query(`
-          INSERT INTO dbo.ticket_comments (ticket_id, comment, author_name, author_id, author_role)
-          VALUES (@ticket_id, @comment, @author_name, @author_id, @author_role)
-        `);
+      await addCommentToTicket(
+        pool,
+        id,
+        `[Resolved] ${resolution_note.trim()}`,
+        actor,
+      );
     }
 
     res.json({ success: true });
@@ -382,15 +478,20 @@ router.put(
   async (req, res) => {
     try {
       const pool = getPool();
-      const id = parseInt(req.params.id);
+      const id = parseTicketId(req.params.id);
+      if (!id) return res.status(400).json({ error: "Invalid ticket id" });
 
-      await pool.request().input("id", sql.Int, id).query(`
+      const result = await pool.request().input("id", sql.Int, id).query(`
         UPDATE dbo.tickets
         SET status     = 'Closed',
             closed_at  = SYSUTCDATETIME(),
             updated_at = SYSUTCDATETIME()
         WHERE id = @id
       `);
+
+      if (result.rowsAffected?.[0] === 0) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
 
       res.json({ success: true });
       emitTicketUpdate("closed", id);
@@ -404,43 +505,21 @@ router.put(
 // ─── POST /api/tickets/comment/:id ───────────────────────────────────────────
 router.post("/comment/:id", async (req, res) => {
   try {
-    const actor = userFromReq(req);
+    const actor = requireActor(req, res);
+    if (!actor) return;
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseTicketId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid ticket id" });
     const { comment } = req.body;
 
     if (!comment?.trim())
       return res.status(400).json({ error: "Comment cannot be empty" });
 
-    const ticket = await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query(
-        `SELECT id, created_by_id, assigned_to_id FROM dbo.tickets WHERE id = @id`,
-      );
+    const access = await getAccessibleTicket(pool, id, actor);
+    const accessError = sendTicketAccessError(res, access);
+    if (accessError) return accessError;
 
-    if (!ticket.recordset.length)
-      return res.status(404).json({ error: "Ticket not found" });
-
-    const t = ticket.recordset[0];
-    if (
-      !isTicketAdmin(actor.role) &&
-      t.created_by_id !== actor.id &&
-      t.assigned_to_id !== actor.id
-    ) {
-      return res.status(403).json({ error: "Access denied" });
-    }
-
-    await pool
-      .request()
-      .input("ticket_id", sql.Int, id)
-      .input("comment", sql.NVarChar(sql.MAX), comment.trim())
-      .input("author_name", sql.NVarChar(255), actor.name)
-      .input("author_id", sql.Int, actor.id)
-      .input("author_role", sql.NVarChar(50), actor.role).query(`
-        INSERT INTO dbo.ticket_comments (ticket_id, comment, author_name, author_id, author_role)
-        VALUES (@ticket_id, @comment, @author_name, @author_id, @author_role)
-      `);
+    await addCommentToTicket(pool, id, comment.trim(), actor);
 
     await pool
       .request()
