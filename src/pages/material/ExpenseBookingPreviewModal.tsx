@@ -130,11 +130,15 @@ export function ExpenseBookingPreviewModal({
                   Source Document
                 </p>
                 <p className="text-sm font-mono font-semibold text-foreground">
-                  {previewRecord.sourceDocNo || previewRecord.purchaseOrderId
-                    ? `PO-${previewRecord.purchaseOrderId}`
-                    : previewRecord.workOrderId
-                      ? `WO-${previewRecord.workOrderId}`
-                      : "—"}
+                  {previewRecord.sourceDocNo
+                    ? previewRecord.sourceDocNo
+                    : previewRecord.eSourceType && previewRecord.eSourceId
+                      ? `${previewRecord.eSourceType}-${previewRecord.eSourceId}`
+                      : previewRecord.purchaseOrderId
+                        ? `PO-${previewRecord.purchaseOrderId}`
+                        : previewRecord.workOrderId
+                          ? `WO-${previewRecord.workOrderId}`
+                          : "—"}
                 </p>
               </div>
               <div className="space-y-0.5">
@@ -611,7 +615,8 @@ export function ExpenseBookingPreviewModal({
                 previewRecord.eSourceId && (
                   <>
                     <span className="bg-teal-500/10 border border-teal-500/20 text-teal-700 dark:text-teal-400 px-2.5 py-1.5 rounded-lg font-mono font-semibold">
-                      GRN #{previewRecord.eSourceId}
+                      {previewRecord.sourceDocNo ||
+                        `GRN #${previewRecord.eSourceId}`}
                     </span>
                     <ArrowRight
                       size={10}

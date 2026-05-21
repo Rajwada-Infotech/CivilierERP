@@ -6,7 +6,11 @@ import {
   type RecordWithId,
 } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
-import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import {
+  useQuery,
+  useQueryClient,
+  keepPreviousData,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Calendar as CalendarIcon } from "lucide-react";
 import {
@@ -28,9 +32,9 @@ interface DbFinYear {
 
 // ─── Payload ──────────────────────────────────────────────────────────────────
 const toPayload = (r: Record<string, unknown>) => ({
-  FName: (r.year as string) || null,
-  FStartDate: (r.startDate as string) || null,
-  FEndDate: (r.endDate as string) || null,
+  fy_label: (r.year as string) || null,
+  start_date: (r.startDate as string) || null,
+  end_date: (r.endDate as string) || null,
   FStatus: r.status !== false && r.status !== "Closed",
   FisLocked: r.locked === true || r.locked === "true",
 });
@@ -177,10 +181,10 @@ const FinancialYearMaster: React.FC = () => {
           filename: "financial-year-master",
           columns: [
             { header: "Financial Year", accessor: "year" },
-            { header: "Start Date",     accessor: "startDate" },
-            { header: "End Date",       accessor: "endDate" },
-            { header: "Status",         accessor: "status" },
-            { header: "Locked",         accessor: (r) => r.locked ? "Yes" : "No" },
+            { header: "Start Date", accessor: "startDate" },
+            { header: "End Date", accessor: "endDate" },
+            { header: "Status", accessor: "status" },
+            { header: "Locked", accessor: (r) => (r.locked ? "Yes" : "No") },
           ],
         }}
       />

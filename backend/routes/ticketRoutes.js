@@ -24,9 +24,10 @@ function emitTicketUpdate(action, ticketId, extra = {}) {
   try {
     getIo().emit("ticket:updated", { action, ticketId, ...extra });
   } catch (err) {
-    if (process.env.NODE_ENV === "development") {
-      console.error("[Tickets socket emit]", err.message);
-    }
+    // Best-effort socket emit: never break HTTP flow if Socket.IO is unavailable.
+    console.warn(
+      `[ticketRoutes] Socket emit failed for action="${action}", ticketId="${ticketId}": ${err?.message || err}`,
+    );
   }
 }
 
@@ -65,7 +66,10 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
   fileFilter: (_req, file, cb) => {
     const allowed = /jpeg|jpg|png|gif|webp|pdf/i;
-    if (allowed.test(path.extname(file.originalname)) && allowed.test(file.mimetype)) {
+    if (
+      allowed.test(path.extname(file.originalname)) &&
+      allowed.test(file.mimetype)
+    ) {
       cb(null, true);
     } else {
       cb(new Error("Only images (jpg, png, gif, webp) and PDFs are allowed"));
@@ -412,11 +416,9 @@ async function createTicketHandler(req, res) {
     } = req.body;
 
     if (!subject || !issue_details || !customer_name) {
-      return res
-        .status(400)
-        .json({
-          error: "subject, issue_details and customer_name are required",
-        });
+      return res.status(400).json({
+        error: "subject, issue_details and customer_name are required",
+      });
     }
 
     const createResult = await pool

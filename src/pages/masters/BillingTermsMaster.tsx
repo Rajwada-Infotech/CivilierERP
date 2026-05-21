@@ -37,6 +37,7 @@ const mapRow = (
   discountValue: 0,
   paymentDueDays: 0,
   status: Boolean(row.IsActive),
+  deductionType: row.DeductionType === "Deduction" ? "Deduction" : "Addition",
   // Raw DB columns — required by the form fields (Name, CalculationType, etc.)
   Name: row.Name ?? "",
   Description: row.Description ?? "",

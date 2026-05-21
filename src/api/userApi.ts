@@ -24,10 +24,8 @@ export interface User {
   tenantId?: string | null;
 }
 
-export interface PagePermission {
-  page: string;
-  actions: ("view" | "create" | "edit" | "delete" | "print" | "export")[];
-}
+import type { PagePermission } from "@/contexts/types";
+export type { PagePermission };
 
 // ======================
 // AUTH & USER MANAGEMENT

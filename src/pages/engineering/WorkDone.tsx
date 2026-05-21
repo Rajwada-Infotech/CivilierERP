@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -14,7 +13,6 @@ import {
   fetchSuppliers,
 } from "@/api/workOrderApi";
 import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
-import { getWDPOPrefill } from "@/api/engineeringApi";
 import {
   Hammer,
   Plus,
@@ -34,7 +32,6 @@ import {
   RotateCcw,
   Eye,
   Printer,
-  ShoppingCart,
   X,
 } from "lucide-react";
 
@@ -932,7 +929,6 @@ function WorkDoneForm({
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function WorkDone() {
   const { finYears } = useFinYear();
-  const navigate = useNavigate();
   const [view, setView] = useState<"list" | "form">("list");
   const [editRecord, setEditRecord] = useState<WorkDoneEntry | null>(null);
   const [viewRecord, setViewRecord] = useState<WorkDoneEntry | null>(null);
@@ -1030,16 +1026,6 @@ export default function WorkDone() {
   const closeForm = () => {
     setView("list");
     setEditRecord(null);
-  };
-
-  // ── Create WO_PO from approved Work Done ──────────────────────────────────
-  const handleCreateWOPO = async (record: WorkDoneEntry) => {
-    try {
-      const prefill = await getWDPOPrefill(record.ID);
-      navigate("/material/purchase-order", { state: { wdPrefill: prefill } });
-    } catch (err: any) {
-      toast.error("Could not load Work Done details: " + err.message);
-    }
   };
 
   // ── Print handler ────────────────────────────────────────────────────────────
@@ -1250,15 +1236,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
           >
             <Printer size={13} />
           </button>
-          {row.original.Status === "Approved" && (
-            <button
-              onClick={() => handleCreateWOPO(row.original)}
-              title="Create WO_PO from this Work Done"
-              className="text-[10px] text-emerald-600 hover:text-emerald-700 flex items-center gap-1 px-2 py-1 rounded hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 transition-colors font-medium"
-            >
-              <ShoppingCart size={11} /> Create WO_PO
-            </button>
-          )}
+
           <button
             onClick={() => openEdit(row.original)}
             className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
@@ -1450,17 +1428,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                 >
                   <Printer size={12} /> Print
                 </button>
-                {viewRecord.Status === "Approved" && (
-                  <button
-                    onClick={() => {
-                      setViewRecord(null);
-                      handleCreateWOPO(viewRecord);
-                    }}
-                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors font-medium"
-                  >
-                    <ShoppingCart size={12} /> Create WO_PO
-                  </button>
-                )}
+
                 <button
                   onClick={() => setViewRecord(null)}
                   className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"

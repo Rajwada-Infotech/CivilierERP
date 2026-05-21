@@ -268,7 +268,12 @@ const NamedEntryTypeMaster: React.FC = () => {
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleDataEvent = async (event: DataChangeEvent) => {
-    console.log("Event:", event.action, "ID:", event.id);
+    console.log(
+      "Event:",
+      event.action,
+      "ID:",
+      "id" in event ? event.id : "(new)",
+    );
     try {
       if (event.action === "add") {
         await addEntryType(toPayload(event.record));
@@ -410,7 +415,7 @@ const NamedEntryTypeMaster: React.FC = () => {
             label: "Prefix",
             type: "custom",
             required: true,
-            defaultValue: { mode: "auto", customPrefix: "" },
+            defaultValue: { mode: "auto", customPrefix: "" } as any,
             render: PrefixRenderer as FieldDef["render"],
           },
           {
