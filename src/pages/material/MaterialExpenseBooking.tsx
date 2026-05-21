@@ -165,6 +165,7 @@ interface WorkDoneItem {
   ID: number;
   DocNo?: string;
   DocDate?: string;
+  FinYear?: string | null;
   ContractorName?: string;
   SupplierId?: number;
   SupplierName?: string;
