@@ -1,11 +1,10 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { SendHorizonal } from "lucide-react";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
@@ -21,7 +20,7 @@ import {
   getCompanies,
   getProjects,
   getUOMs,
-  type PurchaseOrder,
+  type CreatePOPayload,
 } from "@/api/purchaseOrdersApi";
 import { type MRPOPrefill } from "@/api/materialRequestApi";
 import { type WDPOPrefill } from "@/api/engineeringApi";
@@ -33,18 +32,11 @@ import {
   Trash2,
   Save,
   RotateCcw,
-  Package,
-  Calendar,
   Hash,
-  Building2,
-  FolderPlus,
   FileText,
-  IndianRupee,
   Eye,
   PenSquare,
   ArrowLeft,
-  ChevronDown,
-  ChevronUp,
   Search,
   RefreshCw,
   BadgeCheck,
@@ -54,12 +46,8 @@ import {
   Check,
   ShoppingCart,
   Boxes,
-  TrendingUp,
   Filter,
-  MoreVertical,
   User,
-  SortAsc,
-  List,
   ClipboardList,
   X,
   CheckCircle2,
@@ -318,11 +306,8 @@ const PurchaseOrderMaster: React.FC = () => {
   // ── Doc number state ──────────────────────────────────────────────────────
   const [poDocTypeId, setPoDocTypeId] = useState<number | null>(null);
   const [poDocNo, setPoDocNo] = useState("");
-  const [poFormPatch, setPoFormPatch] = useState<Record<
-    string,
-    unknown
-  > | null>(null);
-  const [poFormPatchKey, setPoFormPatchKey] = useState(0);
+  const [, setPoFormPatch] = useState<Record<string, unknown> | null>(null);
+  const [, setPoFormPatchKey] = useState(0);
   const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
@@ -339,7 +324,7 @@ const PurchaseOrderMaster: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [, setSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTCs, setSelectedTCs] = useState<TCRecord[]>([]);
   const [tcDropdownOpen, setTcDropdownOpen] = useState(false);

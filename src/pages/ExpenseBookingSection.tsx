@@ -1,3 +1,4 @@
+import React from "react";
 /**
  * Save this file at:
  *   src/pages/ExpenseBookingSection.tsx
@@ -5,7 +6,7 @@
  * (same folder as Payment.tsx)
  */
 
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Building2,
   FolderKanban,
@@ -89,7 +90,12 @@ export interface PaymentFormValues {
   billingTerms?: DiscountConfig[];
 }
 
-type Filters = { company: string; project: string; financialYear: string; supplier: string };
+type Filters = {
+  company: string;
+  project: string;
+  financialYear: string;
+  supplier: string;
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -103,7 +109,7 @@ function formatINR(n: number) {
 
 function unique(arr: (string | undefined | null)[]): string[] {
   return Array.from(
-    new Set(arr.filter((v): v is string => !!v && v.trim() !== ""))
+    new Set(arr.filter((v): v is string => !!v && v.trim() !== "")),
   ).sort();
 }
 
@@ -189,7 +195,7 @@ function FilterBar({
 }) {
   const companies = useMemo(
     () => unique(options.map((o) => o.companyName)),
-    [options]
+    [options],
   );
 
   const projects = useMemo(
@@ -198,16 +204,16 @@ function FilterBar({
         options
           .filter(
             (o) =>
-              !filters.company || (o.companyName ?? "") === filters.company
+              !filters.company || (o.companyName ?? "") === filters.company,
           )
-          .map((o) => o.projectName)
+          .map((o) => o.projectName),
       ),
-    [options, filters.company]
+    [options, filters.company],
   );
 
   const financialYears = useMemo(
     () => unique(options.map((o) => o.financialYear)),
-    [options]
+    [options],
   );
 
   const suppliers = useMemo(
@@ -215,21 +221,15 @@ function FilterBar({
       unique(
         options
           .filter((o) => {
-            if (
-              filters.company &&
-              (o.companyName ?? "") !== filters.company
-            )
+            if (filters.company && (o.companyName ?? "") !== filters.company)
               return false;
-            if (
-              filters.project &&
-              (o.projectName ?? "") !== filters.project
-            )
+            if (filters.project && (o.projectName ?? "") !== filters.project)
               return false;
             return true;
           })
-          .map((o) => o.supplierName)
+          .map((o) => o.supplierName),
       ),
-    [options, filters.company, filters.project]
+    [options, filters.company, filters.project],
   );
 
   const activeCount = Object.values(filters).filter(Boolean).length;
@@ -364,7 +364,7 @@ function FilterBar({
                   </button>
                 </span>
               );
-            }
+            },
           )}
         </div>
       )}
@@ -609,9 +609,7 @@ export function PaymentBreakdownPanel({
             100
           : t.value;
     termAmt =
-      t.deductionType === "Deduction"
-        ? -Math.abs(termAmt)
-        : Math.abs(termAmt);
+      t.deductionType === "Deduction" ? -Math.abs(termAmt) : Math.abs(termAmt);
     return { name: t.masterTermName || "Billing Term", amt: termAmt };
   });
 
@@ -734,29 +732,20 @@ export function ExpenseBookingSection({
   const filteredOptions = useMemo(
     () =>
       expenseOptions.filter((o) => {
-        if (
-          filters.company &&
-          (o.companyName ?? "") !== filters.company
-        )
+        if (filters.company && (o.companyName ?? "") !== filters.company)
           return false;
-        if (
-          filters.project &&
-          (o.projectName ?? "") !== filters.project
-        )
+        if (filters.project && (o.projectName ?? "") !== filters.project)
           return false;
         if (
           filters.financialYear &&
           (o.financialYear ?? "") !== filters.financialYear
         )
           return false;
-        if (
-          filters.supplier &&
-          (o.supplierName ?? "") !== filters.supplier
-        )
+        if (filters.supplier && (o.supplierName ?? "") !== filters.supplier)
           return false;
         return true;
       }),
-    [expenseOptions, filters]
+    [expenseOptions, filters],
   );
 
   return (
