@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { useTicketSync } from "@/hooks/useTicketSync";
 import {
   AlertCircle,
   ArrowLeft,
@@ -217,6 +218,8 @@ const AllTickets: React.FC = () => {
     staleTime: 0,
     refetchOnWindowFocus: true,
   });
+
+  useTicketSync(refetch);
 
   const tickets = useMemo(() => {
     let list = [...allTickets];

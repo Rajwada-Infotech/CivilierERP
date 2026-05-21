@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTicketSync } from "@/hooks/useTicketSync";
 import {
   AlertCircle,
   ArrowLeft,
@@ -114,11 +115,11 @@ const ResolvedTickets: React.FC = () => {
   const isAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
 
   const [search, setSearch] = useState("");
-  const [priorityFilter, setPriorityFilter] = useState<string>("all");
+  const [priorityFilter, setPriorityFilter] = useState<string>("All");
 
   const { data: allTickets = [], isLoading, isError, refetch, isFetching } =
     useQuery<Ticket[]>({
-      queryKey: ["tickets", isAdmin ? "all" : "my"],
+      queryKey: ["tickets", "resolved", isAdmin ? "all" : "my"],
       queryFn: async () => {
         const endpoint = isAdmin ? "/api/tickets" : "/api/tickets/my";
         const res = await fetchWithAuth(endpoint);
@@ -129,10 +130,12 @@ const ResolvedTickets: React.FC = () => {
       refetchOnWindowFocus: true,
     });
 
+  useTicketSync(refetch);
+
   // Only show resolved tickets
   const resolvedTickets = useMemo(() => {
     let list = allTickets.filter((t) => t.status === "Resolved");
-    if (priorityFilter !== "all") list = list.filter((t) => t.priority === priorityFilter);
+    if (priorityFilter !== "All") list = list.filter((t) => t.priority === priorityFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(
@@ -200,7 +203,7 @@ const ResolvedTickets: React.FC = () => {
             )}
           </div>
           <div className="flex items-center gap-1.5">
-            {(["all", "Urgent", "High", "Medium", "Low"] as const).map((p) => (
+            {(["All", "Urgent", "High", "Medium", "Low"] as const).map((p) => (
               <button
                 key={p}
                 onClick={() => setPriorityFilter(p)}
@@ -210,7 +213,7 @@ const ResolvedTickets: React.FC = () => {
                     : "border border-border text-muted-foreground hover:bg-muted"
                 }`}
               >
-                {p === "all" ? "All" : p}
+                {p === "All" ? "All" : p}
               </button>
             ))}
           </div>
@@ -235,7 +238,7 @@ const ResolvedTickets: React.FC = () => {
           <div className="rounded-xl border border-border bg-card py-16 flex flex-col items-center gap-3 text-muted-foreground">
             <CheckCircle2 size={32} className="opacity-20" />
             <p className="text-sm">
-              {search || priorityFilter !== "all" ? "No tickets match your filters" : "No resolved tickets yet"}
+              {search || priorityFilter !== "All" ? "No tickets match your filters" : "No resolved tickets yet"}
             </p>
           </div>
         ) : (
@@ -246,7 +249,7 @@ const ResolvedTickets: React.FC = () => {
           </div>
         )}
 
-        {!isLoading && resolvedTickets.length > 0 && (search || priorityFilter !== "all") && (
+        {!isLoading && resolvedTickets.length > 0 && (search || priorityFilter !== "All") && (
           <p className="text-xs text-muted-foreground text-center">
             Showing {resolvedTickets.length} of {totalResolved} resolved tickets
           </p>
