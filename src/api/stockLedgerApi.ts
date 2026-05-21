@@ -2,14 +2,25 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE = "/api/stock-ledger";
 
+type ApiErrorPayload = {
+  message?: string;
+  error?: string;
+};
+
 // ─── Response handler ─────────────────────────────────────────────────────────
 async function handleResponse<T = unknown>(res: Response): Promise<T> {
-  let data: any = null;
+  let data: unknown = null;
   try {
     data = await res.json();
-  } catch {}
+  } catch (_e) {
+    // intentionally suppressed
+  }
+
   if (!res.ok) {
-    const msg = data?.message || data?.error || `HTTP ${res.status}`;
+    const errorPayload =
+      data && typeof data === "object" ? (data as ApiErrorPayload) : null;
+    const msg =
+      errorPayload?.message || errorPayload?.error || `HTTP ${res.status}`;
     throw new Error(msg);
   }
   return data as T;
