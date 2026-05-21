@@ -1,4 +1,4 @@
-import React, {
+import {
   createContext,
   useContext,
   useCallback,
@@ -109,7 +109,7 @@ export const FinYearProvider = ({ children }: { children: ReactNode }) => {
 
       try {
         // Step 2 — persist to DB via the raw API (bypasses the FinYear-key mapper)
-        await apiUpdateFinYear(id, { FisLocked: newLockedState });
+        await apiUpdateFinYear(id, { is_locked: newLockedState });
         // Step 3 — invalidate so the next read is fresh (clears Redis cache too)
         await invalidate();
       } catch (error) {
@@ -125,11 +125,10 @@ export const FinYearProvider = ({ children }: { children: ReactNode }) => {
   const addFinYear = useCallback(
     async (finYear: Omit<FinYear, "id">) => {
       await apiAddFinYear({
-        FName: finYear.year,
-        FStartDate: finYear.startDate,
-        FEndDate: finYear.endDate,
-        FStatus: finYear.status !== "Closed",
-        FisLocked: finYear.locked,
+        fy_label: finYear.year,
+        start_date: finYear.startDate,
+        end_date: finYear.endDate,
+        is_locked: finYear.locked,
       });
       await invalidate();
     },
@@ -141,14 +140,18 @@ export const FinYearProvider = ({ children }: { children: ReactNode }) => {
       // Optimistic update for edit dialog saves too
       optimisticPatch(id, updates);
 
-      const payload: any = {};
-      if (updates.year !== undefined) payload.FName = updates.year;
+      const payload: Partial<{
+        fy_label: string;
+        start_date: string;
+        end_date: string;
+        is_locked: boolean;
+      }> = {};
+      if (updates.year !== undefined) payload.fy_label = updates.year;
       if (updates.startDate !== undefined)
-        payload.FStartDate = updates.startDate;
-      if (updates.endDate !== undefined) payload.FEndDate = updates.endDate;
-      if (updates.status !== undefined)
-        payload.FStatus = updates.status !== "Closed";
-      if (updates.locked !== undefined) payload.FisLocked = updates.locked;
+        payload.start_date = updates.startDate;
+      if (updates.endDate !== undefined) payload.end_date = updates.endDate;
+      if (updates.locked !== undefined) payload.is_locked = updates.locked;
+      // status is not part of FinYearPayload — status is derived from is_locked on the backend
 
       try {
         await apiUpdateFinYear(id, payload);

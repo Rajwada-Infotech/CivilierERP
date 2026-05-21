@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccountGroups } from "@/api/accountApi";
 import {
@@ -21,7 +21,6 @@ import {
   BookOpen,
   Hash,
   ChevronDown,
-  ChevronsUpDown,
   AlertCircle,
   Eye,
   XCircle,
@@ -64,7 +63,7 @@ const EMPTY_FORM: LedgerForm = {
 
 // ─── Column builder ────────────────────────────────────────────────────────────
 function buildGLColumns(
-  editingId: number | null,
+  _editingId: number | null,
   deleteConfirm: number | null,
   setDeleteConfirm: (id: number | null) => void,
   startEdit: (l: LedgerHead) => void,

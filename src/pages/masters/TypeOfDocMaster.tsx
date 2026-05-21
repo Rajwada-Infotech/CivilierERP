@@ -1,5 +1,5 @@
 // src/pages/masters/TypeOfDocMaster.tsx
-import React, { useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -152,7 +152,7 @@ function tierLabel(form: FormState, projectCode: string | null): string {
 // ── Table columns ─────────────────────────────────────────────────────────────
 
 function buildDocColumns(
-  editingId: number | null,
+  _editingId: number | null,
   openEdit: (item: DocTypeRecord) => void,
   handleDelete: (id: number) => void,
   onView: (item: DocTypeRecord) => void,
@@ -453,7 +453,6 @@ const TypeOfDocMaster: React.FC = () => {
         : [...prev.links_to, value],
     }));
   };
-
 
   const columns = useMemo(
     () =>
