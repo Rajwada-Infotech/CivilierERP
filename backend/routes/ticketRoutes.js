@@ -9,6 +9,34 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const allowRoles = require("../middleware/role");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+
+// ─── Multer setup ─────────────────────────────────────────────────────────────
+const UPLOAD_DIR = path.join(__dirname, "../uploads/tickets");
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+    cb(null, `${unique}${path.extname(file.originalname)}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (_req, file, cb) => {
+    const allowed = /jpeg|jpg|png|gif|webp|pdf/i;
+    if (allowed.test(path.extname(file.originalname)) && allowed.test(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only images (jpg, png, gif, webp) and PDFs are allowed"));
+    }
+  },
+});
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -158,6 +186,27 @@ router.get("/:id", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ─── POST /api/tickets/upload ─────────────────────────────────────────────────
+// Accepts one or more files; returns array of stored URLs via /api/tickets/file/
+router.post("/upload", upload.array("file", 20), (req, res) => {
+  const files = req.files;
+  if (!files || files.length === 0)
+    return res.status(400).json({ error: "No file uploaded" });
+  const urls = files.map((f) => `/api/tickets/file/${f.filename}`);
+  res.json({ success: true, url: urls[0], urls });
+});
+
+// ─── GET /api/tickets/file/:filename ─────────────────────────────────────────
+// Serve uploaded attachment files — PUBLIC, no auth needed (browser <img src>)
+function serveTicketFile(req, res) {
+  const filename = path.basename(req.params.filename); // prevent path traversal
+  const filePath = path.join(UPLOAD_DIR, filename);
+  if (!fs.existsSync(filePath))
+    return res.status(404).json({ error: "File not found" });
+  res.sendFile(filePath);
+}
+router.get("/file/:filename", serveTicketFile);
 
 // ─── POST /api/tickets  (also accepts /create for backward compat) ─────────────
 async function createTicketHandler(req, res) {
@@ -392,3 +441,4 @@ router.post("/comment/:id", async (req, res) => {
 });
 
 module.exports = router;
+module.exports.serveTicketFile = serveTicketFile;

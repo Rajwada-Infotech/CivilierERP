@@ -159,7 +159,6 @@ const PendingTickets: React.FC = () => {
   const queryClient = useQueryClient();
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"All" | "Pending" | "Resolved">("All");
   const [priorityFilter, setPriorityFilter] = useState<string>("All Priority");
   const [resolvingId, setResolvingId] = useState<number | null>(null);
 
@@ -194,9 +193,8 @@ const PendingTickets: React.FC = () => {
   });
 
   const tickets = useMemo(() => {
-    let list = [...allTickets];
-
-    if (statusFilter !== "All") list = list.filter((t) => t.status === statusFilter);
+    // Only show pending tickets on this page
+    let list = allTickets.filter((t) => t.status === "Pending");
 
     if (priorityFilter !== "All Priority") list = list.filter((t) => t.priority === priorityFilter);
 
@@ -210,7 +208,7 @@ const PendingTickets: React.FC = () => {
       );
     }
     return list;
-  }, [allTickets, statusFilter, priorityFilter, search]);
+  }, [allTickets, priorityFilter, search]);
 
   const pendingCount = allTickets.filter((t) => t.status === "Pending").length;
   const urgentCount = allTickets.filter((t) => t.priority === "Urgent").length;
@@ -230,9 +228,9 @@ const PendingTickets: React.FC = () => {
               <ArrowLeft size={14} />
             </button>
             <div>
-              <h1 className="text-xl font-heading font-bold text-foreground">All Tickets</h1>
+              <h1 className="text-xl font-heading font-bold text-foreground">Pending Tickets</h1>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {pendingCount} pending · {allTickets.length} total
+                {pendingCount} ticket{pendingCount !== 1 ? "s" : ""}
                 {urgentCount > 0 && (
                   <span className="text-red-500 ml-1.5 font-medium">· {urgentCount} urgent</span>
                 )}
@@ -273,43 +271,21 @@ const PendingTickets: React.FC = () => {
             )}
           </div>
 
-          {/* Status + Priority filters */}
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Status */}
-            <div className="flex items-center gap-1">
-              {(["All", "Pending", "Resolved"] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setStatusFilter(s)}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-heading font-medium transition-all ${
-                    statusFilter === s
-                      ? "bg-primary text-primary-foreground"
-                      : "border border-border text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-
-            <div className="w-px h-5 bg-border" />
-
-            {/* Priority */}
-            <div className="flex items-center gap-1">
-              {(["All Priority", "Urgent", "High", "Medium", "Low"] as const).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setPriorityFilter(p)}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-heading font-medium transition-all ${
-                    priorityFilter === p
-                      ? "bg-primary text-primary-foreground"
-                      : "border border-border text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
+          {/* Priority filters */}
+          <div className="flex items-center gap-1 flex-wrap">
+            {(["All Priority", "Urgent", "High", "Medium", "Low"] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPriorityFilter(p)}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-heading font-medium transition-all ${
+                  priorityFilter === p
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {p}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -333,9 +309,9 @@ const PendingTickets: React.FC = () => {
           <div className="rounded-xl border border-border bg-card py-16 flex flex-col items-center gap-3 text-muted-foreground">
             <CheckCircle2 size={32} className="opacity-20" />
             <p className="text-sm">
-              {search || statusFilter !== "All" || priorityFilter !== "All Priority"
+              {search || priorityFilter !== "All Priority"
                 ? "No tickets match your filters"
-                : "No tickets yet"}
+                : "No pending tickets"}
             </p>
           </div>
         ) : (
@@ -351,9 +327,9 @@ const PendingTickets: React.FC = () => {
           </div>
         )}
 
-        {!isLoading && tickets.length > 0 && (search || statusFilter !== "All" || priorityFilter !== "All Priority") && (
+        {!isLoading && tickets.length > 0 && (search || priorityFilter !== "All Priority") && (
           <p className="text-xs text-muted-foreground text-center">
-            Showing {tickets.length} of {allTickets.length} tickets
+            Showing {tickets.length} of {pendingCount} pending tickets
           </p>
         )}
       </div>
