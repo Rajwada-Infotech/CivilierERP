@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
+import { useTicketSync } from "@/hooks/useTicketSync";
 import { cn } from "@/lib/utils";
 import {
   AlertCircle,
@@ -434,6 +435,8 @@ export default function TicketResolution() {
     refetchInterval: () =>
       document.visibilityState === "visible" ? 20_000 : false,
   });
+
+  useTicketSync(refetch);
 
   // ── Resolve mutation ──────────────────────────────────────────────────────
   const resolveMutation = useMutation({

@@ -4,6 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
+import { useTicketSync } from "@/hooks/useTicketSync";
+import { useAuth } from "@/contexts/AuthContext";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import { toast } from "sonner";
 import {
@@ -252,6 +254,9 @@ function StatusBadge({ status }: { status: string }) {
 export default function TicketDashboard() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { currentUser } = useAuth();
+  const ADMIN_ROLES = ["super_admin", "admin", "dba"];
+  const isAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
 
   const {
     data: tickets = [],
@@ -261,9 +266,10 @@ export default function TicketDashboard() {
     refetch,
     isFetching,
   } = useQuery<Ticket[]>({
-    queryKey: ["ticket-dashboard"],
+    queryKey: ["ticket-dashboard", isAdmin ? "all" : "my"],
     queryFn: async () => {
-      const res = await fetchWithAuth("/api/tickets/mine");
+      const endpoint = isAdmin ? "/api/tickets" : "/api/tickets/mine";
+      const res = await fetchWithAuth(endpoint);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body?.error || `HTTP ${res.status}`);
@@ -276,6 +282,8 @@ export default function TicketDashboard() {
     refetchInterval: 30_000,
     retry: 1,
   });
+
+  useTicketSync(refetch);
 
   const resolveMutation = useMutation({
     mutationFn: async (id: number) => {

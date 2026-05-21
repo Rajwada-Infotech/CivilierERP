@@ -13,6 +13,16 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
+// ─── Socket.IO — lazy-loaded (same pattern as userActivity.js) ───────────────
+let _getIo = null;
+function getIo() {
+  if (!_getIo) _getIo = require("../socket").getIo;
+  return _getIo();
+}
+function emitTicketUpdate(action, ticketId) {
+  try { getIo().emit("ticket:updated", { action, ticketId }); } catch (_) { /* not ready */ }
+}
+
 // ─── Multer setup ─────────────────────────────────────────────────────────────
 const UPLOAD_DIR = path.join(__dirname, "../uploads/tickets");
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -232,7 +242,7 @@ async function createTicketHandler(req, res) {
         });
     }
 
-    await pool
+    const createResult = await pool
       .request()
       .input("subject", sql.NVarChar(500), subject)
       .input("priority", sql.NVarChar(50), priority ?? "Medium")
@@ -256,10 +266,13 @@ async function createTicketHandler(req, res) {
           @company_id, @project_id,
           @attachment_path, 'Pending',
           @created_by, @created_by_id
-        )
+        );
+        SELECT SCOPE_IDENTITY() AS id;
       `);
 
+    const newId = createResult.recordset[0]?.id ?? null;
     res.json({ success: true });
+    emitTicketUpdate("created", newId);
   } catch (err) {
     console.error("[Tickets POST /create]", err.message);
     res.status(500).json({ error: err.message });
@@ -298,6 +311,7 @@ router.put(
       `);
 
       res.json({ success: true });
+      emitTicketUpdate("assigned", id);
     } catch (err) {
       console.error("[Tickets PUT /assign]", err.message);
       res.status(500).json({ error: err.message });
@@ -354,6 +368,7 @@ router.put("/resolve/:id", async (req, res) => {
     }
 
     res.json({ success: true });
+    emitTicketUpdate("resolved", id);
   } catch (err) {
     console.error("[Tickets PUT /resolve]", err.message);
     res.status(500).json({ error: err.message });
@@ -378,6 +393,7 @@ router.put(
       `);
 
       res.json({ success: true });
+      emitTicketUpdate("closed", id);
     } catch (err) {
       console.error("[Tickets PUT /close]", err.message);
       res.status(500).json({ error: err.message });
@@ -434,6 +450,7 @@ router.post("/comment/:id", async (req, res) => {
       );
 
     res.json({ success: true });
+    emitTicketUpdate("commented", id);
   } catch (err) {
     console.error("[Tickets POST /comment]", err.message);
     res.status(500).json({ error: err.message });
