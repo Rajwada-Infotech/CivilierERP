@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   AlertCircle,
   CheckCircle2,
@@ -664,153 +665,162 @@ export default function AdminTicketPanel() {
   ];
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      {/* ── Header ── */}
-      <div className="flex items-center justify-between gap-3 px-[18px] py-3.5 border-b border-border">
-        <div className="flex items-center gap-2 min-w-0">
-          <MessageCircle size={15} className="text-muted-foreground shrink-0" />
-          <span className="text-[13px] font-medium text-foreground">
-            Support Tickets
-          </span>
-          {(counts?.urgent_open ?? 0) > 0 && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-50 text-red-800 border border-red-200">
-              <ShieldAlert size={9} />
-              {counts.urgent_open} urgent
+    <>
+      <Breadcrumbs items={["Admin", "Support Tickets"]} />
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        {/* ── Header ── */}
+        <div className="flex items-center justify-between gap-3 px-[18px] py-3.5 border-b border-border">
+          <div className="flex items-center gap-2 min-w-0">
+            <MessageCircle
+              size={15}
+              className="text-muted-foreground shrink-0"
+            />
+            <span className="text-[13px] font-medium text-foreground">
+              Support Tickets
             </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2.5 shrink-0">
-          <button
-            onClick={() => {
-              refetchStats();
-              refetchTickets();
-            }}
-            disabled={isBusy}
-            className="w-7 h-7 flex items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition disabled:opacity-40"
-            title="Refresh"
-          >
-            <RefreshCw size={12} className={isBusy ? "animate-spin" : ""} />
-          </button>
-          <button
-            onClick={() => navigate("/ticket")}
-            className="flex items-center gap-1 text-[12px] font-medium text-primary hover:underline"
-          >
-            Ticket page <ExternalLink size={10} />
-          </button>
-        </div>
-      </div>
-
-      {/* ── Tabs ── */}
-      <div className="grid grid-cols-4 border-b border-border">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setFilter(tab.id)}
-            className={cn(
-              "py-3 text-center border-b-2 transition-colors",
-              filter === tab.id
-                ? "bg-card border-primary"
-                : "border-transparent bg-muted/30 hover:bg-muted/50",
+            {(counts?.urgent_open ?? 0) > 0 && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-50 text-red-800 border border-red-200">
+                <ShieldAlert size={9} />
+                {counts.urgent_open} urgent
+              </span>
             )}
-          >
-            <span
+          </div>
+          <div className="flex items-center gap-2.5 shrink-0">
+            <button
+              onClick={() => {
+                refetchStats();
+                refetchTickets();
+              }}
+              disabled={isBusy}
+              className="w-7 h-7 flex items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition disabled:opacity-40"
+              title="Refresh"
+            >
+              <RefreshCw size={12} className={isBusy ? "animate-spin" : ""} />
+            </button>
+            <button
+              onClick={() => navigate("/ticket")}
+              className="flex items-center gap-1 text-[12px] font-medium text-primary hover:underline"
+            >
+              Ticket page <ExternalLink size={10} />
+            </button>
+          </div>
+        </div>
+
+        {/* ── Tabs ── */}
+        <div className="grid grid-cols-4 border-b border-border">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setFilter(tab.id)}
               className={cn(
-                "block text-[22px] font-medium leading-tight tabular-nums",
-                filter === tab.id ? tab.activeColor : "text-foreground",
-                statsLoading && "opacity-30",
+                "py-3 text-center border-b-2 transition-colors",
+                filter === tab.id
+                  ? "bg-card border-primary"
+                  : "border-transparent bg-muted/30 hover:bg-muted/50",
               )}
             >
-              {statsLoading ? "—" : tab.value}
-            </span>
-            <span className="text-[11px] text-muted-foreground">
-              {tab.label}
-            </span>
-          </button>
-        ))}
-      </div>
+              <span
+                className={cn(
+                  "block text-[22px] font-medium leading-tight tabular-nums",
+                  filter === tab.id ? tab.activeColor : "text-foreground",
+                  statsLoading && "opacity-30",
+                )}
+              >
+                {statsLoading ? "—" : tab.value}
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                {tab.label}
+              </span>
+            </button>
+          ))}
+        </div>
 
-      {/* ── Ticket rows ── */}
-      <div className="max-h-96 overflow-y-auto">
-        {ticketsLoading ? (
-          Array.from({ length: 3 }).map((_, i) => (
-            <div
-              key={i}
-              className="flex items-stretch gap-0 border-b border-border animate-pulse"
-            >
-              <div className="w-[3px] bg-muted shrink-0" />
-              <div className="flex-1 px-4 py-3.5 space-y-2">
-                <div className="h-3.5 rounded bg-muted w-2/3" />
-                <div className="h-3 rounded bg-muted w-1/3" />
-              </div>
-            </div>
-          ))
-        ) : tickets.length === 0 ? (
-          <div className="py-12 flex flex-col items-center gap-2 text-muted-foreground">
-            <CheckCircle2 size={24} className="opacity-20" />
-            <p className="text-xs">
-              {filter === "open" ? "No open tickets" : `No ${filter} tickets`}
-            </p>
-          </div>
-        ) : (
-          tickets.map((ticket) => (
-            <button
-              key={ticket.id}
-              onClick={() => setSelectedTicket(ticket)}
-              className="w-full flex items-stretch text-left border-b border-border last:border-b-0 hover:bg-muted/40 active:bg-muted/60 transition-colors group"
-            >
-              {/* Priority colour bar — flush, no border-radius */}
+        {/* ── Ticket rows ── */}
+        <div className="max-h-96 overflow-y-auto">
+          {ticketsLoading ? (
+            Array.from({ length: 3 }).map((_, i) => (
               <div
-                className={cn("w-[3px] shrink-0", priorityBar[ticket.priority])}
-                style={{ borderRadius: 0 }}
-              />
+                key={i}
+                className="flex items-stretch gap-0 border-b border-border animate-pulse"
+              >
+                <div className="w-[3px] bg-muted shrink-0" />
+                <div className="flex-1 px-4 py-3.5 space-y-2">
+                  <div className="h-3.5 rounded bg-muted w-2/3" />
+                  <div className="h-3 rounded bg-muted w-1/3" />
+                </div>
+              </div>
+            ))
+          ) : tickets.length === 0 ? (
+            <div className="py-12 flex flex-col items-center gap-2 text-muted-foreground">
+              <CheckCircle2 size={24} className="opacity-20" />
+              <p className="text-xs">
+                {filter === "open" ? "No open tickets" : `No ${filter} tickets`}
+              </p>
+            </div>
+          ) : (
+            tickets.map((ticket) => (
+              <button
+                key={ticket.id}
+                onClick={() => setSelectedTicket(ticket)}
+                className="w-full flex items-stretch text-left border-b border-border last:border-b-0 hover:bg-muted/40 active:bg-muted/60 transition-colors group"
+              >
+                {/* Priority colour bar — flush, no border-radius */}
+                <div
+                  className={cn(
+                    "w-[3px] shrink-0",
+                    priorityBar[ticket.priority],
+                  )}
+                  style={{ borderRadius: 0 }}
+                />
 
-              {/* Content */}
-              <div className="flex flex-1 items-center justify-between gap-3 px-4 py-3 min-w-0">
-                <div className="min-w-0">
-                  <p className="text-[13px] font-medium text-foreground truncate leading-snug">
-                    {ticket.subject}
-                  </p>
-                  <div className="mt-1 flex items-center gap-2.5 flex-wrap text-[11px] text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <User size={9} />
-                      {ticket.customer_name}
-                    </span>
-                    {ticket.assigned_to && (
+                {/* Content */}
+                <div className="flex flex-1 items-center justify-between gap-3 px-4 py-3 min-w-0">
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium text-foreground truncate leading-snug">
+                      {ticket.subject}
+                    </p>
+                    <div className="mt-1 flex items-center gap-2.5 flex-wrap text-[11px] text-muted-foreground">
                       <span className="flex items-center gap-1">
-                        <UserCheck size={9} />
-                        {ticket.assigned_to}
+                        <User size={9} />
+                        {ticket.customer_name}
                       </span>
-                    )}
-                    {(ticket.comment_count ?? 0) > 0 && (
-                      <span className="flex items-center gap-1">
-                        <MessageCircle size={9} />
-                        {ticket.comment_count}
-                      </span>
-                    )}
-                    <span>{fmtDate(ticket.created_at)}</span>
+                      {ticket.assigned_to && (
+                        <span className="flex items-center gap-1">
+                          <UserCheck size={9} />
+                          {ticket.assigned_to}
+                        </span>
+                      )}
+                      {(ticket.comment_count ?? 0) > 0 && (
+                        <span className="flex items-center gap-1">
+                          <MessageCircle size={9} />
+                          {ticket.comment_count}
+                        </span>
+                      )}
+                      <span>{fmtDate(ticket.created_at)}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <PriorityBadge priority={ticket.priority} />
+                    <StatusBadge status={ticket.status} />
+                    <ChevronRight
+                      size={13}
+                      className="text-muted-foreground opacity-0 group-hover:opacity-60 transition ml-0.5 shrink-0"
+                    />
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <PriorityBadge priority={ticket.priority} />
-                  <StatusBadge status={ticket.status} />
-                  <ChevronRight
-                    size={13}
-                    className="text-muted-foreground opacity-0 group-hover:opacity-60 transition ml-0.5 shrink-0"
-                  />
-                </div>
-              </div>
-            </button>
-          ))
+              </button>
+            ))
+          )}
+        </div>
+
+        {selectedTicket && (
+          <TicketDetailDialog
+            ticket={selectedTicket}
+            users={users}
+            onClose={() => setSelectedTicket(null)}
+          />
         )}
       </div>
-
-      {selectedTicket && (
-        <TicketDetailDialog
-          ticket={selectedTicket}
-          users={users}
-          onClose={() => setSelectedTicket(null)}
-        />
-      )}
-    </div>
+    </>
   );
 }

@@ -6,6 +6,8 @@ import MyTickets from "@/pages/ticket/MyTickets";
 
 import PendingTickets from "@/pages/ticket/PendingTickets";
 
+import AllTickets from "@/pages/ticket/AllTickets";
+
 import ResolvedTickets from "@/pages/ticket/ResolvedTickets";
 import React, { Suspense, lazy, useState, useEffect } from "react";
 import { RouteErrorBoundary } from "./components/ErrorBoundary";
@@ -161,6 +163,8 @@ const BOQ = lazy(() => import("./pages/engineering/BOQ"));
 
 // Admin Pages
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
+const AdminTicketPanel = lazy(() => import("./pages/admin/AdminTicketPanel"));
+const TicketResolution = lazy(() => import("./pages/ticket/TicketResolution"));
 const Users = lazy(() => import("./pages/Users"));
 const MenuRights = lazy(() => import("./pages/admin/MenuRights"));
 const WidgetRights = lazy(() => import("./pages/admin/WidgetsRights"));
@@ -380,6 +384,29 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
         </AppLayout>
       </ProtectedProviders>
     </RequireAuth>
+  );
+}
+
+// ─── Normal User Route (non-admin only) ──────────────────────────────────────
+// Use for pages that only normal users should access (e.g. /ticket/my-tickets)
+function NormalUserRoute({ children }: { children: React.ReactNode }) {
+  const { currentUser } = useAuth();
+  const ADMIN_ROLES = ["super_admin", "admin", "dba"];
+  if (!currentUser) {
+    return <Navigate to="/login" replace />;
+  }
+  if (ADMIN_ROLES.includes(currentUser.role)) {
+    // Admin landed on a user-only page — send them to pending tickets instead
+    return <Navigate to="/ticket/pending" replace />;
+  }
+  return (
+    <ProtectedProviders>
+      <AppLayout>
+        <RouteErrorBoundary>
+          <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+        </RouteErrorBoundary>
+      </AppLayout>
+    </ProtectedProviders>
   );
 }
 
@@ -947,49 +974,58 @@ function AppRoutes() {
         }
       />
       <Route
-  path="/ticket"
-  element={
-    <ProtectedRoute>
-      <TicketDashboard />
-    </ProtectedRoute>
-  }
-/>
+        path="/ticket"
+        element={
+          <ProtectedRoute>
+            <TicketDashboard />
+          </ProtectedRoute>
+        }
+      />
 
-<Route
-  path="/ticket/create"
-  element={
-    <ProtectedRoute>
-      <CreateTicket />
-    </ProtectedRoute>
-  }
-/>
+      <Route
+        path="/ticket/create"
+        element={
+          <ProtectedRoute>
+            <CreateTicket />
+          </ProtectedRoute>
+        }
+      />
 
-<Route
-  path="/ticket/my-tickets"
-  element={
-    <ProtectedRoute>
-      <MyTickets />
-    </ProtectedRoute>
-  }
-/>
+      <Route
+        path="/ticket/my-tickets"
+        element={
+          <ProtectedRoute>
+            <MyTickets />
+          </ProtectedRoute>
+        }
+      />
 
-<Route
-  path="/ticket/pending"
-  element={
-    <ProtectedRoute>
-      <PendingTickets />
-    </ProtectedRoute>
-  }
-/>
+      <Route
+        path="/ticket/pending"
+        element={
+          <AdminRoute>
+            <PendingTickets />
+          </AdminRoute>
+        }
+      />
 
-<Route
-  path="/ticket/resolved"
-  element={
-    <ProtectedRoute>
-      <ResolvedTickets />
-    </ProtectedRoute>
-  }
-/>
+      <Route
+        path="/ticket/all"
+        element={
+          <AdminRoute>
+            <AllTickets />
+          </AdminRoute>
+        }
+      />
+
+      <Route
+        path="/ticket/resolved"
+        element={
+          <ProtectedRoute>
+            <ResolvedTickets />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/engineering/work-done"
         element={
@@ -1362,6 +1398,22 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <AdminControlPanel />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/tickets"
+        element={
+          <AdminRoute>
+            <AdminTicketPanel />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/tickets/resolution"
+        element={
+          <AdminRoute>
+            <TicketResolution />
           </AdminRoute>
         }
       />
