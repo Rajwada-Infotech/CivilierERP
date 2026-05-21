@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { unwrapTicketList } from "@/lib/ticketListResponse";
 import { useTicketSync } from "@/hooks/useTicketSync";
 import {
   AlertCircle,
@@ -211,9 +212,10 @@ const AllTickets: React.FC = () => {
   } = useQuery<Ticket[]>({
     queryKey: ["tickets", "all"],
     queryFn: async () => {
-      const res = await fetchWithAuth("/api/tickets");
+      const res = await fetchWithAuth("/api/tickets?limit=100");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
+      const payload = await res.json();
+      return unwrapTicketList<Ticket>(payload).data;
     },
     staleTime: 0,
     refetchOnWindowFocus: true,

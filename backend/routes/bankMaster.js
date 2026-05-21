@@ -4,6 +4,7 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { validateBody } = require("../middleware/validateRequest");
 const { bumpCacheVersion } = require("../redis");
+const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
 const {
   bankMasterCreateSchema,
   bankMasterUpdateSchema,
@@ -292,7 +293,8 @@ router.post("/", validateBody(bankMasterCreateSchema), async (req, res) => {
 
 // ====================== UPDATE BANK ======================
 router.put("/:id", validateBody(bankMasterUpdateSchema), async (req, res) => {
-  const { id } = req.params;
+  const id = requireValidId(req, res);
+  if (!id) return;
   const {
     BName,
     BBranch,
@@ -321,7 +323,7 @@ router.put("/:id", validateBody(bankMasterUpdateSchema), async (req, res) => {
 
     const request = pool
       .request()
-      .input("LHeadId", sql.Int, parseInt(id))
+      .input("LHeadId", sql.Int, id)
       .input("LHeadName", sql.NVarChar(200), cleanStr(BName, 200))
       .input("LBranchName", sql.VarChar(100), cleanStr(BBranch, 100))
       .input("LAccountNo", sql.VarChar(20), cleanStr(BAccountNumber, 20))
@@ -387,11 +389,12 @@ router.put("/:id", validateBody(bankMasterUpdateSchema), async (req, res) => {
       updates.push("UpdatedAt  = SYSDATETIME()");
     }
 
-    await request.query(`
+    const result = await request.query(`
       UPDATE dbo.AccountHeadMaster SET
         ${updates.join(",\n        ")}
       WHERE LHeadId = @LHeadId AND LHeadType = 'B'
     `);
+    if (!checkRowsAffected(result, res, "Bank")) return;
 
     await bumpCacheVersion("bank-master");
     res.json({ success: true, message: "Bank updated successfully" });
@@ -406,12 +409,15 @@ router.put("/:id", validateBody(bankMasterUpdateSchema), async (req, res) => {
 // ====================== DELETE BANK ======================
 router.delete("/:id", async (req, res) => {
   try {
+    const id = requireValidId(req, res);
+    if (!id) return;
     const pool = await getPool();
-    await pool.request().input("LHeadId", sql.Int, parseInt(req.params.id))
+    const result = await pool.request().input("LHeadId", sql.Int, id)
       .query(`
         DELETE FROM dbo.AccountHeadMaster
         WHERE LHeadId = @LHeadId AND LHeadType = 'B'
       `);
+    if (!checkRowsAffected(result, res, "Bank")) return;
 
     await bumpCacheVersion("bank-master");
     res.json({ success: true, message: "Bank deleted successfully" });

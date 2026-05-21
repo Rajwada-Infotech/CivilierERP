@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { unwrapTicketList } from "@/lib/ticketListResponse";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTicketSync } from "@/hooks/useTicketSync";
 import {
@@ -121,10 +122,11 @@ const ResolvedTickets: React.FC = () => {
     useQuery<Ticket[]>({
       queryKey: ["tickets", "resolved", isAdmin ? "all" : "my"],
       queryFn: async () => {
-        const endpoint = isAdmin ? "/api/tickets" : "/api/tickets/my";
+        const endpoint = isAdmin ? "/api/tickets?limit=100" : "/api/tickets/my";
         const res = await fetchWithAuth(endpoint);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
+        const payload = await res.json();
+        return unwrapTicketList<Ticket>(payload).data;
       },
       staleTime: 0,
       refetchOnWindowFocus: true,
