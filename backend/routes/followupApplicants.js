@@ -56,14 +56,18 @@ function normalizeText(value) {
 }
 
 function normalizeNumber(value) {
+  // Treat empty / missing values as NULL (not 0) so SQL can store NULL.
   if (value === undefined || value === null || value === "") return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : Number.NaN;
 }
 
 function assertValidNumber(value, fieldName) {
+  // Only reject explicit NaN values.
+  if (value === null) return null;
   return Number.isNaN(value) ? `${fieldName} must be a valid number` : null;
 }
+
 
 function getPayload(body) {
   const projectId = normalizeNumber(body?.ProjectId);
