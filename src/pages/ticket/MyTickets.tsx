@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { unwrapTicketList } from "@/lib/ticketListResponse";
 import { useTicketSync } from "@/hooks/useTicketSync";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -101,10 +102,21 @@ function IconExcellent({ active }: { active: boolean }) {
 }
 
 const SENTIMENTS = [
-  { value: 1, Icon: IconUnhappy, label: "Unhappy" },
-  { value: 4, Icon: IconHappy,   label: "Happy" },
+  { value: 1, Icon: IconUnhappy,   label: "Unhappy" },
+  { value: 4, Icon: IconHappy,     label: "Happy" },
   { value: 5, Icon: IconExcellent, label: "Excellent" },
 ];
+
+// ─── Status labels ────────────────────────────────────────────────────────────
+
+const STATUS_LABELS: Record<StatusFilter, string> = {
+  Open:       "Open",
+  Pending:    "Pending",
+  InProgress: "Resolving",
+  Resolved:   "Resolved",
+  Closed:     "Closed",
+  All:        "All",
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -130,11 +142,27 @@ const fmtDateTime = (d?: string | null) => {
   return `${fmtDate(d)} ${fmtTime(d)}`;
 };
 
+// ─── Attachment blob URL cache ────────────────────────────────────────────────
+
+const attachmentBlobUrlCache = new Map<string, string>();
+let attachmentCacheCleanupRegistered = false;
+
+const registerAttachmentCacheCleanup = () => {
+  if (attachmentCacheCleanupRegistered || typeof window === "undefined") return;
+  attachmentCacheCleanupRegistered = true;
+  window.addEventListener("pagehide", () => {
+    attachmentBlobUrlCache.forEach((blobUrl) => URL.revokeObjectURL(blobUrl));
+    attachmentBlobUrlCache.clear();
+  });
+};
+
+// ─── Priority / Status config ─────────────────────────────────────────────────
+
 const priorityConfig: Record<string, { cls: string; dot: string; bar: string }> = {
-  Urgent: { cls: "bg-red-500/10 text-red-600 border-red-400/20",    dot: "bg-red-500",    bar: "bg-red-500" },
+  Urgent: { cls: "bg-red-500/10 text-red-600 border-red-400/20",         dot: "bg-red-500",    bar: "bg-red-500" },
   High:   { cls: "bg-orange-500/10 text-orange-600 border-orange-400/20", dot: "bg-orange-500", bar: "bg-orange-500" },
-  Medium: { cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",   dot: "bg-amber-400",  bar: "bg-amber-400" },
-  Low:    { cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",     dot: "bg-blue-400",   bar: "bg-blue-400" },
+  Medium: { cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",    dot: "bg-amber-400",  bar: "bg-amber-400" },
+  Low:    { cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",       dot: "bg-blue-400",   bar: "bg-blue-400" },
 };
 
 const statusConfig: Record<string, { cls: string; label: string; icon: React.ElementType }> = {
@@ -165,27 +193,117 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+// ─── Authenticated image component (from backend branch) ──────────────────────
+
+function AuthenticatedAttachmentImage({
+  url,
+  alt,
+  className,
+  onClick,
+}: {
+  url: string;
+  alt: string;
+  className: string;
+  onClick: () => void;
+}) {
+  const [src, setSrc] = useState(url.startsWith("data:") ? url : "");
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (url.startsWith("data:")) {
+      setSrc(url);
+      setFailed(false);
+      return;
+    }
+
+    let alive = true;
+    const cachedSrc = attachmentBlobUrlCache.get(url);
+    if (cachedSrc) {
+      setSrc(cachedSrc);
+      setFailed(false);
+      return () => { alive = false; };
+    }
+
+    setSrc("");
+    setFailed(false);
+
+    fetchWithAuth(url)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Attachment fetch failed: ${res.status}`);
+        return res.blob();
+      })
+      .then((blob) => {
+        const objectUrl = URL.createObjectURL(blob);
+        if (!alive) { URL.revokeObjectURL(objectUrl); return; }
+        attachmentBlobUrlCache.set(url, objectUrl);
+        registerAttachmentCacheCleanup();
+        setSrc(objectUrl);
+      })
+      .catch(() => { if (alive) setFailed(true); });
+
+    return () => { alive = false; };
+  }, [url]);
+
+  if (failed) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="h-24 min-w-24 rounded-lg border border-border bg-muted px-3 text-[11px] text-muted-foreground hover:bg-muted/80"
+      >
+        Preview unavailable
+      </button>
+    );
+  }
+
+  if (!src) {
+    return <div className="h-24 min-w-24 rounded-lg border border-border bg-muted animate-pulse" />;
+  }
+
+  return <img src={src} alt={alt} className={className} onClick={onClick} />;
+}
+
 // ─── Attachment viewer helper ─────────────────────────────────────────────────
 
 function openAttachmentViewer(url: string, filename: string) {
   const isPdf = url.toLowerCase().endsWith(".pdf");
   const win = window.open();
   if (!win) return;
-  const load = async () => {
+
+  const loadContent = async () => {
     let blobUrl = url;
-    try {
-      const r = await fetch(url);
-      const blob = await r.blob();
-      blobUrl = URL.createObjectURL(blob);
-    } catch { blobUrl = url; }
+    if (!url.startsWith("data:")) {
+      try {
+        const cachedBlobUrl = attachmentBlobUrlCache.get(url);
+        if (cachedBlobUrl) {
+          blobUrl = cachedBlobUrl;
+        } else {
+          const r = await fetchWithAuth(url);
+          if (!r.ok) throw new Error(`Attachment fetch failed: ${r.status}`);
+          const blob = await r.blob();
+          blobUrl = URL.createObjectURL(blob);
+          attachmentBlobUrlCache.set(url, blobUrl);
+          registerAttachmentCacheCleanup();
+        }
+      } catch {
+        win.document.body.innerHTML =
+          "<p style=\"color:#ccc;font-family:sans-serif;padding:24px\">Unable to load attachment.</p>";
+        return;
+      }
+    }
     const content = isPdf
       ? `<iframe src="${blobUrl}" style="width:100%;height:90vh;border:none;border-radius:8px"></iframe>`
       : `<img src="${blobUrl}" style="max-width:100%;max-height:90vh;border-radius:8px;box-shadow:0 4px 32px rgba(0,0,0,.6)"/>`;
-    win.document.write(`<!DOCTYPE html><html><head><title>${filename}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#111;display:flex;flex-direction:column;align-items:center;min-height:100vh;font-family:sans-serif}header{width:100%;background:#1a1a1a;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;position:sticky;top:0;z-index:10}header span{color:#ccc;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%}a.dl{background:#6366f1;color:#fff;text-decoration:none;padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0}main{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;width:100%}</style></head><body><header><span>${filename}</span><a class="dl" href="${blobUrl}" download="${filename}">⬇ Download</a></header><main>${content}</main></body></html>`);
+    win.document.write(
+      `<!DOCTYPE html><html><head><title>${filename}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#111;display:flex;flex-direction:column;align-items:center;min-height:100vh;font-family:sans-serif}header{width:100%;background:#1a1a1a;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;position:sticky;top:0;z-index:10}header span{color:#ccc;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%}a.dl{background:#6366f1;color:#fff;text-decoration:none;padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0}main{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;width:100%}</style></head><body><header><span>${filename}</span><a class="dl" href="${blobUrl}" download="${filename}">⬇ Download</a></header><main>${content}</main></body></html>`
+    );
     win.document.close();
   };
-  load();
+
+  loadContent();
 }
+
+// ─── Attachment list ──────────────────────────────────────────────────────────
 
 function AttachmentList({ path: attachmentPath }: { path: string }) {
   let urls: string[] = [];
@@ -199,29 +317,40 @@ function AttachmentList({ path: attachmentPath }: { path: string }) {
       {urls.map((url, i) => {
         const isPdf = url.toLowerCase().endsWith(".pdf");
         const filename = url.split("/").pop() ?? `attachment-${i + 1}`;
-        if (isPdf) return (
-          <button key={i} onClick={() => openAttachmentViewer(url, filename)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors">
-            <Paperclip size={10} /> {filename.length > 20 ? `PDF ${i + 1}` : filename}
-          </button>
-        );
+        if (isPdf) {
+          return (
+            <button
+              key={i}
+              onClick={() => openAttachmentViewer(url, filename)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"
+            >
+              <Paperclip size={10} /> {filename.length > 20 ? `PDF ${i + 1}` : filename}
+            </button>
+          );
+        }
         return (
-          <img key={i} src={url} alt={`Attachment ${i + 1}`}
+          <AuthenticatedAttachmentImage
+            key={i}
+            url={url}
+            alt={`Attachment ${i + 1}`}
             className="h-20 w-auto rounded-lg border border-border object-cover cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-primary/40 transition-all"
-            onClick={() => openAttachmentViewer(url, filename)} />
+            onClick={() => openAttachmentViewer(url, filename)}
+          />
         );
       })}
     </div>
   );
 }
 
-// ─── Ticket List Card (minimal — no description, no actions) ─────────────────
+// ─── Ticket List Card ─────────────────────────────────────────────────────────
 
 function TicketListCard({ ticket, onClick }: { ticket: Ticket; onClick: () => void }) {
   const bar = priorityConfig[ticket.priority]?.bar ?? "bg-muted";
   return (
-    <button onClick={onClick}
-      className="w-full text-left rounded-xl border border-border bg-card hover:border-primary/30 hover:shadow-md hover:bg-card/80 transition-all group overflow-hidden">
+    <button
+      onClick={onClick}
+      className="w-full text-left rounded-xl border border-border bg-card hover:border-primary/30 hover:shadow-md hover:bg-card/80 transition-all group overflow-hidden"
+    >
       <div className="flex items-stretch">
         <div className={`w-1 shrink-0 ${bar}`} />
         <div className="flex-1 px-4 py-3.5 min-w-0">
@@ -266,7 +395,7 @@ function TicketListCard({ ticket, onClick }: { ticket: Ticket; onClick: () => vo
 
 // ─── Ticket Detail View ───────────────────────────────────────────────────────
 
-function TicketDetail({
+function TicketDetailView({
   ticketId,
   onBack,
   isAdmin,
@@ -281,7 +410,6 @@ function TicketDetail({
 }) {
   const queryClient = useQueryClient();
   const [commentText, setCommentText] = useState("");
-  const [attachFiles, setAttachFiles] = useState<File[]>([]);
   const [adminAttachFiles, setAdminAttachFiles] = useState<File[]>([]);
   const [showResolveFlow, setShowResolveFlow] = useState(false);
   const [showReviewSection, setShowReviewSection] = useState(false);
@@ -289,10 +417,10 @@ function TicketDetail({
   const [reviewRemarks, setReviewRemarks] = useState("");
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewDone, setReviewDone] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const adminFileInputRef = useRef<HTMLInputElement>(null);
   const adminCameraInputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { data, isLoading, isError, refetch } = useQuery<TicketDetail>({
     queryKey: ["ticket-detail", ticketId],
@@ -313,7 +441,6 @@ function TicketDetail({
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [comments.length]);
 
-  // Comment mutation
   const commentMutation = useMutation({
     mutationFn: async ({ text }: { text: string }) => {
       const res = await fetchWithAuth(`/api/tickets/comment/${ticketId}`, {
@@ -324,7 +451,7 @@ function TicketDetail({
     },
     onSuccess: () => {
       setCommentText("");
-      setAttachFiles([]);
+      setAdminAttachFiles([]);
       refetch();
       onTicketUpdated();
       queryClient.invalidateQueries({ queryKey: ["tickets"] });
@@ -332,7 +459,6 @@ function TicketDetail({
     onError: () => toast.error("Failed to send reply"),
   });
 
-  // Resolve mutation
   const resolveMutation = useMutation({
     mutationFn: async () => {
       const res = await fetchWithAuth(`/api/tickets/resolve/${ticketId}`, {
@@ -352,7 +478,6 @@ function TicketDetail({
     onError: () => toast.error("Failed to resolve ticket"),
   });
 
-  // Reopen mutation
   const reopenMutation = useMutation({
     mutationFn: async () => {
       const res = await fetchWithAuth(`/api/tickets/reopen/${ticketId}`, { method: "PUT" });
@@ -369,7 +494,6 @@ function TicketDetail({
     onError: () => toast.error("Failed to reopen ticket"),
   });
 
-  // Close mutation
   const closeMutation = useMutation({
     mutationFn: async () => {
       const res = await fetchWithAuth(`/api/tickets/close/${ticketId}`, { method: "PUT" });
@@ -386,7 +510,6 @@ function TicketDetail({
     onError: () => toast.error("Failed to close ticket"),
   });
 
-  // Submit review/sentiment as a comment
   const submitReview = async () => {
     if (!sentiment && !reviewRemarks.trim()) {
       setReviewDone(true);
@@ -395,7 +518,7 @@ function TicketDetail({
     }
     setReviewSubmitting(true);
     try {
-      const sentimentLabel = SENTIMENTS.find(s => s.value === sentiment);
+      const sentimentLabel = SENTIMENTS.find((s) => s.value === sentiment);
       const parts: string[] = [];
       if (sentimentLabel) parts.push(`[Review: ${sentimentLabel.label}]`);
       if (reviewRemarks.trim()) parts.push(reviewRemarks.trim());
@@ -419,53 +542,50 @@ function TicketDetail({
     }
   };
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const handleSend = () => {
-    const text = commentText.trim();
-    if (!text) return;
-    commentMutation.mutate({ text });
-    // Reset height immediately
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "36px";
-    }
-  };
-
-  const handleAdminFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files) return;
-    setAdminAttachFiles(prev => [...prev, ...Array.from(e.target.files!)]);
-    e.target.value = "";
-  };
-
-  const removeAdminFile = (i: number) => {
-    setAdminAttachFiles(prev => prev.filter((_, idx) => idx !== i));
-  };
-
-  // Auto-expand textarea
   const autoExpand = (el: HTMLTextAreaElement) => {
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 120) + "px";
   };
 
-  if (isLoading) return (
-    <div className="flex flex-col items-center justify-center h-64 gap-3 text-muted-foreground">
-      <Loader2 size={24} className="animate-spin" />
-      <p className="text-sm">Loading ticket…</p>
-    </div>
-  );
+  const handleSend = () => {
+    const text = commentText.trim();
+    if (!text) return;
+    commentMutation.mutate({ text });
+    if (textareaRef.current) textareaRef.current.style.height = "36px";
+  };
 
-  if (isError || !ticket) return (
-    <div className="px-4 py-3 rounded-xl bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
-      <AlertCircle size={14} /> Failed to load ticket. <button onClick={() => refetch()} className="underline">Retry</button>
-    </div>
-  );
+  const handleAdminFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    setAdminAttachFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
+    e.target.value = "";
+  };
 
-  const isActive = ticket.status === "Pending" || ticket.status === "InProgress" || ticket.status === "Resolved";
+  const removeAdminFile = (i: number) => {
+    setAdminAttachFiles((prev) => prev.filter((_, idx) => idx !== i));
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-3 text-muted-foreground">
+        <Loader2 size={24} className="animate-spin" />
+        <p className="text-sm">Loading ticket…</p>
+      </div>
+    );
+  }
+
+  if (isError || !ticket) {
+    return (
+      <div className="px-4 py-3 rounded-xl bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
+        <AlertCircle size={14} /> Failed to load ticket.{" "}
+        <button onClick={() => refetch()} className="underline">Retry</button>
+      </div>
+    );
+  }
+
   const isResolved = ticket.status === "Resolved";
   const isClosed = ticket.status === "Closed";
   const bar = priorityConfig[ticket.priority]?.bar ?? "bg-muted";
 
-  // Extract attachment URLs
   let attachUrls: string[] = [];
   if (ticket.attachment_path) {
     try {
@@ -474,15 +594,16 @@ function TicketDetail({
     } catch { attachUrls = [ticket.attachment_path]; }
   }
 
-  // Find review comment if exists
-  const reviewComment = comments.find(c => c.comment.startsWith("[Review:"));
+  const reviewComment = comments.find((c) => c.comment.startsWith("[Review:"));
 
   return (
     <div className="flex flex-col h-full max-w-3xl mx-auto">
-      {/* ── Back button + ticket header ── */}
+      {/* Back + header */}
       <div className="flex items-start gap-3 mb-5">
-        <button onClick={onBack}
-          className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground shrink-0 mt-0.5">
+        <button
+          onClick={onBack}
+          className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground shrink-0 mt-0.5"
+        >
           <ArrowLeft size={14} />
         </button>
         <div className="flex-1 min-w-0">
@@ -519,8 +640,8 @@ function TicketDetail({
         </div>
       </div>
 
-      {/* ── Issue description card ── */}
-      <div className={`rounded-xl border border-border bg-card overflow-hidden mb-4`}>
+      {/* Issue description */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden mb-4">
         <div className="flex items-stretch">
           <div className={`w-1 shrink-0 ${bar}`} />
           <div className="flex-1 px-4 py-4">
@@ -538,14 +659,16 @@ function TicketDetail({
         </div>
       </div>
 
-      {/* ── Resolved info banner ── */}
+      {/* Resolved / Closed banner */}
       {(isResolved || isClosed) && (
         <div className={`rounded-xl border px-4 py-3 mb-4 flex items-center gap-3 ${
           isClosed
             ? "bg-slate-500/5 border-slate-400/20"
             : "bg-emerald-500/5 border-emerald-400/20"
         }`}>
-          {isClosed ? <XCircle size={16} className="text-slate-500 shrink-0" /> : <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />}
+          {isClosed
+            ? <XCircle size={16} className="text-slate-500 shrink-0" />
+            : <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />}
           <div className="flex-1">
             <p className={`text-xs font-semibold ${isClosed ? "text-slate-500" : "text-emerald-600"}`}>
               {isClosed ? "Ticket Closed" : "Ticket Resolved"}
@@ -557,11 +680,12 @@ function TicketDetail({
               <p className="text-xs text-muted-foreground mt-1 italic">{reviewComment.comment}</p>
             )}
           </div>
-          {/* Admin: reopen button */}
           {isAdmin && (
-            <button onClick={() => reopenMutation.mutate()}
+            <button
+              onClick={() => reopenMutation.mutate()}
               disabled={reopenMutation.isPending}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-blue-400/30 bg-blue-500/5 text-blue-600 hover:bg-blue-500/10 transition-colors disabled:opacity-50 shrink-0">
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-blue-400/30 bg-blue-500/5 text-blue-600 hover:bg-blue-500/10 transition-colors disabled:opacity-50 shrink-0"
+            >
               {reopenMutation.isPending ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />}
               Reopen
             </button>
@@ -569,12 +693,15 @@ function TicketDetail({
         </div>
       )}
 
-      {/* ── Chat / comments thread ── */}
+      {/* Chat / comments */}
       <div className="rounded-xl border border-border bg-card mb-4 overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center gap-2">
           <MessageCircle size={13} className="text-muted-foreground" />
           <p className="text-xs font-semibold text-foreground">
-            Conversation {comments.length > 0 && <span className="text-muted-foreground font-normal">({comments.length})</span>}
+            Conversation{" "}
+            {comments.length > 0 && (
+              <span className="text-muted-foreground font-normal">({comments.length})</span>
+            )}
           </p>
         </div>
 
@@ -589,12 +716,13 @@ function TicketDetail({
               const isMe = c.author_name === currentUserName;
               const isReview = c.comment.startsWith("[Review:");
               if (isReview) {
-                // Display review comment styled differently
                 return (
                   <div key={c.id} className="flex justify-center">
                     <div className="bg-emerald-500/5 border border-emerald-400/15 rounded-xl px-4 py-2.5 max-w-sm text-center">
                       <p className="text-xs text-emerald-600 font-medium">{c.comment}</p>
-                      <p className="text-[10px] text-muted-foreground/60 mt-0.5">{c.author_name} · {fmtDateTime(c.created_at)}</p>
+                      <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+                        {c.author_name} · {fmtDateTime(c.created_at)}
+                      </p>
                     </div>
                   </div>
                 );
@@ -625,23 +753,27 @@ function TicketDetail({
           </div>
         )}
 
-        {/* Reply input — disabled when Resolved or Closed */}
+        {/* Reply input */}
         <div className="px-4 py-3 border-t border-border">
-          {/* Admin attachment previews */}
           {isAdmin && adminAttachFiles.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
               {adminAttachFiles.map((f, i) => (
                 <div key={i} className="relative group">
                   {f.type.startsWith("image/") ? (
-                    <img src={URL.createObjectURL(f)} alt={f.name}
-                      className="h-12 w-auto rounded-lg border border-border object-cover" />
+                    <img
+                      src={URL.createObjectURL(f)}
+                      alt={f.name}
+                      className="h-12 w-auto rounded-lg border border-border object-cover"
+                    />
                   ) : (
                     <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted text-[11px] text-muted-foreground">
                       <Paperclip size={10} />{f.name.length > 18 ? f.name.slice(0, 18) + "…" : f.name}
                     </div>
                   )}
-                  <button onClick={() => removeAdminFile(i)}
-                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => removeAdminFile(i)}
+                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
                     <X size={9} />
                   </button>
                 </div>
@@ -649,7 +781,6 @@ function TicketDetail({
             </div>
           )}
           <div className="flex items-end gap-2">
-            {/* Admin: attach file + camera */}
             {isAdmin && (
               <>
                 <input ref={adminFileInputRef} type="file" accept="image/*,.pdf" multiple className="hidden" onChange={handleAdminFileChange} />
@@ -676,7 +807,7 @@ function TicketDetail({
               ref={textareaRef}
               value={commentText}
               onChange={(e) => { setCommentText(e.target.value); autoExpand(e.target); }}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }}}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
               placeholder={isClosed ? "Ticket is closed — reopen to reply" : "Write a reply… (Enter to send, Shift+Enter for new line)"}
               disabled={isClosed}
               rows={1}
@@ -694,25 +825,27 @@ function TicketDetail({
         </div>
       </div>
 
-      {/* ── Admin action buttons ── */}
+      {/* Admin action buttons */}
       {isAdmin && (ticket.status === "Pending" || ticket.status === "InProgress") && !showResolveFlow && (
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setShowResolveFlow(true)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-emerald-400/30 bg-emerald-500/5 text-emerald-600 hover:bg-emerald-500/10 transition-colors">
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-emerald-400/30 bg-emerald-500/5 text-emerald-600 hover:bg-emerald-500/10 transition-colors"
+          >
             <CheckCircle2 size={12} /> Mark as Resolved
           </button>
           <button
             onClick={() => closeMutation.mutate()}
             disabled={closeMutation.isPending}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-400/20 bg-slate-500/5 text-slate-500 hover:bg-slate-500/10 transition-colors disabled:opacity-50">
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-400/20 bg-slate-500/5 text-slate-500 hover:bg-slate-500/10 transition-colors disabled:opacity-50"
+          >
             {closeMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />}
             Close Ticket
           </button>
         </div>
       )}
 
-      {/* ── Resolve confirmation ── */}
+      {/* Resolve confirmation */}
       {showResolveFlow && (
         <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-5 py-4 space-y-3">
           <div className="flex items-center gap-2">
@@ -724,27 +857,28 @@ function TicketDetail({
             <button
               onClick={() => resolveMutation.mutate()}
               disabled={resolveMutation.isPending}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50">
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50"
+            >
               {resolveMutation.isPending ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
               {resolveMutation.isPending ? "Resolving…" : "Confirm & Resolve"}
             </button>
-            <button onClick={() => setShowResolveFlow(false)}
-              className="px-3 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted transition-colors">
+            <button
+              onClick={() => setShowResolveFlow(false)}
+              className="px-3 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted transition-colors"
+            >
               Cancel
             </button>
           </div>
         </div>
       )}
 
-      {/* ── Review section — shown after resolving, fully optional ── */}
+      {/* Review section */}
       {showReviewSection && !reviewDone && (
         <div className="rounded-xl border border-border bg-card px-5 py-5 space-y-4 animate-in fade-in slide-in-from-bottom-3 duration-300">
           <div>
             <p className="text-sm font-semibold text-foreground">How was the resolution?</p>
             <p className="text-xs text-muted-foreground mt-0.5">Completely optional — feel free to skip.</p>
           </div>
-
-          {/* Sentiment picker — 3 icons only */}
           <div className="flex items-center gap-3">
             {SENTIMENTS.map((s) => (
               <button
@@ -761,8 +895,6 @@ function TicketDetail({
               </button>
             ))}
           </div>
-
-          {/* Review remarks text */}
           <textarea
             value={reviewRemarks}
             onChange={(e) => { setReviewRemarks(e.target.value); autoExpand(e.target); }}
@@ -771,18 +903,19 @@ function TicketDetail({
             style={{ minHeight: "36px", maxHeight: "120px", height: "36px" }}
             className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all overflow-hidden"
           />
-
           <div className="flex items-center gap-2">
             <button
               onClick={submitReview}
               disabled={reviewSubmitting}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50">
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
               {reviewSubmitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
               {reviewSubmitting ? "Submitting…" : "Submit Review"}
             </button>
             <button
               onClick={() => { setReviewDone(true); setShowReviewSection(false); }}
-              className="px-4 py-2 rounded-xl text-sm border border-border text-muted-foreground hover:bg-muted transition-colors">
+              className="px-4 py-2 rounded-xl text-sm border border-border text-muted-foreground hover:bg-muted transition-colors"
+            >
               Skip
             </button>
           </div>
@@ -802,10 +935,6 @@ function TicketDetail({
 // ─── MyTickets main page ──────────────────────────────────────────────────────
 
 const STATUS_TABS: StatusFilter[] = ["Open", "Pending", "InProgress", "Resolved", "Closed", "All"];
-const STATUS_LABELS: Record<StatusFilter, string> = {
-  Open: "Open", Pending: "Pending", InProgress: "In Progress",
-  Resolved: "Resolved", Closed: "Closed", All: "All",
-};
 
 const MyTickets: React.FC = () => {
   const navigate = useNavigate();
@@ -829,11 +958,11 @@ const MyTickets: React.FC = () => {
   } = useQuery<Ticket[]>({
     queryKey: ["tickets", isAdmin ? "all" : "my", currentUser?.id],
     queryFn: async () => {
-      // Non-admins always fetch only their own tickets
-      const endpoint = isAdmin ? "/api/tickets" : "/api/tickets/my";
+      const endpoint = isAdmin ? "/api/tickets?limit=100" : "/api/tickets/my";
       const res = await fetchWithAuth(endpoint);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
+      const payload = await res.json();
+      return unwrapTicketList<Ticket>(payload).data;
     },
     staleTime: 0,
     refetchOnWindowFocus: true,
@@ -873,13 +1002,12 @@ const MyTickets: React.FC = () => {
   };
   const isFiltered = statusFilter !== "Open" || priorityFilter !== "all" || !!search.trim();
 
-  // If a ticket is selected — show detail view
   if (selectedTicketId !== null) {
     return (
       <>
         <Breadcrumbs items={["Tickets", "My Tickets", `#${selectedTicketId}`]} />
         <div className="max-w-3xl mx-auto pb-10">
-          <TicketDetail
+          <TicketDetailView
             ticketId={selectedTicketId}
             onBack={() => setSelectedTicketId(null)}
             isAdmin={isAdmin}
@@ -894,11 +1022,9 @@ const MyTickets: React.FC = () => {
     );
   }
 
-  // List view
   return (
     <>
       <Breadcrumbs items={["Tickets", "My Tickets"]} />
-
       <div className="max-w-3xl mx-auto pb-10 space-y-5">
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
@@ -912,8 +1038,11 @@ const MyTickets: React.FC = () => {
             <div>
               <h1 className="text-xl font-heading font-bold text-foreground">My Tickets</h1>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {openTickets.length} open{allTickets.length !== openTickets.length && ` · ${allTickets.length} total`}
-                {urgentCount > 0 && <span className="text-red-500 ml-1.5 font-medium">· {urgentCount} urgent</span>}
+                {openTickets.length} open
+                {allTickets.length !== openTickets.length && ` · ${allTickets.length} total`}
+                {urgentCount > 0 && (
+                  <span className="text-red-500 ml-1.5 font-medium">· {urgentCount} urgent</span>
+                )}
               </p>
             </div>
           </div>
@@ -975,7 +1104,10 @@ const MyTickets: React.FC = () => {
               className="w-full pl-8 pr-8 py-2 rounded-xl border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
             />
             {search && (
-              <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
                 <X size={12} />
               </button>
             )}

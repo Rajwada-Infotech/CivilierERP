@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { unwrapTicketList } from "@/lib/ticketListResponse";
 import { useTicketSync } from "@/hooks/useTicketSync";
 import {
   AlertCircle,
@@ -73,7 +74,7 @@ const statusConfig: Record<string, { cls: string; label: string }> = {
   },
   InProgress: {
     cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",
-    label: "In Progress",
+    label: "Resolving",
   },
   Resolved: {
     cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
@@ -194,7 +195,7 @@ const STATUS_TABS: StatusFilter[] = [
 const TAB_LABELS: Record<StatusFilter, string> = {
   "All Tickets": "All",
   Pending: "Pending",
-  InProgress: "In Progress",
+  InProgress: "Resolving",
   Resolved: "Resolved",
   Closed: "Closed",
 };
@@ -215,9 +216,10 @@ const PendingTickets: React.FC = () => {
   } = useQuery<Ticket[]>({
     queryKey: ["tickets", "all"],
     queryFn: async () => {
-      const res = await fetchWithAuth("/api/tickets");
+      const res = await fetchWithAuth("/api/tickets?limit=100");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
+      const payload = await res.json();
+      return unwrapTicketList<Ticket>(payload).data;
     },
     staleTime: 0,
     refetchOnWindowFocus: true,

@@ -1,22 +1,27 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { toast } from "sonner";
+import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
+import { unwrapTicketList } from "@/lib/ticketListResponse";
+import { useTicketSync } from "@/hooks/useTicketSync";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
   ChevronDown,
   Clock,
+  Loader2,
   RefreshCw,
+  RotateCcw,
   Search,
   Star,
   User,
+  UserCheck,
   X,
-  Loader2,
-  RotateCcw,
   XCircle,
 } from "lucide-react";
 
@@ -30,6 +35,9 @@ interface Ticket {
   customer_name: string;
   customer_phone: string;
   status: "Pending" | "Resolved" | "InProgress" | "Closed";
+  assigned_to?: string | null;
+  assigned_to_id?: number | null;
+  created_by_id?: number | null;
   created_at?: string;
 }
 
@@ -59,10 +67,22 @@ const priorityConfig: Record<string, { cls: string; dot: string }> = {
 };
 
 const statusConfig: Record<string, { cls: string; label: string }> = {
-  Pending:    { cls: "bg-amber-500/10 text-amber-600 border-amber-400/20", label: "Pending" },
-  InProgress: { cls: "bg-blue-500/10 text-blue-600 border-blue-400/20", label: "In Progress" },
-  Resolved:   { cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20", label: "Resolved" },
-  Closed:     { cls: "bg-slate-500/10 text-slate-500 border-slate-400/20", label: "Closed" },
+  Pending: {
+    cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+    label: "Pending",
+  },
+  InProgress: {
+    cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",
+    label: "Resolving",
+  },
+  Resolved: {
+    cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
+    label: "Resolved",
+  },
+  Closed: {
+    cls: "bg-slate-500/10 text-slate-500 border-slate-400/20",
+    label: "Closed",
+  },
 };
 
 function PriorityBadge({ priority }: { priority: string }) {
@@ -146,15 +166,11 @@ function ResolveModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"
         onClick={onClose}
       />
-
-      {/* Modal */}
       <div className="relative z-10 w-full max-w-md bg-card rounded-2xl border border-border shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        {/* Header */}
         <div className="px-5 py-4 border-b border-border flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
             <CheckCircle2 size={15} className="text-emerald-600" />
@@ -173,9 +189,7 @@ function ResolveModal({
           </button>
         </div>
 
-        {/* Body */}
         <div className="px-5 py-4 space-y-4">
-          {/* Ticket summary */}
           <div className="rounded-xl bg-muted/40 border border-border px-4 py-3 space-y-1">
             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
               <User size={10} />
@@ -189,7 +203,6 @@ function ResolveModal({
             </p>
           </div>
 
-          {/* Star rating — required */}
           <div className="space-y-2">
             <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1">
               Resolution Rating
@@ -203,7 +216,6 @@ function ResolveModal({
             )}
           </div>
 
-          {/* Review remarks — shown after rating selected */}
           {rating > 0 && (
             <div className="space-y-1.5 animate-in fade-in slide-in-from-bottom-2 duration-200">
               <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
@@ -223,7 +235,6 @@ function ResolveModal({
           )}
         </div>
 
-        {/* Footer */}
         <div className="px-5 py-3.5 border-t border-border flex items-center justify-end gap-2.5">
           <button
             onClick={onClose}
@@ -338,7 +349,6 @@ function TicketCard({
   const [expanded, setExpanded] = useState(false);
 
   const isActive = ticket.status === "Pending" || ticket.status === "InProgress";
-  const isResolved = ticket.status === "Resolved";
   const isClosed = ticket.status === "Closed";
 
   return (
@@ -372,6 +382,12 @@ function TicketCard({
               {fmtDate(ticket.created_at) && (
                 <span className="text-[11px] text-muted-foreground">{fmtDate(ticket.created_at)}</span>
               )}
+              {ticket.assigned_to && (
+                <span className="flex items-center gap-1 text-[11px] text-blue-600">
+                  <UserCheck size={10} />
+                  {ticket.assigned_to}
+                </span>
+              )}
               <span className="text-[11px] font-mono text-muted-foreground/60">#{ticket.id}</span>
             </div>
 
@@ -397,7 +413,7 @@ function TicketCard({
 
             {/* ── Action buttons ── */}
             <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-border/50">
-              {/* Open / Reopen — shown when not Pending */}
+              {/* Reopen — shown when not active */}
               {!isActive && (
                 <button
                   onClick={() => onAction("open", ticket)}
@@ -419,7 +435,7 @@ function TicketCard({
                 </button>
               )}
 
-              {/* Close — shown when active or resolved (not already closed) */}
+              {/* Close — shown when not already closed */}
               {!isClosed && (
                 <button
                   onClick={() => onAction("close", ticket)}
@@ -444,7 +460,7 @@ const STATUS_TABS: StatusFilter[] = ["All", "Pending", "InProgress", "Resolved",
 const TAB_LABELS: Record<StatusFilter, string> = {
   All: "All",
   Pending: "Pending",
-  InProgress: "In Progress",
+  InProgress: "Resolving",
   Resolved: "Resolved",
   Closed: "Closed",
 };
@@ -452,6 +468,7 @@ const TAB_LABELS: Record<StatusFilter, string> = {
 const AllTickets: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { currentUser } = useAuth();
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
@@ -467,25 +484,24 @@ const AllTickets: React.FC = () => {
   } = useQuery<Ticket[]>({
     queryKey: ["tickets", "all"],
     queryFn: async () => {
-      const res = await fetchWithAuth("/api/tickets");
+      const res = await fetchWithAuth("/api/tickets?limit=100");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
+      const payload = await res.json();
+      return unwrapTicketList<Ticket>(payload).data;
     },
     staleTime: 0,
     refetchOnWindowFocus: true,
   });
 
+  useTicketSync(refetch);
+
   // ── Mutations ────────────────────────────────────────────────────────────────
 
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["tickets"] });
-  };
+  const invalidate = () => invalidateTicketQueries(queryClient);
 
   const openMutation = useMutation({
     mutationFn: async (id: number) => {
-      const res = await fetchWithAuth(`/api/tickets/reopen/${id}`, {
-        method: "PUT",
-      });
+      const res = await fetchWithAuth(`/api/tickets/reopen/${id}`, { method: "PUT" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     },
     onSuccess: () => {
@@ -522,9 +538,7 @@ const AllTickets: React.FC = () => {
 
   const closeMutation = useMutation({
     mutationFn: async (id: number) => {
-      const res = await fetchWithAuth(`/api/tickets/close/${id}`, {
-        method: "PUT",
-      });
+      const res = await fetchWithAuth(`/api/tickets/close/${id}`, { method: "PUT" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     },
     onSuccess: () => {
@@ -564,10 +578,7 @@ const AllTickets: React.FC = () => {
   const urgentCount = allTickets.filter((t) => t.priority === "Urgent").length;
   const isFiltered = statusFilter !== "All" || priorityFilter !== "All" || search.trim();
 
-  const handleAction = (
-    type: "open" | "resolve" | "close",
-    ticket: Ticket,
-  ) => {
+  const handleAction = (type: "open" | "resolve" | "close", ticket: Ticket) => {
     setModal({ type, ticket } as ActionModal);
   };
 
