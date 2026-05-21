@@ -259,6 +259,7 @@ export interface MaterialPayload {
   GSTRate?: number;
   /** Supplier FK (AccountHeadMaster.LHeadId) for this material line */
   SupplierIdPerLine?: number | null;
+  SupplierNamePerLine?: string | null;
   Remarks?: string;
   CreatedBy?: number;
   UpdatedBy?: number;
@@ -275,11 +276,15 @@ export interface ActivityPayload {
   MaterialAmount?: number;
   GrandTotal?: number;
   Remarks?: string;
+  HsnCode?: string | null;
+  HsnGstRate?: number | null;
+  HsnGstType?: string | null;
   materials: MaterialPayload[];
 }
 
 export interface WorkOrderFullPayload {
   header: {
+    BoqID?: number | null;
     CompanyId?: number;
     ProjectId?: number;
     DocumentNumber?: string;
@@ -332,6 +337,43 @@ export interface ConfirmWOResult {
     SupplierName: string | null;
   }[];
 }
+
+export interface WOPOPrefillItem {
+  itemId: string | null;
+  itemDescription: string;
+  unit: string;
+  quantity: number;
+  rate: number;
+  amount: number;
+  tax: number;
+  supplierName: string | null;
+}
+
+export interface WOPOPrefill {
+  WOId: number;
+  DocumentNumber: string;
+  DocNo: string | null;
+  CompanyId: number | null;
+  CompanyName: string;
+  ProjectId: number | null;
+  ProjectName: string;
+  items: WOPOPrefillItem[];
+  totalMaterialCost: number;
+}
+
+export const getWOPOPrefill = async (id: number): Promise<WOPOPrefill> => {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}/create-po-prefill`);
+  if (!res.ok) {
+    let err: Record<string, string> = {};
+    try {
+      err = await res.json();
+    } catch {
+      /* ignore */
+    }
+    throw new Error(err.error || `Failed to load WO prefill: ${res.status}`);
+  }
+  return res.json();
+};
 
 export const confirmWorkOrder = async (
   id: number,

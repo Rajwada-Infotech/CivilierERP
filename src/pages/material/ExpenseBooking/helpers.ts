@@ -251,7 +251,7 @@ export function dbToRecord(row: any): ExpenseRecord {
     poId: null,
     supplier: row.EName || "",
     projectSite: projectEnterpriseIdValid ? String(projectEnterpriseId) : "",
-    projectName: row.EProjectDisplayName || "",
+    projectName: row.EProjectDisplayName || row.projectName || "",
     materialCategory: row.EDocumentType ?? "",
     invoiceReference: row.EDocNo ?? "",
     basicAmount: parseFloat(row.EAmount) || 0,
@@ -280,6 +280,7 @@ export function dbToRecord(row: any): ExpenseRecord {
         | "WORK_DONE"
         | null) ?? null,
     eSourceId: row.ESourceId ? parseInt(row.ESourceId, 10) : null,
+    sourceDocNo: row.sourceDocNo ?? null,
     vendorInvoiceNo: row.EVendorInvoiceNo ?? "",
     vendorInvoiceDate: row.EVendorInvoiceDate
       ? row.EVendorInvoiceDate.slice(0, 10)

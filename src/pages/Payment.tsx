@@ -425,6 +425,7 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     bankId: null,
     bankName: "",
     project: "",
+    projectSite: "",
     company: "",
     expenseRef: "",
     expenseId: "",
@@ -461,6 +462,7 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     bankId: item.PBankID ?? null,
     bankName: item.PBankName || "",
     project: item.PProject || "",
+    projectSite: item.PProject || "",
     company: item.PCompany || "",
     expenseRef: item.PExpenseRef || "",
     expenseId: "",
@@ -2170,32 +2172,35 @@ const Payment: React.FC = () => {
     if (!validate()) return;
 
     const payload = {
-      PPaymentName: form.paymentName || null,
-      PMode: form.mode || null,
-      PAmount: form.amount ?? null,
-      PDocType: form.docType || null,
-      PDate: form.date || null,
-      PBankID: form.bankId ?? null,
-      PBankName: form.bankName || null,
-      PProject: form.project || null,
-      PCompany: form.company || null,
-      PExpenseRef: form.expenseRef || null,
+      // BaseTransactionSchema fields
+      companyId: form.company || null,
+      projectId: form.projectSite || form.project || null,
+      docDate: form.date || "",
+      docTypeId: form.docType || null,
+      remarks: form.paymentName || null,
+      // PaymentPayloadSchema fields
+      supplierId: form.expenseRef || null,
+      bankId: form.bankId ?? null,
+      amount: form.amount ?? 0,
+      // Extended payment fields (passed through for backend processing)
+      bankName: form.bankName || null,
       parentDocNo: form.parentDocNo || null,
       rootExBDocNo: form.rootExBDocNo || null,
+      mode: form.mode || null,
       // Cheque
-      PChequeNo: form.chequeNo || null,
-      PChequeLotId: form.chequeLotId ?? null,
-      PChequeLotNumber: form.chequeLotNumber || null,
-      PChequeDate: form.chequeDate || null,
-      PChequeAccountNumber: form.chequeAccountNumber || null,
-      PChequeIfsc: form.chequeIfsc || null,
-      PIsPostDated: form.isPostDated,
+      chequeNo: form.chequeNo || null,
+      chequeLotId: form.chequeLotId ?? null,
+      chequeLotNumber: form.chequeLotNumber || null,
+      chequeDate: form.chequeDate || null,
+      chequeAccountNumber: form.chequeAccountNumber || null,
+      chequeIfsc: form.chequeIfsc || null,
+      isPostDated: form.isPostDated,
       // Digital
-      PNeftNumber: form.neftNumber || null,
-      PUpiTransactionId: form.upiTransactionId || null,
-      PRtgsReference: form.rtgsReference || null,
-      PImpsReference: form.impsReference || null,
-    };
+      neftNumber: form.neftNumber || null,
+      upiTransactionId: form.upiTransactionId || null,
+      rtgsReference: form.rtgsReference || null,
+      impsReference: form.impsReference || null,
+    } as any;
 
     try {
       setSaving(true);
