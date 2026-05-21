@@ -163,13 +163,13 @@ export default function ApprovalSetup() {
     refetchOnWindowFocus: false, // stop refetching every tab switch
   });
 
-  const createForm = useForm<z.input<typeof formSchema>, unknown, FormData>({
-    resolver: zodResolver(formSchema),
+  const createForm = useForm<z.input<typeof formSchema>>({
+    resolver: zodResolver(formSchema) as any,
     defaultValues: defaultFormValues,
   });
 
-  const editForm = useForm<z.input<typeof formSchema>, unknown, FormData>({
-    resolver: zodResolver(formSchema),
+  const editForm = useForm<z.input<typeof formSchema>>({
+    resolver: zodResolver(formSchema) as any,
     defaultValues: defaultFormValues,
   });
 
@@ -421,7 +421,7 @@ export default function ApprovalSetup() {
           </DialogHeader>
           <Form {...createForm}>
             <form
-              onSubmit={createForm.handleSubmit(onCreateSubmit)}
+              onSubmit={createForm.handleSubmit(onCreateSubmit as any)}
               className="space-y-4"
             >
               {renderFormFields(createForm)}
@@ -450,7 +450,7 @@ export default function ApprovalSetup() {
           </DialogHeader>
           <Form {...editForm}>
             <form
-              onSubmit={editForm.handleSubmit(onEditSubmit)}
+              onSubmit={editForm.handleSubmit(onEditSubmit as any)}
               className="space-y-4"
             >
               {renderFormFields(editForm)}
