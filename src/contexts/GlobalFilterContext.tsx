@@ -1,4 +1,10 @@
-import React, { createContext, useContext, useState, ReactNode } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
 
 interface GlobalFilterState {
   selectedCompany: string | number | null;
@@ -12,7 +18,9 @@ interface GlobalFilterContextType extends GlobalFilterState {
   setFinancialYear: (year: string | null) => void;
 }
 
-const GlobalFilterContext = createContext<GlobalFilterContextType | undefined>(undefined);
+const GlobalFilterContext = createContext<GlobalFilterContextType | undefined>(
+  undefined,
+);
 
 const LOCAL_STORAGE_KEY = "erp_filters";
 
@@ -22,34 +30,53 @@ const getInitialState = (urlKey: string, storageKey: string) => {
     if (params.has(urlKey)) return params.get(urlKey);
     const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (stored) return JSON.parse(stored)[storageKey] || null;
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return null;
 };
 
 export const GlobalFilterProvider = ({ children }: { children: ReactNode }) => {
-  const [selectedCompany, setSelectedCompany] = useState<string | number | null>(() => getInitialState('company', 'selectedCompany'));
-  const [selectedProject, setSelectedProject] = useState<string | number | null>(() => getInitialState('project', 'selectedProject'));
-  const [selectedFinancialYear, setSelectedFinancialYear] = useState<string | null>(() => getInitialState('fy', 'selectedFinancialYear'));
+  const [selectedCompany, setSelectedCompany] = useState<
+    string | number | null
+  >(() => getInitialState("company", "selectedCompany"));
+  const [selectedProject, setSelectedProject] = useState<
+    string | number | null
+  >(() => getInitialState("project", "selectedProject"));
+  const [selectedFinancialYear, setSelectedFinancialYear] = useState<
+    string | null
+  >(() => getInitialState("fy", "selectedFinancialYear"));
 
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({ selectedCompany, selectedProject, selectedFinancialYear }));
-    
+    localStorage.setItem(
+      LOCAL_STORAGE_KEY,
+      JSON.stringify({
+        selectedCompany,
+        selectedProject,
+        selectedFinancialYear,
+      }),
+    );
+
     const url = new URL(window.location.href);
-    if (selectedCompany) url.searchParams.set('company', String(selectedCompany));
-    else url.searchParams.delete('company');
-    
-    if (selectedProject) url.searchParams.set('project', String(selectedProject));
-    else url.searchParams.delete('project');
-    
-    if (selectedFinancialYear) url.searchParams.set('fy', String(selectedFinancialYear));
-    else url.searchParams.delete('fy');
-    
-    window.history.replaceState({}, '', url.toString());
+    if (selectedCompany)
+      url.searchParams.set("company", String(selectedCompany));
+    else url.searchParams.delete("company");
+
+    if (selectedProject)
+      url.searchParams.set("project", String(selectedProject));
+    else url.searchParams.delete("project");
+
+    if (selectedFinancialYear)
+      url.searchParams.set("fy", String(selectedFinancialYear));
+    else url.searchParams.delete("fy");
+
+    window.history.replaceState({}, "", url.toString());
   }, [selectedCompany, selectedProject, selectedFinancialYear]);
 
   const setCompany = (id: string | number | null) => setSelectedCompany(id);
   const setProject = (id: string | number | null) => setSelectedProject(id);
-  const setFinancialYear = (year: string | null) => setSelectedFinancialYear(year);
+  const setFinancialYear = (year: string | null) =>
+    setSelectedFinancialYear(year);
 
   return (
     <GlobalFilterContext.Provider
@@ -70,7 +97,9 @@ export const GlobalFilterProvider = ({ children }: { children: ReactNode }) => {
 export const useGlobalFilters = () => {
   const context = useContext(GlobalFilterContext);
   if (context === undefined) {
-    throw new Error("useGlobalFilters must be used within a GlobalFilterProvider");
+    throw new Error(
+      "useGlobalFilters must be used within a GlobalFilterProvider",
+    );
   }
   return context;
 };
