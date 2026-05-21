@@ -911,7 +911,10 @@ const PurchaseOrderMaster: React.FC = () => {
       SourceMRDocNo: sourceMR?.docNo ?? null,
       SourceWDId: sourceWD?.id ?? null,
       SourceWDDocNo: sourceWD?.docNo ?? null,
-      POType: sourceMR ? "Normal" : sourceWD ? "WO_PO" : undefined,
+      POType: (sourceMR ? "Normal" : sourceWD ? "WO_PO" : "Direct") as
+        | "Normal"
+        | "WO_PO"
+        | "Direct",
     };
   };
 

@@ -1,3 +1,5 @@
+export type { PageKey, PageAction, PagePermission } from "./types";
+
 import type {
   UserRole,
   PageKey,

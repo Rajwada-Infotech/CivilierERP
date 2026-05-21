@@ -106,9 +106,9 @@ export const ActivityBrowserFilters: React.FC<Props> = ({
 
   const handleQuickFilter = useCallback(
     (type: ActivityActionType) => {
-      setQuickFilter((prev) => (prev === type ? null : type));
+      setQuickFilter(quickFilter === type ? null : type);
     },
-    [setQuickFilter],
+    [setQuickFilter, quickFilter],
   );
 
   return (
@@ -227,9 +227,12 @@ export const ActivityBrowserFilters: React.FC<Props> = ({
               initialFocus
               mode="range"
               defaultMonth={dateRange.from}
-              selected={dateRange}
+              selected={dateRange as any}
               onSelect={(range) =>
-                handleDateRangeChange({ from: range?.from, to: range?.to })
+                handleDateRangeChange({
+                  from: range?.from ?? new Date(),
+                  to: range?.to,
+                } as { from?: Date; to?: Date })
               }
               numberOfMonths={2}
             />

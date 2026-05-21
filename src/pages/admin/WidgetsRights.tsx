@@ -189,60 +189,68 @@ function buildWidgetsColumns(
   onManage: (userId: string) => void,
 ): ColumnDef<UserPermRow, unknown>[] {
   return [
-  {
-    accessorKey: "name",
-    header: "User",
-    cell: ({ row }) => (
-      <div className="flex items-center gap-2.5">
-        <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-          <User size={13} className="text-primary" />
+    {
+      accessorKey: "name",
+      header: "User",
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+            <User size={13} className="text-primary" />
+          </div>
+          <p className="font-semibold text-sm text-foreground truncate leading-tight">
+            {row.original.name}
+          </p>
         </div>
-        <p className="font-semibold text-sm text-foreground truncate leading-tight">{row.original.name}</p>
-      </div>
-    ),
-  },
-  {
-    accessorKey: "role",
-    header: "Role",
-    cell: ({ getValue }) => {
-      const v = getValue() as string;
-      return (
-        <div className="flex items-center gap-1.5">
-          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ROLE_DOT[v] ?? "bg-slate-400"}`} />
-          <span className="text-[11px] font-heading text-muted-foreground/80">{v}</span>
+      ),
+    },
+    {
+      accessorKey: "role",
+      header: "Role",
+      cell: ({ getValue }) => {
+        const v = getValue() as string;
+        return (
+          <div className="flex items-center gap-1.5">
+            <span
+              className={`w-1.5 h-1.5 rounded-full shrink-0 ${ROLE_DOT[v] ?? "bg-slate-400"}`}
+            />
+            <span className="text-[11px] font-heading text-muted-foreground/80">
+              {v}
+            </span>
+          </div>
+        );
+      },
+    },
+    {
+      accessorKey: "configuredPages",
+      header: "Configured Widgets",
+      cell: ({ getValue }) => {
+        const v = getValue() as number;
+        return v > 0 ? (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading border bg-primary/10 text-primary border-primary/20">
+            {v} {v !== 1 ? "widgets" : "widget"}
+          </span>
+        ) : (
+          <span className="text-[11px] text-muted-foreground/50 italic">
+            None configured
+          </span>
+        );
+      },
+    },
+    {
+      id: "manage",
+      header: "",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <div className="flex justify-end">
+          <button
+            onClick={() => onManage(String(row.original.userId))}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            Manage
+          </button>
         </div>
-      );
+      ),
     },
-  },
-  {
-    accessorKey: "configuredPages",
-    header: "Configured Widgets",
-    cell: ({ getValue }) => {
-      const v = getValue() as number;
-      return v > 0 ? (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading border bg-primary/10 text-primary border-primary/20">
-          {v} {v !== 1 ? "widgets" : "widget"}
-        </span>
-      ) : (
-        <span className="text-[11px] text-muted-foreground/50 italic">None configured</span>
-      );
-    },
-  },
-  {
-    id: "manage",
-    header: "",
-    enableSorting: false,
-    cell: ({ row }) => (
-      <div className="flex justify-end">
-        <button
-          onClick={() => onManage(row.original.userId)}
-          className="px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-        >
-          Manage
-        </button>
-      </div>
-    ),
-  },
   ];
 }
 export default function WidgetsRights() {
@@ -262,12 +270,13 @@ export default function WidgetsRights() {
   const [selectedUser, setSelectedUser] = useState<DropdownUser | null>(null);
 
   const columns = useMemo(
-    () => buildWidgetsColumns((userId) => {
-      const u = dropdownUsers.find((d) => String(d.id) === String(userId));
-      if (u) setSelectedUser(u);
-    }),
-     
-    [dropdownUsers]
+    () =>
+      buildWidgetsColumns((userId) => {
+        const u = dropdownUsers.find((d) => String(d.id) === String(userId));
+        if (u) setSelectedUser(u);
+      }),
+
+    [dropdownUsers],
   );
   const [pendingPermissions, setPending] = useState<PagePermission[]>([]);
   const [permLoading, setPermLoading] = useState(false);
@@ -551,14 +560,14 @@ export default function WidgetsRights() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-              <DataTable
-                data={filteredRows}
-                columns={columns}
-                searchable={false}
-                paginated={true}
-                defaultPageSize={25}
-                emptyMessage="No users found."
-              />
+            <DataTable
+              data={filteredRows}
+              columns={columns}
+              searchable={false}
+              paginated={true}
+              defaultPageSize={25}
+              emptyMessage="No users found."
+            />
           </div>
         )}
       </div>
