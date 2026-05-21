@@ -1,22 +1,31 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTicketSync } from "@/hooks/useTicketSync";
 import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
 import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
-  ChevronDown,
+  ChevronRight,
   Clock,
+  Loader2,
   Paperclip,
   Plus,
   RefreshCw,
   Search,
+  Send,
   User,
   X,
+  XCircle,
+  RotateCcw,
+  MessageCircle,
+  CalendarDays,
+  Phone,
+  Camera,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -30,28 +39,72 @@ interface Ticket {
   customer_phone: string;
   status: "Pending" | "Resolved" | "InProgress" | "Closed";
   created_at?: string;
+  updated_at?: string;
   attachment_path?: string | null;
+  assigned_to?: string | null;
+  resolution_note?: string | null;
+  comment_count?: number;
+}
+
+interface Comment {
+  id: number;
+  ticket_id: number;
+  comment: string;
+  author_name: string;
+  author_role: string;
+  created_at: string;
+}
+
+interface TicketDetail {
+  ticket: Ticket;
+  comments: Comment[];
 }
 
 type StatusFilter = "Open" | "Pending" | "InProgress" | "Resolved" | "Closed" | "All";
 
-const STATUS_TABS: StatusFilter[] = [
-  "Open",
-  "Pending",
-  "InProgress",
-  "Resolved",
-  "Closed",
-  "All",
-];
+// ─── Sentiment options — 3 SVG icons only ────────────────────────────────────
 
-const STATUS_LABELS: Record<StatusFilter, string> = {
-  Open: "Open",
-  Pending: "Pending",
-  InProgress: "In Progress",
-  Resolved: "Resolved",
-  Closed: "Closed",
-  All: "All",
-};
+function IconUnhappy({ active }: { active: boolean }) {
+  return (
+    <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-8 h-8">
+      <circle cx="18" cy="18" r="17" fill={active ? "#fee2e2" : "currentColor"} fillOpacity={active ? 1 : 0.06} stroke={active ? "#ef4444" : "currentColor"} strokeOpacity={active ? 1 : 0.2} strokeWidth="1.5"/>
+      <circle cx="13" cy="14" r="1.8" fill={active ? "#ef4444" : "currentColor"} fillOpacity={active ? 1 : 0.5}/>
+      <circle cx="23" cy="14" r="1.8" fill={active ? "#ef4444" : "currentColor"} fillOpacity={active ? 1 : 0.5}/>
+      <path d="M12 24c1.5-2.5 4-4 6-4s4.5 1.5 6 4" stroke={active ? "#ef4444" : "currentColor"} strokeOpacity={active ? 1 : 0.5} strokeWidth="1.8" strokeLinecap="round"/>
+      <path d="M10 11.5 L13.5 13" stroke={active ? "#ef4444" : "currentColor"} strokeOpacity={active ? 1 : 0.4} strokeWidth="1.4" strokeLinecap="round"/>
+      <path d="M26 11.5 L22.5 13" stroke={active ? "#ef4444" : "currentColor"} strokeOpacity={active ? 1 : 0.4} strokeWidth="1.4" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+function IconHappy({ active }: { active: boolean }) {
+  return (
+    <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-8 h-8">
+      <circle cx="18" cy="18" r="17" fill={active ? "#dcfce7" : "currentColor"} fillOpacity={active ? 1 : 0.06} stroke={active ? "#22c55e" : "currentColor"} strokeOpacity={active ? 1 : 0.2} strokeWidth="1.5"/>
+      <circle cx="13" cy="15" r="1.8" fill={active ? "#22c55e" : "currentColor"} fillOpacity={active ? 1 : 0.5}/>
+      <circle cx="23" cy="15" r="1.8" fill={active ? "#22c55e" : "currentColor"} fillOpacity={active ? 1 : 0.5}/>
+      <path d="M12 21c1.5 2.8 4 4.5 6 4.5s4.5-1.7 6-4.5" stroke={active ? "#22c55e" : "currentColor"} strokeOpacity={active ? 1 : 0.5} strokeWidth="1.8" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+function IconExcellent({ active }: { active: boolean }) {
+  return (
+    <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-8 h-8">
+      <circle cx="18" cy="18" r="17" fill={active ? "#fef9c3" : "currentColor"} fillOpacity={active ? 1 : 0.06} stroke={active ? "#eab308" : "currentColor"} strokeOpacity={active ? 1 : 0.2} strokeWidth="1.5"/>
+      <path d="M11 14c.5-1 1.5-1.5 2.5-1s1.5 1.5 1 2.5" stroke={active ? "#eab308" : "currentColor"} strokeOpacity={active ? 1 : 0.5} strokeWidth="1.6" strokeLinecap="round"/>
+      <path d="M25 14c-.5-1-1.5-1.5-2.5-1s-1.5 1.5-1 2.5" stroke={active ? "#eab308" : "currentColor"} strokeOpacity={active ? 1 : 0.5} strokeWidth="1.6" strokeLinecap="round"/>
+      <path d="M10.5 21.5c1.5 4 4.5 6 7.5 6s6-2 7.5-6" stroke={active ? "#eab308" : "currentColor"} strokeOpacity={active ? 1 : 0.5} strokeWidth="1.8" strokeLinecap="round"/>
+      <path d="M13 21.5h10" stroke={active ? "#eab308" : "currentColor"} strokeOpacity={active ? 1 : 0.4} strokeWidth="1.4" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+const SENTIMENTS = [
+  { value: 1, Icon: IconUnhappy, label: "Unhappy" },
+  { value: 4, Icon: IconHappy,   label: "Happy" },
+  { value: 5, Icon: IconExcellent, label: "Excellent" },
+];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -64,34 +117,37 @@ const fmtDate = (d?: string | null) =>
       })
     : null;
 
-const priorityConfig: Record<string, { cls: string; dot: string }> = {
-  Urgent: {
-    cls: "bg-red-500/10 text-red-600 border-red-400/20",
-    dot: "bg-red-500",
-  },
-  High: {
-    cls: "bg-orange-500/10 text-orange-600 border-orange-400/20",
-    dot: "bg-orange-500",
-  },
-  Medium: {
-    cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",
-    dot: "bg-amber-500",
-  },
-  Low: {
-    cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",
-    dot: "bg-blue-500",
-  },
+const fmtTime = (d?: string | null) =>
+  d
+    ? new Date(d).toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "";
+
+const fmtDateTime = (d?: string | null) => {
+  if (!d) return "";
+  return `${fmtDate(d)} ${fmtTime(d)}`;
+};
+
+const priorityConfig: Record<string, { cls: string; dot: string; bar: string }> = {
+  Urgent: { cls: "bg-red-500/10 text-red-600 border-red-400/20",    dot: "bg-red-500",    bar: "bg-red-500" },
+  High:   { cls: "bg-orange-500/10 text-orange-600 border-orange-400/20", dot: "bg-orange-500", bar: "bg-orange-500" },
+  Medium: { cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",   dot: "bg-amber-400",  bar: "bg-amber-400" },
+  Low:    { cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",     dot: "bg-blue-400",   bar: "bg-blue-400" },
+};
+
+const statusConfig: Record<string, { cls: string; label: string; icon: React.ElementType }> = {
+  Pending:    { cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",       label: "Pending",     icon: Clock },
+  InProgress: { cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",          label: "In Progress", icon: RefreshCw },
+  Resolved:   { cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20", label: "Resolved",    icon: CheckCircle2 },
+  Closed:     { cls: "bg-slate-500/10 text-slate-500 border-slate-400/20",       label: "Closed",      icon: XCircle },
 };
 
 function PriorityBadge({ priority }: { priority: string }) {
-  const cfg = priorityConfig[priority] ?? {
-    cls: "bg-muted text-muted-foreground border-border",
-    dot: "bg-muted",
-  };
+  const cfg = priorityConfig[priority] ?? { cls: "bg-muted text-muted-foreground border-border", dot: "bg-muted" };
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}
-    >
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
       {priority}
     </span>
@@ -99,173 +155,670 @@ function PriorityBadge({ priority }: { priority: string }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    Resolved: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
-    Pending: "bg-amber-500/10 text-amber-600 border-amber-400/20",
-    InProgress: "bg-blue-500/10 text-blue-600 border-blue-400/20",
-  };
-  const Icon = status === "Resolved" ? CheckCircle2 : Clock;
+  const cfg = statusConfig[status] ?? { cls: "bg-muted text-muted-foreground border-border", label: status, icon: Clock };
+  const Icon = cfg.icon;
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${map[status] ?? "bg-muted text-muted-foreground border-border"}`}
-    >
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}>
       <Icon size={10} />
-      {status}
+      {cfg.label}
     </span>
   );
 }
 
-function TicketCard({ ticket }: { ticket: Ticket }) {
-  const [expanded, setExpanded] = useState(false);
+// ─── Attachment viewer helper ─────────────────────────────────────────────────
+
+function openAttachmentViewer(url: string, filename: string) {
+  const isPdf = url.toLowerCase().endsWith(".pdf");
+  const win = window.open();
+  if (!win) return;
+  const load = async () => {
+    let blobUrl = url;
+    try {
+      const r = await fetch(url);
+      const blob = await r.blob();
+      blobUrl = URL.createObjectURL(blob);
+    } catch { blobUrl = url; }
+    const content = isPdf
+      ? `<iframe src="${blobUrl}" style="width:100%;height:90vh;border:none;border-radius:8px"></iframe>`
+      : `<img src="${blobUrl}" style="max-width:100%;max-height:90vh;border-radius:8px;box-shadow:0 4px 32px rgba(0,0,0,.6)"/>`;
+    win.document.write(`<!DOCTYPE html><html><head><title>${filename}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#111;display:flex;flex-direction:column;align-items:center;min-height:100vh;font-family:sans-serif}header{width:100%;background:#1a1a1a;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;position:sticky;top:0;z-index:10}header span{color:#ccc;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%}a.dl{background:#6366f1;color:#fff;text-decoration:none;padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0}main{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;width:100%}</style></head><body><header><span>${filename}</span><a class="dl" href="${blobUrl}" download="${filename}">⬇ Download</a></header><main>${content}</main></body></html>`);
+    win.document.close();
+  };
+  load();
+}
+
+function AttachmentList({ path: attachmentPath }: { path: string }) {
+  let urls: string[] = [];
+  try {
+    const parsed = JSON.parse(attachmentPath);
+    urls = Array.isArray(parsed) ? parsed : [attachmentPath];
+  } catch { urls = [attachmentPath]; }
+
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden hover:border-border/80 hover:shadow-sm transition-all">
-      <div className="px-5 py-4">
-        <div className="flex items-start gap-3">
-          <div
-            className={`w-1 self-stretch rounded-full shrink-0 mt-0.5 ${priorityConfig[ticket.priority]?.dot ?? "bg-muted"}`}
-          />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between gap-3">
-              <h3 className="text-sm font-heading font-semibold text-foreground leading-snug">
-                {ticket.subject}
-              </h3>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <PriorityBadge priority={ticket.priority} />
-                <StatusBadge status={ticket.status} />
-              </div>
-            </div>
-            <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-              <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                <User size={10} />
-                <span>{ticket.customer_name || "—"}</span>
-              </div>
-              {ticket.customer_phone && (
-                <span className="text-[11px] text-muted-foreground">
-                  {ticket.customer_phone}
-                </span>
-              )}
-              {fmtDate(ticket.created_at) && (
-                <span className="text-[11px] text-muted-foreground">
-                  {fmtDate(ticket.created_at)}
-                </span>
-              )}
-              <span className="text-[11px] font-mono text-muted-foreground/60">
-                #{ticket.id}
-              </span>
-            </div>
-            {ticket.issue_details && (
-              <div className="mt-2">
-                <p
-                  className={`text-xs text-muted-foreground leading-relaxed ${expanded ? "" : "line-clamp-2"}`}
-                >
-                  {ticket.issue_details}
-                </p>
-                {ticket.issue_details.length > 120 && (
-                  <button
-                    onClick={() => setExpanded((p) => !p)}
-                    className="text-[11px] text-primary mt-0.5 hover:underline flex items-center gap-0.5"
-                  >
-                    {expanded ? "Show less" : "Show more"}
-                    <ChevronDown
-                      size={10}
-                      className={`transition-transform ${expanded ? "rotate-180" : ""}`}
-                    />
-                  </button>
-                )}
-              </div>
-            )}
-            {ticket.attachment_path && (() => {
-              let urls: string[] = [];
-              try {
-                const parsed = JSON.parse(ticket.attachment_path);
-                urls = Array.isArray(parsed) ? parsed : [ticket.attachment_path];
-              } catch {
-                urls = [ticket.attachment_path];
-              }
-
-              const openViewer = (url: string, filename: string) => {
-                const isPdf = url.toLowerCase().endsWith(".pdf");
-                const isBase64 = url.startsWith("data:");
-
-                const win = window.open();
-                if (!win) return;
-
-                // For base64 or public URLs — load directly into blob for download support
-                const loadContent = async () => {
-                  let blobUrl = url;
-                  if (!isBase64) {
-                    try {
-                      const r = await fetch(url);
-                      const blob = await r.blob();
-                      blobUrl = URL.createObjectURL(blob);
-                    } catch {
-                      blobUrl = url;
-                    }
-                  }
-                  const content = isPdf
-                    ? `<iframe src="${blobUrl}" style="width:100%;height:90vh;border:none;border-radius:8px"></iframe>`
-                    : `<img src="${blobUrl}" style="max-width:100%;max-height:90vh;border-radius:8px;box-shadow:0 4px 32px rgba(0,0,0,.6)"/>`;
-                  win.document.write(`<!DOCTYPE html><html><head><title>${filename}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#111;display:flex;flex-direction:column;align-items:center;min-height:100vh;font-family:sans-serif}header{width:100%;background:#1a1a1a;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;position:sticky;top:0;z-index:10}header span{color:#ccc;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%}a.dl{background:#6366f1;color:#fff;text-decoration:none;padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0}main{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;width:100%}</style></head><body><header><span>${filename}</span><a class="dl" href="${blobUrl}" download="${filename}">⬇ Download</a></header><main>${content}</main></body></html>`);
-                  win.document.close();
-                };
-                loadContent();
-              };
-
-              return (
-                <div className="mt-3 space-y-2">
-                  <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                    <Paperclip size={10} />
-                    {urls.length > 1 ? `${urls.length} Attachments` : "Attachment"}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {urls.map((url, i) => {
-                      const isPdf = url.toLowerCase().endsWith(".pdf");
-                      const filename = url.split("/").pop() ?? `attachment-${i + 1}`;
-                      if (isPdf) {
-                        return (
-                          <button
-                            key={i}
-                            onClick={() => openViewer(url, filename)}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"
-                          >
-                            <Paperclip size={10} /> PDF {urls.length > 1 ? i + 1 : ""}
-                          </button>
-                        );
-                      }
-                      return (
-                        <img
-                          key={i}
-                          src={url}
-                          alt={`Attachment ${i + 1}`}
-                          className="h-24 w-auto rounded-lg border border-border object-cover cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-primary/40 transition-all"
-                          onClick={() => openViewer(url, filename)}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-      </div>
+    <div className="flex flex-wrap gap-2 mt-1">
+      {urls.map((url, i) => {
+        const isPdf = url.toLowerCase().endsWith(".pdf");
+        const filename = url.split("/").pop() ?? `attachment-${i + 1}`;
+        if (isPdf) return (
+          <button key={i} onClick={() => openAttachmentViewer(url, filename)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors">
+            <Paperclip size={10} /> {filename.length > 20 ? `PDF ${i + 1}` : filename}
+          </button>
+        );
+        return (
+          <img key={i} src={url} alt={`Attachment ${i + 1}`}
+            className="h-20 w-auto rounded-lg border border-border object-cover cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-primary/40 transition-all"
+            onClick={() => openAttachmentViewer(url, filename)} />
+        );
+      })}
     </div>
   );
 }
 
-// ─── MyTickets page ───────────────────────────────────────────────────────────
-// Shows only the logged-in user's own tickets. No resolve button — users cannot
-// resolve tickets; only admin can.
+// ─── Ticket List Card (minimal — no description, no actions) ─────────────────
+
+function TicketListCard({ ticket, onClick }: { ticket: Ticket; onClick: () => void }) {
+  const bar = priorityConfig[ticket.priority]?.bar ?? "bg-muted";
+  return (
+    <button onClick={onClick}
+      className="w-full text-left rounded-xl border border-border bg-card hover:border-primary/30 hover:shadow-md hover:bg-card/80 transition-all group overflow-hidden">
+      <div className="flex items-stretch">
+        <div className={`w-1 shrink-0 ${bar}`} />
+        <div className="flex-1 px-4 py-3.5 min-w-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[10px] text-muted-foreground/50">#{ticket.id}</span>
+                <h3 className="text-sm font-semibold text-foreground leading-snug truncate">{ticket.subject}</h3>
+              </div>
+              <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <User size={10} /><span>{ticket.customer_name || "—"}</span>
+                </div>
+                {ticket.customer_phone && (
+                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <Phone size={10} /><span>{ticket.customer_phone}</span>
+                  </div>
+                )}
+                {fmtDate(ticket.created_at) && (
+                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <CalendarDays size={10} /><span>{fmtDate(ticket.created_at)}</span>
+                  </div>
+                )}
+                {(ticket.comment_count ?? 0) > 0 && (
+                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <MessageCircle size={10} /><span>{ticket.comment_count}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <PriorityBadge priority={ticket.priority} />
+              <StatusBadge status={ticket.status} />
+              <ChevronRight size={14} className="text-muted-foreground/40 group-hover:text-muted-foreground transition-colors ml-1" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+// ─── Ticket Detail View ───────────────────────────────────────────────────────
+
+function TicketDetail({
+  ticketId,
+  onBack,
+  isAdmin,
+  currentUserName,
+  onTicketUpdated,
+}: {
+  ticketId: number;
+  onBack: () => void;
+  isAdmin: boolean;
+  currentUserName: string;
+  onTicketUpdated: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [commentText, setCommentText] = useState("");
+  const [attachFiles, setAttachFiles] = useState<File[]>([]);
+  const [adminAttachFiles, setAdminAttachFiles] = useState<File[]>([]);
+  const [showResolveFlow, setShowResolveFlow] = useState(false);
+  const [showReviewSection, setShowReviewSection] = useState(false);
+  const [sentiment, setSentiment] = useState<number>(0);
+  const [reviewRemarks, setReviewRemarks] = useState("");
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewDone, setReviewDone] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const adminFileInputRef = useRef<HTMLInputElement>(null);
+  const adminCameraInputRef = useRef<HTMLInputElement>(null);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  const { data, isLoading, isError, refetch } = useQuery<TicketDetail>({
+    queryKey: ["ticket-detail", ticketId],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`/api/tickets/${ticketId}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: 15_000,
+  });
+
+  const ticket = data?.ticket;
+  const comments = data?.comments ?? [];
+
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [comments.length]);
+
+  // Comment mutation
+  const commentMutation = useMutation({
+    mutationFn: async ({ text }: { text: string }) => {
+      const res = await fetchWithAuth(`/api/tickets/comment/${ticketId}`, {
+        method: "POST",
+        body: JSON.stringify({ comment: text }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    },
+    onSuccess: () => {
+      setCommentText("");
+      setAttachFiles([]);
+      refetch();
+      onTicketUpdated();
+      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+    },
+    onError: () => toast.error("Failed to send reply"),
+  });
+
+  // Resolve mutation
+  const resolveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetchWithAuth(`/api/tickets/resolve/${ticketId}`, {
+        method: "PUT",
+        body: JSON.stringify({ resolution_note: null }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    },
+    onSuccess: () => {
+      toast.success("Ticket resolved!");
+      setShowResolveFlow(false);
+      setShowReviewSection(true);
+      refetch();
+      onTicketUpdated();
+      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+    },
+    onError: () => toast.error("Failed to resolve ticket"),
+  });
+
+  // Reopen mutation
+  const reopenMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetchWithAuth(`/api/tickets/reopen/${ticketId}`, { method: "PUT" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    },
+    onSuccess: () => {
+      toast.success("Ticket reopened");
+      setReviewDone(false);
+      setShowReviewSection(false);
+      refetch();
+      onTicketUpdated();
+      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+    },
+    onError: () => toast.error("Failed to reopen ticket"),
+  });
+
+  // Close mutation
+  const closeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetchWithAuth(`/api/tickets/close/${ticketId}`, { method: "PUT" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    },
+    onSuccess: () => {
+      toast.success("Ticket closed");
+      setReviewDone(false);
+      setShowReviewSection(false);
+      refetch();
+      onTicketUpdated();
+      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+    },
+    onError: () => toast.error("Failed to close ticket"),
+  });
+
+  // Submit review/sentiment as a comment
+  const submitReview = async () => {
+    if (!sentiment && !reviewRemarks.trim()) {
+      setReviewDone(true);
+      setShowReviewSection(false);
+      return;
+    }
+    setReviewSubmitting(true);
+    try {
+      const sentimentLabel = SENTIMENTS.find(s => s.value === sentiment);
+      const parts: string[] = [];
+      if (sentimentLabel) parts.push(`[Review: ${sentimentLabel.label}]`);
+      if (reviewRemarks.trim()) parts.push(reviewRemarks.trim());
+      if (parts.length > 0) {
+        const res = await fetchWithAuth(`/api/tickets/comment/${ticketId}`, {
+          method: "POST",
+          body: JSON.stringify({ comment: parts.join(" — ") }),
+        });
+        if (!res.ok) throw new Error();
+      }
+      toast.success("Review submitted, thank you!");
+      setReviewDone(true);
+      setShowReviewSection(false);
+      refetch();
+      onTicketUpdated();
+      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+    } catch {
+      toast.error("Failed to submit review");
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleSend = () => {
+    const text = commentText.trim();
+    if (!text) return;
+    commentMutation.mutate({ text });
+    // Reset height immediately
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "36px";
+    }
+  };
+
+  const handleAdminFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    setAdminAttachFiles(prev => [...prev, ...Array.from(e.target.files!)]);
+    e.target.value = "";
+  };
+
+  const removeAdminFile = (i: number) => {
+    setAdminAttachFiles(prev => prev.filter((_, idx) => idx !== i));
+  };
+
+  // Auto-expand textarea
+  const autoExpand = (el: HTMLTextAreaElement) => {
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 120) + "px";
+  };
+
+  if (isLoading) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-3 text-muted-foreground">
+      <Loader2 size={24} className="animate-spin" />
+      <p className="text-sm">Loading ticket…</p>
+    </div>
+  );
+
+  if (isError || !ticket) return (
+    <div className="px-4 py-3 rounded-xl bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
+      <AlertCircle size={14} /> Failed to load ticket. <button onClick={() => refetch()} className="underline">Retry</button>
+    </div>
+  );
+
+  const isActive = ticket.status === "Pending" || ticket.status === "InProgress" || ticket.status === "Resolved";
+  const isResolved = ticket.status === "Resolved";
+  const isClosed = ticket.status === "Closed";
+  const bar = priorityConfig[ticket.priority]?.bar ?? "bg-muted";
+
+  // Extract attachment URLs
+  let attachUrls: string[] = [];
+  if (ticket.attachment_path) {
+    try {
+      const p = JSON.parse(ticket.attachment_path);
+      attachUrls = Array.isArray(p) ? p : [ticket.attachment_path];
+    } catch { attachUrls = [ticket.attachment_path]; }
+  }
+
+  // Find review comment if exists
+  const reviewComment = comments.find(c => c.comment.startsWith("[Review:"));
+
+  return (
+    <div className="flex flex-col h-full max-w-3xl mx-auto">
+      {/* ── Back button + ticket header ── */}
+      <div className="flex items-start gap-3 mb-5">
+        <button onClick={onBack}
+          className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground shrink-0 mt-0.5">
+          <ArrowLeft size={14} />
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[11px] text-muted-foreground/50">#{ticket.id}</span>
+                <h1 className="text-lg font-bold text-foreground leading-tight">{ticket.subject}</h1>
+              </div>
+              <div className="flex items-center gap-3 mt-1 flex-wrap">
+                <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <User size={10} /><span>{ticket.customer_name}</span>
+                </div>
+                {ticket.customer_phone && (
+                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <Phone size={10} /><span>{ticket.customer_phone}</span>
+                  </div>
+                )}
+                {ticket.created_at && (
+                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <CalendarDays size={10} /><span>{fmtDateTime(ticket.created_at)}</span>
+                  </div>
+                )}
+                {ticket.assigned_to && (
+                  <span className="text-[11px] text-muted-foreground">→ {ticket.assigned_to}</span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <PriorityBadge priority={ticket.priority} />
+              <StatusBadge status={ticket.status} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Issue description card ── */}
+      <div className={`rounded-xl border border-border bg-card overflow-hidden mb-4`}>
+        <div className="flex items-stretch">
+          <div className={`w-1 shrink-0 ${bar}`} />
+          <div className="flex-1 px-4 py-4">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Issue Description</p>
+            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{ticket.issue_details}</p>
+            {attachUrls.length > 0 && (
+              <div className="mt-3">
+                <p className="text-[11px] text-muted-foreground flex items-center gap-1 mb-1.5">
+                  <Paperclip size={10} />{attachUrls.length > 1 ? `${attachUrls.length} Attachments` : "Attachment"}
+                </p>
+                <AttachmentList path={ticket.attachment_path!} />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Resolved info banner ── */}
+      {(isResolved || isClosed) && (
+        <div className={`rounded-xl border px-4 py-3 mb-4 flex items-center gap-3 ${
+          isClosed
+            ? "bg-slate-500/5 border-slate-400/20"
+            : "bg-emerald-500/5 border-emerald-400/20"
+        }`}>
+          {isClosed ? <XCircle size={16} className="text-slate-500 shrink-0" /> : <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />}
+          <div className="flex-1">
+            <p className={`text-xs font-semibold ${isClosed ? "text-slate-500" : "text-emerald-600"}`}>
+              {isClosed ? "Ticket Closed" : "Ticket Resolved"}
+            </p>
+            {ticket.resolution_note && (
+              <p className="text-xs text-muted-foreground mt-0.5">{ticket.resolution_note}</p>
+            )}
+            {reviewComment && (
+              <p className="text-xs text-muted-foreground mt-1 italic">{reviewComment.comment}</p>
+            )}
+          </div>
+          {/* Admin: reopen button */}
+          {isAdmin && (
+            <button onClick={() => reopenMutation.mutate()}
+              disabled={reopenMutation.isPending}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-blue-400/30 bg-blue-500/5 text-blue-600 hover:bg-blue-500/10 transition-colors disabled:opacity-50 shrink-0">
+              {reopenMutation.isPending ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />}
+              Reopen
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Chat / comments thread ── */}
+      <div className="rounded-xl border border-border bg-card mb-4 overflow-hidden">
+        <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+          <MessageCircle size={13} className="text-muted-foreground" />
+          <p className="text-xs font-semibold text-foreground">
+            Conversation {comments.length > 0 && <span className="text-muted-foreground font-normal">({comments.length})</span>}
+          </p>
+        </div>
+
+        {comments.length === 0 ? (
+          <div className="px-4 py-8 text-center text-muted-foreground">
+            <MessageCircle size={24} className="mx-auto mb-2 opacity-20" />
+            <p className="text-xs">No messages yet. Start the conversation below.</p>
+          </div>
+        ) : (
+          <div className="px-4 py-3 space-y-3 max-h-80 overflow-y-auto">
+            {comments.map((c) => {
+              const isMe = c.author_name === currentUserName;
+              const isReview = c.comment.startsWith("[Review:");
+              if (isReview) {
+                // Display review comment styled differently
+                return (
+                  <div key={c.id} className="flex justify-center">
+                    <div className="bg-emerald-500/5 border border-emerald-400/15 rounded-xl px-4 py-2.5 max-w-sm text-center">
+                      <p className="text-xs text-emerald-600 font-medium">{c.comment}</p>
+                      <p className="text-[10px] text-muted-foreground/60 mt-0.5">{c.author_name} · {fmtDateTime(c.created_at)}</p>
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <div key={c.id} className={`flex gap-2.5 ${isMe ? "flex-row-reverse" : ""}`}>
+                  <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5">
+                    <User size={12} className="text-muted-foreground" />
+                  </div>
+                  <div className={`max-w-[75%] ${isMe ? "items-end" : "items-start"} flex flex-col gap-0.5`}>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-muted-foreground font-medium">{c.author_name}</span>
+                      <span className="text-[9px] text-muted-foreground/50 capitalize">{c.author_role}</span>
+                      <span className="text-[10px] text-muted-foreground/40">{fmtDateTime(c.created_at)}</span>
+                    </div>
+                    <div className={`px-3 py-2 rounded-xl text-xs leading-relaxed whitespace-pre-wrap ${
+                      isMe
+                        ? "bg-primary text-primary-foreground rounded-tr-sm"
+                        : "bg-muted text-foreground rounded-tl-sm"
+                    }`}>
+                      {c.comment}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={chatBottomRef} />
+          </div>
+        )}
+
+        {/* Reply input — disabled when Resolved or Closed */}
+        <div className="px-4 py-3 border-t border-border">
+          {/* Admin attachment previews */}
+          {isAdmin && adminAttachFiles.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {adminAttachFiles.map((f, i) => (
+                <div key={i} className="relative group">
+                  {f.type.startsWith("image/") ? (
+                    <img src={URL.createObjectURL(f)} alt={f.name}
+                      className="h-12 w-auto rounded-lg border border-border object-cover" />
+                  ) : (
+                    <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted text-[11px] text-muted-foreground">
+                      <Paperclip size={10} />{f.name.length > 18 ? f.name.slice(0, 18) + "…" : f.name}
+                    </div>
+                  )}
+                  <button onClick={() => removeAdminFile(i)}
+                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <X size={9} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+            {/* Admin: attach file + camera */}
+            {isAdmin && (
+              <>
+                <input ref={adminFileInputRef} type="file" accept="image/*,.pdf" multiple className="hidden" onChange={handleAdminFileChange} />
+                <input ref={adminCameraInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleAdminFileChange} />
+                <button
+                  onClick={() => adminFileInputRef.current?.click()}
+                  disabled={isClosed}
+                  title="Attach file"
+                  className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-30 shrink-0"
+                >
+                  <Paperclip size={14} />
+                </button>
+                <button
+                  onClick={() => adminCameraInputRef.current?.click()}
+                  disabled={isClosed}
+                  title="Take photo"
+                  className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-30 shrink-0"
+                >
+                  <Camera size={14} />
+                </button>
+              </>
+            )}
+            <textarea
+              ref={textareaRef}
+              value={commentText}
+              onChange={(e) => { setCommentText(e.target.value); autoExpand(e.target); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }}}
+              placeholder={isClosed ? "Ticket is closed — reopen to reply" : "Write a reply… (Enter to send, Shift+Enter for new line)"}
+              disabled={isClosed}
+              rows={1}
+              style={{ minHeight: "36px", maxHeight: "120px", height: "36px" }}
+              className="flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
+            />
+            <button
+              onClick={handleSend}
+              disabled={!commentText.trim() || commentMutation.isPending || isClosed}
+              className="w-9 h-9 flex items-center justify-center rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 shrink-0"
+            >
+              {commentMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Admin action buttons ── */}
+      {isAdmin && (ticket.status === "Pending" || ticket.status === "InProgress") && !showResolveFlow && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setShowResolveFlow(true)}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-emerald-400/30 bg-emerald-500/5 text-emerald-600 hover:bg-emerald-500/10 transition-colors">
+            <CheckCircle2 size={12} /> Mark as Resolved
+          </button>
+          <button
+            onClick={() => closeMutation.mutate()}
+            disabled={closeMutation.isPending}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-400/20 bg-slate-500/5 text-slate-500 hover:bg-slate-500/10 transition-colors disabled:opacity-50">
+            {closeMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />}
+            Close Ticket
+          </button>
+        </div>
+      )}
+
+      {/* ── Resolve confirmation ── */}
+      {showResolveFlow && (
+        <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-5 py-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-emerald-600" />
+            <p className="text-sm font-semibold text-emerald-700">Confirm Resolution</p>
+          </div>
+          <p className="text-xs text-muted-foreground">This will mark the ticket as resolved. The customer will be able to leave a review.</p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => resolveMutation.mutate()}
+              disabled={resolveMutation.isPending}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50">
+              {resolveMutation.isPending ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+              {resolveMutation.isPending ? "Resolving…" : "Confirm & Resolve"}
+            </button>
+            <button onClick={() => setShowResolveFlow(false)}
+              className="px-3 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Review section — shown after resolving, fully optional ── */}
+      {showReviewSection && !reviewDone && (
+        <div className="rounded-xl border border-border bg-card px-5 py-5 space-y-4 animate-in fade-in slide-in-from-bottom-3 duration-300">
+          <div>
+            <p className="text-sm font-semibold text-foreground">How was the resolution?</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Completely optional — feel free to skip.</p>
+          </div>
+
+          {/* Sentiment picker — 3 icons only */}
+          <div className="flex items-center gap-3">
+            {SENTIMENTS.map((s) => (
+              <button
+                key={s.value}
+                onClick={() => setSentiment(sentiment === s.value ? 0 : s.value)}
+                className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl border text-center transition-all text-muted-foreground ${
+                  sentiment === s.value
+                    ? "border-primary bg-primary/5 scale-105"
+                    : "border-border hover:border-border/60 hover:bg-muted"
+                }`}
+              >
+                <s.Icon active={sentiment === s.value} />
+                <span className="text-[10px] font-medium">{s.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Review remarks text */}
+          <textarea
+            value={reviewRemarks}
+            onChange={(e) => { setReviewRemarks(e.target.value); autoExpand(e.target); }}
+            placeholder="Add a comment about your experience… (optional)"
+            rows={1}
+            style={{ minHeight: "36px", maxHeight: "120px", height: "36px" }}
+            className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all overflow-hidden"
+          />
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={submitReview}
+              disabled={reviewSubmitting}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50">
+              {reviewSubmitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+              {reviewSubmitting ? "Submitting…" : "Submit Review"}
+            </button>
+            <button
+              onClick={() => { setReviewDone(true); setShowReviewSection(false); }}
+              className="px-4 py-2 rounded-xl text-sm border border-border text-muted-foreground hover:bg-muted transition-colors">
+              Skip
+            </button>
+          </div>
+        </div>
+      )}
+
+      {reviewDone && (
+        <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-4 py-3 flex items-center gap-2">
+          <CheckCircle2 size={14} className="text-emerald-600" />
+          <p className="text-xs text-emerald-600 font-medium">Thank you for your feedback!</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── MyTickets main page ──────────────────────────────────────────────────────
+
+const STATUS_TABS: StatusFilter[] = ["Open", "Pending", "InProgress", "Resolved", "Closed", "All"];
+const STATUS_LABELS: Record<StatusFilter, string> = {
+  Open: "Open", Pending: "Pending", InProgress: "In Progress",
+  Resolved: "Resolved", Closed: "Closed", All: "All",
+};
 
 const MyTickets: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
+  const queryClient = useQueryClient();
   const ADMIN_ROLES = ["super_admin", "admin", "dba"];
   const isAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
+  const currentUserName = currentUser?.name ?? "Me";
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("Open");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
+  const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
 
   const {
     data: allTickets = [],
@@ -274,8 +827,9 @@ const MyTickets: React.FC = () => {
     refetch,
     isFetching,
   } = useQuery<Ticket[]>({
-    queryKey: ["tickets", isAdmin ? "all" : "my"],
+    queryKey: ["tickets", isAdmin ? "all" : "my", currentUser?.id],
     queryFn: async () => {
+      // Non-admins always fetch only their own tickets
       const endpoint = isAdmin ? "/api/tickets" : "/api/tickets/my";
       const res = await fetchWithAuth(endpoint);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -290,14 +844,11 @@ const MyTickets: React.FC = () => {
   const tickets = useMemo(() => {
     let list = [...allTickets];
     if (statusFilter === "Open") {
-      list = list.filter(
-        (t) => t.status === "Pending" || t.status === "InProgress",
-      );
+      list = list.filter((t) => t.status === "Pending" || t.status === "InProgress");
     } else if (statusFilter !== "All") {
       list = list.filter((t) => t.status === statusFilter);
     }
-    if (priorityFilter !== "all")
-      list = list.filter((t) => t.priority === priorityFilter);
+    if (priorityFilter !== "all") list = list.filter((t) => t.priority === priorityFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(
@@ -310,21 +861,40 @@ const MyTickets: React.FC = () => {
     return list;
   }, [allTickets, statusFilter, priorityFilter, search]);
 
-  const openTickets = allTickets.filter(
-    (t) => t.status === "Pending" || t.status === "InProgress",
-  );
+  const openTickets = allTickets.filter((t) => t.status === "Pending" || t.status === "InProgress");
   const urgentCount = openTickets.filter((t) => t.priority === "Urgent").length;
   const tabCounts: Record<StatusFilter, number> = {
-    Open: openTickets.length,
-    Pending: allTickets.filter((t) => t.status === "Pending").length,
+    Open:       openTickets.length,
+    Pending:    allTickets.filter((t) => t.status === "Pending").length,
     InProgress: allTickets.filter((t) => t.status === "InProgress").length,
-    Resolved: allTickets.filter((t) => t.status === "Resolved").length,
-    Closed: allTickets.filter((t) => t.status === "Closed").length,
-    All: allTickets.length,
+    Resolved:   allTickets.filter((t) => t.status === "Resolved").length,
+    Closed:     allTickets.filter((t) => t.status === "Closed").length,
+    All:        allTickets.length,
   };
-  const isFiltered =
-    statusFilter !== "Open" || priorityFilter !== "all" || search.trim();
+  const isFiltered = statusFilter !== "Open" || priorityFilter !== "all" || !!search.trim();
 
+  // If a ticket is selected — show detail view
+  if (selectedTicketId !== null) {
+    return (
+      <>
+        <Breadcrumbs items={["Tickets", "My Tickets", `#${selectedTicketId}`]} />
+        <div className="max-w-3xl mx-auto pb-10">
+          <TicketDetail
+            ticketId={selectedTicketId}
+            onBack={() => setSelectedTicketId(null)}
+            isAdmin={isAdmin}
+            currentUserName={currentUserName}
+            onTicketUpdated={() => {
+              refetch();
+              queryClient.invalidateQueries({ queryKey: ["tickets"] });
+            }}
+          />
+        </div>
+      </>
+    );
+  }
+
+  // List view
   return (
     <>
       <Breadcrumbs items={["Tickets", "My Tickets"]} />
@@ -340,19 +910,10 @@ const MyTickets: React.FC = () => {
               <ArrowLeft size={14} />
             </button>
             <div>
-              <h1 className="text-xl font-heading font-bold text-foreground">
-                My Tickets
-              </h1>
+              <h1 className="text-xl font-heading font-bold text-foreground">My Tickets</h1>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {openTickets.length} open ticket{openTickets.length !== 1 ? "s" : ""}
-                {allTickets.length !== openTickets.length && (
-                  <span className="ml-1.5">- {allTickets.length} total</span>
-                )}
-                {urgentCount > 0 && (
-                  <span className="text-red-500 ml-1.5 font-medium">
-                    · {urgentCount} urgent
-                  </span>
-                )}
+                {openTickets.length} open{allTickets.length !== openTickets.length && ` · ${allTickets.length} total`}
+                {urgentCount > 0 && <span className="text-red-500 ml-1.5 font-medium">· {urgentCount} urgent</span>}
               </p>
             </div>
           </div>
@@ -368,15 +929,11 @@ const MyTickets: React.FC = () => {
               disabled={isFetching}
               className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50"
             >
-              <RefreshCw
-                size={13}
-                className={isFetching ? "animate-spin" : ""}
-              />
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
             </button>
           </div>
         </div>
 
-        {/* Error */}
         {isError && (
           <div className="px-4 py-3 rounded-xl bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
             <AlertCircle size={14} /> Failed to load tickets. Try refreshing.
@@ -385,50 +942,51 @@ const MyTickets: React.FC = () => {
 
         {/* Status tabs */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          {STATUS_TABS.map((status) => (
+          {STATUS_TABS.map((tab) => (
             <button
-              key={status}
-              onClick={() => setStatusFilter(status)}
-              className={`px-2.5 py-1.5 rounded-lg text-xs font-heading font-medium transition-all ${
-                statusFilter === status
+              key={tab}
+              onClick={() => setStatusFilter(tab)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                statusFilter === tab
                   ? "bg-primary text-primary-foreground"
                   : "border border-border text-muted-foreground hover:bg-muted"
               }`}
             >
-              {STATUS_LABELS[status]}
-              <span className="ml-1 opacity-70">{tabCounts[status]}</span>
+              {STATUS_LABELS[tab]}
+              {!isLoading && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
+                  statusFilter === tab ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
+                }`}>
+                  {tabCounts[tab]}
+                </span>
+              )}
             </button>
           ))}
         </div>
 
-        {/* Filters */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-48">
-            <Search
-              size={13}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
+        {/* Search + Priority filter */}
+        <div className="space-y-2">
+          <div className="relative">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search tickets…"
+              placeholder="Search by subject, customer, or issue…"
               className="w-full pl-8 pr-8 py-2 rounded-xl border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
             />
             {search && (
-              <button
-                onClick={() => setSearch("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
+              <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                 <X size={12} />
               </button>
             )}
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[11px] text-muted-foreground font-medium">Priority:</span>
             {(["all", "Urgent", "High", "Medium", "Low"] as const).map((p) => (
               <button
                 key={p}
                 onClick={() => setPriorityFilter(p)}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-heading font-medium transition-all ${
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
                   priorityFilter === p
                     ? "bg-primary text-primary-foreground"
                     : "border border-border text-muted-foreground hover:bg-muted"
@@ -440,20 +998,16 @@ const MyTickets: React.FC = () => {
           </div>
         </div>
 
-        {/* List */}
+        {/* Ticket list */}
         {isLoading ? (
           <div className="space-y-3">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div
-                key={i}
-                className="rounded-xl border border-border bg-card p-5 animate-pulse"
-              >
-                <div className="flex gap-3">
-                  <div className="w-1 h-16 bg-muted rounded-full" />
-                  <div className="flex-1 space-y-2">
+              <div key={i} className="rounded-xl border border-border bg-card overflow-hidden animate-pulse">
+                <div className="flex">
+                  <div className="w-1 bg-muted" />
+                  <div className="flex-1 px-4 py-4 space-y-2">
                     <div className="h-4 bg-muted rounded w-2/3" />
                     <div className="h-3 bg-muted rounded w-1/3" />
-                    <div className="h-3 bg-muted rounded w-full" />
                   </div>
                 </div>
               </div>
@@ -462,11 +1016,7 @@ const MyTickets: React.FC = () => {
         ) : tickets.length === 0 ? (
           <div className="rounded-xl border border-border bg-card py-16 flex flex-col items-center gap-3 text-muted-foreground">
             <CheckCircle2 size={32} className="opacity-20" />
-            <p className="text-sm">
-              {isFiltered
-                ? "No tickets match your filters"
-                : "No open tickets"}
-            </p>
+            <p className="text-sm">{isFiltered ? "No tickets match your filters" : "No tickets found"}</p>
             {!isFiltered && (
               <button
                 onClick={() => navigate("/ticket/create")}
@@ -475,22 +1025,28 @@ const MyTickets: React.FC = () => {
                 <Plus size={12} /> Create first ticket
               </button>
             )}
+            {isFiltered && (
+              <button
+                onClick={() => { setSearch(""); setPriorityFilter("all"); setStatusFilter("Open"); }}
+                className="text-xs text-primary hover:underline"
+              >
+                Clear filters
+              </button>
+            )}
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {tickets.map((t) => (
-              <TicketCard key={t.id} ticket={t} />
+              <TicketListCard key={t.id} ticket={t} onClick={() => setSelectedTicketId(t.id)} />
             ))}
           </div>
         )}
 
-        {!isLoading &&
-          tickets.length > 0 &&
-          isFiltered && (
-            <p className="text-xs text-muted-foreground text-center">
-              Showing {tickets.length} of {allTickets.length} tickets
-            </p>
-          )}
+        {!isLoading && tickets.length > 0 && isFiltered && (
+          <p className="text-xs text-muted-foreground text-center">
+            Showing {tickets.length} of {allTickets.length} tickets
+          </p>
+        )}
       </div>
     </>
   );
