@@ -338,6 +338,43 @@ export interface ConfirmWOResult {
   }[];
 }
 
+export interface WOPOPrefillItem {
+  itemId: string | null;
+  itemDescription: string;
+  unit: string;
+  quantity: number;
+  rate: number;
+  amount: number;
+  tax: number;
+  supplierName: string | null;
+}
+
+export interface WOPOPrefill {
+  WOId: number;
+  DocumentNumber: string;
+  DocNo: string | null;
+  CompanyId: number | null;
+  CompanyName: string;
+  ProjectId: number | null;
+  ProjectName: string;
+  items: WOPOPrefillItem[];
+  totalMaterialCost: number;
+}
+
+export const getWOPOPrefill = async (id: number): Promise<WOPOPrefill> => {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}/create-po-prefill`);
+  if (!res.ok) {
+    let err: Record<string, string> = {};
+    try {
+      err = await res.json();
+    } catch {
+      /* ignore */
+    }
+    throw new Error(err.error || `Failed to load WO prefill: ${res.status}`);
+  }
+  return res.json();
+};
+
 export const confirmWorkOrder = async (
   id: number,
   finYear?: string | null,
