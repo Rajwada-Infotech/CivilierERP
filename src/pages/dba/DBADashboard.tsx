@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -9,13 +9,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -42,7 +35,6 @@ import {
   HardDrive,
   Play,
   Trash2,
-  Download,
   XCircle,
   Loader2,
 } from "lucide-react";
@@ -200,7 +192,7 @@ export default function DBADashboard() {
       .includes(tableSearch.toLowerCase()),
   );
 
-  const totalSizeMb = tables.reduce((s, t) => s + (t.size_mb ?? 0), 0);
+  const _totalSizeMb = tables.reduce((s, t) => s + (t.size_mb ?? 0), 0);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (

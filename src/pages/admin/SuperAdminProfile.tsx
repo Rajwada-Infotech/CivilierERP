@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -23,7 +24,6 @@ import {
   Lock,
   Save,
   Crown,
-  Mail,
   Loader2,
   Shield,
   Star,
@@ -79,7 +79,6 @@ const SA_PERMISSIONS = [
     icon: Activity,
   },
 ];
-
 
 // ─── Activity table columns ───────────────────────────────────────────────────
 const ACTIVITY_COLUMNS = [

@@ -3,7 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { getCommunicatorConfig, saveCommunicatorConfig } from "@/api/communicatorConfigApi";
+import {
+  getCommunicatorConfig,
+  saveCommunicatorConfig,
+} from "@/api/communicatorConfigApi";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -32,7 +35,10 @@ const QUERY_KEY = ["communicator-config", "integrations"];
 const EMPTY_FORM: ApiIntegrationForm = { name: "", baseUrl: "", apiKey: "" };
 
 const buildId = () => {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return crypto.randomUUID();
   }
 
@@ -77,9 +83,8 @@ export default function ApiIntegration() {
   } = useQuery<ApiConfig[]>({
     queryKey: QUERY_KEY,
     queryFn: async () => {
-      const config = await getCommunicatorConfig<IntegrationConfigPayload>(
-        "integrations",
-      );
+      const config =
+        await getCommunicatorConfig<IntegrationConfigPayload>("integrations");
       return Array.isArray(config.apis) ? config.apis : [];
     },
   });
@@ -183,7 +188,10 @@ export default function ApiIntegration() {
         : api,
     );
 
-    const saved = await saveApis(nextApis, `API "${values.name.trim()}" updated`);
+    const saved = await saveApis(
+      nextApis,
+      `API "${values.name.trim()}" updated`,
+    );
     if (saved) {
       cancelEdit();
     }
@@ -207,7 +215,9 @@ export default function ApiIntegration() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => queryClient.invalidateQueries({ queryKey: QUERY_KEY })}
+            onClick={() =>
+              queryClient.invalidateQueries({ queryKey: QUERY_KEY })
+            }
             disabled={isFetching}
           >
             {isFetching ? (
@@ -225,61 +235,61 @@ export default function ApiIntegration() {
           </CardHeader>
           <CardContent className="space-y-4 p-6">
             <form className="space-y-4" onSubmit={handleNewApiSubmit(addApi)}>
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <div>
-                <Label htmlFor="name">API Name</Label>
-                <Input
-                  id="name"
-                  placeholder="Payment Gateway API"
-                  {...registerNewApi("name")}
-                />
-                {newApiErrors.name && (
-                  <p className="mt-1 text-xs text-destructive">
-                    {newApiErrors.name.message}
-                  </p>
-                )}
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                <div>
+                  <Label htmlFor="name">API Name</Label>
+                  <Input
+                    id="name"
+                    placeholder="Payment Gateway API"
+                    {...registerNewApi("name")}
+                  />
+                  {newApiErrors.name && (
+                    <p className="mt-1 text-xs text-destructive">
+                      {newApiErrors.name.message}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <Label htmlFor="baseUrl">Base URL</Label>
+                  <Input
+                    id="baseUrl"
+                    placeholder="https://api.example.com"
+                    {...registerNewApi("baseUrl")}
+                  />
+                  {newApiErrors.baseUrl && (
+                    <p className="mt-1 text-xs text-destructive">
+                      {newApiErrors.baseUrl.message}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <Label htmlFor="apiKey">API Key</Label>
+                  <Input
+                    id="apiKey"
+                    type="password"
+                    placeholder="sk-..."
+                    {...registerNewApi("apiKey")}
+                  />
+                  {newApiErrors.apiKey && (
+                    <p className="mt-1 text-xs text-destructive">
+                      {newApiErrors.apiKey.message}
+                    </p>
+                  )}
+                </div>
               </div>
-              <div>
-                <Label htmlFor="baseUrl">Base URL</Label>
-                <Input
-                  id="baseUrl"
-                  placeholder="https://api.example.com"
-                  {...registerNewApi("baseUrl")}
-                />
-                {newApiErrors.baseUrl && (
-                  <p className="mt-1 text-xs text-destructive">
-                    {newApiErrors.baseUrl.message}
-                  </p>
+              <Button
+                type="submit"
+                disabled={
+                  isSaving || !newApi.name || !newApi.baseUrl || !newApi.apiKey
+                }
+              >
+                {isSaving ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="mr-2 h-4 w-4" />
                 )}
-              </div>
-              <div>
-                <Label htmlFor="apiKey">API Key</Label>
-                <Input
-                  id="apiKey"
-                  type="password"
-                  placeholder="sk-..."
-                  {...registerNewApi("apiKey")}
-                />
-                {newApiErrors.apiKey && (
-                  <p className="mt-1 text-xs text-destructive">
-                    {newApiErrors.apiKey.message}
-                  </p>
-                )}
-              </div>
-            </div>
-            <Button
-              type="submit"
-              disabled={
-                isSaving || !newApi.name || !newApi.baseUrl || !newApi.apiKey
-              }
-            >
-              {isSaving ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="mr-2 h-4 w-4" />
-              )}
-              Add API
-            </Button>
+                Add API
+              </Button>
             </form>
           </CardContent>
         </Card>
@@ -316,57 +326,53 @@ export default function ApiIntegration() {
                           className="space-y-4"
                           onSubmit={handleEditApiSubmit(saveEdit)}
                         >
-                        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                          <div>
-                            <Label>Name</Label>
-                            <Input
-                              {...registerEditApi("name")}
-                            />
-                            {editApiErrors.name && (
-                              <p className="mt-1 text-xs text-destructive">
-                                {editApiErrors.name.message}
-                              </p>
-                            )}
+                          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                            <div>
+                              <Label>Name</Label>
+                              <Input {...registerEditApi("name")} />
+                              {editApiErrors.name && (
+                                <p className="mt-1 text-xs text-destructive">
+                                  {editApiErrors.name.message}
+                                </p>
+                              )}
+                            </div>
+                            <div>
+                              <Label>Base URL</Label>
+                              <Input {...registerEditApi("baseUrl")} />
+                              {editApiErrors.baseUrl && (
+                                <p className="mt-1 text-xs text-destructive">
+                                  {editApiErrors.baseUrl.message}
+                                </p>
+                              )}
+                            </div>
+                            <div>
+                              <Label>API Key</Label>
+                              <Input
+                                type="password"
+                                {...registerEditApi("apiKey")}
+                              />
+                              {editApiErrors.apiKey && (
+                                <p className="mt-1 text-xs text-destructive">
+                                  {editApiErrors.apiKey.message}
+                                </p>
+                              )}
+                            </div>
                           </div>
-                          <div>
-                            <Label>Base URL</Label>
-                            <Input
-                              {...registerEditApi("baseUrl")}
-                            />
-                            {editApiErrors.baseUrl && (
-                              <p className="mt-1 text-xs text-destructive">
-                                {editApiErrors.baseUrl.message}
-                              </p>
-                            )}
+                          <div className="flex gap-2">
+                            <Button type="submit" disabled={isSaving}>
+                              {isSaving ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              ) : null}
+                              Save Changes
+                            </Button>
+                            <Button
+                              variant="outline"
+                              onClick={cancelEdit}
+                              disabled={isSaving}
+                            >
+                              Cancel
+                            </Button>
                           </div>
-                          <div>
-                            <Label>API Key</Label>
-                            <Input
-                              type="password"
-                              {...registerEditApi("apiKey")}
-                            />
-                            {editApiErrors.apiKey && (
-                              <p className="mt-1 text-xs text-destructive">
-                                {editApiErrors.apiKey.message}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button type="submit" disabled={isSaving}>
-                            {isSaving ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : null}
-                            Save Changes
-                          </Button>
-                          <Button
-                            variant="outline"
-                            onClick={cancelEdit}
-                            disabled={isSaving}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
                         </form>
                       </div>
                     ) : (

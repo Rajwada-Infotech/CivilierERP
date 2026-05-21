@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -76,7 +76,7 @@ const inp =
 
 // ─── Column builder ────────────────────────────────────────────────────────────
 function buildChequeColumns(
-  editingId: string | null,
+  _editingId: string | null,
   deleteId: string | null,
   setDeleteId: (id: string | null) => void,
   handleEdit: (item: DbCheque) => void,
