@@ -4,6 +4,7 @@ import {
   MasterPage,
   type DataChangeEvent,
   type RecordWithId,
+  type FieldDef,
 } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -15,14 +16,44 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import {
-  getCardMasters,
-  addCardMaster,
-  updateCardMaster,
-  deleteCardMaster,
+  getCards as getCardMasters,
+  addCard as addCardMaster,
+  updateCard as updateCardMaster,
+  deleteCard as deleteCardMaster,
 } from "@/api/cardMasterApi";
 
+const fields: FieldDef[] = [
+  { name: "cardNumber", label: "Card No.", type: "text", required: true },
+  {
+    name: "cardType",
+    label: "Card Type",
+    type: "select",
+    options: [
+      "Access",
+      "Security",
+      "Identity",
+      "Contractor",
+      "Visitor",
+      "Other",
+    ],
+  },
+  { name: "holderName", label: "Holder Name", type: "text" },
+  { name: "issuedFor", label: "Issued For", type: "text" },
+  { name: "vendorContractor", label: "Vendor / Contractor", type: "text" },
+  { name: "siteProject", label: "Site / Project", type: "text" },
+  { name: "materialCategory", label: "Material Category", type: "text" },
+  { name: "validity", label: "Validity", type: "date" },
+  {
+    name: "accessLevel",
+    label: "Access Level",
+    type: "select",
+    options: ["Full", "Restricted", "Temporary", "Read-Only"],
+  },
+  { name: "remarks", label: "Remarks", type: "textarea" },
+  { name: "status", label: "Active", type: "toggle" },
+];
+
 const columns = [
-  { key: "cardNumber", label: "Card No." },
   { key: "holderName", label: "Holder" },
   { key: "cardType", label: "Card Type", hideOnMobile: true },
   { key: "siteProject", label: "Site / Project", hideOnMobile: true },
