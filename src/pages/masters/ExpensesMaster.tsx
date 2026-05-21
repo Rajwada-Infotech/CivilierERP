@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccountGroups } from "@/api/accountApi";
 import {
@@ -19,7 +19,6 @@ import {
   Plus,
   Search,
   BookOpen,
-  Tag,
   ChevronDown,
   ChevronsUpDown,
   AlertCircle,
@@ -62,7 +61,7 @@ const EMPTY_FORM: LedgerForm = {
 
 // ─── Column builder ───────────────────────────────────────────────────────────
 function buildExpenseColumns(
-  editingId: number | null,
+  _editingId: number | null,
   deleteConfirm: number | null,
   setDeleteConfirm: (id: number | null) => void,
   startEdit: (l: LedgerHead) => void,
