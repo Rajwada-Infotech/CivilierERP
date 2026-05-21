@@ -10,6 +10,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   DocNumberPreview,
   fetchNextDocNumber,
+  fetchDocTypes,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import {
   getPurchaseOrders,
@@ -745,7 +746,8 @@ const PurchaseOrderMaster: React.FC = () => {
       !woPrefill ||
       companies.length === 0 ||
       allProjects.length === 0 ||
-      suppliers.length === 0
+      suppliers.length === 0 ||
+      uoms.length === 0
     )
       return;
 
@@ -779,14 +781,25 @@ const PurchaseOrderMaster: React.FC = () => {
       const rate = Number(it.rate) || 0;
       const base = qty * rate;
       const taxAmt = (base * totalGst) / 100;
+
+      // Resolve unit string → UOM master entry (match by code or name)
+      const unitNorm = (it.unit || "").trim().toLowerCase();
+      const uomMatch = unitNorm
+        ? uoms.find(
+            (u) =>
+              u.code.toLowerCase() === unitNorm ||
+              u.name.toLowerCase() === unitNorm,
+          )
+        : null;
+
       return {
         id: crypto.randomUUID(),
         itemId: it.itemId || "",
         itemName: it.itemDescription,
         itemDescription: it.itemDescription,
         quantity: qty,
-        uomId: null,
-        unit: it.unit || "",
+        uomId: uomMatch?.id ?? null,
+        unit: uomMatch?.name ?? it.unit ?? "",
         rate,
         cgstRate: halfGst,
         sgstRate: halfGst,
@@ -803,7 +816,13 @@ const PurchaseOrderMaster: React.FC = () => {
     });
     setViewMode("create");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [woPrefill, companies.length, allProjects.length, suppliers.length]);
+  }, [
+    woPrefill,
+    companies.length,
+    allProjects.length,
+    suppliers.length,
+    uoms.length,
+  ]);
 
   const filteredList = useMemo(() => {
     if (!searchQuery.trim()) return listData;
@@ -873,6 +892,22 @@ const PurchaseOrderMaster: React.FC = () => {
     setDocRefreshTrigger((c) => c + 1);
     return nextDocNo;
   };
+
+  // ── Auto-select WO_PO doc type when form is opened from a Work Order ─────
+  useEffect(() => {
+    if (!sourceWO || poDocTypeId) return; // already selected or not a WO-sourced form
+    fetchDocTypes("WO_PO").then(async (docTypes) => {
+      // Lock to the doc type whose Prefix is exactly "WO_PO"
+      const woPo = docTypes.find((d) => d.Prefix === "WO_PO");
+      if (!woPo) return;
+      const nextDocNo = await fetchNextDocNumber(
+        woPo.TypeOfDocId,
+        selectedFinYear || undefined,
+      );
+      applyPoDocNumber(woPo.TypeOfDocId, nextDocNo);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceWO, selectedFinYear]);
 
   // ── Line item helpers ─────────────────────────────────────────────────────
   const updateLine = (idx: number, patch: Partial<POLineItem>) => {
@@ -1563,14 +1598,45 @@ const PurchaseOrderMaster: React.FC = () => {
               </div>
               <div>
                 <FieldLabel>Document Type &amp; Number</FieldLabel>
-                <DocNumberPreview
-                  module="PO"
-                  finYear={selectedFinYear || undefined}
-                  selectedDocTypeId={poDocTypeId}
-                  preview={poDocNo}
-                  refreshTrigger={docRefreshTrigger}
-                  onSelect={applyPoDocNumber}
-                />
+                {sourceWO ? (
+                  // Locked to WO_PO type — no dropdown
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-muted/30 text-foreground">
+                      <Hash
+                        size={13}
+                        className="text-muted-foreground shrink-0"
+                      />
+                      <span className="font-mono text-xs font-semibold text-primary">
+                        WO_PO
+                      </span>
+                      <span className="text-xs opacity-40">·</span>
+                      <span className="text-xs text-muted-foreground">
+                        Work Order for Materials
+                      </span>
+                    </div>
+                    {poDocNo && (
+                      <div className="flex items-center gap-2 px-1">
+                        <span className="font-mono text-sm font-bold text-primary tracking-wider">
+                          {poDocNo}
+                        </span>
+                        {selectedFinYear && (
+                          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading">
+                            FY {selectedFinYear}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <DocNumberPreview
+                    module="PO"
+                    finYear={selectedFinYear || undefined}
+                    selectedDocTypeId={poDocTypeId}
+                    preview={poDocNo}
+                    refreshTrigger={docRefreshTrigger}
+                    onSelect={applyPoDocNumber}
+                  />
+                )}
               </div>
             </div>
           </div>
