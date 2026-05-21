@@ -49,6 +49,28 @@ async function addEscalationComment(pool, ticket) {
     `);
 }
 
+function emitTicketEscalation(escalatedTickets) {
+  try {
+    const { getIo } = require("../socket");
+    const ticketIds = escalatedTickets.map((ticket) => ticket.id);
+    getIo().emit("ticket:escalated", {
+      count: escalatedTickets.length,
+      ticketIds,
+    });
+    getIo().emit("ticket:updated", {
+      action: "escalated",
+      ticketIds,
+    });
+  } catch (err) {
+    if (process.env.NODE_ENV === "development") {
+      logger.warn(
+        { event: "TICKET_ESCALATION_SOCKET_SKIP", err },
+        "Ticket escalation socket emit skipped",
+      );
+    }
+  }
+}
+
 async function runTicketEscalationJob(options = {}) {
   const pool = options.pool || getPool();
   const sla = options.slaMinutes || getTicketEscalationSlaMinutes();
@@ -97,6 +119,7 @@ async function runTicketEscalationJob(options = {}) {
     }
 
     if (escalatedTickets.length > 0) {
+      emitTicketEscalation(escalatedTickets);
       logger.warn(
         { event: "TICKET_ESCALATION_DONE", count: escalatedTickets.length },
         "Ticket auto-escalation completed",
