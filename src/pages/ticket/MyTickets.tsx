@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { unwrapTicketList } from "@/lib/ticketListResponse";
 import { useTicketSync } from "@/hooks/useTicketSync";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -64,15 +65,16 @@ const fmtDate = (d?: string | null) =>
       })
     : null;
 
-const getAuthToken = () =>
-  localStorage.getItem("token") || sessionStorage.getItem("token") || "";
+const attachmentBlobUrlCache = new Map<string, string>();
+let attachmentCacheCleanupRegistered = false;
 
-const withTicketFileToken = (url: string) => {
-  if (url.startsWith("data:") || !url.includes("/api/tickets/file/")) return url;
-  const token = getAuthToken();
-  if (!token) return url;
-  const separator = url.includes("?") ? "&" : "?";
-  return `${url}${separator}token=${encodeURIComponent(token)}`;
+const registerAttachmentCacheCleanup = () => {
+  if (attachmentCacheCleanupRegistered || typeof window === "undefined") return;
+  attachmentCacheCleanupRegistered = true;
+  window.addEventListener("pagehide", () => {
+    attachmentBlobUrlCache.forEach((blobUrl) => URL.revokeObjectURL(blobUrl));
+    attachmentBlobUrlCache.clear();
+  });
 };
 
 const priorityConfig: Record<string, { cls: string; dot: string }> = {
@@ -137,33 +139,70 @@ function AuthenticatedAttachmentImage({
   className: string;
   onClick: () => void;
 }) {
-  const [src, setSrc] = useState(url);
+  const [src, setSrc] = useState(url.startsWith("data:") ? url : "");
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     if (url.startsWith("data:")) {
       setSrc(url);
+      setFailed(false);
       return;
     }
 
     let alive = true;
-    let objectUrl: string | null = null;
+    const cachedSrc = attachmentBlobUrlCache.get(url);
+    if (cachedSrc) {
+      setSrc(cachedSrc);
+      setFailed(false);
+      return () => {
+        alive = false;
+      };
+    }
+
+    setSrc("");
+    setFailed(false);
 
     fetchWithAuth(url)
-      .then((res) => res.blob())
+      .then((res) => {
+        if (!res.ok) throw new Error(`Attachment fetch failed: ${res.status}`);
+        return res.blob();
+      })
       .then((blob) => {
-        if (!alive) return;
-        objectUrl = URL.createObjectURL(blob);
+        const objectUrl = URL.createObjectURL(blob);
+        if (!alive) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        attachmentBlobUrlCache.set(url, objectUrl);
+        registerAttachmentCacheCleanup();
         setSrc(objectUrl);
       })
       .catch(() => {
-        if (alive) setSrc(withTicketFileToken(url));
+        if (alive) setFailed(true);
       });
 
     return () => {
       alive = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [url]);
+
+  if (failed) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="h-24 min-w-24 rounded-lg border border-border bg-muted px-3 text-[11px] text-muted-foreground hover:bg-muted/80"
+      >
+        Preview unavailable
+      </button>
+    );
+  }
+
+  if (!src) {
+    return (
+      <div className="h-24 min-w-24 rounded-lg border border-border bg-muted animate-pulse" />
+    );
+  }
 
   return <img src={src} alt={alt} className={className} onClick={onClick} />;
 }
@@ -248,11 +287,20 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
                   let blobUrl = url;
                   if (!isBase64) {
                     try {
-                      const r = await fetchWithAuth(url);
-                      const blob = await r.blob();
-                      blobUrl = URL.createObjectURL(blob);
+                      const cachedBlobUrl = attachmentBlobUrlCache.get(url);
+                      if (cachedBlobUrl) {
+                        blobUrl = cachedBlobUrl;
+                      } else {
+                        const r = await fetchWithAuth(url);
+                        if (!r.ok) throw new Error(`Attachment fetch failed: ${r.status}`);
+                        const blob = await r.blob();
+                        blobUrl = URL.createObjectURL(blob);
+                        attachmentBlobUrlCache.set(url, blobUrl);
+                        registerAttachmentCacheCleanup();
+                      }
                     } catch {
-                      blobUrl = withTicketFileToken(url);
+                      win.document.body.innerHTML = "<p style=\"color:#ccc;font-family:sans-serif;padding:24px\">Unable to load attachment.</p>";
+                      return;
                     }
                   }
                   const content = isPdf
@@ -329,10 +377,11 @@ const MyTickets: React.FC = () => {
   } = useQuery<Ticket[]>({
     queryKey: ["tickets", isAdmin ? "all" : "my"],
     queryFn: async () => {
-      const endpoint = isAdmin ? "/api/tickets" : "/api/tickets/my";
+      const endpoint = isAdmin ? "/api/tickets?limit=100" : "/api/tickets/my";
       const res = await fetchWithAuth(endpoint);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
+      const payload = await res.json();
+      return unwrapTicketList<Ticket>(payload).data;
     },
     staleTime: 0,
     refetchOnWindowFocus: true,

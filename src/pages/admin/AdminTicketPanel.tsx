@@ -6,6 +6,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   Clock,
   ExternalLink,
@@ -23,6 +24,10 @@ import {
 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
+import {
+  TicketListResponse,
+  unwrapTicketList,
+} from "@/lib/ticketListResponse";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -551,6 +556,8 @@ export default function AdminTicketPanel() {
     "open",
   );
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  const [page, setPage] = useState(1);
+  const limit = 25;
 
   const {
     data: stats,
@@ -572,16 +579,16 @@ export default function AdminTicketPanel() {
   });
 
   const {
-    data: allTickets = [],
+    data: ticketResponse,
     isLoading: ticketsLoading,
     isFetching: ticketsFetching,
     refetch: refetchTickets,
-  } = useQuery<Ticket[]>({
-    queryKey: ["admin-tickets"],
+  } = useQuery<TicketListResponse<Ticket>>({
+    queryKey: ["admin-tickets", page, limit],
     queryFn: async () => {
-      const res = await fetchWithAuth("/api/tickets");
+      const res = await fetchWithAuth(`/api/tickets?page=${page}&limit=${limit}`);
       if (!res.ok) throw new Error("Failed");
-      return res.json();
+      return unwrapTicketList<Ticket>(await res.json());
     },
     staleTime: 0,
     refetchInterval: () =>
@@ -589,6 +596,9 @@ export default function AdminTicketPanel() {
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
   });
+
+  const allTickets = ticketResponse?.data ?? [];
+  const pagination = ticketResponse?.pagination;
 
   const { data: users = [] } = useQuery<AdminUser[]>({
     queryKey: ["admin-ticket-users"],
@@ -711,7 +721,10 @@ export default function AdminTicketPanel() {
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setFilter(tab.id)}
+              onClick={() => {
+                setFilter(tab.id);
+                setPage(1);
+              }}
               className={cn(
                 "py-3 text-center border-b-2 transition-colors",
                 filter === tab.id
@@ -812,6 +825,36 @@ export default function AdminTicketPanel() {
             ))
           )}
         </div>
+
+        {pagination && pagination.totalPages > 1 && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-border bg-muted/20">
+            <span className="text-[11px] text-muted-foreground tabular-nums">
+              Page {pagination.page} of {pagination.totalPages} - {pagination.total} total
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setPage((value) => Math.max(1, value - 1))}
+                disabled={pagination.page <= 1 || ticketsFetching}
+                className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                title="Previous page"
+              >
+                <ChevronLeft size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setPage((value) => Math.min(pagination.totalPages, value + 1))
+                }
+                disabled={pagination.page >= pagination.totalPages || ticketsFetching}
+                className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                title="Next page"
+              >
+                <ChevronRight size={13} />
+              </button>
+            </div>
+          </div>
+        )}
 
         {selectedTicket && (
           <TicketDetailDialog

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
+import { unwrapTicketList } from "@/lib/ticketListResponse";
 import { useTicketSync } from "@/hooks/useTicketSync";
 import { useAuth } from "@/contexts/AuthContext";
 import { DashboardBackground } from "@/components/DashboardBackground";
@@ -268,13 +269,14 @@ export default function TicketDashboard() {
   } = useQuery<Ticket[]>({
     queryKey: ["ticket-dashboard", isAdmin ? "all" : "my"],
     queryFn: async () => {
-      const endpoint = isAdmin ? "/api/tickets" : "/api/tickets/mine";
+      const endpoint = isAdmin ? "/api/tickets?limit=100" : "/api/tickets/mine";
       const res = await fetchWithAuth(endpoint);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body?.error || `HTTP ${res.status}`);
       }
-      return res.json();
+      const payload = await res.json();
+      return unwrapTicketList<Ticket>(payload).data;
     },
     staleTime: 0,
     refetchOnMount: "always",

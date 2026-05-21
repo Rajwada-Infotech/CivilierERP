@@ -8,6 +8,7 @@ const {
   lockNextDocNumber,
   backPatchRecordId,
 } = require("../utils/docNumberLock");
+const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
 
 const requireUserName = (req, res) => {
   const email = req.user?.name;
@@ -293,10 +294,12 @@ router.get(
   cache("work-orders", 300, { shared: true }),
   async (req, res) => {
     try {
+      const id = requireValidId(req, res);
+      if (!id) return;
       const pool = getPool();
       const headerResult = await pool
         .request()
-        .input("Id", sql.Int, req.params.id).query(`
+        .input("Id", sql.Int, id).query(`
         SELECT h.*, ec.name AS CompanyName, ep.name AS ProjectName, ahm.LHeadName AS ContractorName, ams.LHeadName AS SupplierName
         FROM dbo.WorkOrderHeader h
         LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
@@ -310,7 +313,7 @@ router.get(
 
       const activitiesResult = await pool
         .request()
-        .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
+        .input("WorkOrderHeaderId", sql.Int, id).query(`
         SELECT a.*, ag.activity_name AS ActivityGroupName,
           act.activity_name AS ActivityName, uom.UOMName
         FROM dbo.WorkOrderActivities a
@@ -322,7 +325,7 @@ router.get(
 
       const materialsResult = await pool
         .request()
-        .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
+        .input("WorkOrderHeaderId", sql.Int, id).query(`
         SELECT m.*, img.M_Name AS ItemName, uom.UOMName,
           CAST(m.ItemId AS NVARCHAR(36)) AS ItemIdStr,
           ISNULL(m.GSTRate, 0) AS GSTRate,
@@ -452,8 +455,11 @@ router.post("/", async (req, res) => {
 });
 
 router.put("/:id", async (req, res) => {
+  const id = requireValidId(req, res);
+  if (!id) return;
+
   try {
-    await guardEdit("work-orders", req.params.id);
+    await guardEdit("work-orders", id);
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
@@ -480,9 +486,9 @@ router.put("/:id", async (req, res) => {
     : null;
   try {
     const pool = getPool();
-    await pool
+    const result = await pool
       .request()
-      .input("Id", sql.Int, req.params.id)
+      .input("Id", sql.Int, id)
       .input("CompanyId", sql.Int, CompanyId || null)
       .input("ProjectId", sql.Int, ProjectId || null)
       .input("DocumentNumber", sql.NVarChar(100), DocumentNumber || null)
@@ -511,6 +517,7 @@ router.put("/:id", async (req, res) => {
           UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt, GST=@GST, BoqID=@BoqID
         WHERE Id=@Id
       `);
+    if (!checkRowsAffected(result, res, "Work order")) return;
     await bumpCacheVersion("work-orders");
     res.json({ message: "Work order updated" });
   } catch (err) {
@@ -521,8 +528,10 @@ router.put("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
+    const id = requireValidId(req, res);
+    if (!id) return;
     const pool = getPool();
-    await pool.request().input("WorkOrderHeaderId", sql.Int, req.params.id)
+    await pool.request().input("WorkOrderHeaderId", sql.Int, id)
       .query(`
       DELETE m FROM dbo.WorkOrderActivityMaterials m
       INNER JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
@@ -530,14 +539,15 @@ router.delete("/:id", async (req, res) => {
     `);
     await pool
       .request()
-      .input("WorkOrderHeaderId", sql.Int, req.params.id)
+      .input("WorkOrderHeaderId", sql.Int, id)
       .query(
         "DELETE FROM dbo.WorkOrderActivities WHERE WorkOrderHeaderId = @WorkOrderHeaderId",
       );
-    await pool
+    const result = await pool
       .request()
-      .input("Id", sql.Int, req.params.id)
+      .input("Id", sql.Int, id)
       .query("DELETE FROM dbo.WorkOrderHeader WHERE Id = @Id");
+    if (!checkRowsAffected(result, res, "Work order")) return;
     await bumpCacheVersion("work-orders");
     res.json({ message: "Work order and all related records deleted" });
   } catch (err) {
@@ -552,10 +562,12 @@ router.delete("/:id", async (req, res) => {
 
 router.get("/:id/activities", async (req, res) => {
   try {
+    const id = requireValidId(req, res);
+    if (!id) return;
     const pool = getPool();
     const result = await pool
       .request()
-      .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
+      .input("WorkOrderHeaderId", sql.Int, id).query(`
         SELECT
           a.Id, a.WorkOrderHeaderId, a.ActivityGroupId, a.ActivityId,
           a.UOMId, a.Rate, a.Area, a.LabourAmount, a.MaterialAmount,
@@ -588,6 +600,9 @@ router.get("/:id/activities", async (req, res) => {
 });
 
 router.post("/:id/activities", async (req, res) => {
+  const id = requireValidId(req, res);
+  if (!id) return;
+
   const {
     ActivityGroupId,
     ActivityId,
@@ -600,10 +615,10 @@ router.post("/:id/activities", async (req, res) => {
     Remarks,
   } = req.body;
   try {
-    const pool = getPool();
-    const headerRow = await pool
+      const pool = getPool();
+      const headerRow = await pool
       .request()
-      .input("HeaderId", sql.Int, req.params.id)
+      .input("HeaderId", sql.Int, id)
       .query(
         "SELECT DocumentNumber FROM dbo.WorkOrderHeader WHERE Id = @HeaderId",
       );
@@ -611,7 +626,7 @@ router.post("/:id/activities", async (req, res) => {
 
     const result = await pool
       .request()
-      .input("WorkOrderHeaderId", sql.Int, req.params.id)
+      .input("WorkOrderHeaderId", sql.Int, id)
       .input("DocNo", sql.NVarChar(100), docNo)
       .input("ActivityGroupId", sql.Int, ActivityGroupId || null)
       .input("ActivityId", sql.Int, ActivityId || null)
@@ -642,6 +657,8 @@ router.post("/:id/activities", async (req, res) => {
 });
 
 router.put("/:id/activities/:activityId", async (req, res) => {
+  if (!requireValidId(req, res)) return;
+
   const {
     ActivityGroupId,
     ActivityId,
@@ -655,7 +672,7 @@ router.put("/:id/activities/:activityId", async (req, res) => {
   } = req.body;
   try {
     const pool = getPool();
-    await pool
+    const result = await pool
       .request()
       .input("Id", sql.Int, req.params.activityId)
       .input("ActivityGroupId", sql.Int, ActivityGroupId || null)
@@ -673,6 +690,7 @@ router.put("/:id/activities/:activityId", async (req, res) => {
           MaterialAmount=@MaterialAmount, GrandTotal=@GrandTotal, Remarks=@Remarks
         WHERE Id=@Id
       `);
+    if (!checkRowsAffected(result, res, "Work order activity")) return;
     await bumpCacheVersion("work-orders");
     res.json({ message: "Activity updated" });
   } catch (err) {
@@ -683,6 +701,7 @@ router.put("/:id/activities/:activityId", async (req, res) => {
 
 router.delete("/:id/activities/:activityId", async (req, res) => {
   try {
+    if (!requireValidId(req, res)) return;
     const pool = getPool();
     await pool
       .request()
@@ -690,10 +709,11 @@ router.delete("/:id/activities/:activityId", async (req, res) => {
       .query(
         "DELETE FROM dbo.WorkOrderActivityMaterials WHERE WorkOrderActivityId = @WorkOrderActivityId",
       );
-    await pool
+    const result = await pool
       .request()
       .input("Id", sql.Int, req.params.activityId)
       .query("DELETE FROM dbo.WorkOrderActivities WHERE Id = @Id");
+    if (!checkRowsAffected(result, res, "Work order activity")) return;
     await bumpCacheVersion("work-orders");
     res.json({ message: "Activity and its materials deleted" });
   } catch (err) {
@@ -711,6 +731,7 @@ router.get(
   cache("work-orders", 300, { shared: true }),
   async (req, res) => {
     try {
+      if (!requireValidId(req, res)) return;
       const pool = getPool();
       const result = await pool
         .request()
@@ -738,6 +759,8 @@ router.get(
  * DocNo is fetched from the WorkOrderHeader via the activity's WorkOrderHeaderId
  */
 router.post("/:id/activities/:activityId/materials", async (req, res) => {
+  if (!requireValidId(req, res)) return;
+
   const { ItemId, UOMId, Quantity, Rate, Remarks, SupplierIdPerLine } =
     req.body;
 
@@ -798,11 +821,13 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
 router.put(
   "/:id/activities/:activityId/materials/:materialId",
   async (req, res) => {
+    if (!requireValidId(req, res)) return;
+
     const { ItemId, UOMId, Quantity, Rate, Remarks, SupplierIdPerLine } =
       req.body;
     try {
       const pool = getPool();
-      await pool
+      const result = await pool
         .request()
         .input("Id", sql.Int, req.params.materialId)
         .input("ItemId", sql.UniqueIdentifier, ItemId || null)
@@ -823,6 +848,7 @@ router.put(
           UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
         WHERE Id=@Id
       `);
+      if (!checkRowsAffected(result, res, "Work order material")) return;
       await bumpCacheVersion("work-orders");
       res.json({ message: "Material updated" });
     } catch (err) {
@@ -836,11 +862,13 @@ router.delete(
   "/:id/activities/:activityId/materials/:materialId",
   async (req, res) => {
     try {
+      if (!requireValidId(req, res)) return;
       const pool = getPool();
-      await pool
+      const result = await pool
         .request()
         .input("Id", sql.Int, req.params.materialId)
         .query("DELETE FROM dbo.WorkOrderActivityMaterials WHERE Id = @Id");
+      if (!checkRowsAffected(result, res, "Work order material")) return;
       await bumpCacheVersion("work-orders");
       res.json({ message: "Material deleted" });
     } catch (err) {
@@ -854,7 +882,8 @@ router.delete(
 //  BULK SAVE  —  POST /api/work-orders/:id/save-full
 // =============================================
 router.post("/:id/save-full", async (req, res) => {
-  const headerId = parseInt(req.params.id);
+  const headerId = requireValidId(req, res);
+  if (!headerId) return;
   const { header, activities } = req.body;
 
   if (!Array.isArray(activities))
@@ -887,7 +916,7 @@ router.post("/:id/save-full", async (req, res) => {
       null;
 
     // 1. Update header
-    await pool
+    const headerUpdate = await pool
       .request()
       .input("Id", sql.Int, headerId)
       .input("CompanyId", sql.Int, header.CompanyId || null)
@@ -931,6 +960,7 @@ router.post("/:id/save-full", async (req, res) => {
           UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt, GST=@GST, BoqID=@BoqID
         WHERE Id=@Id
       `);
+    if (!checkRowsAffected(headerUpdate, res, "Work order")) return;
 
     // 2. Re-fetch DocumentNumber to use as DocNo FK in every INSERT
     const docNo = stableDocNo;
@@ -1155,7 +1185,8 @@ router.post("/:id/save-full", async (req, res) => {
 // ── Approval transitions ──────────────────────────────────────────────────────
 
 router.put("/:id/submit", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = requireValidId(req, res);
+  if (!id) return;
   try {
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
@@ -1174,7 +1205,8 @@ router.put("/:id/submit", async (req, res) => {
 });
 
 router.put("/:id/approve", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = requireValidId(req, res);
+  if (!id) return;
   try {
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
@@ -1195,7 +1227,8 @@ router.put("/:id/approve", async (req, res) => {
 });
 
 router.put("/:id/reject", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = requireValidId(req, res);
+  if (!id) return;
   const { note } = req.body;
   try {
     const userEmail = requireUserName(req, res);
@@ -1226,7 +1259,8 @@ router.put("/:id/reject", async (req, res) => {
 // (they produce one combined WO-PO with no supplier set).
 //
 router.post("/:id/confirm", async (req, res) => {
-  const headerId = parseInt(req.params.id, 10);
+  const headerId = requireValidId(req, res);
+  if (!headerId) return;
   const userEmail = requireUserName(req, res);
   if (!userEmail) return;
 

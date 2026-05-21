@@ -82,6 +82,12 @@ function parseTicketId(param) {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
+function parsePositiveInt(value, fallback, max) {
+  const parsed = Number(value);
+  const normalized = Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+  return Math.min(normalized, max);
+}
+
 function sendTicketAccessError(res, access) {
   if (access.status === 404) {
     return res.status(404).json({ error: "Ticket not found" });
@@ -133,14 +139,47 @@ router.get("/", async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
     }
 
+    const page = parsePositiveInt(req.query.page, 1, Number.MAX_SAFE_INTEGER);
+    const limit = parsePositiveInt(req.query.limit, 25, 100);
+    const offset = (page - 1) * limit;
+
     const pool = getPool();
-    const result = await pool.request().query(`
-      SELECT t.*,
-             (SELECT COUNT(*) FROM dbo.ticket_comments tc WHERE tc.ticket_id = t.id) AS comment_count
-      FROM dbo.tickets t
-      ORDER BY t.id DESC
-    `);
-    res.json(result.recordset ?? []);
+    const result = await pool
+      .request()
+      .input("offset", sql.Int, offset)
+      .input("limit", sql.Int, limit).query(`
+        SELECT
+          t.id, t.subject, t.priority, t.customer_name, t.customer_phone,
+          t.company_id, t.project_id, t.status, t.created_at,
+          t.assigned_to, t.assigned_to_id,
+          t.resolved_by, t.resolved_by_id,
+          t.created_by, t.created_by_id,
+          t.updated_at, t.resolved_at, t.closed_at,
+          ISNULL(c.comment_count, 0) AS comment_count
+        FROM dbo.tickets t
+        LEFT JOIN (
+          SELECT ticket_id, COUNT(*) AS comment_count
+          FROM dbo.ticket_comments
+          GROUP BY ticket_id
+        ) c ON c.ticket_id = t.id
+        ORDER BY t.id DESC
+        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      `);
+
+    const countResult = await pool
+      .request()
+      .query("SELECT COUNT(*) AS total FROM dbo.tickets");
+    const total = countResult.recordset[0]?.total ?? 0;
+
+    res.json({
+      data: result.recordset ?? [],
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
   } catch (err) {
     console.error("[Tickets GET /]", err.message);
     res.status(500).json({ error: err.message });

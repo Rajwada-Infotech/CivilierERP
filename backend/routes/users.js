@@ -8,6 +8,7 @@ const { blacklistToken } = require("../middleware/blacklist");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const allowRoles = require("../middleware/role");
+const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
 
 // Privileged roles that can always list users (Password Reset, User Management)
 const PRIVILEGED_ROLES = ["super_admin", "admin", "dba"];
@@ -276,7 +277,8 @@ router.put(
   authMiddleware,
   checkPermission("Users", "List", "CanEdit"),
   async (req, res) => {
-    const { id } = req.params;
+    const id = requireValidId(req, res);
+    if (!id) return;
     const { name, email, RoleId, roleId, discontinue } = req.body;
     try {
       const pool = getPool();
@@ -291,14 +293,15 @@ router.put(
         roleId === undefined;
 
       if (isToggleOnly) {
-        await pool
+        const result = await pool
           .request()
           .input("id", sql.Int, id)
           .input("discontinue", sql.Bit, discontinue ? 1 : 0)
           .query(`UPDATE dbo.users SET discontinue=@discontinue WHERE id=@id`);
+        if (!checkRowsAffected(result, res, "User")) return;
       } else {
         const assignedRoleId = Number(RoleId ?? roleId);
-        await pool
+        const result = await pool
           .request()
           .input("id", sql.Int, id)
           .input("name", sql.NVarChar, name)
@@ -309,6 +312,7 @@ router.put(
           SET name=@name, email=@email, RoleId=@RoleId, discontinue=@discontinue
           WHERE id=@id
         `);
+        if (!checkRowsAffected(result, res, "User")) return;
       }
 
       res.json({ message: "User updated" });
@@ -335,16 +339,18 @@ router.delete(
   authMiddleware,
   checkPermission("Users", "List", "CanDelete"),
   async (req, res) => {
-    const { id } = req.params;
-    if (parseInt(id) === req.user?.userId) {
+    const id = requireValidId(req, res);
+    if (!id) return;
+    if (id === req.user?.userId) {
       return res.status(400).json({ error: "Cannot delete yourself" });
     }
     try {
       const pool = getPool();
-      await pool
+      const result = await pool
         .request()
         .input("id", sql.Int, id)
         .query("DELETE FROM dbo.users WHERE id=@id");
+      if (!checkRowsAffected(result, res, "User")) return;
       res.json({ message: "User deleted" });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -362,7 +368,8 @@ router.patch(
   authMiddleware,
   checkPermission("Users", "List", "CanEdit"),
   async (req, res) => {
-    const { id } = req.params;
+    const id = requireValidId(req, res);
+    if (!id) return;
     const { pagePermissions } = req.body;
 
     if (!Array.isArray(pagePermissions)) {
@@ -397,7 +404,8 @@ router.patch(
   authMiddleware,
   checkPermission("Users", "List", "CanEdit"),
   async (req, res) => {
-    const { id } = req.params;
+    const id = requireValidId(req, res);
+    if (!id) return;
     const { new_password } = req.body;
 
     if (!new_password || new_password.length < 6) {
@@ -409,11 +417,12 @@ router.patch(
     try {
       const pool = getPool();
       const hashed = await bcrypt.hash(new_password, SALT_ROUNDS);
-      await pool
+      const result = await pool
         .request()
         .input("id", sql.Int, id)
         .input("password", sql.NVarChar, hashed)
         .query("UPDATE dbo.users SET password = @password WHERE id = @id");
+      if (!checkRowsAffected(result, res, "User")) return;
 
       res.json({ message: "Password reset successfully" });
     } catch (err) {

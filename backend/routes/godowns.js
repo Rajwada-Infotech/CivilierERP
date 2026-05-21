@@ -3,6 +3,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
 
 // ─── GET all godowns ──────────────────────────────────────────────────────────
 router.get("/", cache("godowns", 120), async (req, res) => {
@@ -34,10 +35,12 @@ router.get("/", cache("godowns", 120), async (req, res) => {
 // ─── GET single godown ────────────────────────────────────────────────────────
 router.get("/:id", async (req, res) => {
   try {
+    const id = requireValidId(req, res);
+    if (!id) return;
     const pool = getPool();
     const result = await pool
       .request()
-      .input("id", sql.Int, parseInt(req.params.id)).query(`
+      .input("id", sql.Int, id).query(`
         SELECT g.*, e.name AS EnterpriseName, p.Name AS ProjectName
         FROM dbo.Godowns g
         LEFT JOIN dbo.enterprise e ON e.id = g.EnterpriseID
@@ -109,7 +112,8 @@ router.post("/", async (req, res) => {
 // ─── PUT update godown ────────────────────────────────────────────────────────
 router.put("/:id", async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = requireValidId(req, res);
+    if (!id) return;
     const {
       GodownCode,
       GodownName,
@@ -134,7 +138,7 @@ router.put("/:id", async (req, res) => {
     if (!check.recordset.length)
       return res.status(404).json({ error: "Godown not found" });
 
-    await pool
+    const result = await pool
       .request()
       .input("id", sql.Int, id)
       .input("GodownCode", sql.NVarChar(50), GodownCode?.trim() || null)
@@ -163,6 +167,7 @@ router.put("/:id", async (req, res) => {
           UpdatedAt    = SYSDATETIME()
         WHERE GodownID = @id AND IsDeleted = 0
       `);
+    if (!checkRowsAffected(result, res, "Godown")) return;
 
     await bumpCacheVersion("godowns");
     res.json({ message: "Godown updated" });
@@ -174,7 +179,8 @@ router.put("/:id", async (req, res) => {
 // ─── DELETE (soft) godown ─────────────────────────────────────────────────────
 router.delete("/:id", async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = requireValidId(req, res);
+    if (!id) return;
     const pool = getPool();
 
     const check = await pool
@@ -188,12 +194,13 @@ router.delete("/:id", async (req, res) => {
     if (check.recordset[0].IsMain)
       return res.status(400).json({ error: "Cannot delete the Main Godown" });
 
-    await pool
+    const result = await pool
       .request()
       .input("id", sql.Int, id)
       .query(
         "UPDATE dbo.Godowns SET IsDeleted=1, UpdatedAt=SYSDATETIME() WHERE GodownID=@id",
       );
+    if (!checkRowsAffected(result, res, "Godown")) return;
 
     await bumpCacheVersion("godowns");
     res.json({ message: "Godown deleted" });
