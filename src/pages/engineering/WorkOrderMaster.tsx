@@ -253,6 +253,9 @@ interface WorkOrderMaterialDetail {
   Quantity: number;
   Rate: number;
   Remarks?: string;
+  GSTRate?: number | null;
+  SupplierIdPerLine?: number | null;
+  SupplierNamePerLine?: string | null;
 }
 
 interface WorkOrderActivityDetail {
@@ -269,6 +272,10 @@ interface WorkOrderActivityDetail {
   MaterialAmount: number;
   GrandTotal: number;
   Remarks?: string;
+  HsnCode?: string | null;
+  HsnGstRate?: number | null;
+  HsnGstType?: string | null;
+  BoqID?: number | null;
   materials: WorkOrderMaterialDetail[];
 }
 

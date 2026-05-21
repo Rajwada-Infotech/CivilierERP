@@ -124,7 +124,7 @@ export default function ApiIntegration() {
           name: values.name.trim(),
           baseUrl: values.baseUrl.trim(),
           apiKey: values.apiKey.trim(),
-          status: "active",
+          status: "active" as const,
         },
       ],
       `API "${values.name.trim()}" saved`,

@@ -8,32 +8,55 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
-  CheckCircle, Shield, Users, AlertCircle,
-  Plus, Edit, Trash2, Search,
+  CheckCircle,
+  Shield,
+  Users,
+  AlertCircle,
+  Plus,
+  Edit,
+  Trash2,
+  Search,
 } from "lucide-react";
 import { PageKey } from "@/contexts/AuthContext";
 import {
-  Dialog, DialogContent, DialogDescription,
-  DialogHeader, DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Form, FormControl, FormField, FormItem,
-  FormLabel, FormMessage,
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import {
-  Select, SelectContent, SelectItem,
-  SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Card, CardContent, CardDescription,
-  CardHeader, CardTitle,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
 } from "@/components/ui/card";
 import {
-  Table, TableBody, TableCell, TableHead,
-  TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 
@@ -86,51 +109,66 @@ async function apiDelete(id: number) {
 
 // ── Form schema ────────────────────────────────────────────────────────────────
 const formSchema = z.object({
-  name:        z.string().min(1, "Name is required"),
-  module:      z.string().min(1, "Module is required"),
-  levels:      z.number().min(1).max(5),
-  approvers:   z.string().transform((val) =>
-    val.split(",").map((s) => s.trim()).filter((s) => s)
+  name: z.string().min(1, "Name is required"),
+  module: z.string().min(1, "Module is required"),
+  levels: z.number().min(1).max(5),
+  approvers: z.string().transform((val) =>
+    val
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s),
   ),
-  status:      z.enum(["Active", "Inactive"]),
+  status: z.enum(["Active", "Inactive"]),
   description: z.string().optional(),
 });
 
 type FormData = z.infer<typeof formSchema>;
 
-const defaultFormValues = {
-  name: "", module: "", levels: 1,
-  approvers: "", status: "Active" as const, description: "",
+const defaultFormValues: z.input<typeof formSchema> = {
+  name: "",
+  module: "",
+  levels: 1,
+  approvers: "",
+  status: "Active" as const,
+  description: "",
 };
 
 const MODULE_OPTIONS = [
-  "AccountHeadMaster", "PurchaseOrders", "WorkOrderHeader",
-  "NewPayment", "ChequeMaster", "Expenses", "Accounts", "Purchases",
+  "AccountHeadMaster",
+  "PurchaseOrders",
+  "WorkOrderHeader",
+  "NewPayment",
+  "ChequeMaster",
+  "Expenses",
+  "Accounts",
+  "Purchases",
 ];
 
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function ApprovalSetup() {
   const queryClient = useQueryClient();
-  const [openCreate, setOpenCreate]           = useState(false);
-  const [openEdit, setOpenEdit]               = useState(false);
+  const [openCreate, setOpenCreate] = useState(false);
+  const [openEdit, setOpenEdit] = useState(false);
   const [editingWorkflow, setEditingWorkflow] = useState<Workflow | null>(null);
-  const [searchTerm, setSearchTerm]           = useState("");
-  const [statusFilter, setStatusFilter]       = useState<"all" | "Active" | "Inactive">("all");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "Active" | "Inactive"
+  >("all");
   const { canDoAction } = useAuth() as any;
 
   const { data: workflows = [], isLoading } = useQuery<Workflow[]>({
     queryKey: ["approval-workflows"],
     queryFn: fetchWorkflows,
-    staleTime: 30_000,          // don't refetch for 30s after a successful load
+    staleTime: 30_000, // don't refetch for 30s after a successful load
     refetchOnWindowFocus: false, // stop refetching every tab switch
   });
 
-  const createForm = useForm<FormData>({
+  const createForm = useForm<z.input<typeof formSchema>, unknown, FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: defaultFormValues,
   });
 
-  const editForm = useForm<FormData>({
+  const editForm = useForm<z.input<typeof formSchema>, unknown, FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: defaultFormValues,
   });
@@ -140,163 +178,213 @@ export default function ApprovalSetup() {
       const matchSearch =
         w.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (w.module || "").toLowerCase().includes(searchTerm.toLowerCase());
-      const matchStatus =
-        statusFilter === "all" || w.status === statusFilter;
+      const matchStatus = statusFilter === "all" || w.status === statusFilter;
       return matchSearch && matchStatus;
     });
   }, [workflows, searchTerm, statusFilter]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
-  const onCreateSubmit = useCallback(async (data: FormData) => {
-    try {
-      await apiCreate(data);
-      toast.success("Workflow created successfully");
-      queryClient.invalidateQueries({ queryKey: ["approval-workflows"] });
-      createForm.reset(defaultFormValues);
-      setOpenCreate(false);
-    } catch (err: any) {
-      toast.error(err.message);
-    }
-  }, [createForm, queryClient]);
+  const onCreateSubmit = useCallback(
+    async (data: FormData) => {
+      try {
+        await apiCreate(data);
+        toast.success("Workflow created successfully");
+        queryClient.invalidateQueries({ queryKey: ["approval-workflows"] });
+        createForm.reset(defaultFormValues);
+        setOpenCreate(false);
+      } catch (err: any) {
+        toast.error(err.message);
+      }
+    },
+    [createForm, queryClient],
+  );
 
-  const onEditSubmit = useCallback(async (data: FormData) => {
-    if (!editingWorkflow) return;
-    try {
-      await apiUpdate(editingWorkflow.id, data);
-      toast.success("Workflow updated successfully");
-      queryClient.invalidateQueries({ queryKey: ["approval-workflows"] });
-      editForm.reset(defaultFormValues);
-      setOpenEdit(false);
-      setEditingWorkflow(null);
-    } catch (err: any) {
-      toast.error(err.message);
-    }
-  }, [editingWorkflow, editForm, queryClient]);
+  const onEditSubmit = useCallback(
+    async (data: FormData) => {
+      if (!editingWorkflow) return;
+      try {
+        await apiUpdate(editingWorkflow.id, data);
+        toast.success("Workflow updated successfully");
+        queryClient.invalidateQueries({ queryKey: ["approval-workflows"] });
+        editForm.reset(defaultFormValues);
+        setOpenEdit(false);
+        setEditingWorkflow(null);
+      } catch (err: any) {
+        toast.error(err.message);
+      }
+    },
+    [editingWorkflow, editForm, queryClient],
+  );
 
-  const toggleStatus = useCallback(async (id: number) => {
-    try {
-      await apiToggle(id);
-      toast.success("Workflow status updated");
-      queryClient.invalidateQueries({ queryKey: ["approval-workflows"] });
-    } catch (err: any) {
-      toast.error(err.message);
-    }
-  }, [queryClient]);
+  const toggleStatus = useCallback(
+    async (id: number) => {
+      try {
+        await apiToggle(id);
+        toast.success("Workflow status updated");
+        queryClient.invalidateQueries({ queryKey: ["approval-workflows"] });
+      } catch (err: any) {
+        toast.error(err.message);
+      }
+    },
+    [queryClient],
+  );
 
-  const deleteWorkflow = useCallback(async (id: number) => {
-    if (!confirm("Delete this workflow?")) return;
-    try {
-      await apiDelete(id);
-      toast.success("Workflow deleted");
-      queryClient.invalidateQueries({ queryKey: ["approval-workflows"] });
-    } catch (err: any) {
-      toast.error(err.message);
-    }
-  }, [queryClient]);
+  const deleteWorkflow = useCallback(
+    async (id: number) => {
+      if (!confirm("Delete this workflow?")) return;
+      try {
+        await apiDelete(id);
+        toast.success("Workflow deleted");
+        queryClient.invalidateQueries({ queryKey: ["approval-workflows"] });
+      } catch (err: any) {
+        toast.error(err.message);
+      }
+    },
+    [queryClient],
+  );
 
-  const openEditDialog = useCallback((w: Workflow) => {
-    setEditingWorkflow(w);
-    editForm.reset({
-      name:        w.name,
-      module:      w.module || "",
-      levels:      w.levels,
-      approvers:   w.approvers.join(", "),
-      status:      w.status,
-      description: w.description || "",
-    });
-    setOpenEdit(true);
-  }, [editForm]);
+  const openEditDialog = useCallback(
+    (w: Workflow) => {
+      setEditingWorkflow(w);
+      editForm.reset({
+        name: w.name,
+        module: w.module || "",
+        levels: w.levels,
+        approvers: w.approvers.join(", "),
+        status: w.status,
+        description: w.description || "",
+      });
+      setOpenEdit(true);
+    },
+    [editForm],
+  );
 
   // ── Shared form fields ─────────────────────────────────────────────────────────
   const renderFormFields = (form: typeof createForm) => (
     <>
-      <FormField control={form.control} name="name" render={({ field }) => (
-        <FormItem>
-          <FormLabel>Workflow Name</FormLabel>
-          <FormControl><Input placeholder="e.g. Purchase Approval" {...field} /></FormControl>
-          <FormMessage />
-        </FormItem>
-      )} />
-
-      <FormField control={form.control} name="module" render={({ field }) => (
-        <FormItem>
-          <FormLabel>Module</FormLabel>
-          <Select onValueChange={field.onChange} value={field.value}>
+      <FormField
+        control={form.control}
+        name="name"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Workflow Name</FormLabel>
             <FormControl>
-              <SelectTrigger><SelectValue placeholder="Select module" /></SelectTrigger>
+              <Input placeholder="e.g. Purchase Approval" {...field} />
             </FormControl>
-            <SelectContent>
-              {MODULE_OPTIONS.map(m => (
-                <SelectItem key={m} value={m}>{m}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <FormMessage />
-        </FormItem>
-      )} />
+            <FormMessage />
+          </FormItem>
+        )}
+      />
 
-      <FormField control={form.control} name="levels" render={({ field }) => (
-        <FormItem>
-          <FormLabel>Approval Levels</FormLabel>
-          <FormControl>
-            <Input type="number" min={1} max={5}
-              {...field}
-              onChange={e => field.onChange(parseInt(e.target.value) || 1)}
-            />
-          </FormControl>
-          <FormMessage />
-        </FormItem>
-      )} />
+      <FormField
+        control={form.control}
+        name="module"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Module</FormLabel>
+            <Select onValueChange={field.onChange} value={field.value}>
+              <FormControl>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select module" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                {MODULE_OPTIONS.map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {m}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
 
-      <FormField control={form.control} name="approvers" render={({ field }) => (
-        <FormItem>
-          <FormLabel>Approvers (comma-separated roles)</FormLabel>
-          <FormControl>
-            <Input placeholder="e.g. Manager, Director, CFO" {...field} />
-          </FormControl>
-          <FormMessage />
-        </FormItem>
-      )} />
-
-      <FormField control={form.control} name="status" render={({ field }) => (
-        <FormItem>
-          <FormLabel>Status</FormLabel>
-          <Select onValueChange={field.onChange} value={field.value}>
+      <FormField
+        control={form.control}
+        name="levels"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Approval Levels</FormLabel>
             <FormControl>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <Input
+                type="number"
+                min={1}
+                max={5}
+                {...field}
+                onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
+              />
             </FormControl>
-            <SelectContent>
-              <SelectItem value="Active">Active</SelectItem>
-              <SelectItem value="Inactive">Inactive</SelectItem>
-            </SelectContent>
-          </Select>
-          <FormMessage />
-        </FormItem>
-      )} />
+            <FormMessage />
+          </FormItem>
+        )}
+      />
 
-      <FormField control={form.control} name="description" render={({ field }) => (
-        <FormItem>
-          <FormLabel>Description</FormLabel>
-          <FormControl>
-            <Textarea placeholder="Optional description..." {...field} />
-          </FormControl>
-          <FormMessage />
-        </FormItem>
-      )} />
+      <FormField
+        control={form.control}
+        name="approvers"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Approvers (comma-separated roles)</FormLabel>
+            <FormControl>
+              <Input placeholder="e.g. Manager, Director, CFO" {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+
+      <FormField
+        control={form.control}
+        name="status"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Status</FormLabel>
+            <Select onValueChange={field.onChange} value={field.value}>
+              <FormControl>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                <SelectItem value="Active">Active</SelectItem>
+                <SelectItem value="Inactive">Inactive</SelectItem>
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+
+      <FormField
+        control={form.control}
+        name="description"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Description</FormLabel>
+            <FormControl>
+              <Textarea placeholder="Optional description..." {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
     </>
   );
 
-  if (isLoading) return (
-    <div className="p-6 space-y-4 animate-pulse">
-      <div className="h-6 w-48 bg-muted rounded" />
-      <div className="grid grid-cols-4 gap-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="h-24 bg-muted rounded-xl" />
-        ))}
+  if (isLoading)
+    return (
+      <div className="p-6 space-y-4 animate-pulse">
+        <div className="h-6 w-48 bg-muted rounded" />
+        <div className="grid grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-24 bg-muted rounded-xl" />
+          ))}
+        </div>
+        <div className="h-64 bg-muted rounded-xl" />
       </div>
-      <div className="h-64 bg-muted rounded-xl" />
-    </div>
-  );
+    );
 
   return (
     <>
@@ -306,10 +394,17 @@ export default function ApprovalSetup() {
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <CheckCircle className="text-primary" /> Approval Setup
           </h1>
-          <p className="text-muted-foreground text-sm">Configure approval workflows and levels</p>
+          <p className="text-muted-foreground text-sm">
+            Configure approval workflows and levels
+          </p>
         </div>
         {canDoAction("admin_approval_setup" as PageKey, "create") && (
-          <Button onClick={() => { createForm.reset(defaultFormValues); setOpenCreate(true); }}>
+          <Button
+            onClick={() => {
+              createForm.reset(defaultFormValues);
+              setOpenCreate(true);
+            }}
+          >
             <Plus className="mr-2 h-4 w-4" /> New Workflow
           </Button>
         )}
@@ -320,29 +415,52 @@ export default function ApprovalSetup() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>New Workflow</DialogTitle>
-            <DialogDescription>Create a new approval workflow.</DialogDescription>
+            <DialogDescription>
+              Create a new approval workflow.
+            </DialogDescription>
           </DialogHeader>
           <Form {...createForm}>
-            <form onSubmit={createForm.handleSubmit(onCreateSubmit)} className="space-y-4">
+            <form
+              onSubmit={createForm.handleSubmit(onCreateSubmit)}
+              className="space-y-4"
+            >
               {renderFormFields(createForm)}
-              <Button type="submit" className="w-full">Create Workflow</Button>
+              <Button type="submit" className="w-full">
+                Create Workflow
+              </Button>
             </form>
           </Form>
         </DialogContent>
       </Dialog>
 
       {/* Edit Dialog */}
-      <Dialog open={openEdit} onOpenChange={(open) => { setOpenEdit(open); if (!open) setEditingWorkflow(null); }}>
+      <Dialog
+        open={openEdit}
+        onOpenChange={(open) => {
+          setOpenEdit(open);
+          if (!open) setEditingWorkflow(null);
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Edit Workflow</DialogTitle>
-            <DialogDescription>Update the approval workflow details.</DialogDescription>
+            <DialogDescription>
+              Update the approval workflow details.
+            </DialogDescription>
           </DialogHeader>
           <Form {...editForm}>
-            <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
+            <form
+              onSubmit={editForm.handleSubmit(onEditSubmit)}
+              className="space-y-4"
+            >
               {renderFormFields(editForm)}
-              <Button type="submit" className="w-full"
-                disabled={!canDoAction("admin_approval_setup" as PageKey, "edit")}>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={
+                  !canDoAction("admin_approval_setup" as PageKey, "edit")
+                }
+              >
                 Save Changes
               </Button>
             </form>
@@ -354,10 +472,14 @@ export default function ApprovalSetup() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:gap-6 mb-8 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Workflows</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              Total Workflows
+            </CardTitle>
             <CheckCircle className="h-5 w-5 text-primary" />
           </CardHeader>
-          <CardContent><div className="text-2xl font-bold">{workflows.length}</div></CardContent>
+          <CardContent>
+            <div className="text-2xl font-bold">{workflows.length}</div>
+          </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -365,7 +487,9 @@ export default function ApprovalSetup() {
             <Shield className="h-5 w-5 text-green-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{workflows.filter(w => w.status === "Active").length}</div>
+            <div className="text-2xl font-bold">
+              {workflows.filter((w) => w.status === "Active").length}
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -376,7 +500,10 @@ export default function ApprovalSetup() {
           <CardContent>
             <div className="text-2xl font-bold">
               {workflows.length
-                ? Math.round(workflows.reduce((a, b) => a + b.levels, 0) / workflows.length)
+                ? Math.round(
+                    workflows.reduce((a, b) => a + b.levels, 0) /
+                      workflows.length,
+                  )
                 : 0}
             </div>
           </CardContent>
@@ -386,7 +513,9 @@ export default function ApprovalSetup() {
             <CardTitle className="text-sm font-medium">Needs Review</CardTitle>
             <AlertCircle className="h-5 w-5 text-orange-500" />
           </CardHeader>
-          <CardContent><div className="text-2xl font-bold">0</div></CardContent>
+          <CardContent>
+            <div className="text-2xl font-bold">0</div>
+          </CardContent>
         </Card>
       </div>
 
@@ -395,16 +524,24 @@ export default function ApprovalSetup() {
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle>Approval Workflows</CardTitle>
-            <CardDescription>Define multi-level approval chains</CardDescription>
+            <CardDescription>
+              Define multi-level approval chains
+            </CardDescription>
           </div>
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <div className="relative flex-1 min-w-0">
               <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search workflows..."
-                className="pl-10 w-full" value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)} />
+              <Input
+                placeholder="Search workflows..."
+                className="pl-10 w-full"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
             </div>
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
+            <Select
+              value={statusFilter}
+              onValueChange={(v) => setStatusFilter(v as any)}
+            >
               <SelectTrigger className="w-full sm:w-32">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
@@ -421,7 +558,9 @@ export default function ApprovalSetup() {
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Search className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-1">No workflows found</h3>
-              <p className="text-muted-foreground mb-6">Try adjusting your search or filter.</p>
+              <p className="text-muted-foreground mb-6">
+                Try adjusting your search or filter.
+              </p>
             </div>
           ) : (
             <Table>
@@ -452,20 +591,42 @@ export default function ApprovalSetup() {
                       <Switch
                         checked={item.status === "Active"}
                         onCheckedChange={() => toggleStatus(item.id)}
-                        disabled={!canDoAction("admin_approval_setup" as PageKey, "edit")}
+                        disabled={
+                          !canDoAction(
+                            "admin_approval_setup" as PageKey,
+                            "edit",
+                          )
+                        }
                       />
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1">
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0"
-                          disabled={!canDoAction("admin_approval_setup" as PageKey, "edit")}
-                          onClick={() => openEditDialog(item)}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          disabled={
+                            !canDoAction(
+                              "admin_approval_setup" as PageKey,
+                              "edit",
+                            )
+                          }
+                          onClick={() => openEditDialog(item)}
+                        >
                           <Edit className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="sm"
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10"
-                          disabled={!canDoAction("admin_approval_setup" as PageKey, "delete")}
-                          onClick={() => deleteWorkflow(item.id)}>
+                          disabled={
+                            !canDoAction(
+                              "admin_approval_setup" as PageKey,
+                              "delete",
+                            )
+                          }
+                          onClick={() => deleteWorkflow(item.id)}
+                        >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>

@@ -261,18 +261,17 @@ export default function AdminControlPanel() {
                       </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-1">
-                          <Key size={11} className="text-muted-foreground" />
-                          {user.permissions} pages
+                          <Key size={11} className="text-muted-foreground" />—
                         </span>
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {user.lastLogin}
+                        {user.last_login ?? "—"}
                       </TableCell>
                       <TableCell>
                         <Badge
                           className={`text-[10px] ${!user.discontinue ? "bg-green-500/15 text-green-600 border-green-500/30" : "bg-red-500/15 text-red-600 border-red-500/30"}`}
                         >
-                          {user.status}
+                          {!user.discontinue ? "Active" : "Inactive"}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
@@ -288,10 +287,10 @@ export default function AdminControlPanel() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className={`h-6 w-6 ${user.status === "active" ? "text-orange-500" : "text-green-500"}`}
+                            className={`h-6 w-6 ${!user.discontinue ? "text-orange-500" : "text-green-500"}`}
                             onClick={() => toggleStatusMutation.mutate(user)}
                           >
-                            {user.status === "active" ? (
+                            {!user.discontinue ? (
                               <Lock size={12} />
                             ) : (
                               <Unlock size={12} />
