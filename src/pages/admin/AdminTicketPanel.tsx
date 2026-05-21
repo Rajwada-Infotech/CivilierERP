@@ -201,7 +201,7 @@ function TicketDetailDialog({
   const [resolutionNote, setResolutionNote] = useState("");
   const [showResolve, setShowResolve] = useState(false);
 
-  const { data, isLoading } = useQuery<{
+  const { data, isLoading, refetch } = useQuery<{
     ticket: Ticket;
     comments: TicketComment[];
   }>({
@@ -216,6 +216,8 @@ function TicketDetailDialog({
       document.visibilityState === "visible" ? 15_000 : false,
     refetchOnWindowFocus: true,
   });
+
+  useTicketSync(refetch, ticket.id);
 
   const inv = () => invalidateTicketQueries(queryClient);
 

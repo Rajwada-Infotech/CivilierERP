@@ -434,6 +434,8 @@ function TicketDetailView({
     refetchInterval: 15_000,
   });
 
+  useTicketSync(refetch, ticketId);
+
   const ticket = data?.ticket;
   const comments = data?.comments ?? [];
 

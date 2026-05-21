@@ -20,12 +20,30 @@ function getIo() {
   if (!_getIo) _getIo = require("../socket").getIo;
   return _getIo();
 }
-function emitTicketUpdate(action, ticketId) {
+function emitTicketUpdate(action, ticketId, extra = {}) {
   try {
-    getIo().emit("ticket:updated", { action, ticketId });
+    getIo().emit("ticket:updated", { action, ticketId, ...extra });
   } catch (err) {
     if (process.env.NODE_ENV === "development") {
       console.error("[Tickets socket emit]", err.message);
+    }
+  }
+}
+
+function emitTicketMessage(ticketId, message) {
+  try {
+    getIo().to(`ticket:${ticketId}`).emit("ticket:message", {
+      ticketId,
+      message,
+    });
+    getIo().emit("ticket:updated", {
+      action: "commented",
+      ticketId,
+      commentId: message?.id,
+    });
+  } catch (err) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[Tickets socket message emit]", err.message);
     }
   }
 }
@@ -100,7 +118,7 @@ function sendTicketAccessError(res, access) {
 }
 
 async function addCommentToTicket(pool, ticketId, comment, actor) {
-  await pool
+  const result = await pool
     .request()
     .input("ticket_id", sql.Int, ticketId)
     .input("comment", sql.NVarChar(sql.MAX), comment)
@@ -108,8 +126,16 @@ async function addCommentToTicket(pool, ticketId, comment, actor) {
     .input("author_id", sql.Int, actor.id)
     .input("author_role", sql.NVarChar(50), actor.role).query(`
       INSERT INTO dbo.ticket_comments (ticket_id, comment, author_name, author_id, author_role)
+      OUTPUT INSERTED.*
       VALUES (@ticket_id, @comment, @author_name, @author_id, @author_role)
     `);
+  return result.recordset[0] || null;
+}
+
+async function addAndEmitCommentToTicket(pool, ticketId, comment, actor) {
+  const inserted = await addCommentToTicket(pool, ticketId, comment, actor);
+  if (inserted) emitTicketMessage(ticketId, inserted);
+  return inserted;
 }
 
 async function getAccessibleTicket(pool, id, actor) {
@@ -393,7 +419,7 @@ async function createTicketHandler(req, res) {
         });
     }
 
-    await pool
+    const createResult = await pool
       .request()
       .input("subject", sql.NVarChar(500), subject)
       .input("priority", sql.NVarChar(50), priority ?? "Medium")
@@ -417,10 +443,13 @@ async function createTicketHandler(req, res) {
           @company_id, @project_id,
           @attachment_path, 'Pending',
           @created_by, @created_by_id
-        )
+        );
+        SELECT SCOPE_IDENTITY() AS id;
       `);
 
-    res.json({ success: true });
+    const ticketId = Number(createResult.recordset[0]?.id || 0) || null;
+    res.json({ success: true, id: ticketId });
+    emitTicketUpdate("created", ticketId);
   } catch (err) {
     console.error("[Tickets POST /create]", err.message);
     res.status(500).json({ error: err.message });
@@ -467,7 +496,7 @@ router.put("/accept/:id", canAcceptTickets, async (req, res) => {
       });
     }
 
-    await addCommentToTicket(
+    await addAndEmitCommentToTicket(
       pool,
       id,
       `[Accepted] ${actor.name} started resolving this ticket.`,
@@ -517,6 +546,7 @@ router.put(
       }
 
       res.json({ success: true });
+      emitTicketUpdate("assigned", id);
     } catch (err) {
       console.error("[Tickets PUT /assign]", err.message);
       res.status(500).json({ error: err.message });
@@ -570,10 +600,11 @@ router.put("/resolve/:id", async (req, res) => {
       );
 
     if (commentParts.length > 0) {
-      await addCommentToTicket(pool, id, commentParts.join("\n"), actor);
+      await addAndEmitCommentToTicket(pool, id, commentParts.join("\n"), actor);
     }
 
     res.json({ success: true });
+    emitTicketUpdate("resolved", id);
   } catch (err) {
     console.error("[Tickets PUT /resolve]", err.message);
     res.status(500).json({ error: err.message });
@@ -612,6 +643,7 @@ router.put("/reopen/:id", async (req, res) => {
       `);
 
     res.json({ success: true });
+    emitTicketUpdate("reopened", id);
   } catch (err) {
     console.error("[Tickets PUT /reopen]", err.message);
     res.status(500).json({ error: err.message });
@@ -641,6 +673,7 @@ router.put(
       }
 
       res.json({ success: true });
+      emitTicketUpdate("closed", id);
     } catch (err) {
       console.error("[Tickets PUT /close]", err.message);
       res.status(500).json({ error: err.message });
@@ -665,7 +698,12 @@ router.post("/comment/:id", async (req, res) => {
     const accessError = sendTicketAccessError(res, access);
     if (accessError) return accessError;
 
-    await addCommentToTicket(pool, id, comment.trim(), actor);
+    const insertedComment = await addAndEmitCommentToTicket(
+      pool,
+      id,
+      comment.trim(),
+      actor,
+    );
 
     await pool
       .request()
@@ -674,7 +712,7 @@ router.post("/comment/:id", async (req, res) => {
         `UPDATE dbo.tickets SET updated_at = SYSUTCDATETIME() WHERE id = @id`,
       );
 
-    res.json({ success: true });
+    res.json({ success: true, comment: insertedComment });
   } catch (err) {
     console.error("[Tickets POST /comment]", err.message);
     res.status(500).json({ error: err.message });
