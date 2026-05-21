@@ -1217,6 +1217,80 @@ router.put("/:id/reject", async (req, res) => {
   }
 });
 
+// ── GET /:id/create-po-prefill ────────────────────────────────────────────────
+// Returns WO materials shaped for the PO form (manual Material PO creation).
+// The frontend navigates to PurchaseOrderMaster with this as location.state.woPrefill.
+router.get("/:id/create-po-prefill", async (req, res) => {
+  const headerId = parseInt(req.params.id, 10);
+  if (isNaN(headerId)) return res.status(400).json({ error: "Invalid id" });
+
+  try {
+    const pool = getPool();
+
+    const hdrRow = await pool.request().input("Id", sql.Int, headerId).query(`
+      SELECT
+        wh.Id, wh.DocumentNumber, wh.DocNo, wh.Status,
+        wh.CompanyId, wh.ProjectId,
+        ec.name AS CompanyName,
+        ep.name AS ProjectName
+      FROM dbo.WorkOrderHeader wh
+      LEFT JOIN dbo.enterprise ec ON ec.id = wh.CompanyId
+      LEFT JOIN dbo.enterprise ep ON ep.id = wh.ProjectId
+      WHERE wh.Id = @Id
+    `);
+
+    if (!hdrRow.recordset.length)
+      return res.status(404).json({ error: "Work order not found" });
+
+    const hdr = hdrRow.recordset[0];
+
+    const matsRow = await pool.request().input("HeaderId", sql.Int, headerId)
+      .query(`
+      SELECT
+        m.Id, m.ItemId, img.M_Name AS ItemName, m.UOMId, uom.UOMName,
+        m.Quantity, m.Rate, m.GSTRate,
+        m.SupplierIdPerLine,
+        sup.LHeadName AS SupplierName
+      FROM dbo.WorkOrderActivityMaterials m
+      INNER JOIN dbo.WorkOrderActivities a   ON a.Id     = m.WorkOrderActivityId
+      LEFT  JOIN dbo.Item_Master_Group   img ON img.M_Id = m.ItemId
+      LEFT  JOIN dbo.UOMMaster           uom ON uom.Id   = m.UOMId
+      LEFT  JOIN dbo.AccountHeadMaster   sup ON sup.LHeadId = m.SupplierIdPerLine
+      WHERE a.WorkOrderHeaderId = @HeaderId
+        AND m.ItemId IS NOT NULL
+      ORDER BY m.Id
+    `);
+
+    const items = matsRow.recordset.map((m) => ({
+      itemId: m.ItemId ? String(m.ItemId) : null,
+      itemDescription: m.ItemName || "",
+      unit: m.UOMName || "",
+      quantity: parseFloat(m.Quantity) || 0,
+      rate: parseFloat(m.Rate) || 0,
+      amount: (parseFloat(m.Quantity) || 0) * (parseFloat(m.Rate) || 0),
+      tax: parseFloat(m.GSTRate) || 0,
+      supplierName: m.SupplierName || null,
+    }));
+
+    const totalMaterialCost = items.reduce((s, i) => s + i.amount, 0);
+
+    res.json({
+      WOId: hdr.Id,
+      DocumentNumber: hdr.DocumentNumber,
+      DocNo: hdr.DocNo || null,
+      CompanyId: hdr.CompanyId || null,
+      CompanyName: hdr.CompanyName || "",
+      ProjectId: hdr.ProjectId || null,
+      ProjectName: hdr.ProjectName || "",
+      items,
+      totalMaterialCost,
+    });
+  } catch (err) {
+    console.error("[GET /work-orders/:id/create-po-prefill]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Confirm Work Order & auto-create WO-POs ───────────────────────────────────
 //
 // Reads the WO-PO DocTypeId from SystemSettings key "wo_po_doc_type_id".

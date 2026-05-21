@@ -81,7 +81,6 @@ function buildChequeColumns(
   setDeleteId: (id: string | null) => void,
   handleEdit: (item: DbCheque) => void,
   handleDelete: (id: string) => void,
-  dbBanks: BankOption[],
   onView: (item: DbCheque) => void,
   onPrint: (item: DbCheque) => void,
 ): ColumnDef<DbCheque, unknown>[] {
@@ -89,14 +88,11 @@ function buildChequeColumns(
     {
       id: "bank",
       header: "Bank",
-      cell: ({ row }) => {
-        const bank = dbBanks.find((b) => b.id === row.original.BankId);
-        return (
-          <span className="font-medium text-foreground">
-            {bank?.label || "—"}
-          </span>
-        );
-      },
+      cell: ({ row }) => (
+        <span className="font-medium text-foreground">
+          {row.original.BankName || "—"}
+        </span>
+      ),
     },
     {
       accessorKey: "AccountNumber",
@@ -382,7 +378,6 @@ const ChequeMaster: React.FC = () => {
         setDeleteId,
         handleEdit,
         handleDelete,
-        dbBanks,
         setViewRow,
         handlePrint,
       ),
