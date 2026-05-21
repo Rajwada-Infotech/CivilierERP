@@ -741,8 +741,25 @@ const PurchaseOrderMaster: React.FC = () => {
 
   // ── Apply WO prefill (material lines from Work Order) ─────────────────────
   useEffect(() => {
-    if (!woPrefill || companies.length === 0 || allProjects.length === 0)
+    if (
+      !woPrefill ||
+      companies.length === 0 ||
+      allProjects.length === 0 ||
+      suppliers.length === 0
+    )
       return;
+
+    // Try to match a single supplier from the prefill items
+    const supplierNames = [
+      ...new Set(woPrefill.items.map((i) => i.supplierName).filter(Boolean)),
+    ];
+    const matchedSupplier =
+      supplierNames.length === 1
+        ? suppliers.find(
+            (s) => s.name.toLowerCase() === supplierNames[0]!.toLowerCase(),
+          )
+        : null;
+
     setForm((prev) => ({
       ...prev,
       companyId: woPrefill.CompanyId
@@ -751,26 +768,42 @@ const PurchaseOrderMaster: React.FC = () => {
       projectId: woPrefill.ProjectId
         ? String(woPrefill.ProjectId)
         : prev.projectId,
+      supplierId: matchedSupplier ? matchedSupplier.id : prev.supplierId,
     }));
-    const prefillLines: POLineItem[] = woPrefill.items.map((it) => ({
-      id: crypto.randomUUID(),
-      itemId: it.itemId || null,
-      description: it.itemDescription,
-      quantity: it.quantity,
-      unit: it.unit,
-      rate: it.rate,
-      tax: it.tax || 0,
-      amount: it.amount,
-    }));
+    const prefillLines: POLineItem[] = woPrefill.items.map((it) => {
+      // Split combined GST% into CGST+SGST halves (intra-state assumption for WO-PO).
+      // If the item later gets an IGST designation the user can override in the line.
+      const totalGst = Number(it.tax) || 0;
+      const halfGst = totalGst / 2;
+      const qty = Number(it.quantity) || 0;
+      const rate = Number(it.rate) || 0;
+      const base = qty * rate;
+      const taxAmt = (base * totalGst) / 100;
+      return {
+        id: crypto.randomUUID(),
+        itemId: it.itemId || "",
+        itemName: it.itemDescription,
+        itemDescription: it.itemDescription,
+        quantity: qty,
+        uomId: null,
+        unit: it.unit || "",
+        rate,
+        cgstRate: halfGst,
+        sgstRate: halfGst,
+        igstRate: 0,
+        gstRate: totalGst,
+        taxAmount: taxAmt,
+        amount: base + taxAmt,
+      };
+    });
     if (prefillLines.length > 0) setLineItems(prefillLines);
     setSourceWO({
       id: woPrefill.WOId,
       docNo: woPrefill.DocNo || woPrefill.DocumentNumber,
     });
     setViewMode("create");
-    // Only run once when woPrefill is present and master data is loaded
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [woPrefill, companies.length, allProjects.length]);
+  }, [woPrefill, companies.length, allProjects.length, suppliers.length]);
 
   const filteredList = useMemo(() => {
     if (!searchQuery.trim()) return listData;
