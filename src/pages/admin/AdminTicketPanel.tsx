@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { useTicketSync } from "@/hooks/useTicketSync";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
 import {
   TicketListResponse,
@@ -643,6 +644,13 @@ export default function AdminTicketPanel() {
     },
     staleTime: 5 * 60_000,
   });
+
+  useTicketSync(
+    useCallback(() => {
+      refetchStats();
+      refetchTickets();
+    }, [refetchStats, refetchTickets]),
+  );
 
   const tickets = useMemo(() => {
     const filtered = allTickets.filter((t) => {

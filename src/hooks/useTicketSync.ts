@@ -9,9 +9,11 @@ export function useTicketSync(refetch: RefetchFn) {
     if (!socket) return;
 
     socket.on("ticket:updated", refetch);
+    socket.on("ticket:escalated", refetch);
 
     return () => {
       socket.off("ticket:updated", refetch);
+      socket.off("ticket:escalated", refetch);
     };
   }, [refetch]);
 }
