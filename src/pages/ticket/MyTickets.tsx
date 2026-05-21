@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -64,6 +64,17 @@ const fmtDate = (d?: string | null) =>
       })
     : null;
 
+const getAuthToken = () =>
+  localStorage.getItem("token") || sessionStorage.getItem("token") || "";
+
+const withTicketFileToken = (url: string) => {
+  if (url.startsWith("data:") || !url.includes("/api/tickets/file/")) return url;
+  const token = getAuthToken();
+  if (!token) return url;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}token=${encodeURIComponent(token)}`;
+};
+
 const priorityConfig: Record<string, { cls: string; dot: string }> = {
   Urgent: {
     cls: "bg-red-500/10 text-red-600 border-red-400/20",
@@ -113,6 +124,48 @@ function StatusBadge({ status }: { status: string }) {
       {status}
     </span>
   );
+}
+
+function AuthenticatedAttachmentImage({
+  url,
+  alt,
+  className,
+  onClick,
+}: {
+  url: string;
+  alt: string;
+  className: string;
+  onClick: () => void;
+}) {
+  const [src, setSrc] = useState(url);
+
+  useEffect(() => {
+    if (url.startsWith("data:")) {
+      setSrc(url);
+      return;
+    }
+
+    let alive = true;
+    let objectUrl: string | null = null;
+
+    fetchWithAuth(url)
+      .then((res) => res.blob())
+      .then((blob) => {
+        if (!alive) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+      })
+      .catch(() => {
+        if (alive) setSrc(withTicketFileToken(url));
+      });
+
+    return () => {
+      alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [url]);
+
+  return <img src={src} alt={alt} className={className} onClick={onClick} />;
 }
 
 function TicketCard({ ticket }: { ticket: Ticket }) {
@@ -195,11 +248,11 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
                   let blobUrl = url;
                   if (!isBase64) {
                     try {
-                      const r = await fetch(url);
+                      const r = await fetchWithAuth(url);
                       const blob = await r.blob();
                       blobUrl = URL.createObjectURL(blob);
                     } catch {
-                      blobUrl = url;
+                      blobUrl = withTicketFileToken(url);
                     }
                   }
                   const content = isPdf
@@ -233,9 +286,9 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
                         );
                       }
                       return (
-                        <img
+                        <AuthenticatedAttachmentImage
                           key={i}
-                          src={url}
+                          url={url}
                           alt={`Attachment ${i + 1}`}
                           className="h-24 w-auto rounded-lg border border-border object-cover cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-primary/40 transition-all"
                           onClick={() => openViewer(url, filename)}
