@@ -145,7 +145,7 @@ function StructureSVG() {
     initial: { pathLength: 0, opacity: 0 },
     animate: controls,
     transition: {
-      pathLength: { delay, duration: dur, ease: "easeInOut" },
+      pathLength: { delay, duration: dur, ease: "easeInOut" as any },
       opacity: { delay, duration: 0.3 },
     },
   });
