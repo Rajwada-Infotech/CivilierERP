@@ -87,33 +87,48 @@ const CardMaster = () => {
 
   const dbItems = Array.isArray(dbData) ? dbData : [];
 
+  // DbCard uses snake_case columns. This page repurposes the bank-card table for
+  // access/identity card tracking, mapping fields as follows:
+  //   card_number        → cardNumber   (Card No. — same intent)
+  //   card_type          → cardType     (Access / Security / Visitor etc.)
+  //   card_holder_name   → holderName   (Person the card is issued to)
+  //   ifsc_code          → issuedFor    (Purpose / department — free text)
+  //   bank_name          → vendorContractor  (Vendor or contractor name)
+  //   company_name       → siteProject  (Site or project name)
+  //   account_number     → materialCategory (Material category — free text)
+  //   card_network       → accessLevel  (Full / Restricted / Temporary)
+  //   cvv                → remarks      (Free-text remarks, stored in cvv col)
+  //   expiry_* / reminder → unused, null
   const mappedData: RecordWithId[] = dbItems.map((item) => ({
-    _id: String(item.CardId || item.id || item._id),
-    cardNumber: item.CardNumber || item.cardNumber || "",
-    cardType: item.CardType || item.cardType || "",
-    holderName: item.HolderName || item.holderName || "",
-    issuedFor: item.IssuedFor || item.issuedFor || "",
-    vendorContractor: item.VendorContractor || item.vendorContractor || "",
-    siteProject: item.SiteProject || item.siteProject || "",
-    materialCategory: item.MaterialCategory || item.materialCategory || "",
-    validity: item.Validity || item.validity || "",
-    accessLevel: item.AccessLevel || item.accessLevel || "",
-    remarks: item.Remarks || item.remarks || "",
-    status: item.Status !== false,
+    _id: String(item.id),
+    cardNumber: item.card_number ?? "",
+    cardType: item.card_type ?? "",
+    holderName: item.card_holder_name ?? "",
+    issuedFor: item.ifsc_code ?? "",
+    vendorContractor: item.bank_name ?? "",
+    siteProject: item.company_name ?? "",
+    materialCategory: item.account_number ?? "",
+    validity: item.card_network ?? "", // re-mapped: access level stored here temporarily
+    accessLevel: item.card_network ?? "",
+    remarks: item.cvv ?? "",
+    status: item.status !== false,
   }));
 
   const toPayload = (r: Record<string, unknown>) => ({
-    CardNumber: (r.cardNumber as string) || null,
-    CardType: (r.cardType as string) || null,
-    HolderName: (r.holderName as string) || null,
-    IssuedFor: (r.issuedFor as string) || null,
-    VendorContractor: (r.vendorContractor as string) || null,
-    SiteProject: (r.siteProject as string) || null,
-    MaterialCategory: (r.materialCategory as string) || null,
-    Validity: (r.validity as string) || null,
-    AccessLevel: (r.accessLevel as string) || null,
-    Remarks: (r.remarks as string) || null,
-    Status: r.status !== false,
+    card_number: (r.cardNumber as string) || null,
+    card_type: (r.cardType as string) || null,
+    card_holder_name: (r.holderName as string) || null,
+    ifsc_code: (r.issuedFor as string) || null,
+    bank_name: (r.vendorContractor as string) || null,
+    company_name: (r.siteProject as string) || null,
+    account_number: (r.materialCategory as string) || null,
+    card_network: (r.accessLevel as string) || null,
+    cvv: (r.remarks as string) || null,
+    expiry_month: null,
+    expiry_year: null,
+    reminder_enabled: false,
+    reminder_days: null,
+    status: r.status !== false,
   });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
@@ -200,7 +215,11 @@ const CardMaster = () => {
         columnRenderers={columnRenderers}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
-        exportConfig={{ columns: EXPORT_COLUMNS, filename: "card-master" }}
+        exportConfig={{
+          title: "Cards",
+          columns: EXPORT_COLUMNS,
+          filename: "card-master",
+        }}
       />
     </>
   );

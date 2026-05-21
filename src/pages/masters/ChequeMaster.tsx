@@ -490,7 +490,7 @@ const ChequeMaster: React.FC = () => {
                     {dbBanks.map((b) => (
                       <option key={b.id} value={String(b.id)}>
                         {b.label}
-                        {b.BBranch ? ` — ${b.BBranch}` : ""}
+                        {b.branchName ? ` — ${b.branchName}` : ""}
                       </option>
                     ))}
                   </select>
