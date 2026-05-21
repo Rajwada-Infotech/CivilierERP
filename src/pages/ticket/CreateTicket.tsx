@@ -252,9 +252,9 @@ const CreateTicket = () => {
   >("Medium");
   const [subject, setSubject] = useState("");
   const [issueDetails, setIssueDetails] = useState("");
-  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
   const [showCamera, setShowCamera] = useState(false);
-  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [capturedImages, setCapturedImages] = useState<string[]>([]);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -315,7 +315,7 @@ const CreateTicket = () => {
   const capturePhoto = () => {
     const img = webcamRef.current?.getScreenshot();
     if (img) {
-      setCapturedImage(img);
+      setCapturedImages((prev) => [...prev, img]);
       setShowCamera(false);
     }
   };
@@ -333,6 +333,46 @@ const CreateTicket = () => {
     if (!validate()) return;
     setSubmitting(true);
     try {
+      const allUrls: string[] = [];
+
+      // Step 1a — upload each file via raw fetch (avoids fetchWithAuth setting Content-Type: application/json)
+      const token = localStorage.getItem("token") || sessionStorage.getItem("token") || "";
+      for (const file of attachmentFiles) {
+        const formData = new FormData();
+        formData.append("file", file);
+        const uploadRes = await fetch("/api/tickets/upload", {
+          method: "POST",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: formData,
+        });
+        if (!uploadRes.ok) {
+          const err = await uploadRes.json().catch(() => ({}));
+          throw new Error(err.error ?? `Failed to upload ${file.name}`);
+        }
+        const { url } = await uploadRes.json();
+        allUrls.push(url);
+      }
+
+      // Step 1b — upload each camera-captured image as a blob
+      for (let i = 0; i < capturedImages.length; i++) {
+        const base64 = capturedImages[i];
+        const blob = await fetch(base64).then((r) => r.blob());
+        const formData = new FormData();
+        formData.append("file", blob, `capture-${i + 1}.jpg`);
+        const uploadRes = await fetch("/api/tickets/upload", {
+          method: "POST",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: formData,
+        });
+        if (!uploadRes.ok) {
+          const err = await uploadRes.json().catch(() => ({}));
+          throw new Error(err.error ?? "Failed to upload captured photo");
+        }
+        const { url } = await uploadRes.json();
+        allUrls.push(url);
+      }
+
+      // Step 2 — create the ticket; store URLs as JSON array string
       const res = await fetchWithAuth("/api/tickets/create", {
         method: "POST",
         body: JSON.stringify({
@@ -343,7 +383,7 @@ const CreateTicket = () => {
           customer_phone: customerPhone.trim(),
           company_id: companyId || null,
           project_id: projectId || null,
-          attachment_path: capturedImage ?? null,
+          attachment_path: allUrls.length > 0 ? JSON.stringify(allUrls) : null,
         }),
       });
       const data = await res.json();
@@ -354,8 +394,8 @@ const CreateTicket = () => {
       } else {
         toast.error(data.error || "Failed to create ticket");
       }
-    } catch {
-      toast.error("Failed to create ticket");
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to create ticket");
     } finally {
       setSubmitting(false);
     }
@@ -518,16 +558,22 @@ const CreateTicket = () => {
               {/* File upload */}
               <div>
                 <Label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5 block">
-                  File
+                  Files
                 </Label>
                 <input
                   ref={fileRef}
                   type="file"
                   accept="image/*,.pdf"
+                  multiple
                   className="hidden"
-                  onChange={(e) =>
-                    setAttachmentFile(e.target.files?.[0] ?? null)
-                  }
+                  onChange={(e) => {
+                    const picked = Array.from(e.target.files ?? []);
+                    setAttachmentFiles((prev) => {
+                      const names = new Set(prev.map((f) => f.name));
+                      return [...prev, ...picked.filter((f) => !names.has(f.name))];
+                    });
+                    e.target.value = "";
+                  }}
                 />
                 <button
                   type="button"
@@ -535,13 +581,9 @@ const CreateTicket = () => {
                   className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border border-dashed border-border hover:border-primary/50 hover:bg-muted/30 transition-all text-sm text-muted-foreground"
                 >
                   <Paperclip size={14} />
-                  {attachmentFile ? (
-                    <span className="text-foreground truncate">
-                      {attachmentFile.name}
-                    </span>
-                  ) : (
-                    "Choose file…"
-                  )}
+                  {attachmentFiles.length > 0
+                    ? `${attachmentFiles.length} file${attachmentFiles.length > 1 ? "s" : ""} selected — add more`
+                    : "Choose files…"}
                 </button>
               </div>
 
@@ -559,43 +601,43 @@ const CreateTicket = () => {
                   className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border border-border hover:bg-muted/30 transition-all text-sm text-muted-foreground"
                 >
                   <Camera size={14} />
-                  {capturedImage ? "Retake photo" : "Open camera"}
+                  {capturedImages.length > 0
+                    ? `${capturedImages.length} photo${capturedImages.length > 1 ? "s" : ""} captured — take more`
+                    : "Open camera"}
                 </button>
               </div>
             </div>
 
-            {/* Attachment badges */}
-            {(attachmentFile || capturedImage) && (
+            {/* Previews */}
+            {(attachmentFiles.length > 0 || capturedImages.length > 0) && (
               <div className="flex flex-wrap gap-2 mt-4">
-                {attachmentFile && (
-                  <Badge variant="secondary" className="gap-1.5 pr-1">
+                {attachmentFiles.map((file, i) => (
+                  <Badge key={`file-${i}`} variant="secondary" className="gap-1.5 pr-1">
                     <Paperclip size={11} />
-                    <span className="max-w-[160px] truncate">
-                      {attachmentFile.name}
-                    </span>
+                    <span className="max-w-[160px] truncate">{file.name}</span>
                     <button
-                      onClick={() => setAttachmentFile(null)}
+                      onClick={() => setAttachmentFiles((prev) => prev.filter((_, idx) => idx !== i))}
                       className="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5 transition-colors"
                     >
                       <X size={10} />
                     </button>
                   </Badge>
-                )}
-                {capturedImage && (
-                  <div className="relative inline-block">
+                ))}
+                {capturedImages.map((img, i) => (
+                  <div key={`cap-${i}`} className="relative inline-block">
                     <img
-                      src={capturedImage}
-                      alt="Captured"
+                      src={img}
+                      alt={`Capture ${i + 1}`}
                       className="h-20 w-auto rounded-lg border border-border object-cover"
                     />
                     <button
-                      onClick={() => setCapturedImage(null)}
+                      onClick={() => setCapturedImages((prev) => prev.filter((_, idx) => idx !== i))}
                       className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-colors"
                     >
                       <X size={10} />
                     </button>
                   </div>
-                )}
+                ))}
               </div>
             )}
           </Section>
