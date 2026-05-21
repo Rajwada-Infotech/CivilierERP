@@ -1,22 +1,16 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
-import { useAuth } from "@/contexts/AuthContext";
 import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
   ChevronDown,
   Clock,
-  Flame,
-  Paperclip,
-  Plus,
   RefreshCw,
   Search,
-  ShieldAlert,
   User,
   X,
 } from "lucide-react";
@@ -30,10 +24,11 @@ interface Ticket {
   issue_details: string;
   customer_name: string;
   customer_phone: string;
-  status: "Pending" | "Resolved" | "InProgress";
+  status: "Pending" | "Resolved" | "InProgress" | "Closed";
   created_at?: string;
-  attachment_path?: string | null;
 }
+
+type StatusFilter = "All" | "Pending" | "InProgress" | "Resolved" | "Closed";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -65,6 +60,25 @@ const priorityConfig: Record<string, { cls: string; dot: string }> = {
   },
 };
 
+const statusConfig: Record<string, { cls: string; label: string }> = {
+  Pending: {
+    cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+    label: "Pending",
+  },
+  InProgress: {
+    cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",
+    label: "In Progress",
+  },
+  Resolved: {
+    cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
+    label: "Resolved",
+  },
+  Closed: {
+    cls: "bg-slate-500/10 text-slate-500 border-slate-400/20",
+    label: "Closed",
+  },
+};
+
 function PriorityBadge({ priority }: { priority: string }) {
   const cfg = priorityConfig[priority] ?? {
     cls: "bg-muted text-muted-foreground border-border",
@@ -81,18 +95,17 @@ function PriorityBadge({ priority }: { priority: string }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    Resolved: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
-    Pending: "bg-amber-500/10 text-amber-600 border-amber-400/20",
-    InProgress: "bg-blue-500/10 text-blue-600 border-blue-400/20",
+  const cfg = statusConfig[status] ?? {
+    cls: "bg-muted text-muted-foreground border-border",
+    label: status,
   };
   const Icon = status === "Resolved" ? CheckCircle2 : Clock;
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${map[status] ?? "bg-muted text-muted-foreground border-border"}`}
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}
     >
       <Icon size={10} />
-      {status}
+      {cfg.label}
     </span>
   );
 }
@@ -156,78 +169,6 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
                 )}
               </div>
             )}
-            {ticket.attachment_path && (() => {
-              let urls: string[] = [];
-              try {
-                const parsed = JSON.parse(ticket.attachment_path);
-                urls = Array.isArray(parsed) ? parsed : [ticket.attachment_path];
-              } catch {
-                urls = [ticket.attachment_path];
-              }
-
-              const openViewer = (url: string, filename: string) => {
-                const isPdf = url.toLowerCase().endsWith(".pdf");
-                const isBase64 = url.startsWith("data:");
-
-                const win = window.open();
-                if (!win) return;
-
-                // For base64 or public URLs — load directly into blob for download support
-                const loadContent = async () => {
-                  let blobUrl = url;
-                  if (!isBase64) {
-                    try {
-                      const r = await fetch(url);
-                      const blob = await r.blob();
-                      blobUrl = URL.createObjectURL(blob);
-                    } catch {
-                      blobUrl = url;
-                    }
-                  }
-                  const content = isPdf
-                    ? `<iframe src="${blobUrl}" style="width:100%;height:90vh;border:none;border-radius:8px"></iframe>`
-                    : `<img src="${blobUrl}" style="max-width:100%;max-height:90vh;border-radius:8px;box-shadow:0 4px 32px rgba(0,0,0,.6)"/>`;
-                  win.document.write(`<!DOCTYPE html><html><head><title>${filename}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#111;display:flex;flex-direction:column;align-items:center;min-height:100vh;font-family:sans-serif}header{width:100%;background:#1a1a1a;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;position:sticky;top:0;z-index:10}header span{color:#ccc;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%}a.dl{background:#6366f1;color:#fff;text-decoration:none;padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0}main{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;width:100%}</style></head><body><header><span>${filename}</span><a class="dl" href="${blobUrl}" download="${filename}">⬇ Download</a></header><main>${content}</main></body></html>`);
-                  win.document.close();
-                };
-                loadContent();
-              };
-
-              return (
-                <div className="mt-3 space-y-2">
-                  <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                    <Paperclip size={10} />
-                    {urls.length > 1 ? `${urls.length} Attachments` : "Attachment"}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {urls.map((url, i) => {
-                      const isPdf = url.toLowerCase().endsWith(".pdf");
-                      const filename = url.split("/").pop() ?? `attachment-${i + 1}`;
-                      if (isPdf) {
-                        return (
-                          <button
-                            key={i}
-                            onClick={() => openViewer(url, filename)}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"
-                          >
-                            <Paperclip size={10} /> PDF {urls.length > 1 ? i + 1 : ""}
-                          </button>
-                        );
-                      }
-                      return (
-                        <img
-                          key={i}
-                          src={url}
-                          alt={`Attachment ${i + 1}`}
-                          className="h-24 w-auto rounded-lg border border-border object-cover cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-primary/40 transition-all"
-                          onClick={() => openViewer(url, filename)}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
           </div>
         </div>
       </div>
@@ -235,18 +176,30 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
   );
 }
 
-// ─── MyTickets page ───────────────────────────────────────────────────────────
-// Shows only the logged-in user's own tickets. No resolve button — users cannot
-// resolve tickets; only admin can.
+// ─── AllTickets page ──────────────────────────────────────────────────────────
 
-const MyTickets: React.FC = () => {
+const STATUS_TABS: StatusFilter[] = [
+  "All",
+  "Pending",
+  "InProgress",
+  "Resolved",
+  "Closed",
+];
+
+const TAB_LABELS: Record<StatusFilter, string> = {
+  All: "All",
+  Pending: "Pending",
+  InProgress: "In Progress",
+  Resolved: "Resolved",
+  Closed: "Closed",
+};
+
+const AllTickets: React.FC = () => {
   const navigate = useNavigate();
-  const { currentUser } = useAuth();
-  const ADMIN_ROLES = ["super_admin", "admin", "dba"];
-  const isAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
 
   const [search, setSearch] = useState("");
-  const [priorityFilter, setPriorityFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
+  const [priorityFilter, setPriorityFilter] = useState<string>("All");
 
   const {
     data: allTickets = [],
@@ -255,10 +208,9 @@ const MyTickets: React.FC = () => {
     refetch,
     isFetching,
   } = useQuery<Ticket[]>({
-    queryKey: ["tickets", isAdmin ? "all" : "my"],
+    queryKey: ["tickets", "all"],
     queryFn: async () => {
-      const endpoint = isAdmin ? "/api/tickets" : "/api/tickets/my";
-      const res = await fetchWithAuth(endpoint);
+      const res = await fetchWithAuth("/api/tickets");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },
@@ -268,7 +220,9 @@ const MyTickets: React.FC = () => {
 
   const tickets = useMemo(() => {
     let list = [...allTickets];
-    if (priorityFilter !== "all")
+    if (statusFilter !== "All")
+      list = list.filter((t) => t.status === statusFilter);
+    if (priorityFilter !== "All")
       list = list.filter((t) => t.priority === priorityFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -280,13 +234,24 @@ const MyTickets: React.FC = () => {
       );
     }
     return list;
-  }, [allTickets, priorityFilter, search]);
+  }, [allTickets, statusFilter, priorityFilter, search]);
+
+  // Counts per tab
+  const tabCounts: Record<StatusFilter, number> = {
+    All: allTickets.length,
+    Pending: allTickets.filter((t) => t.status === "Pending").length,
+    InProgress: allTickets.filter((t) => t.status === "InProgress").length,
+    Resolved: allTickets.filter((t) => t.status === "Resolved").length,
+    Closed: allTickets.filter((t) => t.status === "Closed").length,
+  };
 
   const urgentCount = allTickets.filter((t) => t.priority === "Urgent").length;
+  const isFiltered =
+    statusFilter !== "All" || priorityFilter !== "All" || search.trim();
 
   return (
     <>
-      <Breadcrumbs items={["Tickets", "My Tickets"]} />
+      <Breadcrumbs items={["Tickets", "All Tickets"]} />
 
       <div className="max-w-3xl mx-auto pb-10 space-y-5">
         {/* Header */}
@@ -300,10 +265,10 @@ const MyTickets: React.FC = () => {
             </button>
             <div>
               <h1 className="text-xl font-heading font-bold text-foreground">
-                My Tickets
+                All Tickets
               </h1>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {allTickets.length} ticket{allTickets.length !== 1 ? "s" : ""}
+                {allTickets.length} total
                 {urgentCount > 0 && (
                   <span className="text-red-500 ml-1.5 font-medium">
                     · {urgentCount} urgent
@@ -312,24 +277,13 @@ const MyTickets: React.FC = () => {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate("/ticket/create")}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
-            >
-              <Plus size={12} /> New
-            </button>
-            <button
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50"
-            >
-              <RefreshCw
-                size={13}
-                className={isFetching ? "animate-spin" : ""}
-              />
-            </button>
-          </div>
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+          </button>
         </div>
 
         {/* Error */}
@@ -339,9 +293,37 @@ const MyTickets: React.FC = () => {
           </div>
         )}
 
-        {/* Filters */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-48">
+        {/* Status tabs */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {STATUS_TABS.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setStatusFilter(tab)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                statusFilter === tab
+                  ? "bg-primary text-primary-foreground"
+                  : "border border-border text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {TAB_LABELS[tab]}
+              {!isLoading && (
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
+                    statusFilter === tab
+                      ? "bg-white/20 text-white"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {tabCounts[tab]}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Search + Priority filter */}
+        <div className="space-y-2">
+          <div className="relative">
             <Search
               size={13}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -349,7 +331,7 @@ const MyTickets: React.FC = () => {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search tickets…"
+              placeholder="Search by subject, customer, or issue…"
               className="w-full pl-8 pr-8 py-2 rounded-xl border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
             />
             {search && (
@@ -361,24 +343,29 @@ const MyTickets: React.FC = () => {
               </button>
             )}
           </div>
-          <div className="flex items-center gap-1.5">
-            {(["all", "Urgent", "High", "Medium", "Low"] as const).map((p) => (
+
+          {/* Priority chips */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[11px] text-muted-foreground font-medium">
+              Priority:
+            </span>
+            {(["All", "Urgent", "High", "Medium", "Low"] as const).map((p) => (
               <button
                 key={p}
                 onClick={() => setPriorityFilter(p)}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-heading font-medium transition-all ${
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
                   priorityFilter === p
                     ? "bg-primary text-primary-foreground"
                     : "border border-border text-muted-foreground hover:bg-muted"
                 }`}
               >
-                {p === "all" ? "All" : p}
+                {p}
               </button>
             ))}
           </div>
         </div>
 
-        {/* List */}
+        {/* Ticket list */}
         {isLoading ? (
           <div className="space-y-3">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -401,16 +388,20 @@ const MyTickets: React.FC = () => {
           <div className="rounded-xl border border-border bg-card py-16 flex flex-col items-center gap-3 text-muted-foreground">
             <CheckCircle2 size={32} className="opacity-20" />
             <p className="text-sm">
-              {search || priorityFilter !== "all"
+              {isFiltered
                 ? "No tickets match your filters"
-                : "No tickets yet"}
+                : "No tickets found"}
             </p>
-            {!search && priorityFilter === "all" && (
+            {isFiltered && (
               <button
-                onClick={() => navigate("/ticket/create")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity mt-1"
+                onClick={() => {
+                  setSearch("");
+                  setPriorityFilter("All");
+                  setStatusFilter("All");
+                }}
+                className="text-xs text-primary hover:underline"
               >
-                <Plus size={12} /> Create first ticket
+                Clear filters
               </button>
             )}
           </div>
@@ -422,16 +413,14 @@ const MyTickets: React.FC = () => {
           </div>
         )}
 
-        {!isLoading &&
-          tickets.length > 0 &&
-          (search || priorityFilter !== "all") && (
-            <p className="text-xs text-muted-foreground text-center">
-              Showing {tickets.length} of {allTickets.length} tickets
-            </p>
-          )}
+        {!isLoading && tickets.length > 0 && isFiltered && (
+          <p className="text-xs text-muted-foreground text-center">
+            Showing {tickets.length} of {allTickets.length} tickets
+          </p>
+        )}
       </div>
     </>
   );
 };
 
-export default MyTickets;
+export default AllTickets;

@@ -28,6 +28,7 @@ import { followupNavItems } from "./sidebars/FollowupSidebar";
 import { buildAdminNavItems } from "./sidebars/AdminSidebar";
 import { dbaNavItems } from "./sidebars/DbaSidebar";
 import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
+import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { SidebarNav, NavItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar (tiny — lives here) ─────────────────────────────────────────
@@ -86,7 +87,8 @@ type ModuleKey =
   | "admin"
   | "super_admin"
   | "dba"
-  | "user";
+  | "user"
+  | "ticket";
 
 const MODULE_META: Record<
   ModuleKey,
@@ -140,6 +142,12 @@ const MODULE_META: Record<
     color: "bg-gray-500/10 text-gray-500 border-gray-500/20",
     dot: "bg-gray-400",
   },
+  ticket: {
+    label: "Ticket",
+    icon: MessageSquare,
+    color: "bg-pink-500/10 text-pink-500 border-pink-500/20",
+    dot: "bg-pink-500",
+  },
 };
 
 // ── AppSidebar ────────────────────────────────────────────────────────────────
@@ -188,41 +196,9 @@ export const AppSidebar = () => {
         return materialNavItems;
       case "followup":
         return followupNavItems;
-        case "ticket":
-          return [
-            {
-              label: "Dashboard",
-              icon: BarChart3,
-              path: "/ticket",
-            },
-        
-            {
-              label: "Ticket",
-              icon: MessageSquare,
-        
-              children: [
-                {
-                  label: "Create Ticket",
-                  path: "/ticket/create",
-                },
-              
-                {
-                  label: "My Tickets",
-                  path: "/ticket/my-tickets",
-                },
-              
-                {
-                  label: "Pending Tickets",
-                  path: "/ticket/pending",
-                },
-              
-                {
-                  label: "Resolved Tickets",
-                  path: "/ticket/resolved",
-                },
-              ],
-            },
-          ];
+      case "ticket":
+        // Pass isAdminTier so the nav reflects what the logged-in role can see
+        return buildTicketNavItems(isAdminTier);
       case "admin":
         return buildAdminNavItems(pendingApprovalCount);
       default:

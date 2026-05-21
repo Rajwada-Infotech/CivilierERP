@@ -23,6 +23,7 @@ const {
 const { ipKeyGenerator } = require("express-rate-limit");
 const { safeLoadRoutes, printRoutesSummary } = require("./utils/loadRoutes");
 const http = require("http");
+const path = require("path");
 const { initSocket } = require("./socket");
 
 const {
@@ -131,6 +132,7 @@ const ALL_ROUTES = [
   { path: "/api/company-master", file: "./routes/companyMaster" },
   { path: "/api/project-master", file: "./routes/projectMaster" },
   { path: "/api/business", file: "./routes/businessRoutes" },
+  { path: "/api/tickets", file: "./routes/ticketRoutes" },
   { path: "/api/signatures", file: "./routes/signatures" },
   { path: "/api/communicator", file: "./routes/communicator" },
   { path: "/api/system/metrics", file: "./routes/systemMetrics" },
@@ -142,7 +144,6 @@ const ALL_ROUTES = [
   { path: "/api/app-version", file: "./routes/appVersion" },
   { path: "/api/godowns", file: "./routes/godowns" },
   { path: "/api/stock-transfers", file: "./routes/stockTransfers" },
-  { path: "/api/tickets", file: "./routes/ticketRoutes" },
 ];
 
 // ─── createApp ──────────────────────────────────────────────────────────────
@@ -188,6 +189,8 @@ async function createApp() {
 
   app.use(compression());
 
+  // Serve uploaded ticket attachments statically
+  app.use("/uploads", express.static(path.join(__dirname, "uploads")));
   // Global request tracking
   if (!isTest) {
     app.use(async (req, res, next) => {
@@ -249,6 +252,10 @@ async function createApp() {
   app.use("/health", require("./routes/health"));
 
   app.use("/api/users", require("./routes/users"));
+
+  // Public — no auth required; browser fetches these directly via <img src>
+  const { serveTicketFile } = require("./routes/ticketRoutes");
+  app.get("/api/tickets/file/:filename", serveTicketFile);
 
   // Active user tracking
   app.use("/api", authMiddleware, async (req, res, next) => {
