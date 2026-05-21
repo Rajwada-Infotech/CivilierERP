@@ -127,35 +127,53 @@ export default function FinYearRights() {
     setShowDialog(true);
   }, [reset]);
 
-  const openEditDialog = useCallback((fy: FinYear) => {
-    setEditingFinYear(fy);
-    reset({
-      year: fy.year,
-      startDate: fy.startDate,
-      endDate: fy.endDate,
-      status: fy.status,
-      locked: fy.locked,
-    });
-    setShowDialog(true);
-  }, [reset]);
+  const openEditDialog = useCallback(
+    (fy: FinYear) => {
+      setEditingFinYear(fy);
+      reset({
+        year: fy.year,
+        startDate: fy.startDate,
+        endDate: fy.endDate,
+        status: fy.status,
+        locked: fy.locked,
+      });
+      setShowDialog(true);
+    },
+    [reset],
+  );
 
-  const handleSave = useCallback(async (values: FinYearForm) => {
-    setIsSaving(true);
-    try {
-      if (editingFinYear) {
-        await updateFinYear(editingFinYear.id, values);
-        toast.success(`Financial year "${values.year}" updated`);
-      } else {
-        await addFinYear(values);
-        toast.success(`Financial year "${values.year}" added`);
+  const handleSave = useCallback(
+    async (values: FinYearForm) => {
+      setIsSaving(true);
+      try {
+        if (editingFinYear) {
+          await updateFinYear(editingFinYear.id, {
+            year: values.year,
+            startDate: values.startDate,
+            endDate: values.endDate,
+            status: values.status,
+            locked: values.locked,
+          });
+          toast.success(`Financial year "${values.year}" updated`);
+        } else {
+          await addFinYear({
+            year: values.year,
+            startDate: values.startDate,
+            endDate: values.endDate,
+            status: values.status,
+            locked: values.locked,
+          });
+          toast.success(`Financial year "${values.year}" added`);
+        }
+        resetForm();
+      } catch (err: any) {
+        toast.error(err?.message || "Save failed");
+      } finally {
+        setIsSaving(false);
       }
-      resetForm();
-    } catch (err: any) {
-      toast.error(err?.message || "Save failed");
-    } finally {
-      setIsSaving(false);
-    }
-  }, [addFinYear, editingFinYear, resetForm, updateFinYear]);
+    },
+    [addFinYear, editingFinYear, resetForm, updateFinYear],
+  );
 
   const handleToggleLock = useCallback(
     async (id: string, currentlyLocked: boolean) => {
@@ -235,18 +253,16 @@ export default function FinYearRights() {
                 placeholder="e.g. 2025-26"
               />
               {errors.year && (
-                <p className="text-xs text-destructive">{errors.year.message}</p>
+                <p className="text-xs text-destructive">
+                  {errors.year.message}
+                </p>
               )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="startDate">Start Date</Label>
-                <Input
-                  id="startDate"
-                  type="date"
-                  {...register("startDate")}
-                />
+                <Input id="startDate" type="date" {...register("startDate")} />
                 {errors.startDate && (
                   <p className="text-xs text-destructive">
                     {errors.startDate.message}
@@ -255,11 +271,7 @@ export default function FinYearRights() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="endDate">End Date</Label>
-                <Input
-                  id="endDate"
-                  type="date"
-                  {...register("endDate")}
-                />
+                <Input id="endDate" type="date" {...register("endDate")} />
                 {errors.endDate && (
                   <p className="text-xs text-destructive">
                     {errors.endDate.message}
@@ -292,9 +304,7 @@ export default function FinYearRights() {
               <Switch
                 id="locked"
                 checked={formData.locked}
-                onCheckedChange={(checked) =>
-                  setValue("locked", checked)
-                }
+                onCheckedChange={(checked) => setValue("locked", checked)}
               />
               <Label htmlFor="locked" className="font-normal">
                 Locked (Read Only)
@@ -401,7 +411,9 @@ export default function FinYearRights() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={fy.locked ? "destructive" : "secondary"}>
+                        <Badge
+                          variant={fy.locked ? "destructive" : "secondary"}
+                        >
                           {fy.locked ? "Locked" : "Unlocked"}
                         </Badge>
                       </TableCell>

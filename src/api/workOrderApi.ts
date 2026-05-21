@@ -259,6 +259,7 @@ export interface MaterialPayload {
   GSTRate?: number;
   /** Supplier FK (AccountHeadMaster.LHeadId) for this material line */
   SupplierIdPerLine?: number | null;
+  SupplierNamePerLine?: string | null;
   Remarks?: string;
   CreatedBy?: number;
   UpdatedBy?: number;
@@ -275,11 +276,15 @@ export interface ActivityPayload {
   MaterialAmount?: number;
   GrandTotal?: number;
   Remarks?: string;
+  HsnCode?: string | null;
+  HsnGstRate?: number | null;
+  HsnGstType?: string | null;
   materials: MaterialPayload[];
 }
 
 export interface WorkOrderFullPayload {
   header: {
+    BoqID?: number | null;
     CompanyId?: number;
     ProjectId?: number;
     DocumentNumber?: string;

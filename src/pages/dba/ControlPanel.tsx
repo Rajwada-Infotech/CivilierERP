@@ -444,7 +444,7 @@ export default function ControlPanel() {
                   );
 
                   return (
-                    <TableRow key={acc.id} className="text-xs">
+                    <TableRow key={acc.tenant_id} className="text-xs">
                       <TableCell>
                         <div className="font-medium text-[11px]">
                           {acc.name}
@@ -565,7 +565,7 @@ export default function ControlPanel() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-sm">
               <Database size={15} className="text-emerald-500" />
-              Access Details — {selectedAccess?.tenantId}
+              Access Details — {selectedAccess?.tenant_id}
             </DialogTitle>
           </DialogHeader>
           {selectedAccess && (
@@ -717,7 +717,7 @@ export default function ControlPanel() {
                 <SelectContent>
                   {accesses.map((t) => (
                     <SelectItem
-                      key={t.id}
+                      key={t.tenant_id}
                       value={t.tenant_id}
                       className="text-xs"
                     >

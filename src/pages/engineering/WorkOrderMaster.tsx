@@ -253,6 +253,9 @@ interface WorkOrderMaterialDetail {
   Quantity: number;
   Rate: number;
   Remarks?: string;
+  GSTRate?: number | null;
+  SupplierIdPerLine?: number | null;
+  SupplierNamePerLine?: string | null;
 }
 
 interface WorkOrderActivityDetail {
@@ -269,6 +272,10 @@ interface WorkOrderActivityDetail {
   MaterialAmount: number;
   GrandTotal: number;
   Remarks?: string;
+  HsnCode?: string | null;
+  HsnGstRate?: number | null;
+  HsnGstType?: string | null;
+  BoqID?: number | null;
   materials: WorkOrderMaterialDetail[];
 }
 
@@ -2748,7 +2755,7 @@ const WorkOrderEditPanel: React.FC<{
         status: !!h.HStatus,
       }))
     : [];
-  const userId = (currentUser as { id?: number } | null)?.id ?? 1;
+  const userId = (currentUser as unknown as { id?: number } | null)?.id ?? 1;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
