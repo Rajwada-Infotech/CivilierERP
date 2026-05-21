@@ -200,6 +200,12 @@ const materialSetupItems = [
     path: "/material/inventory-master",
     color: "text-teal-400",
   },
+  {
+    icon: ShieldCheck,
+    label: "Access Cards",
+    path: "/material/access-card-master",
+    color: "text-rose-400",
+  },
 ];
 
 const followupSetupItems = [
