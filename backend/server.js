@@ -23,6 +23,7 @@ const {
 const { ipKeyGenerator } = require("express-rate-limit");
 const { safeLoadRoutes, printRoutesSummary } = require("./utils/loadRoutes");
 const http = require("http");
+const path = require("path");
 const { initSocket } = require("./socket");
 
 const {
@@ -188,6 +189,8 @@ async function createApp() {
 
   app.use(compression());
 
+  // Serve uploaded ticket attachments statically
+  app.use("/uploads", express.static(path.join(__dirname, "uploads")));
   // Global request tracking
   if (!isTest) {
     app.use(async (req, res, next) => {
@@ -249,6 +252,10 @@ async function createApp() {
   app.use("/health", require("./routes/health"));
 
   app.use("/api/users", require("./routes/users"));
+
+  // Public — no auth required; browser fetches these directly via <img src>
+  const { serveTicketFile } = require("./routes/ticketRoutes");
+  app.get("/api/tickets/file/:filename", serveTicketFile);
 
   // Active user tracking
   app.use("/api", authMiddleware, async (req, res, next) => {

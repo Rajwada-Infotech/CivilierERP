@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   AlertCircle,
   ArrowLeft,
@@ -11,6 +12,7 @@ import {
   ChevronDown,
   Clock,
   Flame,
+  Paperclip,
   Plus,
   RefreshCw,
   Search,
@@ -30,6 +32,7 @@ interface Ticket {
   customer_phone: string;
   status: "Pending" | "Resolved" | "InProgress";
   created_at?: string;
+  attachment_path?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -153,6 +156,78 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
                 )}
               </div>
             )}
+            {ticket.attachment_path && (() => {
+              let urls: string[] = [];
+              try {
+                const parsed = JSON.parse(ticket.attachment_path);
+                urls = Array.isArray(parsed) ? parsed : [ticket.attachment_path];
+              } catch {
+                urls = [ticket.attachment_path];
+              }
+
+              const openViewer = (url: string, filename: string) => {
+                const isPdf = url.toLowerCase().endsWith(".pdf");
+                const isBase64 = url.startsWith("data:");
+
+                const win = window.open();
+                if (!win) return;
+
+                // For base64 or public URLs — load directly into blob for download support
+                const loadContent = async () => {
+                  let blobUrl = url;
+                  if (!isBase64) {
+                    try {
+                      const r = await fetch(url);
+                      const blob = await r.blob();
+                      blobUrl = URL.createObjectURL(blob);
+                    } catch {
+                      blobUrl = url;
+                    }
+                  }
+                  const content = isPdf
+                    ? `<iframe src="${blobUrl}" style="width:100%;height:90vh;border:none;border-radius:8px"></iframe>`
+                    : `<img src="${blobUrl}" style="max-width:100%;max-height:90vh;border-radius:8px;box-shadow:0 4px 32px rgba(0,0,0,.6)"/>`;
+                  win.document.write(`<!DOCTYPE html><html><head><title>${filename}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#111;display:flex;flex-direction:column;align-items:center;min-height:100vh;font-family:sans-serif}header{width:100%;background:#1a1a1a;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;position:sticky;top:0;z-index:10}header span{color:#ccc;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%}a.dl{background:#6366f1;color:#fff;text-decoration:none;padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0}main{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;width:100%}</style></head><body><header><span>${filename}</span><a class="dl" href="${blobUrl}" download="${filename}">⬇ Download</a></header><main>${content}</main></body></html>`);
+                  win.document.close();
+                };
+                loadContent();
+              };
+
+              return (
+                <div className="mt-3 space-y-2">
+                  <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                    <Paperclip size={10} />
+                    {urls.length > 1 ? `${urls.length} Attachments` : "Attachment"}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {urls.map((url, i) => {
+                      const isPdf = url.toLowerCase().endsWith(".pdf");
+                      const filename = url.split("/").pop() ?? `attachment-${i + 1}`;
+                      if (isPdf) {
+                        return (
+                          <button
+                            key={i}
+                            onClick={() => openViewer(url, filename)}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"
+                          >
+                            <Paperclip size={10} /> PDF {urls.length > 1 ? i + 1 : ""}
+                          </button>
+                        );
+                      }
+                      return (
+                        <img
+                          key={i}
+                          src={url}
+                          alt={`Attachment ${i + 1}`}
+                          className="h-24 w-auto rounded-lg border border-border object-cover cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-primary/40 transition-all"
+                          onClick={() => openViewer(url, filename)}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>
@@ -166,6 +241,10 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
 
 const MyTickets: React.FC = () => {
   const navigate = useNavigate();
+  const { currentUser } = useAuth();
+  const ADMIN_ROLES = ["super_admin", "admin", "dba"];
+  const isAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
+
   const [search, setSearch] = useState("");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
 
@@ -176,10 +255,10 @@ const MyTickets: React.FC = () => {
     refetch,
     isFetching,
   } = useQuery<Ticket[]>({
-    queryKey: ["tickets", "my"],
+    queryKey: ["tickets", isAdmin ? "all" : "my"],
     queryFn: async () => {
-      // Always hit /api/tickets/my — this endpoint returns only the current user's tickets
-      const res = await fetchWithAuth("/api/tickets/my");
+      const endpoint = isAdmin ? "/api/tickets" : "/api/tickets/my";
+      const res = await fetchWithAuth(endpoint);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },

@@ -127,7 +127,7 @@ SELECT
   g.Status,
   g.DocNo,
   -- Line item fields
-  j.[key]                             AS LineIndex,
+  raw.[key]                           AS LineIndex,
   j.itemId,
   j.itemName,
   j.orderedQty,
@@ -140,7 +140,8 @@ SELECT
   -- Derived / safety-net: recompute in case totalAmount was stored as 0
   ISNULL(j.rate, 0) * ISNULL(j.quantity, 0) AS ComputedTotal
 FROM dbo.GoodsReceiptNotes g
-CROSS APPLY OPENJSON(g.GRNItems)
+CROSS APPLY OPENJSON(g.GRNItems) raw
+CROSS APPLY OPENJSON(raw.[value])
 WITH (
   itemId       NVARCHAR(100)  '$.itemId',
   itemName     NVARCHAR(500)  '$.itemName',
