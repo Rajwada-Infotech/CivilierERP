@@ -341,7 +341,7 @@ router.get(
       const result = await pool.request().query(`
         SELECT ESourceType, ESourceId, Eid
         FROM dbo.ExpenseBooking
-        WHERE EIsDeleted = 0
+        WHERE EStatus != 'Deleted'
           AND ESourceType IS NOT NULL
           AND ESourceId   IS NOT NULL
       `);
