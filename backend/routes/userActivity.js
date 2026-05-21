@@ -34,6 +34,17 @@ const ALLOWED_ACTION_TYPES = new Set([
   "settings_change",
 ]);
 
+const SORT_MAP = {
+  userName: "UserName",
+  event: "EventType",
+  timestamp: "CreatedAt",
+};
+
+const ORDER_MAP = {
+  asc: "ASC",
+  desc: "DESC",
+};
+
 function normalizePositiveInt(value, fallback) {
   const parsed = parseInt(String(value), 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
@@ -50,6 +61,56 @@ function normalizeNullableInt(value) {
   if (value === undefined || value === null || value === "") return null;
   const parsed = parseInt(String(value), 10);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function computeDateRange(period) {
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const d = now.getUTCDate();
+
+  switch (period) {
+    case "today":
+      return [new Date(Date.UTC(y, m, d)), new Date(Date.UTC(y, m, d + 1))];
+    case "yesterday":
+      return [new Date(Date.UTC(y, m, d - 1)), new Date(Date.UTC(y, m, d))];
+    case "this-week": {
+      const dow = now.getUTCDay() || 7;
+      const monday = d - (dow - 1);
+      return [
+        new Date(Date.UTC(y, m, monday)),
+        new Date(Date.UTC(y, m, monday + 7)),
+      ];
+    }
+    case "this-month":
+      return [new Date(Date.UTC(y, m, 1)), new Date(Date.UTC(y, m + 1, 1))];
+    case "last-month":
+      return [new Date(Date.UTC(y, m - 1, 1)), new Date(Date.UTC(y, m, 1))];
+    case "this-year":
+      return [new Date(Date.UTC(y, 0, 1)), new Date(Date.UTC(y + 1, 0, 1))];
+    default:
+      return [null, null];
+  }
+}
+
+function parseDateBoundary(value, { exclusiveEnd = false } = {}) {
+  if (!value) return null;
+
+  const raw = String(value).trim();
+  const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (dateOnlyMatch) {
+    const [, year, month, day] = dateOnlyMatch;
+    return new Date(
+      Date.UTC(
+        Number(year),
+        Number(month) - 1,
+        Number(day) + (exclusiveEnd ? 1 : 0),
+      ),
+    );
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function mapActivityRow(row) {
@@ -111,49 +172,16 @@ router.get(
       const search = (req.query.search || "").trim().toLowerCase();
       const eventFilter = req.query.event || "";
       const roleFilter = req.query.role || "";
-      const sortField = req.query.sort || "timestamp";
-      const order = req.query.order === "asc" ? "ASC" : "DESC";
+      const sortColumn = SORT_MAP[req.query.sort] ?? "CreatedAt";
+      const order = ORDER_MAP[req.query.order] ?? "DESC";
 
-      let computedDateFrom = req.query.dateFrom;
-      let computedDateTo = req.query.dateTo;
       const period = req.query.period;
-
-      if (period) {
-        const now = new Date();
-        now.setHours(0, 0, 0, 0);
-        const tomorrow = new Date(now);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-
-        if (period === "today") {
-          computedDateFrom = now.toISOString().slice(0, 10);
-          computedDateTo = tomorrow.toISOString().slice(0, 10);
-        } else if (period === "yesterday") {
-          const yesterday = new Date(now);
-          yesterday.setDate(yesterday.getDate() - 1);
-          computedDateFrom = yesterday.toISOString().slice(0, 10);
-          computedDateTo = now.toISOString().slice(0, 10);
-        } else if (period === "this-week") {
-          const weekStart = new Date(now);
-          weekStart.setDate(now.getDate() - now.getDay());
-          computedDateFrom = weekStart.toISOString().slice(0, 10);
-          computedDateTo = tomorrow.toISOString().slice(0, 10);
-        } else if (period === "this-month") {
-          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-          computedDateFrom = monthStart.toISOString().slice(0, 10);
-          computedDateTo = tomorrow.toISOString().slice(0, 10);
-        } else if (period === "last-month") {
-          const lmStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-          const lmEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-          computedDateFrom = lmStart.toISOString().slice(0, 10);
-          computedDateTo = new Date(lmEnd.getTime() + 86400000)
-            .toISOString()
-            .slice(0, 10);
-        } else if (period === "this-year") {
-          const yearStart = new Date(now.getFullYear(), 0, 1);
-          computedDateFrom = yearStart.toISOString().slice(0, 10);
-          computedDateTo = tomorrow.toISOString().slice(0, 10);
-        }
-      }
+      const [periodDateFrom, periodDateTo] = computeDateRange(period);
+      const computedDateFrom =
+        periodDateFrom ?? parseDateBoundary(req.query.dateFrom);
+      const computedDateTo =
+        periodDateTo ??
+        parseDateBoundary(req.query.dateTo, { exclusiveEnd: true });
 
       const whereConditions = ["1 = 1"];
       const queryInputs = [];
@@ -177,28 +205,15 @@ router.get(
 
       if (computedDateFrom) {
         whereConditions.push("CreatedAt >= @dateFrom");
-        queryInputs.push([
-          "dateFrom",
-          sql.DateTime2,
-          new Date(computedDateFrom),
-        ]);
+        queryInputs.push(["dateFrom", sql.DateTime2, computedDateFrom]);
       }
 
       if (computedDateTo) {
-        const dateToObj = new Date(computedDateTo);
-        dateToObj.setHours(23, 59, 59, 999);
-        whereConditions.push("CreatedAt <= @dateTo");
-        queryInputs.push(["dateTo", sql.DateTime2, dateToObj]);
+        whereConditions.push("CreatedAt < @dateTo");
+        queryInputs.push(["dateTo", sql.DateTime2, computedDateTo]);
       }
 
       whereClause = whereConditions.join(" AND ");
-
-      const sortColumn =
-        sortField === "userName"
-          ? "UserName"
-          : sortField === "event"
-            ? "EventType"
-            : "CreatedAt";
 
       const dataRequest = pool.request();
       for (const [name, type, value] of queryInputs) {
