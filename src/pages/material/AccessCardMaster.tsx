@@ -72,7 +72,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Status", accessor: "status" },
 ];
 
-const CardMaster = () => {
+const AccessCardMaster = () => {
   const queryClient = useQueryClient();
 
   const {
@@ -204,9 +204,11 @@ const CardMaster = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Material Module", "Card Master"]} />
+      <Breadcrumbs
+        items={["Dashboard", "Material Module", "Access Card Master"]}
+      />
       <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Card Master
+        Access Card Master
       </h1>
       <MasterPage
         title="Card"
@@ -216,13 +218,13 @@ const CardMaster = () => {
         initialData={mappedData}
         onDataEvent={handleDataEvent}
         exportConfig={{
-          title: "Cards",
+          title: "Access Cards",
           columns: EXPORT_COLUMNS,
-          filename: "card-master",
+          filename: "access-card-master",
         }}
       />
     </>
   );
 };
 
-export default CardMaster;
+export default AccessCardMaster;
