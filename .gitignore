@@ -41,3 +41,4 @@ pnpm-lock.yaml
 bun.lock
 README/
 backend/uploads/tickets/
+implementation_plan.md
