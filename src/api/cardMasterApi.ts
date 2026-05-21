@@ -43,7 +43,7 @@ export interface BankOption {
   label: string;
   accountNumber: string | null;
   ifscCode: string | null;
-  BBranch?: string | null;
+  branchName: string | null;
 }
 
 export interface CompanyOption {
