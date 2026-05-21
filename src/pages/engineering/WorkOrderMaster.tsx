@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
   Popover,
@@ -43,6 +44,7 @@ import {
   BadgeCheck,
   Clock,
   XCircle,
+  ShoppingCart,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -61,6 +63,7 @@ import {
   getWorkOrders,
   getWorkOrder,
   deleteWorkOrder,
+  getWOPOPrefill,
   type WOItemOption,
 } from "@/api/workOrderApi";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -1563,6 +1566,7 @@ const WorkOrderDetailPanel: React.FC<{
   const [detail, setDetail] = useState<WorkOrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
     {},
   );
@@ -1571,6 +1575,7 @@ const WorkOrderDetailPanel: React.FC<{
   >({});
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [creatingMaterialPO, setCreatingMaterialPO] = useState(false);
 
   const { status: chainStatus } = useWOChainStatus(workOrderId ?? null);
 
@@ -1614,6 +1619,25 @@ const WorkOrderDetailPanel: React.FC<{
       toast.error("Failed to delete work order");
       setDeleting(false);
       setConfirmDelete(false);
+    }
+  };
+
+  const handleCreateMaterialPO = async () => {
+    setCreatingMaterialPO(true);
+    try {
+      const prefill = await getWOPOPrefill(workOrderId);
+      if (prefill.items.length === 0) {
+        toast.info(
+          "This work order has no material items to create a PO from.",
+        );
+        return;
+      }
+      navigate("/material/purchase-order", { state: { woPrefill: prefill } });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error("Could not load work order materials: " + msg);
+    } finally {
+      setCreatingMaterialPO(false);
     }
   };
 
@@ -1729,6 +1753,20 @@ const WorkOrderDetailPanel: React.FC<{
                 <PenSquare size={12} />
                 Edit
               </button>
+              {detail.Status === "Approved" && (
+                <button
+                  onClick={() => void handleCreateMaterialPO()}
+                  disabled={creatingMaterialPO}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 text-xs font-medium hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-colors disabled:opacity-60"
+                >
+                  {creatingMaterialPO ? (
+                    <span className="w-3 h-3 border border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+                  ) : (
+                    <ShoppingCart size={12} />
+                  )}
+                  Create Material PO
+                </button>
+              )}
               <button
                 onClick={() => setConfirmDelete(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-800 text-red-500 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
@@ -3029,16 +3067,16 @@ const WorkOrderEditPanel: React.FC<{
           .map((p) => p.PurchaseOrderNo)
           .join(", ");
         toast.success(
-          `Work order confirmed! ${result.woPOsCreated} WO-PO${result.woPOsCreated > 1 ? "s" : ""} auto-created: ${poNos}`,
+          `Work order confirmed! ${result.woPOsCreated} Material PO${result.woPOsCreated > 1 ? "s" : ""} auto-created: ${poNos}`,
           { duration: 6000 },
         );
       } else if (!result.thresholdMet) {
         toast.info(
-          `Work order confirmed. Material cost (₹${result.totalMaterialCost.toLocaleString("en-IN")}) is below threshold — no WO-PO created.`,
+          `Work order confirmed. Material cost (₹${result.totalMaterialCost.toLocaleString("en-IN")}) is below threshold — no Material PO created.`,
         );
       } else {
         toast.info(
-          "Work order confirmed. Configure WO-PO document type in System Settings to enable auto-PO.",
+          "Work order confirmed. Configure Material PO document type in System Settings to enable auto-creation.",
         );
       }
     } catch (err: unknown) {
