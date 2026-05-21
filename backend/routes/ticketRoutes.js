@@ -9,6 +9,7 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const allowRoles = require("../middleware/role");
+const canAcceptTickets = require("../middleware/canAcceptTickets");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
@@ -135,9 +136,6 @@ router.get("/", async (req, res) => {
   try {
     const actor = requireActor(req, res);
     if (!actor) return;
-    if (!isTicketAdmin(actor.role)) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
 
     const page = parsePositiveInt(req.query.page, 1, Number.MAX_SAFE_INTEGER);
     const limit = parsePositiveInt(req.query.limit, 25, 100);
@@ -154,6 +152,8 @@ router.get("/", async (req, res) => {
           t.assigned_to, t.assigned_to_id,
           t.resolved_by, t.resolved_by_id,
           t.created_by, t.created_by_id,
+          t.issue_details, t.attachment_path,
+          t.escalated_at, t.escalation_level, t.escalation_reason,
           t.updated_at, t.resolved_at, t.closed_at,
           ISNULL(c.comment_count, 0) AS comment_count
         FROM dbo.tickets t
@@ -162,7 +162,23 @@ router.get("/", async (req, res) => {
           FROM dbo.ticket_comments
           GROUP BY ticket_id
         ) c ON c.ticket_id = t.id
-        ORDER BY t.id DESC
+        ORDER BY
+          CASE WHEN t.escalated_at IS NOT NULL AND t.status IN ('Pending', 'InProgress') THEN 0 ELSE 1 END,
+          CASE
+            WHEN t.status = 'Pending' AND t.assigned_to_id IS NULL THEN 0
+            WHEN t.status = 'InProgress' THEN 1
+            WHEN t.status = 'Resolved' THEN 2
+            ELSE 3
+          END,
+          CASE t.priority
+            WHEN 'Urgent' THEN 0
+            WHEN 'High' THEN 1
+            WHEN 'Medium' THEN 2
+            WHEN 'Low' THEN 3
+            ELSE 4
+          END,
+          t.created_at ASC,
+          t.id ASC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
 
@@ -203,6 +219,7 @@ router.get("/stats", async (req, res) => {
         SUM(CASE WHEN status = 'InProgress' THEN 1 ELSE 0 END) AS in_progress,
         SUM(CASE WHEN status = 'Resolved'   THEN 1 ELSE 0 END) AS resolved,
         SUM(CASE WHEN status = 'Closed'     THEN 1 ELSE 0 END) AS closed,
+        SUM(CASE WHEN escalated_at IS NOT NULL AND status IN ('Pending','InProgress') THEN 1 ELSE 0 END) AS escalated_open,
         SUM(CASE WHEN priority = 'Urgent' AND status NOT IN ('Resolved','Closed') THEN 1 ELSE 0 END) AS urgent_open,
         SUM(CASE WHEN priority = 'High'   AND status NOT IN ('Resolved','Closed') THEN 1 ELSE 0 END) AS high_open
       FROM dbo.tickets
@@ -414,6 +431,59 @@ async function createTicketHandler(req, res) {
 }
 router.post("/", createTicketHandler);
 router.post("/create", createTicketHandler);
+
+// Accept an unassigned pending ticket into the current user's resolving queue.
+router.put("/accept/:id", canAcceptTickets, async (req, res) => {
+  try {
+    const actor = requireActor(req, res);
+    if (!actor) return;
+
+    const pool = getPool();
+    const id = parseTicketId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid ticket id" });
+
+    const result = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .input("assigned_to", sql.NVarChar(255), actor.name)
+      .input("assigned_to_id", sql.Int, actor.id).query(`
+        UPDATE dbo.tickets
+        SET assigned_to    = @assigned_to,
+            assigned_to_id = @assigned_to_id,
+            status         = 'InProgress',
+            updated_at     = SYSUTCDATETIME()
+        WHERE id = @id
+          AND status = 'Pending'
+          AND assigned_to_id IS NULL
+      `);
+
+    if (result.rowsAffected?.[0] === 0) {
+      const current = await pool
+        .request()
+        .input("id", sql.Int, id)
+        .query("SELECT status, assigned_to FROM dbo.tickets WHERE id = @id");
+      if (!current.recordset.length) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
+      return res.status(409).json({
+        error: "Ticket is already accepted, assigned, or no longer pending",
+      });
+    }
+
+    await addCommentToTicket(
+      pool,
+      id,
+      `[Accepted] ${actor.name} started resolving this ticket.`,
+      actor,
+    );
+
+    res.json({ success: true });
+    emitTicketUpdate("accepted", id);
+  } catch (err) {
+    console.error("[Tickets PUT /accept]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ─── PUT /api/tickets/assign/:id ─────────────────────────────────────────────
 router.put(

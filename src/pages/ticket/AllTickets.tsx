@@ -1,19 +1,24 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
 import { unwrapTicketList } from "@/lib/ticketListResponse";
 import { useTicketSync } from "@/hooks/useTicketSync";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
   ChevronDown,
   Clock,
+  Loader2,
   RefreshCw,
   Search,
   User,
+  UserCheck,
   X,
 } from "lucide-react";
 
@@ -27,6 +32,9 @@ interface Ticket {
   customer_name: string;
   customer_phone: string;
   status: "Pending" | "Resolved" | "InProgress" | "Closed";
+  assigned_to?: string | null;
+  assigned_to_id?: number | null;
+  created_by_id?: number | null;
   created_at?: string;
 }
 
@@ -69,7 +77,7 @@ const statusConfig: Record<string, { cls: string; label: string }> = {
   },
   InProgress: {
     cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",
-    label: "In Progress",
+    label: "Resolving",
   },
   Resolved: {
     cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
@@ -112,7 +120,17 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function TicketCard({ ticket }: { ticket: Ticket }) {
+function TicketCard({
+  ticket,
+  canAccept,
+  isAccepting,
+  onAccept,
+}: {
+  ticket: Ticket;
+  canAccept: boolean;
+  isAccepting: boolean;
+  onAccept: () => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden hover:border-border/80 hover:shadow-sm transition-all">
@@ -146,6 +164,12 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
                   {fmtDate(ticket.created_at)}
                 </span>
               )}
+              {ticket.assigned_to && (
+                <span className="flex items-center gap-1 text-[11px] text-blue-600">
+                  <UserCheck size={10} />
+                  {ticket.assigned_to}
+                </span>
+              )}
               <span className="text-[11px] font-mono text-muted-foreground/60">
                 #{ticket.id}
               </span>
@@ -171,6 +195,23 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
                 )}
               </div>
             )}
+            {canAccept && (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={onAccept}
+                  disabled={isAccepting}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-60"
+                >
+                  {isAccepting ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <UserCheck size={12} />
+                  )}
+                  Accept
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -191,17 +232,23 @@ const STATUS_TABS: StatusFilter[] = [
 const TAB_LABELS: Record<StatusFilter, string> = {
   All: "All",
   Pending: "Pending",
-  InProgress: "In Progress",
+  InProgress: "Resolving",
   Resolved: "Resolved",
   Closed: "Closed",
 };
 
 const AllTickets: React.FC = () => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { currentUser } = useAuth();
+  const canCurrentUserAccept =
+    !!currentUser?.can_accept_tickets ||
+    ["admin", "super_admin", "dba"].includes(currentUser?.role ?? "");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [priorityFilter, setPriorityFilter] = useState<string>("All");
+  const [acceptingId, setAcceptingId] = useState<number | null>(null);
 
   const {
     data: allTickets = [],
@@ -222,6 +269,26 @@ const AllTickets: React.FC = () => {
   });
 
   useTicketSync(refetch);
+
+  const acceptMutation = useMutation({
+    mutationFn: async (id: number) => {
+      setAcceptingId(id);
+      const res = await fetchWithAuth(`/api/tickets/accept/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to accept ticket");
+      }
+    },
+    onSuccess: () => {
+      toast.success("Ticket accepted. Status changed to Resolving.");
+      invalidateTicketQueries(queryClient);
+    },
+    onError: (err: Error) => toast.error(err.message),
+    onSettled: () => setAcceptingId(null),
+  });
 
   const tickets = useMemo(() => {
     let list = [...allTickets];
@@ -412,9 +479,22 @@ const AllTickets: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-3">
-            {tickets.map((t) => (
-              <TicketCard key={t.id} ticket={t} />
-            ))}
+            {tickets.map((t) => {
+              const canAccept =
+                t.status === "Pending" &&
+                !t.assigned_to_id &&
+                canCurrentUserAccept &&
+                String(t.created_by_id ?? "") !== String(currentUser?.id ?? "");
+              return (
+                <TicketCard
+                  key={t.id}
+                  ticket={t}
+                  canAccept={canAccept}
+                  isAccepting={acceptingId === t.id}
+                  onAccept={() => acceptMutation.mutate(t.id)}
+                />
+              );
+            })}
           </div>
         )}
 

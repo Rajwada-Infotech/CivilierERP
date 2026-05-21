@@ -57,6 +57,9 @@ interface Ticket {
   resolution_note: string | null;
   created_by: string | null;
   comment_count: number;
+  escalated_at: string | null;
+  escalation_level: number;
+  escalation_reason: string | null;
   created_at: string;
   updated_at: string | null;
 }
@@ -76,6 +79,7 @@ interface TicketStats {
     in_progress: number;
     resolved: number;
     closed: number;
+    escalated_open: number;
     urgent_open: number;
     high_open: number;
   };
@@ -127,7 +131,7 @@ const statusBadge: Record<
   InProgress: {
     cls: "bg-blue-50 text-blue-800 border-blue-200",
     Icon: RefreshCw,
-    label: "In progress",
+    label: "Resolving",
   },
   Resolved: {
     cls: "bg-green-50 text-green-800 border-green-200",
@@ -328,6 +332,12 @@ function TicketDetailDialog({
                     {t.assigned_to}
                   </span>
                 )}
+                {t.escalated_at && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border bg-red-50 text-red-800 border-red-200">
+                    <ShieldAlert size={9} />
+                    Escalated
+                  </span>
+                )}
               </div>
 
               {/* Meta grid */}
@@ -366,6 +376,21 @@ function TicketDetailDialog({
                       By {t.resolved_by}
                     </p>
                   )}
+                </div>
+              )}
+
+              {t.escalated_at && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5">
+                  <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-red-700 mb-1">
+                    <ShieldAlert size={11} />
+                    Escalation
+                  </p>
+                  <p className="text-sm text-red-900">
+                    {t.escalation_reason || "This ticket was auto-escalated."}
+                  </p>
+                  <p className="mt-1 text-xs text-red-600">
+                    {fmtDate(t.escalated_at)}
+                  </p>
                 </div>
               )}
 
@@ -631,6 +656,9 @@ export default function AdminTicketPanel() {
       const sa = a.status === "Pending" ? 0 : a.status === "InProgress" ? 1 : 2;
       const sb = b.status === "Pending" ? 0 : b.status === "InProgress" ? 1 : 2;
       if (sa !== sb) return sa - sb;
+      const ea = a.escalated_at ? 0 : 1;
+      const eb = b.escalated_at ? 0 : 1;
+      if (ea !== eb) return ea - eb;
       const pd = priorityRank[a.priority] - priorityRank[b.priority];
       if (pd !== 0) return pd;
       return (
@@ -692,6 +720,12 @@ export default function AdminTicketPanel() {
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-50 text-red-800 border border-red-200">
                 <ShieldAlert size={9} />
                 {counts.urgent_open} urgent
+              </span>
+            )}
+            {(counts?.escalated_open ?? 0) > 0 && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-50 text-red-800 border border-red-200">
+                <Flame size={9} />
+                {counts.escalated_open} escalated
               </span>
             )}
           </div>
@@ -807,6 +841,12 @@ export default function AdminTicketPanel() {
                         <span className="flex items-center gap-1">
                           <MessageCircle size={9} />
                           {ticket.comment_count}
+                        </span>
+                      )}
+                      {ticket.escalated_at && (
+                        <span className="flex items-center gap-1 text-red-700">
+                          <ShieldAlert size={9} />
+                          Escalated
                         </span>
                       )}
                       <span>{fmtDate(ticket.created_at)}</span>
