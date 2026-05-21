@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   BarChart3,
@@ -12,25 +12,15 @@ import {
   LogOut,
   User,
   Crown,
-  Palette,
   ShieldCheck,
   Package,
   Building2,
   MessageSquare,
   Users,
   ChevronRight,
-  Layers,
   FileWarning,
   Database,
-  Settings,
-  Truck,
   Calendar,
-  BookOpen,
-  CreditCard,
-  Hash,
-  Tag,
-  FileType2,
-  Activity,
   Landmark,
   Bell,
   CalendarClock,
@@ -39,13 +29,11 @@ import {
   PackageMinus,
   ClipboardList,
   Wrench,
-  LayoutGrid,
   Grip,
   Home,
 } from "lucide-react";
 
 import { useModule, MODULE_DASHBOARD_ROUTES } from "@/contexts/ModuleContext";
-import { BillingIcon } from "@/components/icons/BillingIcon";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";
@@ -413,17 +401,37 @@ export const MobileNav: React.FC = () => {
             icon: MessageSquare,
             children: [
               // Create Ticket — visible to all
-              { label: "Create Ticket", path: "/ticket/create", icon: FileText },
+              {
+                label: "Create Ticket",
+                path: "/ticket/create",
+                icon: FileText,
+              },
               // My Tickets — only for normal users (not admin/super_admin)
               ...(!isAdmin
-                ? [{ label: "My Tickets", path: "/ticket/my-tickets", icon: FileText }]
+                ? [
+                    {
+                      label: "My Tickets",
+                      path: "/ticket/my-tickets",
+                      icon: FileText,
+                    },
+                  ]
                 : []),
               // Pending Tickets — only for admin/super_admin
               ...(isAdmin
-                ? [{ label: "Pending Tickets", path: "/ticket/pending", icon: FileText }]
+                ? [
+                    {
+                      label: "Pending Tickets",
+                      path: "/ticket/pending",
+                      icon: FileText,
+                    },
+                  ]
                 : []),
               // Resolved Tickets — visible to all
-              { label: "Resolved Tickets", path: "/ticket/resolved", icon: FileText },
+              {
+                label: "Resolved Tickets",
+                path: "/ticket/resolved",
+                icon: FileText,
+              },
             ],
           },
         ];

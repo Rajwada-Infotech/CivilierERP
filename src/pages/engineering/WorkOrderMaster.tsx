@@ -1,10 +1,5 @@
-import React, {
-  useState,
-  useMemo,
-  useEffect,
-  useCallback,
-  useRef,
-} from "react";
+import React from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
   Popover,
   PopoverContent,
@@ -43,15 +38,11 @@ import {
   List,
   ClipboardList,
   ArrowLeft,
-  Filter,
-  SortAsc,
   TrendingUp,
   Boxes,
   BadgeCheck,
   Clock,
   XCircle,
-  MoreVertical,
-  Link2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";

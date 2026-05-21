@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -118,7 +118,7 @@ const CREATIVE_STATUS_CONFIG = {
 export default function AdsManager() {
   const queryClient = useQueryClient();
 
-  const { data: ads = [], refetch } = useQuery<Ad[]>({
+  const { data: serverAds = [] } = useQuery<Ad[]>({
     queryKey: ["dba-ads"],
     queryFn: async () => {
       const res = await fetchWithAuth("/api/dba/ads");
@@ -143,6 +143,28 @@ export default function AdsManager() {
       }));
     },
   });
+
+  // Local creative overrides — creatives are managed client-side until a
+  // backend endpoint exists. Keyed by ad id, merged over the server data.
+  const [localCreatives, setLocalCreatives] = useState<
+    Record<string, Creative[]>
+  >({});
+
+  const ads: Ad[] = serverAds.map((a) => ({
+    ...a,
+    creatives: localCreatives[a.id] ?? a.creatives,
+  }));
+
+  const setAds = (
+    updater: ((prev: Ad[]) => Ad[]) | Ad[],
+  ) => {
+    const next = typeof updater === "function" ? updater(ads) : updater;
+    const patch: Record<string, Creative[]> = {};
+    next.forEach((a) => {
+      patch[a.id] = a.creatives;
+    });
+    setLocalCreatives(patch);
+  };
 
   const toggleStatusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {

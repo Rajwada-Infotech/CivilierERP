@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -13,7 +13,6 @@ import {
   Check,
   X,
   Search,
-  Calendar,
   Eye,
   XCircle,
 } from "lucide-react";
@@ -43,7 +42,7 @@ const inp =
 
 // ─── Column builder ───────────────────────────────────────────────────────────
 function buildRoleColumns(
-  editingId: number | null,
+  _editingId: number | null,
   deleteId: number | null,
   setDeleteId: (id: number | null) => void,
   handleEdit: (item: RoleRecord) => void,
