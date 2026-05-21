@@ -10,18 +10,21 @@ export const chequeMasterSchema = z
     accountNumber: z.string().trim().min(1, "Account number is required"),
     ifscCode: z.string(),
     lotNumber: z.string().trim().min(1, "Lot number is required").max(100),
-    chqStart: chequeNumber.refine((value) => value !== "", "Start number is required"),
-    chqEnd: chequeNumber.refine((value) => value !== "", "End number is required"),
+    chqStart: chequeNumber.refine(
+      (value) => value !== "",
+      "Start number is required",
+    ),
+    chqEnd: chequeNumber.refine(
+      (value) => value !== "",
+      "End number is required",
+    ),
     totalCheques: z.number().int().nonnegative(),
     remarks: z.string().max(500),
     status: z.boolean(),
   })
-  .refine(
-    (value) =>
-      value.chqStart === "" ||
-      value.chqEnd === "" ||
-      Number(value.chqEnd) >= Number(value.chqStart),
-    { path: ["chqEnd"], message: "End must be greater than or equal to start" },
-  );
+  .refine((value) => Number(value.chqEnd) >= Number(value.chqStart), {
+    path: ["chqEnd"],
+    message: "End must be greater than or equal to start",
+  });
 
 export type ChequeMasterForm = z.infer<typeof chequeMasterSchema>;
