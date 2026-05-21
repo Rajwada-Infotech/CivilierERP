@@ -131,13 +131,10 @@ export const getSessionActivity = async (
 export const logUserActivity = async (
   data: Omit<SessionEvent, "id">,
 ): Promise<{ message: string }> => {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch("/api/user-activity", {
+  const response = await fetchWithAuth("/api/user-activity", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(token && { Authorization: `Bearer ${token}` }),
     },
     body: JSON.stringify(data),
   });
