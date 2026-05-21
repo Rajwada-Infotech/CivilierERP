@@ -130,6 +130,7 @@ export interface PaginatedResponse<T> {
 export interface PaginationQuery {
   page?: number;
   limit?: number;
+  [key: string]: unknown;
 }
 
 const buildUrl = (base: string, params: Record<string, unknown> = {}) => {

@@ -190,6 +190,7 @@ const ContractorMaster: React.FC = () => {
         initialData={mappedData}
         onDataEvent={handleDataEvent}
         exportConfig={{
+          title: "Contractor Master",
           columns: EXPORT_COLUMNS,
           filename: "contractor-master",
         }}

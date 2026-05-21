@@ -61,7 +61,7 @@ const DOC_TYPE_CONFIG: Record<
   DocType,
   {
     label: string;
-    icon: React.ComponentType<{ size?: number; className?: string }>;
+    icon: React.ElementType;
     api: string;
     idField: string;
     refField: string;

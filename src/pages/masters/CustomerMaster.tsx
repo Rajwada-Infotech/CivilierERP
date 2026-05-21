@@ -7,6 +7,7 @@ import {
   MasterPage,
   type DataChangeEvent,
   type RecordWithId,
+  type FieldDef,
 } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 
@@ -20,7 +21,7 @@ import {
 const CUSTOMER_TYPE = "A";
 
 /* -------------------- FORM FIELDS (UI Friendly) -------------------- */
-const fields = [
+const fields: FieldDef[] = [
   { name: "name", label: "Customer Name", type: "text", required: true },
   { name: "contact", label: "Contact Person", type: "text" },
   { name: "phone", label: "Phone Number", type: "text" },

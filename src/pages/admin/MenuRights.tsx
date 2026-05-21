@@ -17,7 +17,7 @@ import {
   saveUserPermissions,
   PagePermission,
 } from "@/api/userApi";
-
+import type { PageKey } from "@/contexts/types";
 type PageAction = "view" | "create" | "edit" | "delete" | "print" | "export";
 
 interface PageDef {
@@ -205,7 +205,10 @@ export default function MenuRights() {
       const newActions = current.includes(action)
         ? current.filter((a) => a !== action)
         : [...current, action];
-      const newPerm: PagePermission = { page: pageKey, actions: newActions };
+      const newPerm: PagePermission = {
+        page: pageKey as PageKey,
+        actions: newActions,
+      };
       if (idx >= 0) {
         const copy = [...prev];
         copy[idx] = newPerm;
@@ -221,7 +224,7 @@ export default function MenuRights() {
     setPermissions((prev) => {
       const idx = prev.findIndex((p) => p.page === pageKey);
       const newPerm: PagePermission = {
-        page: pageKey,
+        page: pageKey as PageKey,
         actions: allChecked ? [] : [...pageActions],
       };
       if (idx >= 0) {
