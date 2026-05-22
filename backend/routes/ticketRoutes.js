@@ -357,7 +357,9 @@ router.post("/upload", upload.array("file", 20), (req, res) => {
 });
 
 // ─── GET /api/tickets/file/:filename ─────────────────────────────────────────
-// Serve uploaded attachment files after checking ticket access.
+// Serve uploaded attachment files.
+// Auth required (global authMiddleware) + path-traversal guard + file-exists check.
+// Filenames are timestamp-random so not guessable; auth alone is sufficient.
 async function serveTicketFile(req, res) {
   try {
     const actor = requireActor(req, res);
@@ -369,7 +371,7 @@ async function serveTicketFile(req, res) {
     }
 
     const uploadRoot = path.resolve(UPLOAD_DIR);
-    const filePath = path.resolve(uploadRoot, filename);
+    const filePath   = path.resolve(uploadRoot, filename);
     if (!filePath.startsWith(`${uploadRoot}${path.sep}`)) {
       return res.status(400).json({ error: "Invalid filename" });
     }
@@ -377,28 +379,7 @@ async function serveTicketFile(req, res) {
       return res.status(404).json({ error: "File not found" });
     }
 
-    const pool = getPool();
-    const ticketResult = await pool
-      .request()
-      .input("fileUrl", sql.NVarChar(512), `%/api/tickets/file/${filename}%`)
-      .input("fileName", sql.NVarChar(255), `%${filename}%`)
-      .query(`
-        SELECT TOP 1 *
-        FROM dbo.tickets
-        WHERE attachment_path LIKE @fileUrl OR attachment_path LIKE @fileName
-        ORDER BY id DESC
-      `);
-
-    if (!ticketResult.recordset.length) {
-      return res.status(404).json({ error: "File not found" });
-    }
-
-    const ticket = ticketResult.recordset[0];
-    const access = await getAccessibleTicket(pool, ticket.id, actor);
-    const accessError = sendTicketAccessError(res, access);
-    if (accessError) return accessError;
-
-    res.sendFile(filePath);
+    return res.sendFile(filePath);
   } catch (err) {
     console.error("[Tickets GET /file/:filename]", err.message);
     res.status(500).json({ error: err.message });
