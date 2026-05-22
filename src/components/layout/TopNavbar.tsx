@@ -43,6 +43,7 @@ import {
   ClipboardList,
   Wrench,
   MessageSquare,
+  Ruler,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
@@ -125,12 +126,6 @@ const financeSetupItems = [
     color: "text-yellow-500",
   },
   {
-    icon: Users,
-    label: "Customers",
-    path: "/masters/customers",
-    color: "text-purple-400",
-  },
-  {
     icon: Landmark,
     label: "Banks",
     path: "/masters/banks",
@@ -204,6 +199,18 @@ const materialSetupItems = [
 
 const followupSetupItems = [
   {
+    icon: Layers,
+    label: "Block",
+    path: "/followup/setup/block-master",
+    color: "text-cyan-500",
+  },
+  {
+    icon: Ruler,
+    label: "Unit",
+    path: "/followup/setup/unit-master",
+    color: "text-orange-500",
+  },
+  {
     icon: Calendar,
     label: "Reminders",
     path: "/followup/follow-ups/reminders",
@@ -214,6 +221,12 @@ const followupSetupItems = [
     label: "Pending Tasks",
     path: "/followup/setup/pending-tasks",
     color: "text-purple-500",
+  },
+  {
+    icon: Users,
+    label: "Customers",
+    path: "/followup/setup/customer-master",
+    color: "text-violet-500",
   },
 ];
 
