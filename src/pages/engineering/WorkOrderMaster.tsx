@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
   Popover,
@@ -43,6 +44,7 @@ import {
   BadgeCheck,
   Clock,
   XCircle,
+  ShoppingCart,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -61,6 +63,7 @@ import {
   getWorkOrders,
   getWorkOrder,
   deleteWorkOrder,
+  getWOPOPrefill,
   type WOItemOption,
 } from "@/api/workOrderApi";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -253,6 +256,9 @@ interface WorkOrderMaterialDetail {
   Quantity: number;
   Rate: number;
   Remarks?: string;
+  GSTRate?: number | null;
+  SupplierIdPerLine?: number | null;
+  SupplierNamePerLine?: string | null;
 }
 
 interface WorkOrderActivityDetail {
@@ -269,6 +275,10 @@ interface WorkOrderActivityDetail {
   MaterialAmount: number;
   GrandTotal: number;
   Remarks?: string;
+  HsnCode?: string | null;
+  HsnGstRate?: number | null;
+  HsnGstType?: string | null;
+  BoqID?: number | null;
   materials: WorkOrderMaterialDetail[];
 }
 
@@ -1556,6 +1566,7 @@ const WorkOrderDetailPanel: React.FC<{
   const [detail, setDetail] = useState<WorkOrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
     {},
   );
@@ -1564,6 +1575,7 @@ const WorkOrderDetailPanel: React.FC<{
   >({});
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [creatingMaterialPO, setCreatingMaterialPO] = useState(false);
 
   const { status: chainStatus } = useWOChainStatus(workOrderId ?? null);
 
@@ -1607,6 +1619,25 @@ const WorkOrderDetailPanel: React.FC<{
       toast.error("Failed to delete work order");
       setDeleting(false);
       setConfirmDelete(false);
+    }
+  };
+
+  const handleCreateMaterialPO = async () => {
+    setCreatingMaterialPO(true);
+    try {
+      const prefill = await getWOPOPrefill(workOrderId);
+      if (prefill.items.length === 0) {
+        toast.info(
+          "This work order has no material items to create a PO from.",
+        );
+        return;
+      }
+      navigate("/material/purchase-order", { state: { woPrefill: prefill } });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error("Could not load work order materials: " + msg);
+    } finally {
+      setCreatingMaterialPO(false);
     }
   };
 
@@ -1722,6 +1753,20 @@ const WorkOrderDetailPanel: React.FC<{
                 <PenSquare size={12} />
                 Edit
               </button>
+              {detail.Status === "Approved" && (
+                <button
+                  onClick={() => void handleCreateMaterialPO()}
+                  disabled={creatingMaterialPO}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 text-xs font-medium hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-colors disabled:opacity-60"
+                >
+                  {creatingMaterialPO ? (
+                    <span className="w-3 h-3 border border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+                  ) : (
+                    <ShoppingCart size={12} />
+                  )}
+                  Create Material PO
+                </button>
+              )}
               <button
                 onClick={() => setConfirmDelete(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-800 text-red-500 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
@@ -2748,7 +2793,7 @@ const WorkOrderEditPanel: React.FC<{
         status: !!h.HStatus,
       }))
     : [];
-  const userId = (currentUser as { id?: number } | null)?.id ?? 1;
+  const userId = (currentUser as unknown as { id?: number } | null)?.id ?? 1;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -3022,16 +3067,16 @@ const WorkOrderEditPanel: React.FC<{
           .map((p) => p.PurchaseOrderNo)
           .join(", ");
         toast.success(
-          `Work order confirmed! ${result.woPOsCreated} WO-PO${result.woPOsCreated > 1 ? "s" : ""} auto-created: ${poNos}`,
+          `Work order confirmed! ${result.woPOsCreated} Material PO${result.woPOsCreated > 1 ? "s" : ""} auto-created: ${poNos}`,
           { duration: 6000 },
         );
       } else if (!result.thresholdMet) {
         toast.info(
-          `Work order confirmed. Material cost (₹${result.totalMaterialCost.toLocaleString("en-IN")}) is below threshold — no WO-PO created.`,
+          `Work order confirmed. Material cost (₹${result.totalMaterialCost.toLocaleString("en-IN")}) is below threshold — no Material PO created.`,
         );
       } else {
         toast.info(
-          "Work order confirmed. Configure WO-PO document type in System Settings to enable auto-PO.",
+          "Work order confirmed. Configure Material PO document type in System Settings to enable auto-creation.",
         );
       }
     } catch (err: unknown) {
@@ -4324,284 +4369,351 @@ const WorkOrderMaster: React.FC = () => {
           )}
 
           {/* ── Unified Work Order Header Card ── */}
-          <div className="rounded-xl border border-border bg-card mb-5">
-            <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-center gap-2">
-              <FileText size={15} className="text-primary shrink-0" />
-              <h2 className="text-sm font-semibold text-foreground">
-                Work Order Details
-              </h2>
+          <div className="rounded-2xl border border-border bg-card mb-5 overflow-hidden shadow-sm">
+            {/* Card Header */}
+            <div className="px-5 py-4 border-b border-border bg-muted/20 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                  <FileText size={15} className="text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-foreground tracking-tight">
+                    Work Order Details
+                  </h2>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Configuration, parties &amp; document info
+                  </p>
+                </div>
+              </div>
               {form.docNumber && (
-                <span className="ml-auto font-mono text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded shrink-0">
+                <span className="font-mono text-xs font-bold text-primary bg-primary/10 border border-primary/20 px-2.5 py-1 rounded-lg shrink-0">
                   {form.docNumber}
                 </span>
               )}
             </div>
-            <div className="p-4 sm:p-5">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-4 items-start">
-                {/* BOQ Link */}
-                <div>
-                  <FieldLabel>
-                    <span className="flex items-center gap-1.5">
-                      <FileText size={11} />
-                      Linked BOQ
-                    </span>
-                  </FieldLabel>
-                  <select
-                    value={form.boqId}
-                    onChange={async (e) => {
-                      const boqId = e.target.value;
-                      const boq = approvedBoqs.find(
-                        (b) => String(b.id) === boqId,
-                      );
-                      setForm((prev) => ({
-                        ...prev,
-                        boqId,
-                        companyId: boq?.CompanyId
-                          ? String(boq.CompanyId)
-                          : prev.companyId,
-                        projectId: boq?.ProjectId
-                          ? String(boq.ProjectId)
-                          : prev.projectId,
-                      }));
-                      if (boqId) {
-                        try {
-                          const acts = await fetchWithAuth(
-                            `/api/engineering/boq-activities/${boqId}`,
-                          ).then((r) => r.json());
-                          if (Array.isArray(acts) && acts.length > 0) {
-                            const inherited: ActivityGroup[] = acts.map(
-                              (a: any) => ({
-                                id: uid(),
-                                groupId: null,
-                                name: a.ActivityName || "",
-                                expanded: true,
-                                activities: [
-                                  {
-                                    id: uid(),
-                                    activityId: a.ActivityId
-                                      ? parseInt(a.ActivityId)
-                                      : null,
-                                    name: a.ActivityName || "",
-                                    uomId: a.UomId ?? null,
-                                    unit: a.UomName || "",
-                                    ratePerUnit: parseFloat(a.Rate || 0),
-                                    area: parseFloat(a.Quantity || 0),
-                                    materials: [],
-                                    hsnCode: "",
-                                    hsnGstRate: parseFloat(a.TaxPct || 0),
-                                    hsnGstType: "cgst_sgst" as const,
-                                  },
-                                ],
-                              }),
-                            );
-                            setGroups(inherited);
-                          }
-                        } catch {
-                          /* non-fatal */
-                        }
-                      }
-                    }}
-                    className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="">— None —</option>
-                    {approvedBoqs.map((b) => (
-                      <option key={b.id} value={String(b.id)}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </select>
-                  {form.boqId && (
-                    <p className="text-[10px] text-muted-foreground mt-1">
-                      Company &amp; Project auto-filled from BOQ
-                    </p>
-                  )}
+
+            <div className="divide-y divide-border/60">
+              {/* ── Section 1: Project Configuration ── */}
+              <div className="px-5 py-4">
+                <div className="flex items-center gap-2 mb-3.5">
+                  <div className="w-1 h-4 rounded-full bg-primary/60 shrink-0" />
+                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                    Project Configuration
+                  </span>
                 </div>
-                {/* Row 1: Company | Project | Financial Year */}
-                <div>
-                  <FieldLabel required>
-                    <span className="flex items-center gap-1.5">
-                      <Building2 size={11} />
-                      Company Name
-                    </span>
-                  </FieldLabel>
-                  {renderSelect(
-                    "companyId",
-                    form.companyId,
-                    (v) => setField("companyId", v),
-                    companies,
-                    "Select company",
-                    errors.companyId ?? false,
-                  )}
-                  {errors.companyId && (
-                    <p className="text-xs text-red-500 mt-1">Required</p>
-                  )}
-                </div>
-                <div>
-                  <FieldLabel required>
-                    <span className="flex items-center gap-1.5">
-                      <Layers size={11} />
-                      Project Name
-                    </span>
-                  </FieldLabel>
-                  {renderSelect(
-                    "projectId",
-                    form.projectId,
-                    (v) => setField("projectId", v),
-                    projects,
-                    "Select project",
-                    errors.projectId ?? false,
-                  )}
-                  {errors.projectId && (
-                    <p className="text-xs text-red-500 mt-1">Required</p>
-                  )}
-                </div>
-                <div>
-                  <FieldLabel>
-                    <span className="flex items-center gap-1.5">
-                      <Calendar size={11} />
-                      Financial Year
-                    </span>
-                  </FieldLabel>
-                  {loadingDropdowns ? (
-                    <SelectSkeleton />
-                  ) : (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* BOQ Link */}
+                  <div>
+                    <FieldLabel>
+                      <span className="flex items-center gap-1.5">
+                        <FileText size={11} />
+                        Linked BOQ
+                      </span>
+                    </FieldLabel>
                     <select
-                      value={selectedFinYear}
-                      onChange={(e) => {
-                        const nextFinYear = e.target.value;
-                        setSelectedFinYear(nextFinYear);
-                        if (woDocTypeId)
-                          void refreshWoDocNumber(woDocTypeId, nextFinYear);
+                      value={form.boqId}
+                      onChange={async (e) => {
+                        const boqId = e.target.value;
+                        const boq = approvedBoqs.find(
+                          (b) => String(b.id) === boqId,
+                        );
+                        setForm((prev) => ({
+                          ...prev,
+                          boqId,
+                          companyId: boq?.CompanyId
+                            ? String(boq.CompanyId)
+                            : prev.companyId,
+                          projectId: boq?.ProjectId
+                            ? String(boq.ProjectId)
+                            : prev.projectId,
+                        }));
+                        if (boqId) {
+                          try {
+                            const acts = await fetchWithAuth(
+                              `/api/engineering/boq-activities/${boqId}`,
+                            ).then((r) => r.json());
+                            if (Array.isArray(acts) && acts.length > 0) {
+                              const inherited: ActivityGroup[] = acts.map(
+                                (a: any) => ({
+                                  id: uid(),
+                                  groupId: null,
+                                  name: a.ActivityName || "",
+                                  expanded: true,
+                                  activities: [
+                                    {
+                                      id: uid(),
+                                      activityId: a.ActivityId
+                                        ? parseInt(a.ActivityId)
+                                        : null,
+                                      name: a.ActivityName || "",
+                                      uomId: a.UomId ?? null,
+                                      unit: a.UomName || "",
+                                      ratePerUnit: parseFloat(a.Rate || 0),
+                                      area: parseFloat(a.Quantity || 0),
+                                      materials: [],
+                                      hsnCode: "",
+                                      hsnGstRate: parseFloat(a.TaxPct || 0),
+                                      hsnGstType: "cgst_sgst" as const,
+                                    },
+                                  ],
+                                }),
+                              );
+                              setGroups(inherited);
+                            }
+                          } catch {
+                            /* non-fatal */
+                          }
+                        }
                       }}
-                      className={selectCls}
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring appearance-none"
                     >
-                      <option value="">Select financial year…</option>
-                      {finYearOptions.map((fy) => (
-                        <option key={fy.id} value={fy.year}>
-                          {fy.year}
+                      <option value="">— None —</option>
+                      {approvedBoqs.map((b) => (
+                        <option key={b.id} value={String(b.id)}>
+                          {b.name}
                         </option>
                       ))}
                     </select>
-                  )}
-                </div>
+                    {form.boqId && (
+                      <p className="text-[10px] text-primary/70 mt-1 flex items-center gap-1">
+                        <Check size={9} />
+                        Company &amp; Project auto-filled from BOQ
+                      </p>
+                    )}
+                  </div>
 
-                {/* Row 2: Document Type | Doc Number | Doc Date */}
-                <div className="col-span-1">
-                  <FieldLabel>
-                    <span className="flex items-center gap-1.5">
-                      <Hash size={11} />
-                      Document Type
-                    </span>
-                  </FieldLabel>
-                  <DocNumberPreview
-                    module="WO"
-                    finYear={selectedFinYear || undefined}
-                    selectedDocTypeId={woDocTypeId}
-                    preview={woDocNo}
-                    refreshTrigger={docRefreshTrigger}
-                    onSelect={applyWoDocNumber}
-                  />
-                </div>
-                <div className="col-span-1">
-                  <FieldLabel>
-                    <span className="flex items-center gap-1.5">
-                      <Hash size={11} />
-                      Document Number
-                    </span>
-                  </FieldLabel>
-                  <input
-                    value={form.docNumber}
-                    onChange={(e) => {
-                      const nextValue = e.target.value.toUpperCase();
-                      setForm((prev) => ({ ...prev, docNumber: nextValue }));
-                      setWoDocNo(nextValue);
-                    }}
-                    className={`${inputCls} font-mono`}
-                    placeholder="Auto-generated…"
-                  />
-                  <p className="text-[11px] text-muted-foreground mt-1">
-                    Auto-filled from document type, but still editable.
-                  </p>
-                </div>
-                <div className="col-span-1">
-                  <FieldLabel required>
-                    <span className="flex items-center gap-1.5">
-                      <Calendar size={11} />
-                      Document Date
-                    </span>
-                  </FieldLabel>
-                  <input
-                    type="date"
-                    value={form.docDate}
-                    onChange={(e) => setField("docDate", e.target.value)}
-                    className={`${inputCls} ${errors.docDate ? "border-red-400" : ""}`}
-                  />
-                  {errors.docDate && (
-                    <p className="text-xs text-red-500 mt-1">Required</p>
-                  )}
-                </div>
+                  {/* Company */}
+                  <div>
+                    <FieldLabel required>
+                      <span className="flex items-center gap-1.5">
+                        <Building2 size={11} />
+                        Company Name
+                      </span>
+                    </FieldLabel>
+                    {renderSelect(
+                      "companyId",
+                      form.companyId,
+                      (v) => setField("companyId", v),
+                      companies,
+                      "Select company",
+                      errors.companyId ?? false,
+                    )}
+                    {errors.companyId && (
+                      <p className="text-xs text-red-500 mt-1">Required</p>
+                    )}
+                  </div>
 
-                {/* Row 3: Contractor | Supplier | Total Amount */}
-                <div>
-                  <FieldLabel required>
-                    <span className="flex items-center gap-1.5">
-                      <User size={11} />
-                      Contractor
-                    </span>
-                  </FieldLabel>
-                  {renderSelect(
-                    "contractorId",
-                    form.contractorId,
-                    (v) => setField("contractorId", v),
-                    contractors,
-                    "Select contractor",
-                    errors.contractorId ?? false,
-                  )}
-                  {errors.contractorId && (
-                    <p className="text-xs text-red-500 mt-1">Required</p>
-                  )}
+                  {/* Project */}
+                  <div>
+                    <FieldLabel required>
+                      <span className="flex items-center gap-1.5">
+                        <Layers size={11} />
+                        Project Name
+                      </span>
+                    </FieldLabel>
+                    {renderSelect(
+                      "projectId",
+                      form.projectId,
+                      (v) => setField("projectId", v),
+                      projects,
+                      "Select project",
+                      errors.projectId ?? false,
+                    )}
+                    {errors.projectId && (
+                      <p className="text-xs text-red-500 mt-1">Required</p>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <FieldLabel>
-                    <span className="flex items-center gap-1.5">
-                      <User size={11} />
-                      Supplier
-                    </span>
-                  </FieldLabel>
-                  {renderSelect(
-                    "supplierId",
-                    form.supplierId,
-                    (v) => setField("supplierId", v),
-                    suppliers,
-                    "Select supplier",
-                    false,
-                  )}
+              </div>
+
+              {/* ── Section 2: Document Configuration ── */}
+              <div className="px-5 py-4">
+                <div className="flex items-center gap-2 mb-3.5">
+                  <div className="w-1 h-4 rounded-full bg-indigo-400/70 shrink-0" />
+                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                    Document Configuration
+                  </span>
                 </div>
-                <div>
-                  <FieldLabel>
-                    <span className="flex items-center gap-1.5">
-                      <IndianRupee size={11} />
-                      Total Amount
-                    </span>
-                  </FieldLabel>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
-                      ₹
-                    </span>
-                    <input
-                      readOnly
-                      value={grandTotal > 0 ? grandTotal.toFixed(2) : ""}
-                      placeholder="Calculated from activities"
-                      className={`${inputCls} pl-7 bg-muted/50 text-muted-foreground cursor-not-allowed`}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* Financial Year */}
+                  <div>
+                    <FieldLabel>
+                      <span className="flex items-center gap-1.5">
+                        <Calendar size={11} />
+                        Financial Year
+                      </span>
+                    </FieldLabel>
+                    {loadingDropdowns ? (
+                      <SelectSkeleton />
+                    ) : (
+                      <select
+                        value={selectedFinYear}
+                        onChange={(e) => {
+                          const nextFinYear = e.target.value;
+                          setSelectedFinYear(nextFinYear);
+                          if (woDocTypeId)
+                            void refreshWoDocNumber(woDocTypeId, nextFinYear);
+                        }}
+                        className={selectCls}
+                      >
+                        <option value="">Select financial year…</option>
+                        {finYearOptions.map((fy) => (
+                          <option key={fy.id} value={fy.year}>
+                            {fy.year}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
+                  {/* Document Type */}
+                  <div>
+                    <FieldLabel>
+                      <span className="flex items-center gap-1.5">
+                        <Hash size={11} />
+                        Document Type
+                      </span>
+                    </FieldLabel>
+                    <DocNumberPreview
+                      module="WO"
+                      finYear={selectedFinYear || undefined}
+                      selectedDocTypeId={woDocTypeId}
+                      preview={woDocNo}
+                      refreshTrigger={docRefreshTrigger}
+                      onSelect={applyWoDocNumber}
                     />
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-1">
-                    Auto-calculated from activities
-                  </p>
+
+                  {/* Document Number */}
+                  <div>
+                    <FieldLabel>
+                      <span className="flex items-center gap-1.5">
+                        <Hash size={11} />
+                        Document Number
+                      </span>
+                    </FieldLabel>
+                    <input
+                      value={form.docNumber}
+                      onChange={(e) => {
+                        const nextValue = e.target.value.toUpperCase();
+                        setForm((prev) => ({ ...prev, docNumber: nextValue }));
+                        setWoDocNo(nextValue);
+                      }}
+                      className={`${inputCls} font-mono`}
+                      placeholder="Auto-generated…"
+                    />
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Auto-filled, still editable
+                    </p>
+                  </div>
+
+                  {/* Document Date */}
+                  <div>
+                    <FieldLabel required>
+                      <span className="flex items-center gap-1.5">
+                        <Calendar size={11} />
+                        Document Date
+                      </span>
+                    </FieldLabel>
+                    <input
+                      type="date"
+                      value={form.docDate}
+                      onChange={(e) => setField("docDate", e.target.value)}
+                      className={`${inputCls} ${errors.docDate ? "border-red-400" : ""}`}
+                    />
+                    {errors.docDate && (
+                      <p className="text-xs text-red-500 mt-1">Required</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Section 3: Parties & Amount ── */}
+              <div className="px-5 py-4">
+                <div className="flex items-center gap-2 mb-3.5">
+                  <div className="w-1 h-4 rounded-full bg-emerald-400/70 shrink-0" />
+                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                    Parties &amp; Amount
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Contractor */}
+                  <div>
+                    <FieldLabel required>
+                      <span className="flex items-center gap-1.5">
+                        <User size={11} />
+                        Contractor
+                      </span>
+                    </FieldLabel>
+                    {renderSelect(
+                      "contractorId",
+                      form.contractorId,
+                      (v) => setField("contractorId", v),
+                      contractors,
+                      "Select contractor",
+                      errors.contractorId ?? false,
+                    )}
+                    {errors.contractorId && (
+                      <p className="text-xs text-red-500 mt-1">Required</p>
+                    )}
+                  </div>
+
+                  {/* Supplier */}
+                  <div>
+                    <FieldLabel>
+                      <span className="flex items-center gap-1.5">
+                        <User size={11} />
+                        Supplier
+                      </span>
+                    </FieldLabel>
+                    {renderSelect(
+                      "supplierId",
+                      form.supplierId,
+                      (v) => setField("supplierId", v),
+                      suppliers,
+                      "Select supplier",
+                      false,
+                    )}
+                  </div>
+
+                  {/* Total Amount */}
+                  <div>
+                    <FieldLabel>
+                      <span className="flex items-center gap-1.5">
+                        <IndianRupee size={11} />
+                        Total Amount
+                      </span>
+                    </FieldLabel>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">
+                        ₹
+                      </span>
+                      <input
+                        readOnly
+                        value={grandTotal > 0 ? grandTotal.toFixed(2) : ""}
+                        placeholder="Calculated from activities"
+                        className={`${inputCls} pl-7 bg-muted/40 text-foreground font-mono font-semibold cursor-not-allowed`}
+                      />
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+                      <Calculator size={9} />
+                      Auto-calculated from activities
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Section 4: Remarks & T&C ── */}
+              <div className="px-5 py-4">
+                <div className="flex items-center gap-2 mb-3.5">
+                  <div className="w-1 h-4 rounded-full bg-amber-400/70 shrink-0" />
+                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                    Notes &amp; Terms
+                  </span>
                 </div>
 
-                {/* Row 4: Remarks (full width) */}
-                <div className="col-span-1 md:col-span-2 lg:col-span-3">
+                {/* Remarks */}
+                <div className="mb-4">
                   <FieldLabel>Remarks</FieldLabel>
                   <input
                     value={form.remarks}
@@ -4610,88 +4722,92 @@ const WorkOrderMaster: React.FC = () => {
                     className={inputCls}
                   />
                 </div>
-                <div className="col-span-1 md:col-span-2 lg:col-span-3">
-                  <FieldLabel>Terms &amp; Conditions</FieldLabel>
-                  {/* T&C Picker from TCMaster */}
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setTcDropdownOpen((o) => !o)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition mb-2"
-                    >
-                      <Plus size={13} />
-                      Add T&amp;C
-                    </button>
-                    {tcDropdownOpen && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-10"
-                          onClick={() => setTcDropdownOpen(false)}
-                        />
-                        <div className="absolute left-0 top-full mt-1 z-20 w-80 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
-                          <div className="px-3 py-2 border-b border-border">
-                            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                              Select Terms &amp; Conditions
-                            </p>
-                          </div>
-                          <div className="max-h-56 overflow-y-auto divide-y divide-border">
-                            {tcRecords.length === 0 ? (
-                              <p className="px-4 py-6 text-xs text-center text-muted-foreground">
-                                No T&amp;C records found
+
+                {/* Terms & Conditions */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <FieldLabel>Terms &amp; Conditions</FieldLabel>
+                    {/* T&C Picker from TCMaster */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setTcDropdownOpen((o) => !o)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition mb-2"
+                      >
+                        <Plus size={13} />
+                        Add T&amp;C
+                      </button>
+                      {tcDropdownOpen && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-10"
+                            onClick={() => setTcDropdownOpen(false)}
+                          />
+                          <div className="absolute right-0 top-full mt-1 z-20 w-80 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
+                            <div className="px-3 py-2 border-b border-border">
+                              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                                Select Terms &amp; Conditions
                               </p>
-                            ) : (
-                              tcRecords.map((tc) => {
-                                const isSelected = selectedTCs.some(
-                                  (s) => s.id === tc.id,
-                                );
-                                return (
-                                  <button
-                                    key={tc.id}
-                                    type="button"
-                                    onClick={() =>
-                                      setSelectedTCs((prev) =>
-                                        isSelected
-                                          ? prev.filter((s) => s.id !== tc.id)
-                                          : [...prev, tc],
-                                      )
-                                    }
-                                    className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSelected ? "bg-primary/5" : ""}`}
-                                  >
-                                    <span
-                                      className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? "bg-primary border-primary" : "border-border"}`}
+                            </div>
+                            <div className="max-h-56 overflow-y-auto divide-y divide-border">
+                              {tcRecords.length === 0 ? (
+                                <p className="px-4 py-6 text-xs text-center text-muted-foreground">
+                                  No T&amp;C records found
+                                </p>
+                              ) : (
+                                tcRecords.map((tc) => {
+                                  const isSelected = selectedTCs.some(
+                                    (s) => s.id === tc.id,
+                                  );
+                                  return (
+                                    <button
+                                      key={tc.id}
+                                      type="button"
+                                      onClick={() =>
+                                        setSelectedTCs((prev) =>
+                                          isSelected
+                                            ? prev.filter((s) => s.id !== tc.id)
+                                            : [...prev, tc],
+                                        )
+                                      }
+                                      className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSelected ? "bg-primary/5" : ""}`}
                                     >
-                                      {isSelected && (
-                                        <Check
-                                          size={10}
-                                          className="text-primary-foreground"
-                                        />
-                                      )}
-                                    </span>
-                                    <span className="flex-1 min-w-0">
-                                      <span className="block text-sm font-medium text-foreground truncate">
-                                        {tc.name}
+                                      <span
+                                        className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? "bg-primary border-primary" : "border-border"}`}
+                                      >
+                                        {isSelected && (
+                                          <Check
+                                            size={10}
+                                            className="text-primary-foreground"
+                                          />
+                                        )}
                                       </span>
-                                      <span className="block text-[11px] text-muted-foreground truncate mt-0.5">
-                                        {tc.terms}
+                                      <span className="flex-1 min-w-0">
+                                        <span className="block text-sm font-medium text-foreground truncate">
+                                          {tc.name}
+                                        </span>
+                                        <span className="block text-[11px] text-muted-foreground truncate mt-0.5">
+                                          {tc.terms}
+                                        </span>
                                       </span>
-                                    </span>
-                                  </button>
-                                );
-                              })
-                            )}
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                            <div className="px-3 py-2 border-t border-border">
+                              <button
+                                type="button"
+                                onClick={() => setTcDropdownOpen(false)}
+                                className="w-full text-xs text-center text-muted-foreground hover:text-foreground transition py-1"
+                              >
+                                Done
+                              </button>
+                            </div>
                           </div>
-                          <div className="px-3 py-2 border-t border-border">
-                            <button
-                              type="button"
-                              onClick={() => setTcDropdownOpen(false)}
-                              className="w-full text-xs text-center text-muted-foreground hover:text-foreground transition py-1"
-                            >
-                              Done
-                            </button>
-                          </div>
-                        </div>
-                      </>
-                    )}
+                        </>
+                      )}
+                    </div>
                   </div>
                   {/* Selected T&C list */}
                   {selectedTCs.length > 0 ? (

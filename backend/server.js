@@ -23,7 +23,6 @@ const {
 const { ipKeyGenerator } = require("express-rate-limit");
 const { safeLoadRoutes, printRoutesSummary } = require("./utils/loadRoutes");
 const http = require("http");
-const path = require("path");
 const { initSocket } = require("./socket");
 
 const {
@@ -67,6 +66,16 @@ function makeStore(prefix) {
     prefix,
     sendCommand: (...args) => getRedis().then((client) => client.call(...args)),
   });
+}
+
+function isLocalRequest(req) {
+  const ip = req.ip || req.socket?.remoteAddress || "";
+  return (
+    ip === "::1" ||
+    ip === "127.0.0.1" ||
+    ip === "::ffff:127.0.0.1" ||
+    ip.includes("127.0.0.1")
+  );
 }
 
 // ─── ALL routes ─────────────────────────────────────────────────────────────
@@ -189,8 +198,8 @@ async function createApp() {
 
   app.use(compression());
 
-  // Serve uploaded ticket attachments statically
-  app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+  // Ticket attachments are served through /api/tickets/file/:filename after auth.
+  // Do not expose backend/uploads/tickets statically.
   // Global request tracking
   if (!isTest) {
     app.use(async (req, res, next) => {
@@ -210,6 +219,7 @@ async function createApp() {
       max: 10,
       message: { error: "Too many login attempts. Try again later." },
       store: makeStore("rl:login:"),
+      skip: (req) => isDev && isLocalRequest(req),
       standardHeaders: true,
       legacyHeaders: false,
     });
@@ -252,10 +262,6 @@ async function createApp() {
   app.use("/health", require("./routes/health"));
 
   app.use("/api/users", require("./routes/users"));
-
-  // Public — no auth required; browser fetches these directly via <img src>
-  const { serveTicketFile } = require("./routes/ticketRoutes");
-  app.get("/api/tickets/file/:filename", serveTicketFile);
 
   // Active user tracking
   app.use("/api", authMiddleware, async (req, res, next) => {

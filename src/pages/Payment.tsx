@@ -148,6 +148,8 @@ interface ExpenseDetail {
   ECgstRate?: number | null;
   ESgstRate?: number | null;
   EIgstRate?: number | null;
+  EBillingTermsData?: string | null;
+  EDiscountData?: string | null;
 }
 
 interface GRNRef {
@@ -196,6 +198,7 @@ interface PaymentRecord {
   cgstRate: number | null;
   sgstRate: number | null;
   igstRate: number | null;
+  billingTermsData: string | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -425,6 +428,7 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     bankId: null,
     bankName: "",
     project: "",
+    projectSite: "",
     company: "",
     expenseRef: "",
     expenseId: "",
@@ -448,6 +452,7 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     cgstRate: null,
     sgstRate: null,
     igstRate: null,
+    billingTermsData: null,
   };
 }
 
@@ -461,6 +466,7 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     bankId: item.PBankID ?? null,
     bankName: item.PBankName || "",
     project: item.PProject || "",
+    projectSite: item.PProject || "",
     company: item.PCompany || "",
     expenseRef: item.PExpenseRef || "",
     expenseId: "",
@@ -484,6 +490,7 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     cgstRate: null,
     sgstRate: null,
     igstRate: null,
+    billingTermsData: null,
   };
 }
 
@@ -2037,6 +2044,8 @@ const Payment: React.FC = () => {
           cgstRate: detail.ECgstRate ?? null,
           sgstRate: detail.ESgstRate ?? null,
           igstRate: detail.EIgstRate ?? null,
+          billingTermsData:
+            detail.EBillingTermsData ?? detail.EDiscountData ?? null,
         }));
 
         // For WORK_DONE entries, resolve project from the linked WorkDone record
@@ -2076,6 +2085,7 @@ const Payment: React.FC = () => {
       cgstRate: null,
       sgstRate: null,
       igstRate: null,
+      billingTermsData: null,
     }));
     setLinkedGRNs([]);
     setSupplierBookingFilter("");
@@ -2170,32 +2180,35 @@ const Payment: React.FC = () => {
     if (!validate()) return;
 
     const payload = {
-      PPaymentName: form.paymentName || null,
-      PMode: form.mode || null,
-      PAmount: form.amount ?? null,
-      PDocType: form.docType || null,
-      PDate: form.date || null,
-      PBankID: form.bankId ?? null,
-      PBankName: form.bankName || null,
-      PProject: form.project || null,
-      PCompany: form.company || null,
-      PExpenseRef: form.expenseRef || null,
+      // BaseTransactionSchema fields
+      companyId: form.company || null,
+      projectId: form.projectSite || form.project || null,
+      docDate: form.date || "",
+      docTypeId: form.docType || null,
+      remarks: form.paymentName || null,
+      // PaymentPayloadSchema fields
+      supplierId: form.expenseRef || null,
+      bankId: form.bankId ?? null,
+      amount: form.amount ?? 0,
+      // Extended payment fields (passed through for backend processing)
+      bankName: form.bankName || null,
       parentDocNo: form.parentDocNo || null,
       rootExBDocNo: form.rootExBDocNo || null,
+      mode: form.mode || null,
       // Cheque
-      PChequeNo: form.chequeNo || null,
-      PChequeLotId: form.chequeLotId ?? null,
-      PChequeLotNumber: form.chequeLotNumber || null,
-      PChequeDate: form.chequeDate || null,
-      PChequeAccountNumber: form.chequeAccountNumber || null,
-      PChequeIfsc: form.chequeIfsc || null,
-      PIsPostDated: form.isPostDated,
+      chequeNo: form.chequeNo || null,
+      chequeLotId: form.chequeLotId ?? null,
+      chequeLotNumber: form.chequeLotNumber || null,
+      chequeDate: form.chequeDate || null,
+      chequeAccountNumber: form.chequeAccountNumber || null,
+      chequeIfsc: form.chequeIfsc || null,
+      isPostDated: form.isPostDated,
       // Digital
-      PNeftNumber: form.neftNumber || null,
-      PUpiTransactionId: form.upiTransactionId || null,
-      PRtgsReference: form.rtgsReference || null,
-      PImpsReference: form.impsReference || null,
-    };
+      neftNumber: form.neftNumber || null,
+      upiTransactionId: form.upiTransactionId || null,
+      rtgsReference: form.rtgsReference || null,
+      impsReference: form.impsReference || null,
+    } as any;
 
     try {
       setSaving(true);
@@ -2588,17 +2601,115 @@ const Payment: React.FC = () => {
                   {(form.amount ?? 0) > 0 &&
                     (() => {
                       const base = form.baseAmount ?? form.amount ?? 0;
-                      const cgst = form.cgstRate
-                        ? (base * form.cgstRate) / 100
-                        : 0;
-                      const sgst = form.sgstRate
-                        ? (base * form.sgstRate) / 100
-                        : 0;
-                      const igst = form.igstRate
-                        ? (base * form.igstRate) / 100
-                        : 0;
-                      const gstTotal = cgst + sgst + igst;
-                      const hasGst = gstTotal > 0;
+                      const cgstRate = form.cgstRate ?? 0;
+                      const sgstRate = form.sgstRate ?? 0;
+                      const igstRate = form.igstRate ?? 0;
+
+                      // Parse billing terms
+                      let billingTerms: {
+                        masterTermName?: string;
+                        type: string;
+                        value: number;
+                        appliedOn: string;
+                        deductionType?: string;
+                        applicable?: boolean;
+                      }[] = [];
+                      try {
+                        if (form.billingTermsData) {
+                          const parsed = JSON.parse(form.billingTermsData);
+                          const arr = Array.isArray(parsed) ? parsed : [parsed];
+                          billingTerms = arr.filter(
+                            (t: any) => t.applicable !== false,
+                          );
+                        }
+                      } catch {
+                        /* ignore */
+                      }
+
+                      const preGst = billingTerms.filter(
+                        (t) => t.appliedOn !== "post-gst",
+                      );
+                      const postGst = billingTerms.filter(
+                        (t) => t.appliedOn === "post-gst",
+                      );
+
+                      // Compute taxable after pre-GST terms
+                      let taxable = base;
+                      const preGstRows: {
+                        term: (typeof preGst)[0];
+                        amt: number;
+                      }[] = [];
+                      for (const t of preGst) {
+                        const amt =
+                          t.type === "percentage"
+                            ? (taxable * t.value) / 100
+                            : t.value;
+                        preGstRows.push({ term: t, amt });
+                        if (t.deductionType === "Addition") taxable += amt;
+                        else taxable = Math.max(0, taxable - amt);
+                      }
+
+                      const cgst = (taxable * cgstRate) / 100;
+                      const sgst = (taxable * sgstRate) / 100;
+                      const igst = (taxable * igstRate) / 100;
+                      let gross = taxable + cgst + sgst + igst;
+
+                      const postGstRows: {
+                        term: (typeof postGst)[0];
+                        amt: number;
+                      }[] = [];
+                      for (const t of postGst) {
+                        const amt =
+                          t.type === "percentage"
+                            ? (gross * t.value) / 100
+                            : t.value;
+                        postGstRows.push({ term: t, amt });
+                        if (t.deductionType === "Addition") gross += amt;
+                        else gross = Math.max(0, gross - amt);
+                      }
+
+                      const roundOff = Math.round(gross) - gross;
+                      const net = Math.round(gross);
+
+                      const hasGst = cgst + sgst + igst > 0;
+                      const hasTerms =
+                        preGstRows.length > 0 || postGstRows.length > 0;
+
+                      const Row = ({
+                        label,
+                        sub,
+                        value,
+                        color,
+                        bold,
+                        large,
+                      }: {
+                        label: string;
+                        sub?: string;
+                        value: string;
+                        color?: string;
+                        bold?: boolean;
+                        large?: boolean;
+                      }) => (
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <span
+                              className={`text-xs ${bold ? "font-heading font-semibold text-foreground" : "text-muted-foreground"}`}
+                            >
+                              {label}
+                            </span>
+                            {sub && (
+                              <p className="text-[10px] text-muted-foreground/60">
+                                {sub}
+                              </p>
+                            )}
+                          </div>
+                          <span
+                            className={`font-mono shrink-0 ${large ? "text-base font-bold text-primary" : bold ? "text-sm font-semibold text-foreground" : `text-xs ${color ?? "text-muted-foreground"}`}`}
+                          >
+                            {value}
+                          </span>
+                        </div>
+                      );
 
                       return (
                         <div className="rounded-xl bg-primary/5 border border-primary/20 px-4 py-3 space-y-2">
@@ -2612,49 +2723,126 @@ const Payment: React.FC = () => {
                             </p>
                           </div>
                           <div className="space-y-1.5">
-                            {hasGst && (
+                            {/* Base */}
+                            <Row label="Basic Amount" value={formatINR(base)} />
+
+                            {/* Pre-GST billing terms */}
+                            {preGstRows.map(({ term, amt }, i) => {
+                              const isAdd = term.deductionType === "Addition";
+                              return (
+                                <Row
+                                  key={i}
+                                  label={term.masterTermName ?? `Term ${i + 1}`}
+                                  sub={`${isAdd ? "Addition" : "Deduction"} · Before GST${term.type === "percentage" ? ` · ${term.value}%` : ""}`}
+                                  value={(isAdd ? "+ " : "− ") + formatINR(amt)}
+                                  color={
+                                    isAdd
+                                      ? "text-green-500"
+                                      : "text-destructive"
+                                  }
+                                />
+                              );
+                            })}
+
+                            {/* Taxable subtotal — only show if pre-GST terms changed it */}
+                            {preGstRows.length > 0 && (
                               <>
-                                <div className="flex justify-between text-xs text-muted-foreground">
-                                  <span>Base Amount</span>
-                                  <span className="font-mono">
-                                    {formatINR(base)}
-                                  </span>
-                                </div>
-                                {cgst > 0 && (
-                                  <div className="flex justify-between text-xs text-muted-foreground">
-                                    <span>CGST ({form.cgstRate}%)</span>
-                                    <span className="font-mono">
-                                      {formatINR(cgst)}
-                                    </span>
-                                  </div>
-                                )}
-                                {sgst > 0 && (
-                                  <div className="flex justify-between text-xs text-muted-foreground">
-                                    <span>SGST ({form.sgstRate}%)</span>
-                                    <span className="font-mono">
-                                      {formatINR(sgst)}
-                                    </span>
-                                  </div>
-                                )}
-                                {igst > 0 && (
-                                  <div className="flex justify-between text-xs text-muted-foreground">
-                                    <span>IGST ({form.igstRate}%)</span>
-                                    <span className="font-mono">
-                                      {formatINR(igst)}
-                                    </span>
-                                  </div>
-                                )}
-                                <div className="border-t border-border/60 pt-1.5" />
+                                <div className="border-t border-border/40 pt-1" />
+                                <Row
+                                  label="Taxable Amount"
+                                  sub="After pre-GST adjustments"
+                                  value={formatINR(taxable)}
+                                  bold
+                                />
                               </>
                             )}
-                            <div className="flex justify-between items-center">
-                              <span className="text-xs font-heading font-semibold text-foreground">
-                                Net Payable
-                              </span>
-                              <span className="font-mono text-base font-bold text-primary">
-                                {formatINR(form.amount ?? 0)}
-                              </span>
-                            </div>
+
+                            {/* GST */}
+                            {hasGst && (
+                              <>
+                                {preGstRows.length === 0 && (
+                                  <div className="border-t border-border/40 pt-1" />
+                                )}
+                                {cgst > 0 && (
+                                  <Row
+                                    label={`CGST @ ${cgstRate}%`}
+                                    value={formatINR(cgst)}
+                                    color="text-primary"
+                                  />
+                                )}
+                                {sgst > 0 && (
+                                  <Row
+                                    label={`SGST @ ${sgstRate}%`}
+                                    value={formatINR(sgst)}
+                                    color="text-primary"
+                                  />
+                                )}
+                                {igst > 0 && (
+                                  <Row
+                                    label={`IGST @ ${igstRate}%`}
+                                    value={formatINR(igst)}
+                                    color="text-primary"
+                                  />
+                                )}
+                              </>
+                            )}
+
+                            {/* Gross before post-GST */}
+                            {(hasGst || hasTerms) && (
+                              <>
+                                <div className="border-t border-border/40 pt-1" />
+                                <Row
+                                  label="Gross Amount"
+                                  sub={
+                                    hasGst
+                                      ? "Taxable + GST"
+                                      : "Before post-GST adjustments"
+                                  }
+                                  value={formatINR(
+                                    taxable + cgst + sgst + igst,
+                                  )}
+                                  bold
+                                />
+                              </>
+                            )}
+
+                            {/* Post-GST billing terms */}
+                            {postGstRows.map(({ term, amt }, i) => {
+                              const isAdd = term.deductionType === "Addition";
+                              return (
+                                <Row
+                                  key={i}
+                                  label={term.masterTermName ?? `Term ${i + 1}`}
+                                  sub={`${isAdd ? "Addition" : "Deduction"} · After GST${term.type === "percentage" ? ` · ${term.value}%` : ""}`}
+                                  value={(isAdd ? "+ " : "− ") + formatINR(amt)}
+                                  color={
+                                    isAdd
+                                      ? "text-green-500"
+                                      : "text-destructive"
+                                  }
+                                />
+                              );
+                            })}
+
+                            {/* Round off */}
+                            {Math.abs(roundOff) >= 0.01 && (
+                              <Row
+                                label="Round Off"
+                                value={
+                                  (roundOff >= 0 ? "+ " : "− ") +
+                                  formatINR(Math.abs(roundOff))
+                                }
+                              />
+                            )}
+
+                            {/* Net payable */}
+                            <div className="border-t border-border/60 pt-1.5" />
+                            <Row
+                              label="Net Payable"
+                              value={formatINR(net)}
+                              bold
+                              large
+                            />
                           </div>
                         </div>
                       );

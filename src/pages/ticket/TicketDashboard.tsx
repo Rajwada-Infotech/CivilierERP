@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
+import { unwrapTicketList } from "@/lib/ticketListResponse";
 import { useTicketSync } from "@/hooks/useTicketSync";
 import { useAuth } from "@/contexts/AuthContext";
 import { DashboardBackground } from "@/components/DashboardBackground";
@@ -239,12 +240,15 @@ function StatusBadge({ status }: { status: string }) {
   const cls =
     status === "Resolved"
       ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/20"
-      : "bg-amber-500/10 text-amber-600 border-amber-400/20";
+      : status === "InProgress"
+        ? "bg-blue-500/10 text-blue-600 border-blue-400/20"
+        : "bg-amber-500/10 text-amber-600 border-amber-400/20";
+  const label = status === "InProgress" ? "Resolving" : status;
   return (
     <span
       className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}
     >
-      {status}
+      {label}
     </span>
   );
 }
@@ -268,13 +272,14 @@ export default function TicketDashboard() {
   } = useQuery<Ticket[]>({
     queryKey: ["ticket-dashboard", isAdmin ? "all" : "my"],
     queryFn: async () => {
-      const endpoint = isAdmin ? "/api/tickets" : "/api/tickets/mine";
+      const endpoint = isAdmin ? "/api/tickets?limit=100" : "/api/tickets/mine";
       const res = await fetchWithAuth(endpoint);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body?.error || `HTTP ${res.status}`);
       }
-      return res.json();
+      const payload = await res.json();
+      return unwrapTicketList<Ticket>(payload).data;
     },
     staleTime: 0,
     refetchOnMount: "always",
@@ -671,7 +676,7 @@ export default function TicketDashboard() {
                     color: "bg-amber-500",
                   },
                   {
-                    label: "In Progress",
+                    label: "Resolving",
                     count: stats.inProgress,
                     color: "bg-blue-500",
                   },
