@@ -102,12 +102,14 @@ const Records = lazy(() => import("./pages/Records"));
 const ReceivedPayment = lazy(() => import("./pages/ReceivedPayment"));
 
 // Task Detail
-const TaskDetail = lazy(() => import("./pages/ticket/tasks/TaskDetail"));
+const TaskDetail = lazy(() => import("./pages/tasks/TaskDetail"));
 
 // Masters
 const ContractorMaster = lazy(() => import("./pages/masters/ContractorMaster"));
 const SupplierMaster = lazy(() => import("./pages/masters/SupplierMaster"));
 const CustomerMaster = lazy(() => import("./pages/masters/CustomerMaster"));
+const UnitMaster = lazy(() => import("./pages/followup/UnitMaster"));
+const BlockMaster = lazy(() => import("./pages/followup/BlockMaster"));
 const BankMaster = lazy(() => import("./pages/masters/BankMaster"));
 const ExpensesMaster = lazy(() => import("./pages/masters/ExpensesMaster"));
 const ItemMaster = lazy(() => import("./pages/masters/ItemMaster"));
@@ -627,6 +629,30 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <PendingTasksPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/setup/customer-master"
+        element={
+          <ProtectedRoute>
+            <CustomerMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/setup/unit-master"
+        element={
+          <ProtectedRoute>
+            <UnitMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/setup/block-master"
+        element={
+          <ProtectedRoute>
+            <BlockMaster />
           </ProtectedRoute>
         }
       />
