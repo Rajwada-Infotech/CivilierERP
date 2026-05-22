@@ -9,7 +9,6 @@ import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
-  ChevronDown,
   Clock,
   RefreshCw,
   Search,
@@ -118,7 +117,6 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function TicketCard({ ticket }: { ticket: Ticket }) {
-  const [expanded, setExpanded] = useState(false);
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden hover:border-border/80 hover:shadow-sm transition-all">
       <div className="px-5 py-4">
@@ -155,27 +153,6 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
                 #{ticket.id}
               </span>
             </div>
-            {ticket.issue_details && (
-              <div className="mt-2">
-                <p
-                  className={`text-xs text-muted-foreground leading-relaxed ${expanded ? "" : "line-clamp-2"}`}
-                >
-                  {ticket.issue_details}
-                </p>
-                {ticket.issue_details.length > 120 && (
-                  <button
-                    onClick={() => setExpanded((p) => !p)}
-                    className="text-[11px] text-primary mt-0.5 hover:underline flex items-center gap-0.5"
-                  >
-                    {expanded ? "Show less" : "Show more"}
-                    <ChevronDown
-                      size={10}
-                      className={`transition-transform ${expanded ? "rotate-180" : ""}`}
-                    />
-                  </button>
-                )}
-              </div>
-            )}
           </div>
         </div>
       </div>

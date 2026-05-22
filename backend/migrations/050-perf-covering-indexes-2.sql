@@ -134,9 +134,25 @@ IF NOT EXISTS (
   WHERE name = 'IX_AccountHeadMaster_LHeadId_Name'
     AND object_id = OBJECT_ID('dbo.AccountHeadMaster')
 )
-CREATE INDEX IX_AccountHeadMaster_LHeadId_Name
-  ON dbo.AccountHeadMaster (LHeadId)
-  INCLUDE (LHeadName, LHeadShortName, LGroupId);
+BEGIN
+  IF COL_LENGTH('dbo.AccountHeadMaster', 'LHeadShortName') IS NOT NULL
+     AND COL_LENGTH('dbo.AccountHeadMaster', 'LGroupId') IS NOT NULL
+    CREATE INDEX IX_AccountHeadMaster_LHeadId_Name
+      ON dbo.AccountHeadMaster (LHeadId)
+      INCLUDE (LHeadName, LHeadShortName, LGroupId);
+  ELSE IF COL_LENGTH('dbo.AccountHeadMaster', 'LHeadShortName') IS NOT NULL
+    CREATE INDEX IX_AccountHeadMaster_LHeadId_Name
+      ON dbo.AccountHeadMaster (LHeadId)
+      INCLUDE (LHeadName, LHeadShortName);
+  ELSE IF COL_LENGTH('dbo.AccountHeadMaster', 'LGroupId') IS NOT NULL
+    CREATE INDEX IX_AccountHeadMaster_LHeadId_Name
+      ON dbo.AccountHeadMaster (LHeadId)
+      INCLUDE (LHeadName, LGroupId);
+  ELSE
+    CREATE INDEX IX_AccountHeadMaster_LHeadId_Name
+      ON dbo.AccountHeadMaster (LHeadId)
+      INCLUDE (LHeadName);
+END;
 
 -- ─── TypeOfDoc ────────────────────────────────────────────────────────────────
 -- Joined by TypeOfDocId in PO, WO, GRN, ExpenseBooking.
@@ -146,6 +162,13 @@ IF NOT EXISTS (
   WHERE name = 'IX_TypeOfDoc_Id_Covering'
     AND object_id = OBJECT_ID('dbo.TypeOfDoc')
 )
-CREATE INDEX IX_TypeOfDoc_Id_Covering
-  ON dbo.TypeOfDoc (TypeOfDocId)
-  INCLUDE (Prefix, Description, ModuleTag);
+BEGIN
+  IF COL_LENGTH('dbo.TypeOfDoc', 'ModuleTag') IS NOT NULL
+    CREATE INDEX IX_TypeOfDoc_Id_Covering
+      ON dbo.TypeOfDoc (TypeOfDocId)
+      INCLUDE (Prefix, Description, ModuleTag);
+  ELSE
+    CREATE INDEX IX_TypeOfDoc_Id_Covering
+      ON dbo.TypeOfDoc (TypeOfDocId)
+      INCLUDE (Prefix, Description);
+END;

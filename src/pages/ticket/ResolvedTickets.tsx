@@ -3,14 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { unwrapTicketList } from "@/lib/ticketListResponse";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTicketSync } from "@/hooks/useTicketSync";
 import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
-  ChevronDown,
   RefreshCw,
   Search,
   User,
@@ -26,7 +24,7 @@ interface Ticket {
   issue_details: string;
   customer_name: string;
   customer_phone: string;
-  status: "Pending" | "Resolved" | "InProgress";
+  status: "Pending" | "Resolved" | "InProgress" | "Closed";
   created_at?: string;
 }
 
@@ -59,7 +57,10 @@ function PriorityBadge({ priority }: { priority: string }) {
 }
 
 function TicketCard({ ticket }: { ticket: Ticket }) {
-  const [expanded, setExpanded] = useState(false);
+  const statusLabel = ticket.status === "Closed" ? "Closed" : "Resolved";
+  const statusCls = ticket.status === "Closed"
+    ? "bg-slate-500/10 text-slate-500 border-slate-400/20"
+    : "bg-emerald-500/10 text-emerald-600 border-emerald-400/20";
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden hover:border-border/80 hover:shadow-sm transition-all">
       <div className="px-5 py-4">
@@ -70,8 +71,8 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
               <h3 className="text-sm font-heading font-semibold text-foreground leading-snug">{ticket.subject}</h3>
               <div className="flex items-center gap-1.5 shrink-0">
                 <PriorityBadge priority={ticket.priority} />
-                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border bg-emerald-500/10 text-emerald-600 border-emerald-400/20">
-                  <CheckCircle2 size={10} /> Resolved
+                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${statusCls}`}>
+                  <CheckCircle2 size={10} /> {statusLabel}
                 </span>
               </div>
             </div>
@@ -84,19 +85,6 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
               {fmtDate(ticket.created_at) && <span className="text-[11px] text-muted-foreground">{fmtDate(ticket.created_at)}</span>}
               <span className="text-[11px] font-mono text-muted-foreground/60">#{ticket.id}</span>
             </div>
-            {ticket.issue_details && (
-              <div className="mt-2">
-                <p className={`text-xs text-muted-foreground leading-relaxed ${expanded ? "" : "line-clamp-2"}`}>
-                  {ticket.issue_details}
-                </p>
-                {ticket.issue_details.length > 120 && (
-                  <button onClick={() => setExpanded((p) => !p)} className="text-[11px] text-primary mt-0.5 hover:underline flex items-center gap-0.5">
-                    {expanded ? "Show less" : "Show more"}
-                    <ChevronDown size={10} className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
-                  </button>
-                )}
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -109,6 +97,8 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
 // Admin → sees ALL resolved tickets (/api/tickets filtered)
 // User  → sees only their own resolved tickets (/api/tickets/my filtered)
 
+type ResolutionTab = "Resolved" | "Closed";
+
 const ResolvedTickets: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
@@ -117,40 +107,57 @@ const ResolvedTickets: React.FC = () => {
 
   const [search, setSearch] = useState("");
   const [priorityFilter, setPriorityFilter] = useState<string>("All");
+  const [activeTab, setActiveTab] = useState<ResolutionTab>("Resolved");
 
   const { data: allTickets = [], isLoading, isError, refetch, isFetching } =
     useQuery<Ticket[]>({
       queryKey: ["tickets", "resolved", isAdmin ? "all" : "my"],
       queryFn: async () => {
-        const endpoint = isAdmin ? "/api/tickets?limit=100" : "/api/tickets/my";
+        const endpoint = isAdmin
+          ? "/api/tickets?limit=100&status=Resolved,Closed"
+          : "/api/tickets/my";
         const res = await fetchWithAuth(endpoint);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const payload = await res.json();
-        return unwrapTicketList<Ticket>(payload).data;
+        // Handle both response shapes:
+        // paginated: { data: [...], pagination: {...} }
+        // plain array: [...]
+        const raw: Ticket[] = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.data)
+          ? payload.data
+          : [];
+        // Always filter to only Resolved/Closed regardless of endpoint
+        return raw.filter(
+          (t) => t.status === "Resolved" || t.status === "Closed",
+        );
       },
       staleTime: 0,
+      gcTime: 0,
       refetchOnWindowFocus: true,
     });
 
   useTicketSync(refetch);
 
-  // Only show resolved tickets
-  const resolvedTickets = useMemo(() => {
-    let list = allTickets.filter((t) => t.status === "Resolved");
+  // Show resolved OR closed tickets based on active tab
+  // Non-admin /my endpoint returns all statuses — filter to only resolved/closed here
+  const filteredTickets = useMemo(() => {
+    // allTickets already contains only Resolved/Closed (filtered in queryFn)
+    let list = allTickets.filter((t) => t.status === activeTab);
     if (priorityFilter !== "All") list = list.filter((t) => t.priority === priorityFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(
         (t) =>
           t.subject.toLowerCase().includes(q) ||
-          t.customer_name?.toLowerCase().includes(q) ||
-          t.issue_details?.toLowerCase().includes(q),
+          t.customer_name?.toLowerCase().includes(q),
       );
     }
     return list;
-  }, [allTickets, priorityFilter, search]);
+  }, [allTickets, activeTab, priorityFilter, search]);
 
-  const totalResolved = allTickets.filter((t) => t.status === "Resolved").length;
+  const resolvedCount = allTickets.filter((t) => t.status === "Resolved").length;
+  const closedCount = allTickets.filter((t) => t.status === "Closed").length;
 
   return (
     <>
@@ -169,7 +176,7 @@ const ResolvedTickets: React.FC = () => {
             <div>
               <h1 className="text-xl font-heading font-bold text-foreground">Resolved Tickets</h1>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {totalResolved} ticket{totalResolved !== 1 ? "s" : ""} resolved
+                {resolvedCount} resolved · {closedCount} closed
               </p>
             </div>
           </div>
@@ -188,6 +195,37 @@ const ResolvedTickets: React.FC = () => {
           </div>
         )}
 
+        {/* Resolved / Closed tabs */}
+        <div className="flex items-center gap-1.5">
+          {(["Resolved", "Closed"] as ResolutionTab[]).map((tab) => {
+            const count = tab === "Resolved" ? resolvedCount : closedCount;
+            return (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  activeTab === tab
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {tab}
+                {!isLoading && (
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
+                      activeTab === tab
+                        ? "bg-white/20 text-white"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
         {/* Filters */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative flex-1 min-w-48">
@@ -195,7 +233,7 @@ const ResolvedTickets: React.FC = () => {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search resolved tickets…"
+              placeholder={`Search ${activeTab.toLowerCase()} tickets…`}
               className="w-full pl-8 pr-8 py-2 rounded-xl border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
             />
             {search && (
@@ -215,7 +253,7 @@ const ResolvedTickets: React.FC = () => {
                     : "border border-border text-muted-foreground hover:bg-muted"
                 }`}
               >
-                {p === "All" ? "All" : p}
+                {p}
               </button>
             ))}
           </div>
@@ -236,24 +274,34 @@ const ResolvedTickets: React.FC = () => {
               </div>
             ))}
           </div>
-        ) : resolvedTickets.length === 0 ? (
+        ) : filteredTickets.length === 0 ? (
           <div className="rounded-xl border border-border bg-card py-16 flex flex-col items-center gap-3 text-muted-foreground">
             <CheckCircle2 size={32} className="opacity-20" />
             <p className="text-sm">
-              {search || priorityFilter !== "All" ? "No tickets match your filters" : "No resolved tickets yet"}
+              {search || priorityFilter !== "All"
+                ? "No tickets match your filters"
+                : `No ${activeTab.toLowerCase()} tickets yet`}
             </p>
+            {(search || priorityFilter !== "All") && (
+              <button
+                onClick={() => { setSearch(""); setPriorityFilter("All"); }}
+                className="text-xs text-primary hover:underline"
+              >
+                Clear filters
+              </button>
+            )}
           </div>
         ) : (
           <div className="space-y-3">
-            {resolvedTickets.map((t) => (
+            {filteredTickets.map((t) => (
               <TicketCard key={t.id} ticket={t} />
             ))}
           </div>
         )}
 
-        {!isLoading && resolvedTickets.length > 0 && (search || priorityFilter !== "All") && (
+        {!isLoading && filteredTickets.length > 0 && (search || priorityFilter !== "All") && (
           <p className="text-xs text-muted-foreground text-center">
-            Showing {resolvedTickets.length} of {totalResolved} resolved tickets
+            Showing {filteredTickets.length} of {activeTab === "Resolved" ? resolvedCount : closedCount} {activeTab.toLowerCase()} tickets
           </p>
         )}
       </div>

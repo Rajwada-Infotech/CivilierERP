@@ -10,6 +10,7 @@
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 const logger = require("./logger");
+const { getPool, sql } = require("./db");
 
 const ALLOWED_ORIGINS = [
   "http://localhost:3000",
@@ -25,6 +26,35 @@ const ALLOWED_ORIGINS = [
 
 /** @type {import('socket.io').Server | null} */
 let io = null;
+
+function normalizeRole(role) {
+  return String(role || "").trim().toLowerCase();
+}
+
+function isTicketAdmin(role) {
+  return ["admin", "super_admin", "dba"].includes(normalizeRole(role));
+}
+
+async function canAccessTicket(ticketId, user) {
+  if (!user?.userId && !user?.id) return false;
+  if (isTicketAdmin(user.role)) return true;
+
+  const userId = Number(user.userId ?? user.id);
+  if (!Number.isInteger(userId) || userId <= 0) return false;
+
+  const pool = getPool();
+  const result = await pool
+    .request()
+    .input("ticketId", sql.Int, ticketId)
+    .input("userId", sql.Int, userId).query(`
+      SELECT TOP 1 id
+      FROM dbo.tickets
+      WHERE id = @ticketId
+        AND (created_by_id = @userId OR assigned_to_id = @userId)
+    `);
+
+  return result.recordset.length > 0;
+}
 
 /**
  * Attach socket.io to an existing http.Server.
@@ -77,6 +107,70 @@ function initSocket(httpServer) {
     if (role === "admin" || role === "super_admin" || role === "dba") {
       socket.join("activity-watchers");
     }
+
+    socket.on("ticket:join", async (ticketId, ack) => {
+      const id = Number(ticketId);
+      if (!Number.isInteger(id) || id <= 0) {
+        if (typeof ack === "function") ack({ ok: false, error: "Invalid ticket id" });
+        return;
+      }
+
+      try {
+        const allowed = await canAccessTicket(id, socket.data.user);
+        if (!allowed) {
+          if (typeof ack === "function") ack({ ok: false, error: "Access denied" });
+          return;
+        }
+
+        socket.join(`ticket:${id}`);
+        if (typeof ack === "function") ack({ ok: true });
+      } catch (err) {
+        logger.warn(
+          { event: "SOCKET_TICKET_JOIN_ERROR", socketId: socket.id, ticketId: id, err },
+          "Ticket room join failed",
+        );
+        if (typeof ack === "function") ack({ ok: false, error: "Join failed" });
+      }
+    });
+
+    socket.on("ticket:leave", (ticketId) => {
+      const id = Number(ticketId);
+      if (Number.isInteger(id) && id > 0) {
+        socket.leave(`ticket:${id}`);
+      }
+    });
+
+    socket.on("ticket:typing", async (payload = {}) => {
+      const id = Number(payload.ticketId);
+      if (!Number.isInteger(id) || id <= 0) return;
+
+      try {
+        const allowed = await canAccessTicket(id, socket.data.user);
+        if (!allowed) return;
+
+        // SEC-002: always derive identity from the authenticated JWT token.
+        // Never trust client-supplied name/role/userId — they can be spoofed
+        // to impersonate other users in the typing indicator UI.
+        const authedUser = socket.data.user || {};
+        socket.to(`ticket:${id}`).emit("ticket:typing", {
+          ticketId: id,
+          userId: Number(authedUser.userId ?? authedUser.id ?? null) || null,
+          name: String(authedUser.name ?? authedUser.username ?? "Unknown"),
+          role: String(authedUser.role ?? "user"),
+          isTyping: Boolean(payload.isTyping),
+        });
+      } catch (err) {
+        logger.warn(
+          {
+            event: "SOCKET_TICKET_TYPING_ERROR",
+            socketId: socket.id,
+            ticketId: id,
+            err,
+          },
+          "Ticket typing broadcast failed",
+        );
+      }
+    });
 
     socket.on("disconnect", (reason) => {
       logger.info(
