@@ -2,6 +2,7 @@ import React, { useMemo, useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { TicketChat } from "@/components/tickets/TicketChat";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { unwrapTicketList } from "@/lib/ticketListResponse";
 import { useTicketSync } from "@/hooks/useTicketSync";
@@ -54,6 +55,7 @@ interface Comment {
   author_name: string;
   author_role: string;
   created_at: string;
+  is_internal?: boolean | number;
 }
 
 interface TicketDetail {
@@ -599,12 +601,14 @@ function TicketDetailView({
   ticketId,
   onBack,
   isAdmin,
+  currentUser,
   currentUserName,
   onTicketUpdated,
 }: {
   ticketId: number;
   onBack: () => void;
   isAdmin: boolean;
+  currentUser: { id: number; name: string; role: string };
   currentUserName: string;
   onTicketUpdated: () => void;
 }) {
@@ -634,6 +638,8 @@ function TicketDetailView({
     refetchOnWindowFocus: true,
     refetchInterval: 15_000,
   });
+
+  useTicketSync(refetch, ticketId);
 
   const ticket = data?.ticket;
   const comments = data?.comments ?? [];
@@ -960,259 +966,27 @@ function TicketDetailView({
         </div>
       )}
 
-      {/* Chat / comments */}
-      <div className="rounded-xl border border-border bg-card mb-4 overflow-hidden">
-        <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-          <MessageCircle size={13} className="text-muted-foreground" />
-          <p className="text-xs font-semibold text-foreground">
-            Conversation
-            {comments.length > 0 && (
-              <span className="text-muted-foreground font-normal ml-1">
-                ({comments.length})
-              </span>
-            )}
-          </p>
-        </div>
-
-        {comments.length === 0 ? (
-          <div className="px-4 py-8 text-center text-muted-foreground">
-            <MessageCircle size={24} className="mx-auto mb-2 opacity-20" />
-            <p className="text-xs">
-              No messages yet. Start the conversation below.
-            </p>
-          </div>
-        ) : (
-          <div className="px-4 py-3 space-y-3 max-h-80 overflow-y-auto">
-            {comments.map((c) => {
-              const isMe = c.author_name === currentUserName;
-              const isReview = c.comment.startsWith("[Review:");
-
-              const attachPattern = /\[attachment:([^\]]+)\]/g;
-              const commentAttachUrls: string[] = [];
-              const textOnly = c.comment
-                .replace(attachPattern, (_, url) => {
-                  commentAttachUrls.push(url);
-                  return "";
-                })
-                .trim();
-
-              if (isReview) {
-                return (
-                  <div key={c.id} className="flex justify-center">
-                    <div className="bg-emerald-500/5 border border-emerald-400/15 rounded-xl px-4 py-2.5 max-w-sm text-center">
-                      <p className="text-xs text-emerald-600 font-medium">
-                        {textOnly || c.comment}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-                        {c.author_name} · {fmtDateTime(c.created_at)}
-                      </p>
-                    </div>
-                  </div>
-                );
-              }
-              return (
-                <div
-                  key={c.id}
-                  className={`flex gap-2.5 ${isMe ? "flex-row-reverse" : ""}`}
-                >
-                  <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5">
-                    <User size={12} className="text-muted-foreground" />
-                  </div>
-                  <div
-                    className={`max-w-[75%] flex flex-col gap-0.5 ${isMe ? "items-end" : "items-start"}`}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-muted-foreground font-medium">
-                        {c.author_name}
-                      </span>
-                      <span className="text-[9px] text-muted-foreground/50 capitalize">
-                        {c.author_role}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground/40">
-                        {fmtDateTime(c.created_at)}
-                      </span>
-                    </div>
-                    {textOnly && (
-                      <div
-                        className={`px-3 py-2 rounded-xl text-xs leading-relaxed whitespace-pre-wrap ${
-                          isMe
-                            ? "bg-primary text-primary-foreground rounded-tr-sm"
-                            : "bg-muted text-foreground rounded-tl-sm"
-                        }`}
-                      >
-                        {textOnly}
-                      </div>
-                    )}
-                    {commentAttachUrls.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-1">
-                        {commentAttachUrls.map((url, ai) => {
-                          const isPdf = url.toLowerCase().endsWith(".pdf");
-                          const filename =
-                            url.split("/").pop() ?? `file-${ai + 1}`;
-                          if (isPdf)
-                            return (
-                              <button
-                                key={ai}
-                                onClick={() =>
-                                  openAttachmentViewer(url, filename)
-                                }
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"
-                              >
-                                <Paperclip size={10} />{" "}
-                                {filename.length > 20
-                                  ? `PDF ${ai + 1}`
-                                  : filename}
-                              </button>
-                            );
-                          return (
-                            <img
-                              key={ai}
-                              src={url}
-                              alt={`Attachment ${ai + 1}`}
-                              className="h-24 w-auto rounded-lg border border-border object-cover cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-primary/40 transition-all"
-                              onClick={() =>
-                                openAttachmentViewer(url, filename)
-                              }
-                            />
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            <div ref={chatBottomRef} />
-          </div>
-        )}
-
-        {/* Reply input — only shown when ticket is active (Pending / InProgress) */}
-        {canReply && (
-          <div className="px-4 py-3 border-t border-border">
-            {isAdmin && adminAttachFiles.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {adminAttachFiles.map((f, i) => (
-                  <div key={i} className="relative group">
-                    {f.type.startsWith("image/") ? (
-                      <img
-                        src={URL.createObjectURL(f)}
-                        alt={f.name}
-                        className="h-12 w-auto rounded-lg border border-border object-cover"
-                      />
-                    ) : (
-                      <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted text-[11px] text-muted-foreground">
-                        <Paperclip size={10} />
-                        {f.name.length > 18
-                          ? f.name.slice(0, 18) + "…"
-                          : f.name}
-                      </div>
-                    )}
-                    <button
-                      onClick={() => removeAdminFile(i)}
-                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X size={9} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="flex items-end gap-2">
-              {isAdmin && (
-                <>
-                  <input
-                    ref={adminFileInputRef}
-                    type="file"
-                    accept="image/*,.pdf"
-                    multiple
-                    className="hidden"
-                    onChange={handleAdminFileChange}
-                  />
-                  <input
-                    ref={adminCameraInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={handleAdminFileChange}
-                  />
-                  <button
-                    onClick={() => adminFileInputRef.current?.click()}
-                    title="Attach files"
-                    className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors shrink-0"
-                  >
-                    <Paperclip size={14} />
-                  </button>
-                  <button
-                    onClick={() => adminCameraInputRef.current?.click()}
-                    title="Take photo"
-                    className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors shrink-0"
-                  >
-                    <Camera size={14} />
-                  </button>
-                </>
-              )}
-              <textarea
-                ref={textareaRef}
-                value={commentText}
-                onChange={(e) => {
-                  setCommentText(e.target.value);
-                  autoExpand(e.target);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-                placeholder="Write a reply… (Enter to send, Shift+Enter for new line)"
-                rows={1}
-                style={{
-                  minHeight: "36px",
-                  maxHeight: "120px",
-                  height: "36px",
-                }}
-                className="flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all overflow-hidden"
-              />
-              <button
-                onClick={handleSend}
-                disabled={
-                  isSending ||
-                  (!commentText.trim() && adminAttachFiles.length === 0)
-                }
-                className="w-9 h-9 flex items-center justify-center rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 shrink-0"
-              >
-                {isSending ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Send size={14} />
-                )}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* When closed or resolved — notice inside conversation box */}
-        {!canReply && (
-          <div className="px-4 py-3 border-t border-border flex items-center gap-2 text-muted-foreground">
-            {isClosed ? (
-              <>
-                <XCircle size={13} />
-                <p className="text-xs">
-                  Ticket is closed — reopen to continue the conversation.
-                </p>
-              </>
-            ) : (
-              <>
-                <CheckCircle2 size={13} className="text-emerald-500" />
-                <p className="text-xs text-emerald-600">
-                  Ticket resolved — reopen to continue the conversation.
-                </p>
-              </>
-            )}
-          </div>
-        )}
-      </div>
+      <TicketChat
+        ticketId={ticketId}
+        currentUser={currentUser}
+        initialMessages={comments
+          .filter((comment) => !comment.comment.startsWith("[Review:"))
+          .map((comment) => ({
+            id: comment.id,
+            ticket_id: comment.ticket_id,
+            comment: comment.comment,
+            author_name: comment.author_name,
+            author_role: comment.author_role,
+            created_at: comment.created_at,
+            is_internal: comment.is_internal,
+          }))}
+        ticketStatus={ticket.status}
+        onSent={() => {
+          refetch();
+          onTicketUpdated();
+          queryClient.invalidateQueries({ queryKey: ["tickets"] });
+        }}
+      />
 
       {/* Admin action buttons (Pending / InProgress only) */}
       {isAdmin && isActive && !showResolveFlow && (
@@ -1444,16 +1218,21 @@ const MyTickets: React.FC = () => {
           items={["Tickets", "My Tickets", `#${selectedTicketId}`]}
         />
         <div className="max-w-3xl mx-auto pb-10">
-          <TicketDetailView
-            ticketId={selectedTicketId}
-            onBack={() => setSelectedTicketId(null)}
-            isAdmin={isAdmin}
-            currentUserName={currentUserName}
-            onTicketUpdated={() => {
-              refetch();
-              queryClient.invalidateQueries({ queryKey: ["tickets"] });
-            }}
-          />
+        <TicketDetailView
+          ticketId={selectedTicketId}
+          onBack={() => setSelectedTicketId(null)}
+          isAdmin={isAdmin}
+          currentUser={{
+            id: Number(currentUser?.id ?? 0),
+            name: currentUserName,
+            role: currentUser?.role ?? "user",
+          }}
+          currentUserName={currentUserName}
+          onTicketUpdated={() => {
+            refetch();
+            queryClient.invalidateQueries({ queryKey: ["tickets"] });
+          }}
+        />
         </div>
       </>
     );
