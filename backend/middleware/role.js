@@ -49,6 +49,10 @@ const ROLE_ALIASES = {
   "material manager": "store_manager",
   store_manager: "store_manager",
 
+  // engineering
+  engineer: "engineer",
+  "site engineer": "engineer",
+
   // general user
   user: "user",
   employee: "user",
