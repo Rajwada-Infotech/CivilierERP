@@ -149,13 +149,13 @@ export default function ControlPanel() {
 
   const patchTenant = useMutation({
     mutationFn: async ({
-      tenantId,
+      tenant_id,
       body,
     }: {
-      tenantId: string;
+      tenant_id: string;
       body: Record<string, unknown>;
     }) => {
-      const res = await fetchWithAuth(`/api/dba/control-panel/${tenantId}`, {
+      const res = await fetchWithAuth(`/api/dba/control-panel/${tenant_id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -245,7 +245,7 @@ export default function ControlPanel() {
 
     patchTenant.mutate(
       {
-        tenantId: grantForm.tenantId,
+        tenant_id: grantForm.tenantId,
         body: {
           access_level: grantForm.isTrial ? "read" : grantForm.accessLevel,
           status: grantForm.isTrial ? "trial" : "active",
@@ -282,7 +282,7 @@ export default function ControlPanel() {
 
   const handleRevoke = (access: TenantAccess) => {
     patchTenant.mutate(
-      { tenantId: access.tenant_id, body: { status: "suspended" } },
+      { tenant_id: access.tenant_id, body: { status: "suspended" } },
       {
         onSuccess: () => {
           setRevokeTarget(null);
@@ -295,7 +295,7 @@ export default function ControlPanel() {
 
   const handleReactivate = (access: TenantAccess) => {
     patchTenant.mutate(
-      { tenantId: access.tenant_id, body: { status: "active" } },
+      { tenant_id: access.tenant_id, body: { status: "active" } },
       {
         onSuccess: () => toast.success(`Access reactivated for ${access.name}`),
         onError: () => toast.error("Failed to reactivate access"),
