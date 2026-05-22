@@ -174,11 +174,30 @@ router.get("/", async (req, res) => {
     const limit = parsePositiveInt(req.query.limit, 25, 100);
     const offset = (page - 1) * limit;
 
+    // Optional comma-separated status filter: ?status=Resolved,Closed
+    const VALID_STATUSES = ["Pending", "InProgress", "Resolved", "Closed"];
+    const rawStatus = req.query.status ?? "";
+    const statusFilter = rawStatus
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => VALID_STATUSES.includes(s));
+    const hasStatusFilter = statusFilter.length > 0;
+
     const pool = getPool();
-    const result = await pool
+    const req2 = pool
       .request()
       .input("offset", sql.Int, offset)
-      .input("limit", sql.Int, limit).query(`
+      .input("limit", sql.Int, limit);
+
+    // Build WHERE clause — values validated against allowlist, safe to interpolate
+    // Use two variants: one with alias "t." for the main query, one without for COUNT
+    const statusIn = hasStatusFilter
+      ? statusFilter.map((s) => `'${s}'`).join(",")
+      : null;
+    const whereClause = statusIn ? `WHERE t.status IN (${statusIn})` : "";
+    const countWhereClause = statusIn ? `WHERE status IN (${statusIn})` : "";
+
+    const result = await req2.query(`
         SELECT
           t.id, t.subject, t.priority, t.customer_name, t.customer_phone,
           t.company_id, t.project_id, t.status, t.created_at,
@@ -195,6 +214,7 @@ router.get("/", async (req, res) => {
           FROM dbo.ticket_comments
           GROUP BY ticket_id
         ) c ON c.ticket_id = t.id
+        ${whereClause}
         ORDER BY
           CASE WHEN t.escalated_at IS NOT NULL AND t.status IN ('Pending', 'InProgress') THEN 0 ELSE 1 END,
           CASE
@@ -217,7 +237,7 @@ router.get("/", async (req, res) => {
 
     const countResult = await pool
       .request()
-      .query("SELECT COUNT(*) AS total FROM dbo.tickets");
+      .query(`SELECT COUNT(*) AS total FROM dbo.tickets ${countWhereClause}`);
     const total = countResult.recordset[0]?.total ?? 0;
 
     res.json({
@@ -378,23 +398,40 @@ async function serveTicketFile(req, res) {
     }
 
     const pool = getPool();
+    const filePattern = `%${filename}%`;
+
+    // First: check ticket attachment_path (user-uploaded on create)
     const ticketResult = await pool
       .request()
-      .input("fileUrl", sql.NVarChar(512), `%/api/tickets/file/${filename}%`)
-      .input("fileName", sql.NVarChar(255), `%${filename}%`)
+      .input("fileUrl", sql.NVarChar(512), filePattern)
       .query(`
-        SELECT TOP 1 *
+        SELECT TOP 1 id
         FROM dbo.tickets
-        WHERE attachment_path LIKE @fileUrl OR attachment_path LIKE @fileName
+        WHERE attachment_path LIKE @fileUrl
         ORDER BY id DESC
       `);
 
-    if (!ticketResult.recordset.length) {
+    let ticketId = ticketResult.recordset[0]?.id ?? null;
+
+    // Fallback: check ticket_comments (admin/user reply attachments)
+    if (!ticketId) {
+      const commentResult = await pool
+        .request()
+        .input("fileUrl", sql.NVarChar(512), filePattern)
+        .query(`
+          SELECT TOP 1 ticket_id
+          FROM dbo.ticket_comments
+          WHERE comment LIKE @fileUrl
+          ORDER BY id DESC
+        `);
+      ticketId = commentResult.recordset[0]?.ticket_id ?? null;
+    }
+
+    if (!ticketId) {
       return res.status(404).json({ error: "File not found" });
     }
 
-    const ticket = ticketResult.recordset[0];
-    const access = await getAccessibleTicket(pool, ticket.id, actor);
+    const access = await getAccessibleTicket(pool, ticketId, actor);
     const accessError = sendTicketAccessError(res, access);
     if (accessError) return accessError;
 
@@ -696,6 +733,47 @@ router.put(
   },
 );
 
+// ─── PUT /api/tickets/status/:id ─────────────────────────────────────────────
+// Lightweight status update — used by frontend to move Pending → InProgress
+// when an admin/user sends a reply. Only allows transitions that make sense:
+// Pending → InProgress (replying), InProgress → Pending (edge-case rollback)
+router.put("/status/:id", async (req, res) => {
+  try {
+    const actor = requireActor(req, res);
+    if (!actor) return;
+    const pool = getPool();
+    const id = parseTicketId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid ticket id" });
+
+    const ALLOWED = ["Pending", "InProgress", "Resolved", "Closed"];
+    const { status } = req.body;
+    if (!status || !ALLOWED.includes(status)) {
+      return res.status(400).json({ error: "Invalid status value" });
+    }
+
+    const access = await getAccessibleTicket(pool, id, actor);
+    const accessError = sendTicketAccessError(res, access);
+    if (accessError) return accessError;
+
+    await pool
+      .request()
+      .input("id", sql.Int, id)
+      .input("status", sql.NVarChar(50), status)
+      .query(`
+        UPDATE dbo.tickets
+        SET status     = @status,
+            updated_at = SYSUTCDATETIME()
+        WHERE id = @id
+      `);
+
+    res.json({ success: true });
+    emitTicketUpdate("status_updated", id);
+  } catch (err) {
+    console.error("[Tickets PUT /status]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/tickets/comment/:id ───────────────────────────────────────────
 const rateLimit = require("express-rate-limit");
 
@@ -732,12 +810,28 @@ router.post("/comment/:id", commentRateLimiter, async (req, res) => {
       isTicketAdmin(actor.role) ? Boolean(is_internal) : false,
     );
 
-    await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query(
-        `UPDATE dbo.tickets SET updated_at = SYSUTCDATETIME() WHERE id = @id`,
-      );
+    // Auto-move Pending → InProgress when any reply is posted.
+    // This is the authoritative transition — the frontend PUT /status/:id
+    // does the same, but having it here ensures it always happens.
+    const currentTicket = access.ticket;
+    if (currentTicket.status === "Pending") {
+      await pool
+        .request()
+        .input("id", sql.Int, id)
+        .query(`
+          UPDATE dbo.tickets
+          SET status     = 'InProgress',
+              updated_at = SYSUTCDATETIME()
+          WHERE id = @id AND status = 'Pending'
+        `);
+    } else {
+      await pool
+        .request()
+        .input("id", sql.Int, id)
+        .query(
+          `UPDATE dbo.tickets SET updated_at = SYSUTCDATETIME() WHERE id = @id`,
+        );
+    }
 
     res.json({ success: true, comment: insertedComment });
   } catch (err) {
