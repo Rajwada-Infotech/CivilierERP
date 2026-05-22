@@ -97,10 +97,12 @@ interface PermissionRow {
   email: string;
   role: AppUser["role"];
   pageKey: PageKey;
+  pageId: string;
   pageLabel: string;
   pageGroup: string;
   actions: string[];
   status: string;
+  canPostApproval: boolean;
 }
 
 // ── Role colour dots ──────────────────────────────────────────────────────────
@@ -232,7 +234,7 @@ function buildPostApprovalColumns(
       ),
     },
     {
-      accessorKey: "pageName",
+      accessorKey: "pageLabel",
       header: "Page",
       cell: ({ getValue }) => (
         <span className="text-sm text-foreground font-medium">
@@ -364,10 +366,12 @@ export default function PostApprovalRights() {
           email: user.email,
           role: user.role,
           pageKey: def.key,
+          pageId: def.key,
           pageLabel: def.label,
           pageGroup: def.group,
           actions: acts,
           status: user.isActive ? "Active" : "Inactive",
+          canPostApproval: false,
         });
       });
     });

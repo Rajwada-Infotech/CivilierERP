@@ -12,7 +12,6 @@ import {
   updateFinYear as apiUpdateFinYear,
   deleteFinYear as apiDeleteFinYear,
 } from "@/api/finYearApi";
-import { useAuth } from "./AuthContext";
 
 export interface FinYear {
   id: string;
@@ -44,14 +43,11 @@ const QUERY_KEY = ["fin-years"];
 
 export const FinYearProvider = ({ children }: { children: ReactNode }) => {
   const queryClient = useQueryClient();
-  const { currentUser } = useAuth();
 
   const { data: dbData, isLoading } = useQuery({
     queryKey: QUERY_KEY,
     queryFn: getFinYears,
-    enabled: !!currentUser && !!localStorage.getItem("token"),
-    // staleTime: 0 was causing a refetch on every render. invalidateQueries()
-    // correctly forces a refetch regardless of staleTime — so 5 min is safe.
+    enabled: !!localStorage.getItem("token"),
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });

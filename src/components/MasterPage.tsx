@@ -44,6 +44,8 @@ export interface FieldDef {
   uppercase?: boolean;
   fullWidth?: boolean;
   defaultValue?: string | boolean | string[];
+  placeholder?: string;
+  mode?: string;
   render?: (props: {
     value: unknown;
     onChange: (v: unknown) => void;

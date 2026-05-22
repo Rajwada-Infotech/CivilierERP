@@ -13,7 +13,7 @@ const allowRoles = require("../middleware/role");
 const PRIVILEGED_ROLES = ["super_admin", "admin", "dba"];
 
 const SALT_ROUNDS = 12;
-const MAX_LOGIN_ATTEMPTS = 5;
+const MAX_LOGIN_ATTEMPTS = process.env.NODE_ENV === "development" ? 50 : 5;
 const LOCKOUT_SECONDS = 15 * 60;
 
 // ======================
@@ -90,10 +90,17 @@ router.post("/login", async (req, res) => {
   const lockKey = `login:lock:${email.toLowerCase()}`;
   const attemptsKey = `login:attempts:${email.toLowerCase()}`;
 
+  // Skip rate limiting for local development
+  const isLocal =
+    req.ip === "::1" ||
+    req.ip === "127.0.0.1" ||
+    req.ip === "::ffff:127.0.0.1" ||
+    req.ip?.includes("127.0.0.1");
+
   try {
     // Redis may be unavailable — never let a cache check block login
     try {
-      const locked = await redisGet(lockKey);
+      const locked = isLocal ? null : await redisGet(lockKey);
       if (locked) {
         return res.status(429).json({
           error: "Too many attempts. Try again later.",
@@ -115,7 +122,7 @@ router.post("/login", async (req, res) => {
 
     const user = result.recordset[0];
     if (!user) {
-      await incrementLoginAttempts(attemptsKey, lockKey);
+      if (!isLocal) await incrementLoginAttempts(attemptsKey, lockKey);
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
@@ -125,7 +132,7 @@ router.post("/login", async (req, res) => {
 
     const match = await bcrypt.compare(password, user.password);
     if (!match) {
-      await incrementLoginAttempts(attemptsKey, lockKey);
+      if (!isLocal) await incrementLoginAttempts(attemptsKey, lockKey);
       return res.status(401).json({ error: "Invalid credentials" });
     }
 

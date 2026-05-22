@@ -18,15 +18,14 @@ export interface User {
   RoleId?: number;
   created_datetime: string;
   discontinue: boolean;
+  can_accept_tickets?: boolean;
   last_login?: string | null;
   tenant_id?: string | null;
   tenantId?: string | null;
 }
 
-export interface PagePermission {
-  page: string;
-  actions: ("view" | "create" | "edit" | "delete" | "print" | "export")[];
-}
+import type { PagePermission } from "@/contexts/types";
+export type { PagePermission };
 
 // ======================
 // AUTH & USER MANAGEMENT

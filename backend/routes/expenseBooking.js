@@ -290,17 +290,24 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
             ELSE NULL
           END AS DocTypeName,
           ec.name  AS ECompanyName,
-          ep.name  AS EProjectDisplayName,
+          -- Project: resolve from EProjectName if set, otherwise fall back to GRN -> PO -> Project
+          ISNULL(ep.name, epo_proj.name) AS EProjectDisplayName,
+          -- Source doc: use actual GRN document number when source is GRN
+          CASE
+            WHEN eb.ESourceType = 'GRN' AND grn_list.GRNNo IS NOT NULL THEN grn_list.GRNNo
+            ELSE NULL
+          END AS sourceDocNo,
           COUNT(*) OVER() AS _total
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
         LEFT JOIN dbo.enterprise ec ON ec.id          = eb.ECompanyId
-        -- FIX: TRY_CAST inside a JOIN predicate prevents index seeks on
-        -- enterprise.id — SQL Server must evaluate it for every row.
-        -- Use a computed integer column via CROSS APPLY instead so the
-        -- cast happens once per row during the scan, not as a join barrier.
         CROSS APPLY (SELECT TRY_CAST(eb.EProjectName AS INT) AS _projId) _p
         LEFT JOIN dbo.enterprise ep ON ep.id = _p._projId
+        -- GRN join for sourceDocNo and project fallback
+        LEFT JOIN dbo.GoodsReceiptNotes grn_list
+          ON eb.ESourceType = 'GRN' AND grn_list.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.PurchaseOrders po_list ON grn_list.POID = po_list.PurchaseOrderID
+        LEFT JOIN dbo.enterprise epo_proj ON epo_proj.id = po_list.ProjectId
         ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -334,7 +341,7 @@ router.get(
       const result = await pool.request().query(`
         SELECT ESourceType, ESourceId, Eid
         FROM dbo.ExpenseBooking
-        WHERE EIsDeleted = 0
+        WHERE EStatus != 'Deleted'
           AND ESourceType IS NOT NULL
           AND ESourceId   IS NOT NULL
       `);
@@ -395,12 +402,20 @@ router.get("/:id", async (req, res) => {
             ELSE NULL
           END AS DocTypeName,
           ec.name AS ECompanyName,
-               ep.name AS EProjectDisplayName
+               ISNULL(ep.name, epo_proj2.name) AS EProjectDisplayName,
+               CASE
+                 WHEN eb.ESourceType = 'GRN' AND grn_det.GRNNo IS NOT NULL THEN grn_det.GRNNo
+                 ELSE NULL
+               END AS sourceDocNo
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
         LEFT JOIN dbo.enterprise ec ON ec.id = eb.ECompanyId
         CROSS APPLY (SELECT TRY_CAST(eb.EProjectName AS INT) AS _projId) _p
         LEFT JOIN dbo.enterprise ep ON ep.id = _p._projId
+        LEFT JOIN dbo.GoodsReceiptNotes grn_det
+          ON eb.ESourceType = 'GRN' AND grn_det.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.PurchaseOrders po_det ON grn_det.POID = po_det.PurchaseOrderID
+        LEFT JOIN dbo.enterprise epo_proj2 ON epo_proj2.id = po_det.ProjectId
         WHERE eb.Eid = @Eid
       `);
     if (!result.recordset.length)

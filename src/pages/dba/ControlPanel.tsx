@@ -149,13 +149,13 @@ export default function ControlPanel() {
 
   const patchTenant = useMutation({
     mutationFn: async ({
-      tenantId,
+      tenant_id,
       body,
     }: {
-      tenantId: string;
+      tenant_id: string;
       body: Record<string, unknown>;
     }) => {
-      const res = await fetchWithAuth(`/api/dba/control-panel/${tenantId}`, {
+      const res = await fetchWithAuth(`/api/dba/control-panel/${tenant_id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -245,7 +245,7 @@ export default function ControlPanel() {
 
     patchTenant.mutate(
       {
-        tenantId: grantForm.tenantId,
+        tenant_id: grantForm.tenantId,
         body: {
           access_level: grantForm.isTrial ? "read" : grantForm.accessLevel,
           status: grantForm.isTrial ? "trial" : "active",
@@ -282,7 +282,7 @@ export default function ControlPanel() {
 
   const handleRevoke = (access: TenantAccess) => {
     patchTenant.mutate(
-      { tenantId: access.tenant_id, body: { status: "suspended" } },
+      { tenant_id: access.tenant_id, body: { status: "suspended" } },
       {
         onSuccess: () => {
           setRevokeTarget(null);
@@ -295,7 +295,7 @@ export default function ControlPanel() {
 
   const handleReactivate = (access: TenantAccess) => {
     patchTenant.mutate(
-      { tenantId: access.tenant_id, body: { status: "active" } },
+      { tenant_id: access.tenant_id, body: { status: "active" } },
       {
         onSuccess: () => toast.success(`Access reactivated for ${access.name}`),
         onError: () => toast.error("Failed to reactivate access"),
@@ -444,7 +444,7 @@ export default function ControlPanel() {
                   );
 
                   return (
-                    <TableRow key={acc.id} className="text-xs">
+                    <TableRow key={acc.tenant_id} className="text-xs">
                       <TableCell>
                         <div className="font-medium text-[11px]">
                           {acc.name}
@@ -565,7 +565,7 @@ export default function ControlPanel() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-sm">
               <Database size={15} className="text-emerald-500" />
-              Access Details — {selectedAccess?.tenantId}
+              Access Details — {selectedAccess?.tenant_id}
             </DialogTitle>
           </DialogHeader>
           {selectedAccess && (
@@ -717,7 +717,7 @@ export default function ControlPanel() {
                 <SelectContent>
                   {accesses.map((t) => (
                     <SelectItem
-                      key={t.id}
+                      key={t.tenant_id}
                       value={t.tenant_id}
                       className="text-xs"
                     >
