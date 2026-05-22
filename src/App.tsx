@@ -102,7 +102,7 @@ const Records = lazy(() => import("./pages/Records"));
 const ReceivedPayment = lazy(() => import("./pages/ReceivedPayment"));
 
 // Task Detail
-const TaskDetail = lazy(() => import("./pages/tasks/TaskDetail"));
+const TaskDetail = lazy(() => import("./pages/ticket/tasks/TaskDetail"));
 
 // Masters
 const ContractorMaster = lazy(() => import("./pages/masters/ContractorMaster"));
