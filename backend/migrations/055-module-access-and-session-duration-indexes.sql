@@ -2,9 +2,8 @@
 -- Supports two new query patterns introduced by the logging fix:
 --   1. "Which modules did user X access?" → filter by UserId + Resource
 --   2. "Session duration for user X?" → filter by UserId + EventType + SessionDuration
--- Run after 054-fix-boq-foreign-keys.sql
-
-USE [CivilierERP];
+-- Run after 054-fix-boq-foreign-keys.sql.
+-- Uses the current migration connection database; do not hardcode DB name.
 
 -- Index: fast lookup of all actions for a given user, ordered by time
 IF NOT EXISTS (

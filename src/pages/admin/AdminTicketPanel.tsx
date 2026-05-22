@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   AlertCircle,
   CheckCircle2,
@@ -15,7 +16,6 @@ import {
   Lock,
   MessageCircle,
   RefreshCw,
-  Send,
   ShieldAlert,
   User,
   UserCheck,
@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { useTicketSync } from "@/hooks/useTicketSync";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
 import {
   TicketListResponse,
@@ -31,6 +32,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import TicketChat from "@/components/tickets/TicketChat";
 import {
   Select,
   SelectContent,
@@ -66,10 +68,12 @@ interface Ticket {
 
 interface TicketComment {
   id: number;
+  ticket_id: number;
   comment: string;
   author_name: string;
   author_role: string;
   created_at: string;
+  is_internal?: boolean | number;
 }
 
 interface TicketStats {
@@ -195,12 +199,12 @@ function TicketDetailDialog({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const { currentUser } = useAuth();
   const [assigneeId, setAssigneeId] = useState("");
-  const [comment, setComment] = useState("");
   const [resolutionNote, setResolutionNote] = useState("");
   const [showResolve, setShowResolve] = useState(false);
 
-  const { data, isLoading } = useQuery<{
+  const { data, isLoading, refetch } = useQuery<{
     ticket: Ticket;
     comments: TicketComment[];
   }>({
@@ -215,6 +219,8 @@ function TicketDetailDialog({
       document.visibilityState === "visible" ? 15_000 : false,
     refetchOnWindowFocus: true,
   });
+
+  useTicketSync(refetch, ticket.id);
 
   const inv = () => invalidateTicketQueries(queryClient);
 
@@ -268,22 +274,6 @@ function TicketDetailDialog({
       inv();
     },
     onError: () => toast.error("Could not close ticket"),
-  });
-
-  const commentMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetchWithAuth(`/api/tickets/comment/${ticket.id}`, {
-        method: "POST",
-        body: JSON.stringify({ comment }),
-      });
-      if (!res.ok) throw new Error("Failed");
-    },
-    onSuccess: () => {
-      toast.success("Comment added");
-      setComment("");
-      inv();
-    },
-    onError: () => toast.error("Could not add comment"),
   });
 
   const t = data?.ticket ?? ticket;
@@ -501,70 +491,20 @@ function TicketDetailDialog({
                 )}
               </div>
 
-              {/* Trail */}
-              <div className="space-y-2.5">
-                <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                  <MessageCircle size={11} />
-                  Trail ({comments.length})
-                </p>
-
-                {comments.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    No comments yet.
-                  </p>
-                ) : (
-                  <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
-                    {comments.map((c) => {
-                      const isAdmin = ["admin", "super_admin", "dba"].includes(
-                        c.author_role,
-                      );
-                      return (
-                        <div
-                          key={c.id}
-                          className={cn(
-                            "rounded-lg px-3.5 py-2.5 text-xs border",
-                            isAdmin
-                              ? "bg-primary/5 border-primary/20"
-                              : "bg-muted/30 border-border",
-                          )}
-                        >
-                          <p className="whitespace-pre-wrap text-foreground">
-                            {c.comment}
-                          </p>
-                          <p className="mt-1 text-[10px] text-muted-foreground">
-                            {c.author_name} · {isAdmin ? "Admin" : "User"} ·{" "}
-                            {fmtDate(c.created_at)}
-                          </p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {t.status !== "Closed" && (
-                  <div className="flex gap-2 items-end">
-                    <Textarea
-                      value={comment}
-                      onChange={(e) => setComment(e.target.value)}
-                      placeholder="Add a comment or internal note"
-                      rows={2}
-                      className="resize-none text-xs flex-1"
-                    />
-                    <Button
-                      size="icon"
-                      className="shrink-0 h-8 w-8"
-                      disabled={!comment.trim() || commentMutation.isPending}
-                      onClick={() => commentMutation.mutate()}
-                    >
-                      {commentMutation.isPending ? (
-                        <Loader2 size={13} className="animate-spin" />
-                      ) : (
-                        <Send size={13} />
-                      )}
-                    </Button>
-                  </div>
-                )}
-              </div>
+              <TicketChat
+                ticketId={t.id}
+                currentUser={{
+                  id: Number(currentUser?.id ?? 0),
+                  name: currentUser?.name ?? "Admin",
+                  role: currentUser?.role ?? "admin",
+                }}
+                initialMessages={comments}
+                ticketStatus={t.status}
+                className="border-border"
+                onSent={() => {
+                  inv();
+                }}
+              />
             </>
           )}
         </div>
@@ -628,21 +568,26 @@ export default function AdminTicketPanel() {
   const { data: users = [] } = useQuery<AdminUser[]>({
     queryKey: ["admin-ticket-users"],
     queryFn: async () => {
-      const res = await fetchWithAuth("/api/users");
+      const res = await fetchWithAuth("/api/tickets/admin-users");
       if (!res.ok) throw new Error("Failed");
       const raw = await res.json();
       return Array.isArray(raw)
-        ? raw
-            .filter((u) => !u.discontinue)
-            .map((u) => ({
-              id: u.id,
-              name: u.name,
-              role: u.role || u.roleName || "user",
-            }))
+        ? raw.map((u) => ({
+            id: u.id,
+            name: u.name,
+            role: u.role || "user",
+          }))
         : [];
     },
     staleTime: 5 * 60_000,
   });
+
+  useTicketSync(
+    useCallback(() => {
+      refetchStats();
+      refetchTickets();
+    }, [refetchStats, refetchTickets]),
+  );
 
   const tickets = useMemo(() => {
     const filtered = allTickets.filter((t) => {

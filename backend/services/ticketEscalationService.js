@@ -43,10 +43,35 @@ async function addEscalationComment(pool, ticket) {
     .input("comment", sql.NVarChar(sql.MAX), `[Escalated] ${ticket.reason}`)
     .input("author_name", sql.NVarChar(255), "System")
     .input("author_id", sql.Int, null)
-    .input("author_role", sql.NVarChar(50), "system").query(`
-      INSERT INTO dbo.ticket_comments (ticket_id, comment, author_name, author_id, author_role)
-      VALUES (@ticket_id, @comment, @author_name, @author_id, @author_role)
+    .input("author_role", sql.NVarChar(50), "system")
+    .input("is_internal", sql.Bit, 0).query(`
+      INSERT INTO dbo.ticket_comments (
+        ticket_id, comment, author_name, author_id, author_role, is_internal
+      )
+      VALUES (@ticket_id, @comment, @author_name, @author_id, @author_role, @is_internal)
     `);
+}
+
+function emitTicketEscalation(escalatedTickets) {
+  try {
+    const { getIo } = require("../socket");
+    const ticketIds = escalatedTickets.map((ticket) => ticket.id);
+    getIo().emit("ticket:escalated", {
+      count: escalatedTickets.length,
+      ticketIds,
+    });
+    getIo().emit("ticket:updated", {
+      action: "escalated",
+      ticketIds,
+    });
+  } catch (err) {
+    if (process.env.NODE_ENV === "development") {
+      logger.warn(
+        { event: "TICKET_ESCALATION_SOCKET_SKIP", err },
+        "Ticket escalation socket emit skipped",
+      );
+    }
+  }
 }
 
 async function runTicketEscalationJob(options = {}) {
@@ -88,7 +113,7 @@ async function runTicketEscalationJob(options = {}) {
         ) thresholds
         WHERE t.status IN ('Pending', 'InProgress')
           AND t.escalated_at IS NULL
-          AND DATEDIFF(MINUTE, ISNULL(t.updated_at, t.created_at), SYSUTCDATETIME()) >= thresholds.sla_minutes
+          AND DATEDIFF(MINUTE, t.created_at, SYSUTCDATETIME()) >= thresholds.sla_minutes
       `);
 
     const escalatedTickets = result.recordset || [];
@@ -97,6 +122,7 @@ async function runTicketEscalationJob(options = {}) {
     }
 
     if (escalatedTickets.length > 0) {
+      emitTicketEscalation(escalatedTickets);
       logger.warn(
         { event: "TICKET_ESCALATION_DONE", count: escalatedTickets.length },
         "Ticket auto-escalation completed",
