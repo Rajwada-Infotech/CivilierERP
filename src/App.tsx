@@ -224,6 +224,7 @@ const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
 const PendingTasksPage = lazy(() => import("./pages/followup/PendingTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
 const FollowupApplicants = lazy(() => import("./pages/followup/Applications"));
+const BookingsPage = lazy(() => import("./pages/followup/Bookings"));
 const FollowupUnitSelection = lazy(
   () => import("./pages/followup/UnitSelection"),
 );
@@ -685,6 +686,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ApplicantDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/sales/bookings"
+        element={
+          <ProtectedRoute>
+            <BookingsPage />
           </ProtectedRoute>
         }
       />
