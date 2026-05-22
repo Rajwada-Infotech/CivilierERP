@@ -223,7 +223,7 @@ const TDSReminders = lazy(() => import("./pages/followup/TDSReminders"));
 const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
 const PendingTasksPage = lazy(() => import("./pages/followup/PendingTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
-const FollowupApplicants = lazy(() => import("./pages/followup/Applicants"));
+const FollowupApplicants = lazy(() => import("./pages/followup/Applications"));
 const FollowupUnitSelection = lazy(
   () => import("./pages/followup/UnitSelection"),
 );
