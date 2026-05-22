@@ -50,6 +50,7 @@ export const followupNavItems: NavItem[] = [
     icon: Users,
     children: [
       { label: "Applicants", path: "/followup/sales/applicants" },
+      { label: "Bookings", path: "/followup/sales/bookings" },
       { label: "Unit Selection", path: "/followup/sales/unit-selection" },
       { label: "Welcome Calls", path: "/followup/sales/welcome-calls" },
     ],
