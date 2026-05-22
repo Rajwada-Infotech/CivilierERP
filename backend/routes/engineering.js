@@ -832,7 +832,7 @@ router.get("/work-order-summary/:woId", async (req, res) => {
         SELECT ISNULL(SUM(eb.ENetAmount), 0) AS TotalBooked
         FROM dbo.ExpenseBooking eb
         WHERE eb.ESourceType = 'WORK_DONE'
-          AND eb.EIsDeleted = 0
+          AND eb.EStatus != 'Deleted'
           AND eb.ESourceId IN (
             SELECT ID FROM dbo.WorkDone WHERE WorkOrderID = @WorkOrderHeaderId3
           )
@@ -848,7 +848,7 @@ router.get("/work-order-summary/:woId", async (req, res) => {
           SELECT eb.EDocNo
           FROM dbo.ExpenseBooking eb
           WHERE eb.ESourceType = 'WORK_DONE'
-            AND eb.EIsDeleted = 0
+            AND eb.EStatus != 'Deleted'
             AND eb.ESourceId IN (
               SELECT ID FROM dbo.WorkDone WHERE WorkOrderID = @WorkOrderHeaderId4
             )

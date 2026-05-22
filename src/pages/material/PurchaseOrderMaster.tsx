@@ -10,6 +10,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   DocNumberPreview,
   fetchNextDocNumber,
+  fetchDocTypes,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import {
   getPurchaseOrders,
@@ -646,7 +647,12 @@ const PurchaseOrderMaster: React.FC = () => {
 
   // ── Pre-populate form when arriving from Material Request ─────────────────
   useEffect(() => {
-    if (!mrPrefill || companies.length === 0 || allProjects.length === 0)
+    if (
+      !mrPrefill ||
+      companies.length === 0 ||
+      allProjects.length === 0 ||
+      uoms.length === 0
+    )
       return;
 
     const matchCompany = companies.find(
@@ -671,14 +677,25 @@ const PurchaseOrderMaster: React.FC = () => {
       const qty = Number(it.Quantity ?? 1);
       const rate = 0;
       const taxAmount = (qty * rate * gstRate) / 100;
+
+      // Resolve UOM: match UOMCode against master code, fallback to UOMName
+      const uomCodeNorm = (it.UOMCode ?? "").trim().toLowerCase();
+      const uomNameNorm = (it.UOMName ?? "").trim().toLowerCase();
+      const uomMatch =
+        uoms.find(
+          (u) =>
+            (uomCodeNorm && u.code.toLowerCase() === uomCodeNorm) ||
+            (uomNameNorm && u.name.toLowerCase() === uomNameNorm),
+        ) ?? null;
+
       return {
         id: uid(),
         itemId: it.ItemId ?? "",
         itemName: it.ItemName ?? "",
         itemDescription: "",
         quantity: qty,
-        uomId: null,
-        unit: it.UOMCode ?? "",
+        uomId: uomMatch?.id ?? null,
+        unit: uomMatch?.name ?? it.UOMName ?? it.UOMCode ?? "",
         rate,
         cgstRate: cgst,
         sgstRate: sgst,
@@ -694,7 +711,7 @@ const PurchaseOrderMaster: React.FC = () => {
     setViewMode("create");
     // Only run once when mrPrefill is present and master data is loaded
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mrPrefill, companies.length, allProjects.length]);
+  }, [mrPrefill, companies.length, allProjects.length, uoms.length]);
 
   // ── Pre-populate form when arriving from Work Done "Create WO_PO" ─────────
   useEffect(() => {
@@ -741,8 +758,27 @@ const PurchaseOrderMaster: React.FC = () => {
 
   // ── Apply WO prefill (material lines from Work Order) ─────────────────────
   useEffect(() => {
-    if (!woPrefill || companies.length === 0 || allProjects.length === 0)
+    if (
+      !woPrefill ||
+      companies.length === 0 ||
+      allProjects.length === 0 ||
+      suppliers.length === 0 ||
+      uoms.length === 0 ||
+      items.length === 0
+    )
       return;
+
+    // Try to match a single supplier from the prefill items
+    const supplierNames = [
+      ...new Set(woPrefill.items.map((i) => i.supplierName).filter(Boolean)),
+    ];
+    const matchedSupplier =
+      supplierNames.length === 1
+        ? suppliers.find(
+            (s) => s.name.toLowerCase() === supplierNames[0]!.toLowerCase(),
+          )
+        : null;
+
     setForm((prev) => ({
       ...prev,
       companyId: woPrefill.CompanyId
@@ -751,26 +787,75 @@ const PurchaseOrderMaster: React.FC = () => {
       projectId: woPrefill.ProjectId
         ? String(woPrefill.ProjectId)
         : prev.projectId,
+      supplierId: matchedSupplier ? matchedSupplier.id : prev.supplierId,
     }));
-    const prefillLines: POLineItem[] = woPrefill.items.map((it) => ({
-      id: crypto.randomUUID(),
-      itemId: it.itemId || null,
-      description: it.itemDescription,
-      quantity: it.quantity,
-      unit: it.unit,
-      rate: it.rate,
-      tax: it.tax || 0,
-      amount: it.amount,
-    }));
+    const prefillLines: POLineItem[] = woPrefill.items.map((it) => {
+      // Split combined GST% into CGST+SGST halves (intra-state assumption for WO-PO).
+      // If the item later gets an IGST designation the user can override in the line.
+      const totalGst = Number(it.tax) || 0;
+      const halfGst = totalGst / 2;
+      const qty = Number(it.quantity) || 0;
+      const rate = Number(it.rate) || 0;
+      const base = qty * rate;
+      const taxAmt = (base * totalGst) / 100;
+
+      // Resolve unit string → UOM master entry
+      // 1. Try direct match on the unit string (code or name)
+      const unitNorm = (it.unit || "").trim().toLowerCase();
+      let uomMatch = unitNorm
+        ? (uoms.find(
+            (u) =>
+              u.code.toLowerCase() === unitNorm ||
+              u.name.toLowerCase() === unitNorm,
+          ) ?? null)
+        : null;
+
+      // 2. Fallback: look up item master M_UOM when itemId is available
+      if (!uomMatch && it.itemId) {
+        const masterItem = items.find((i) => i.id === it.itemId);
+        if (masterItem?.uom) {
+          const mUomNorm = masterItem.uom.trim().toLowerCase();
+          uomMatch =
+            uoms.find(
+              (u) =>
+                u.code.toLowerCase() === mUomNorm ||
+                u.name.toLowerCase() === mUomNorm,
+            ) ?? null;
+        }
+      }
+
+      return {
+        id: crypto.randomUUID(),
+        itemId: it.itemId || "",
+        itemName: it.itemDescription,
+        itemDescription: it.itemDescription,
+        quantity: qty,
+        uomId: uomMatch?.id ?? null,
+        unit: uomMatch?.name ?? it.unit ?? "",
+        rate,
+        cgstRate: halfGst,
+        sgstRate: halfGst,
+        igstRate: 0,
+        gstRate: totalGst,
+        taxAmount: taxAmt,
+        amount: base + taxAmt,
+      };
+    });
     if (prefillLines.length > 0) setLineItems(prefillLines);
     setSourceWO({
       id: woPrefill.WOId,
       docNo: woPrefill.DocNo || woPrefill.DocumentNumber,
     });
     setViewMode("create");
-    // Only run once when woPrefill is present and master data is loaded
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [woPrefill, companies.length, allProjects.length]);
+  }, [
+    woPrefill,
+    companies.length,
+    allProjects.length,
+    suppliers.length,
+    uoms.length,
+    items.length,
+  ]);
 
   const filteredList = useMemo(() => {
     if (!searchQuery.trim()) return listData;
@@ -840,6 +925,22 @@ const PurchaseOrderMaster: React.FC = () => {
     setDocRefreshTrigger((c) => c + 1);
     return nextDocNo;
   };
+
+  // ── Auto-select WO_PO doc type when form is opened from a Work Order ─────
+  useEffect(() => {
+    if (!sourceWO || poDocTypeId) return; // already selected or not a WO-sourced form
+    fetchDocTypes("WO_PO").then(async (docTypes) => {
+      // Lock to the doc type whose Prefix is exactly "WO_PO"
+      const woPo = docTypes.find((d) => d.Prefix === "WO_PO");
+      if (!woPo) return;
+      const nextDocNo = await fetchNextDocNumber(
+        woPo.TypeOfDocId,
+        selectedFinYear || undefined,
+      );
+      applyPoDocNumber(woPo.TypeOfDocId, nextDocNo);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceWO, selectedFinYear]);
 
   // ── Line item helpers ─────────────────────────────────────────────────────
   const updateLine = (idx: number, patch: Partial<POLineItem>) => {
@@ -1530,14 +1631,45 @@ const PurchaseOrderMaster: React.FC = () => {
               </div>
               <div>
                 <FieldLabel>Document Type &amp; Number</FieldLabel>
-                <DocNumberPreview
-                  module="PO"
-                  finYear={selectedFinYear || undefined}
-                  selectedDocTypeId={poDocTypeId}
-                  preview={poDocNo}
-                  refreshTrigger={docRefreshTrigger}
-                  onSelect={applyPoDocNumber}
-                />
+                {sourceWO ? (
+                  // Locked to WO_PO type — no dropdown
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-muted/30 text-foreground">
+                      <Hash
+                        size={13}
+                        className="text-muted-foreground shrink-0"
+                      />
+                      <span className="font-mono text-xs font-semibold text-primary">
+                        WO_PO
+                      </span>
+                      <span className="text-xs opacity-40">·</span>
+                      <span className="text-xs text-muted-foreground">
+                        Work Order for Materials
+                      </span>
+                    </div>
+                    {poDocNo && (
+                      <div className="flex items-center gap-2 px-1">
+                        <span className="font-mono text-sm font-bold text-primary tracking-wider">
+                          {poDocNo}
+                        </span>
+                        {selectedFinYear && (
+                          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading">
+                            FY {selectedFinYear}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <DocNumberPreview
+                    module="PO"
+                    finYear={selectedFinYear || undefined}
+                    selectedDocTypeId={poDocTypeId}
+                    preview={poDocNo}
+                    refreshTrigger={docRefreshTrigger}
+                    onSelect={applyPoDocNumber}
+                  />
+                )}
               </div>
             </div>
           </div>
