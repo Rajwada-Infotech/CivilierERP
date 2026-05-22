@@ -184,8 +184,11 @@ function SingleTermRow({
             </p>
             {term.applicable && basicAmount > 0 && (
               <p className="text-[10px] text-muted-foreground">
-                {isAddition ? "+" : "−"}₹{fmt(discountAmount)} → base ₹
-                {fmt(afterThisTerm)}
+                {isAddition ? "+" : "−"}₹{fmt(discountAmount)}{" "}
+                <span className="opacity-60">
+                  ({term.appliedOn === "post-gst" ? "After GST" : "Before GST"})
+                </span>{" "}
+                → ₹{fmt(afterThisTerm)}
               </p>
             )}
           </div>
@@ -365,7 +368,7 @@ export function BillingAccordion({
       applicable: true,
       type: masterTerm.discountType === "flat" ? "fixed" : "percentage",
       value: hasDiscount ? masterTerm.discountValue : 0,
-      appliedOn: "pre-gst",
+      appliedOn: masterTerm.appliedOn ?? "pre-gst",
       masterTermId: masterTerm._id,
       masterTermName: masterTerm.name,
       deductionType: masterTerm.deductionType ?? "Deduction",
@@ -387,16 +390,26 @@ export function BillingAccordion({
   const activeCount = terms.filter((t) => t.applicable).length;
 
   // Running base amounts for per-row display
+  // Pre-GST terms: track against basic amount
+  // Post-GST terms: track against gross (taxable + cgst + sgst)
   const runningBases: number[] = [];
   let rb = basicAmount;
+  const grossForPostGst = bd.taxableAmount + bd.cgstAmount + bd.sgstAmount;
+  let pgRb = grossForPostGst;
   for (const t of terms) {
-    runningBases.push(rb);
-    if (t.applicable) {
-      const d = t.type === "percentage" ? (rb * t.value) / 100 : t.value;
-      if (t.deductionType === "Addition") {
-        rb += d;
-      } else {
-        rb = Math.max(0, rb - d);
+    if (t.appliedOn === "post-gst") {
+      runningBases.push(pgRb);
+      if (t.applicable) {
+        const d = t.type === "percentage" ? (pgRb * t.value) / 100 : t.value;
+        if (t.deductionType === "Addition") pgRb += d;
+        else pgRb = Math.max(0, pgRb - d);
+      }
+    } else {
+      runningBases.push(rb);
+      if (t.applicable) {
+        const d = t.type === "percentage" ? (rb * t.value) / 100 : t.value;
+        if (t.deductionType === "Addition") rb += d;
+        else rb = Math.max(0, rb - d);
       }
     }
   }

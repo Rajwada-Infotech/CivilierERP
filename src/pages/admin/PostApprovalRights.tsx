@@ -234,7 +234,7 @@ function buildPostApprovalColumns(
       ),
     },
     {
-      accessorKey: "pageName",
+      accessorKey: "pageLabel",
       header: "Page",
       cell: ({ getValue }) => (
         <span className="text-sm text-foreground font-medium">

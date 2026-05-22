@@ -32,6 +32,8 @@ export interface BillingTerm {
   calculationType?: string;
   /** "Addition" adds to the base amount; "Deduction" subtracts from it */
   deductionType: "Addition" | "Deduction";
+  /** Whether the term is applied before or after GST */
+  appliedOn: "pre-gst" | "post-gst";
 }
 
 interface BillingTermsContextType {
@@ -55,6 +57,7 @@ function mapDbRow(row: any): BillingTerm {
     status: row.IsActive === 1 || row.IsActive === true,
     calculationType: row.CalculationType ?? undefined,
     deductionType: row.DeductionType === "Addition" ? "Addition" : "Deduction",
+    appliedOn: row.CalculationType === "After GST" ? "post-gst" : "pre-gst",
   };
 }
 

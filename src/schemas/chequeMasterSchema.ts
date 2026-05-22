@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-const chequeNumber = z.union([z.number().int().positive(), z.literal("")]);
+const chequeNumber = z
+  .number({
+    required_error: "Required",
+    invalid_type_error: "Must be a number",
+  })
+  .int()
+  .positive("Must be a positive number");
 
 export const chequeMasterSchema = z
   .object({
@@ -10,14 +16,8 @@ export const chequeMasterSchema = z
     accountNumber: z.string().trim().min(1, "Account number is required"),
     ifscCode: z.string(),
     lotNumber: z.string().trim().min(1, "Lot number is required").max(100),
-    chqStart: chequeNumber.refine(
-      (value) => value !== "",
-      "Start number is required",
-    ),
-    chqEnd: chequeNumber.refine(
-      (value) => value !== "",
-      "End number is required",
-    ),
+    chqStart: chequeNumber,
+    chqEnd: chequeNumber,
     totalCheques: z.number().int().nonnegative(),
     remarks: z.string().max(500),
     status: z.boolean(),

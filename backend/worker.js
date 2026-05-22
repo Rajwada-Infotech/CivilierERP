@@ -2,9 +2,18 @@
 
 const logger = require("./logger");
 const { getRedis } = require("./redis");
+const { runTicketEscalationJob } = require("./services/ticketEscalationService");
 
 let workerInterval = null;
+let ticketEscalationInterval = null;
 let workerRunning = false;
+
+function getTicketEscalationIntervalMs() {
+  const configured = Number(process.env.TICKET_ESCALATION_INTERVAL_MS);
+  return Number.isInteger(configured) && configured > 0
+    ? configured
+    : 5 * 60 * 1000;
+}
 
 async function decayEngagement() {
   try {
@@ -88,6 +97,7 @@ async function startWorker() {
     logger.info({ event: "WORKER_INIT" }, "Running initial decay & cleanup...");
     await decayEngagement();
     await cleanupInactiveUsers();
+    await runTicketEscalationJob();
     logger.info({ event: "WORKER_INIT_DONE" }, "Initial decay & cleanup complete");
   } catch (err) {
     logger.error({ event: "WORKER_INIT_ERROR", err }, "Worker init failed");
@@ -111,12 +121,25 @@ async function startWorker() {
       logger.error({ event: "WORKER_ERROR", err }, "Worker interval crashed");
     }
   }, 3600000);
+
+  ticketEscalationInterval = setInterval(async () => {
+    try {
+      await runTicketEscalationJob();
+    } catch (err) {
+      logger.error(
+        { event: "WORKER_TICKET_ESCALATION_ERROR", err },
+        "Ticket escalation interval crashed",
+      );
+    }
+  }, getTicketEscalationIntervalMs());
 }
 
 function stopWorker() {
   if (!workerRunning) return;
   clearInterval(workerInterval);
+  clearInterval(ticketEscalationInterval);
   workerInterval = null;
+  ticketEscalationInterval = null;
   workerRunning = false;
   logger.info({ event: "WORKER_STOPPED" }, "Redis worker stopped");
 }
