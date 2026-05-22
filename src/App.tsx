@@ -108,6 +108,8 @@ const TaskDetail = lazy(() => import("./pages/tasks/TaskDetail"));
 const ContractorMaster = lazy(() => import("./pages/masters/ContractorMaster"));
 const SupplierMaster = lazy(() => import("./pages/masters/SupplierMaster"));
 const CustomerMaster = lazy(() => import("./pages/masters/CustomerMaster"));
+const UnitMaster = lazy(() => import("./pages/followup/UnitMaster"));
+const BlockMaster = lazy(() => import("./pages/followup/BlockMaster"));
 const BankMaster = lazy(() => import("./pages/masters/BankMaster"));
 const ExpensesMaster = lazy(() => import("./pages/masters/ExpensesMaster"));
 const ItemMaster = lazy(() => import("./pages/masters/ItemMaster"));
@@ -221,7 +223,8 @@ const TDSReminders = lazy(() => import("./pages/followup/TDSReminders"));
 const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
 const PendingTasksPage = lazy(() => import("./pages/followup/PendingTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
-const FollowupApplicants = lazy(() => import("./pages/followup/Applicants"));
+const FollowupApplicants = lazy(() => import("./pages/followup/Applications"));
+const BookingsPage = lazy(() => import("./pages/followup/Bookings"));
 const FollowupUnitSelection = lazy(
   () => import("./pages/followup/UnitSelection"),
 );
@@ -631,6 +634,30 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/followup/setup/customer-master"
+        element={
+          <ProtectedRoute>
+            <CustomerMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/setup/unit-master"
+        element={
+          <ProtectedRoute>
+            <UnitMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/setup/block-master"
+        element={
+          <ProtectedRoute>
+            <BlockMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/followup/follow-ups/log"
         element={
           <ProtectedRoute>
@@ -659,6 +686,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ApplicantDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/sales/bookings"
+        element={
+          <ProtectedRoute>
+            <BookingsPage />
           </ProtectedRoute>
         }
       />

@@ -137,7 +137,9 @@ const CustomerMaster: React.FC = () => {
   /* -------------------- UI -------------------- */
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Finance Module", "Customer Master"]} />
+      <Breadcrumbs
+        items={["Dashboard", "Follow-Up", "Setup", "Customer Master"]}
+      />
 
       <h1 className="text-xl font-heading font-bold text-foreground mb-4">
         Customer Master
