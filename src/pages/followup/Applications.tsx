@@ -8,7 +8,6 @@ import {
   Plus,
   X,
   RefreshCw,
-  ChevronRight,
   User,
   Phone,
   Mail,
@@ -19,9 +18,6 @@ import {
   Home,
   FileText,
   Users,
-  TrendingUp,
-  CheckCircle,
-  Clock,
   ChevronDown,
   Save,
   Loader2,
@@ -29,8 +25,14 @@ import {
   IndianRupee,
   Tag,
   UserCheck,
-  Info,
   Hash,
+  Clock,
+  Filter,
+  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
+  Trash2,
+  MoreVertical,
 } from "lucide-react";
 import { DashboardBackground } from "@/components/DashboardBackground";
 
@@ -68,7 +70,6 @@ interface Application {
   UpdatedBy: string | null;
   UpdatedAt: string | null;
 }
-
 interface Customer {
   Id: number;
   Name: string;
@@ -97,13 +98,50 @@ const STATUS_OPTIONS = [
   "Rejected",
 ];
 
-const STATUS_STYLE: Record<string, string> = {
-  New: "bg-blue-500/10 text-blue-600 border-blue-400/20",
-  Qualified: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
-  Shortlisted: "bg-violet-500/10 text-violet-600 border-violet-400/20",
-  "Document Pending": "bg-amber-500/10 text-amber-600 border-amber-400/20",
-  Rejected: "bg-red-500/10 text-red-500 border-red-400/20",
-};
+const STATUS_CONFIG: Record<string, { dot: string; text: string; bg: string }> =
+  {
+    New: {
+      dot: "bg-blue-500",
+      text: "text-blue-700 dark:text-blue-400",
+      bg: "bg-blue-50 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/20",
+    },
+    Qualified: {
+      dot: "bg-emerald-500",
+      text: "text-emerald-700 dark:text-emerald-400",
+      bg: "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20",
+    },
+    Shortlisted: {
+      dot: "bg-violet-500",
+      text: "text-violet-700 dark:text-violet-400",
+      bg: "bg-violet-50 dark:bg-violet-500/10 border-violet-200 dark:border-violet-500/20",
+    },
+    "Document Pending": {
+      dot: "bg-amber-500",
+      text: "text-amber-700 dark:text-amber-400",
+      bg: "bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20",
+    },
+    Rejected: {
+      dot: "bg-red-500",
+      text: "text-red-700 dark:text-red-400",
+      bg: "bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/20",
+    },
+  };
+
+function StatusBadge({ status }: { status: string }) {
+  const cfg = STATUS_CONFIG[status] ?? {
+    dot: "bg-muted-foreground",
+    text: "text-muted-foreground",
+    bg: "bg-muted border-border",
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-md border ${cfg.bg} ${cfg.text}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+      {status}
+    </span>
+  );
+}
 
 const AVATAR_COLORS = [
   "#2563EB",
@@ -129,7 +167,7 @@ function initials(name: string) {
     .toUpperCase();
 }
 function fmtDate(d: string | null) {
-  if (!d) return null;
+  if (!d) return "—";
   return new Date(d).toLocaleDateString("en-IN", {
     day: "2-digit",
     month: "short",
@@ -145,7 +183,7 @@ function fmtCurrency(v: number | null) {
   }).format(v);
 }
 
-// ── Searchable combobox ───────────────────────────────────────────────────────
+// ── Searchable Combobox ───────────────────────────────────────────────────────
 function Combobox({
   label,
   value,
@@ -166,7 +204,6 @@ function Combobox({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const ref = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node))
@@ -175,12 +212,10 @@ function Combobox({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
-
   const filtered = options.filter((o) =>
     o.label.toLowerCase().includes(q.toLowerCase()),
   );
   const selected = options.find((o) => o.value === value);
-
   return (
     <div ref={ref} className="relative">
       <label className="block text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
@@ -194,8 +229,8 @@ function Combobox({
           setOpen(!open);
           setQ("");
         }}
-        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm transition-colors
-          ${disabled ? "opacity-50 cursor-not-allowed bg-muted" : "bg-card hover:border-primary/50 cursor-pointer"}
+        className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm transition-colors
+          ${disabled ? "opacity-50 cursor-not-allowed bg-muted" : "bg-background hover:border-primary/50 cursor-pointer"}
           ${open ? "border-primary ring-1 ring-primary/20" : "border-border"}
           ${!selected ? "text-muted-foreground" : "text-foreground"}`}
       >
@@ -259,7 +294,7 @@ function Combobox({
   );
 }
 
-// ── Form ──────────────────────────────────────────────────────────────────────
+// ── Application Form ──────────────────────────────────────────────────────────
 const EMPTY_FORM = {
   customerId: "",
   applicantName: "",
@@ -295,7 +330,6 @@ function ApplicationForm({
 }) {
   const [form, setForm] = useState<FormData>({ ...EMPTY_FORM, ...initial });
   const [saving, setSaving] = useState(false);
-
   const set = (k: keyof FormData) => (v: string) =>
     setForm((prev) => {
       const next = { ...prev, [k]: v };
@@ -321,7 +355,7 @@ function ApplicationForm({
 
   const handleSave = async () => {
     if (!form.customerId) {
-      toast.error("Applicant Name is required");
+      toast.error("Applicant is required");
       return;
     }
     if (!form.projectId) {
@@ -337,150 +371,187 @@ function ApplicationForm({
   };
 
   const inputCls =
-    "w-full px-3 py-2.5 rounded-lg border border-border bg-card text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors placeholder:text-muted-foreground";
+    "w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors placeholder:text-muted-foreground";
   const labelCls =
     "block text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5";
 
   return (
-    <div className="space-y-6">
-      {/* Applicant */}
-      <div>
-        <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
-          <User size={12} /> Applicant Details
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Combobox
-            label="Applicant Name"
-            required
-            value={form.customerId}
-            onChange={set("customerId")}
-            options={customerOpts}
-            placeholder="Select applicant..."
+    <div className="flex flex-col h-full">
+      <div className="flex-1 overflow-y-auto p-5 space-y-6">
+        {/* Applicant */}
+        <section>
+          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
+            <User size={11} className="text-blue-500" /> Applicant Details
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <Combobox
+                label="Applicant Name"
+                required
+                value={form.customerId}
+                onChange={set("customerId")}
+                options={customerOpts}
+                placeholder="Select applicant..."
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Application Date</label>
+              <input
+                type="date"
+                className={inputCls}
+                value={form.applicationDate}
+                onChange={(e) => set("applicationDate")(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Status</label>
+              <select
+                className={inputCls}
+                value={form.status}
+                onChange={(e) => set("status")(e.target.value)}
+              >
+                {STATUS_OPTIONS.map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Phone Number</label>
+              <input
+                className={inputCls}
+                placeholder="+91 XXXXX XXXXX"
+                value={form.primaryMobile}
+                onChange={(e) => set("primaryMobile")(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Email Address</label>
+              <input
+                type="email"
+                className={inputCls}
+                placeholder="name@example.com"
+                value={form.email}
+                onChange={(e) => set("email")(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>PAN Number</label>
+              <input
+                className={`${inputCls} uppercase`}
+                placeholder="ABCDE1234F"
+                maxLength={10}
+                value={form.panNumber}
+                onChange={(e) => set("panNumber")(e.target.value.toUpperCase())}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>City</label>
+              <input
+                className={inputCls}
+                placeholder="City"
+                value={(form as any).city ?? ""}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, city: e.target.value }))
+                }
+              />
+            </div>
+            <div className="col-span-2">
+              <label className={labelCls}>Applicant Address</label>
+              <textarea
+                rows={2}
+                className={inputCls}
+                placeholder="Full address..."
+                value={form.applicantAddress}
+                onChange={(e) => set("applicantAddress")(e.target.value)}
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* Property */}
+        <section>
+          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
+            <Building2 size={11} className="text-violet-500" /> Property Details
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Combobox
+                label="Project"
+                required
+                value={form.projectId}
+                onChange={set("projectId")}
+                options={projectOpts}
+                placeholder="Select project..."
+              />
+            </div>
+            <div>
+              <Combobox
+                label="Unit"
+                value={form.unitId}
+                onChange={set("unitId")}
+                options={unitOpts}
+                placeholder="Select unit..."
+                disabled={!form.projectId}
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* Co-Applicant */}
+        <section>
+          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
+            <Users size={11} className="text-amber-500" /> Co-Applicant
+            (Optional)
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Name</label>
+              <input
+                className={inputCls}
+                placeholder="Full name"
+                value={form.coApplicantName}
+                onChange={(e) => set("coApplicantName")(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Phone</label>
+              <input
+                className={inputCls}
+                placeholder="+91 XXXXX XXXXX"
+                value={form.coApplicantPhone}
+                onChange={(e) => set("coApplicantPhone")(e.target.value)}
+              />
+            </div>
+            <div className="col-span-2">
+              <label className={labelCls}>Correspondence Address</label>
+              <textarea
+                rows={2}
+                className={inputCls}
+                placeholder="If different from applicant address..."
+                value={form.correspondenceAddress}
+                onChange={(e) => set("correspondenceAddress")(e.target.value)}
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* Notes */}
+        <section>
+          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
+            <FileText size={11} className="text-muted-foreground" /> Notes
+          </p>
+          <textarea
+            rows={3}
+            className={inputCls}
+            placeholder="Any additional notes..."
+            value={form.notes}
+            onChange={(e) => set("notes")(e.target.value)}
           />
-          <div>
-            <label className={labelCls}>Application Date</label>
-            <input
-              type="date"
-              className={inputCls}
-              value={form.applicationDate}
-              onChange={(e) => set("applicationDate")(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className={labelCls}>Phone Number</label>
-            <input
-              className={inputCls}
-              placeholder="+91 XXXXX XXXXX"
-              value={form.primaryMobile}
-              onChange={(e) => set("primaryMobile")(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className={labelCls}>Email Address</label>
-            <input
-              type="email"
-              className={inputCls}
-              placeholder="name@example.com"
-              value={form.email}
-              onChange={(e) => set("email")(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className={labelCls}>PAN Number</label>
-            <input
-              className={`${inputCls} uppercase`}
-              placeholder="ABCDE1234F"
-              maxLength={10}
-              value={form.panNumber}
-              onChange={(e) => set("panNumber")(e.target.value.toUpperCase())}
-            />
-          </div>
-          <div>
-            <label className={labelCls}>Status</label>
-            <select
-              className={inputCls}
-              value={form.status}
-              onChange={(e) => set("status")(e.target.value)}
-            >
-              {STATUS_OPTIONS.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
-          </div>
-          <div className="sm:col-span-2">
-            <label className={labelCls}>Applicant Address</label>
-            <textarea
-              rows={2}
-              className={inputCls}
-              placeholder="Full address..."
-              value={form.applicantAddress}
-              onChange={(e) => set("applicantAddress")(e.target.value)}
-            />
-          </div>
-        </div>
+        </section>
       </div>
-      {/* Property */}
-      <div>
-        <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
-          <Building2 size={12} /> Property Details
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Combobox
-            label="Project"
-            required
-            value={form.projectId}
-            onChange={set("projectId")}
-            options={projectOpts}
-            placeholder="Select project..."
-          />
-          <Combobox
-            label="Unit"
-            value={form.unitId}
-            onChange={set("unitId")}
-            options={unitOpts}
-            placeholder="Select unit..."
-            disabled={!form.projectId}
-          />
-        </div>
-      </div>
-      {/* Co-Applicant */}
-      <div>
-        <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
-          <Users size={12} /> Co-Applicant Details
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className={labelCls}>Co-Applicant Name</label>
-            <input
-              className={inputCls}
-              placeholder="Full name"
-              value={form.coApplicantName}
-              onChange={(e) => set("coApplicantName")(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className={labelCls}>Co-Applicant Phone</label>
-            <input
-              className={inputCls}
-              placeholder="+91 XXXXX XXXXX"
-              value={form.coApplicantPhone}
-              onChange={(e) => set("coApplicantPhone")(e.target.value)}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <label className={labelCls}>Correspondence Address</label>
-            <textarea
-              rows={2}
-              className={inputCls}
-              placeholder="If different from applicant address..."
-              value={form.correspondenceAddress}
-              onChange={(e) => set("correspondenceAddress")(e.target.value)}
-            />
-          </div>
-        </div>
-      </div>
-      {/* Actions */}
-      <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-border">
+
+      {/* Footer */}
+      <div className="flex-shrink-0 flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/20">
         <button
           type="button"
           onClick={onCancel}
@@ -506,48 +577,8 @@ function ApplicationForm({
   );
 }
 
-// ── Detail field helper ───────────────────────────────────────────────────────
-// ── Cascade accordion section ─────────────────────────────────────────────────
-function CascadeSection({
-  title,
-  icon,
-  children,
-  defaultOpen = true,
-  accent = "bg-primary/10 text-primary",
-}: {
-  title: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-  accent?: string;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="rounded-xl border border-border/70 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-2.5 px-4 py-2.5 bg-muted/20 hover:bg-muted/40 transition-colors text-left"
-      >
-        <span
-          className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 ${accent}`}
-        >
-          {icon}
-        </span>
-        <span className="flex-1 text-[11px] font-bold text-foreground uppercase tracking-widest">
-          {title}
-        </span>
-        <ChevronDown
-          size={13}
-          className={`text-muted-foreground/60 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
-        />
-      </button>
-      {open && <div className="divide-y divide-border/40">{children}</div>}
-    </div>
-  );
-}
-
-function CascadeRow({
+// ── Detail Drawer ─────────────────────────────────────────────────────────────
+function DetailRow({
   label,
   value,
   icon,
@@ -558,26 +589,40 @@ function CascadeRow({
 }) {
   if (!value) return null;
   return (
-    <div className="flex items-start gap-3 px-4 py-2.5 hover:bg-muted/20 transition-colors">
+    <div className="flex items-start gap-3 py-2.5 border-b border-border/50 last:border-0">
       {icon && (
-        <span className="text-muted-foreground/50 mt-0.5 flex-shrink-0 w-4 flex justify-center">
+        <span className="text-muted-foreground mt-0.5 w-4 flex-shrink-0">
           {icon}
         </span>
       )}
-      <div className={`flex-1 min-w-0 ${icon ? "" : "pl-7"}`}>
-        <p className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider leading-none mb-1">
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-0.5">
           {label}
         </p>
-        <p className="text-sm text-foreground break-words leading-snug">
-          {value}
-        </p>
+        <p className="text-sm text-foreground break-words">{value}</p>
       </div>
     </div>
   );
 }
 
-// ── Application Detail Panel ──────────────────────────────────────────────────
-function ApplicationDetail({
+function DetailSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mb-5">
+      <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">
+        {title}
+      </p>
+      <div className="bg-muted/30 rounded-xl px-4">{children}</div>
+    </div>
+  );
+}
+
+function ApplicationDrawer({
   app,
   onClose,
   onEdit,
@@ -587,427 +632,347 @@ function ApplicationDetail({
   onEdit: () => void;
 }) {
   const bg = avatarColor(app.ApplicantName);
-  const statusCls =
-    STATUS_STYLE[app.Status] ?? "bg-muted text-muted-foreground border-border";
-
-  const hasPropertyData =
-    app.ProjectId ||
-    app.ProjectName ||
-    app.UnitName ||
-    app.BlockName ||
-    app.CompanyName ||
-    app.PreferredUnitType ||
-    app.BudgetAmount;
-  const hasCoApplicant =
-    app.CoApplicantName || app.CoApplicantPhone || app.CorrespondenceAddress;
-  const hasLeadInfo = app.Source || app.AssignedToName;
-
   return (
-    <div className="flex flex-col h-full bg-card border border-border rounded-xl overflow-hidden shadow-lg">
-      {/* ── Header ── */}
-      <div className="flex-shrink-0 px-4 pt-4 pb-3 border-b border-border">
-        {/* Top row: avatar + name + actions */}
-        <div className="flex items-start justify-between gap-2 mb-3">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-12 h-12 rounded-2xl flex items-center justify-center text-[15px] font-bold text-white flex-shrink-0 shadow-sm"
-              style={{ background: bg }}
-            >
-              {initials(app.ApplicantName)}
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px]"
+        onClick={onClose}
+      />
+      {/* Drawer */}
+      <div className="fixed right-0 top-0 bottom-0 z-50 w-[600px] max-w-[95vw] bg-card border-l border-border shadow-2xl flex flex-col">
+        {/* Header */}
+        <div className="flex-shrink-0 px-5 pt-5 pb-4 border-b border-border">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="flex items-center gap-3">
+              <div
+                className="w-11 h-11 rounded-xl flex items-center justify-center text-[14px] font-bold text-white flex-shrink-0"
+                style={{ background: bg }}
+              >
+                {initials(app.ApplicantName)}
+              </div>
+              <div>
+                <h2 className="text-[15px] font-bold text-foreground leading-tight">
+                  {app.ApplicantName}
+                </h2>
+                {app.ApplicantNo && (
+                  <p className="text-[11px] font-mono text-muted-foreground">
+                    {app.ApplicantNo}
+                  </p>
+                )}
+              </div>
             </div>
-            <div>
-              <h2 className="text-[15px] font-bold text-foreground leading-tight">
-                {app.ApplicantName}
-              </h2>
-              {app.ApplicantNo && (
-                <span className="font-mono text-[11px] text-muted-foreground">
-                  {app.ApplicantNo}
-                </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={onEdit}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors"
+              >
+                <Edit2 size={12} /> Edit
+              </button>
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center flex-wrap gap-2">
+            <StatusBadge status={app.Status} />
+            {app.ApplicationDate && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground bg-muted rounded-md px-2 py-0.5 border border-border">
+                <Calendar size={10} /> {fmtDate(app.ApplicationDate)}
+              </span>
+            )}
+            {app.BudgetAmount && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-md px-2 py-0.5">
+                <IndianRupee size={10} /> {fmtCurrency(app.BudgetAmount)}
+              </span>
+            )}
+          </div>
+          {(app.PrimaryMobile || app.Email) && (
+            <div className="flex flex-wrap gap-3 mt-2.5">
+              {app.PrimaryMobile && (
+                <a
+                  href={`tel:${app.PrimaryMobile}`}
+                  className="flex items-center gap-1 text-[12px] text-primary hover:underline"
+                >
+                  <Phone size={11} /> {app.PrimaryMobile}
+                </a>
+              )}
+              {app.Email && (
+                <a
+                  href={`mailto:${app.Email}`}
+                  className="flex items-center gap-1 text-[12px] text-primary hover:underline truncate max-w-full"
+                >
+                  <Mail size={11} /> {app.Email}
+                </a>
               )}
             </div>
-          </div>
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            <button
-              onClick={onEdit}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors"
-            >
-              <Edit2 size={12} /> Edit
-            </button>
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            >
-              <X size={15} />
-            </button>
-          </div>
-        </div>
-
-        {/* Chips row */}
-        <div className="flex items-center flex-wrap gap-1.5">
-          <span
-            className={`inline-flex items-center gap-1 text-[11px] font-semibold rounded-full px-2.5 py-1 border ${statusCls}`}
-          >
-            {app.Status}
-          </span>
-          {app.ApplicationDate && (
-            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground bg-muted/50 rounded-full px-2 py-0.5 border border-border/50">
-              <Calendar size={9} /> {fmtDate(app.ApplicationDate)}
-            </span>
-          )}
-          {app.BudgetAmount && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-400/20 rounded-full px-2 py-0.5">
-              <IndianRupee size={9} /> {fmtCurrency(app.BudgetAmount)}
-            </span>
           )}
         </div>
 
-        {/* Contact quick-row */}
-        {(app.PrimaryMobile || app.Email) && (
-          <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-2.5">
-            {app.PrimaryMobile && (
-              <a
-                href={`tel:${app.PrimaryMobile}`}
-                className="flex items-center gap-1.5 text-[12px] text-primary hover:underline"
-              >
-                <Phone size={11} /> {app.PrimaryMobile}
-              </a>
-            )}
-            {app.Email && (
-              <a
-                href={`mailto:${app.Email}`}
-                className="flex items-center gap-1.5 text-[12px] text-primary hover:underline truncate max-w-full"
-              >
-                <Mail size={11} /> {app.Email}
-              </a>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* ── Scrollable cascade body ── */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {/* Applicant Details */}
-        <CascadeSection
-          title="Applicant"
-          icon={<User size={11} />}
-          accent="bg-blue-500/10 text-blue-600"
-        >
-          <CascadeRow
-            label="Phone"
-            value={app.PrimaryMobile}
-            icon={<Phone size={12} />}
-          />
-          <CascadeRow
-            label="Email"
-            value={app.Email}
-            icon={<Mail size={12} />}
-          />
-          <CascadeRow
-            label="PAN Number"
-            value={app.PanNumber}
-            icon={<CreditCard size={12} />}
-          />
-          <CascadeRow
-            label="City"
-            value={app.City}
-            icon={<MapPin size={12} />}
-          />
-          <CascadeRow
-            label="Address"
-            value={app.ApplicantAddress}
-            icon={<MapPin size={12} />}
-          />
-        </CascadeSection>
-
-        {/* Property Details — only shown if there's data */}
-        {hasPropertyData && (
-          <CascadeSection
-            title="Property"
-            icon={<Building2 size={11} />}
-            accent="bg-violet-500/10 text-violet-600"
-          >
-            <CascadeRow
-              label="Company"
-              value={app.CompanyName}
-              icon={<Building2 size={12} />}
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5">
+          <DetailSection title="Applicant">
+            <DetailRow
+              label="PAN Number"
+              value={app.PanNumber}
+              icon={<CreditCard size={12} />}
             />
-            {/* Project → Block → Unit hierarchy */}
-            {app.ProjectName && (
-              <div className="px-4 py-2.5 hover:bg-muted/20 transition-colors">
-                <div className="flex items-start gap-3">
-                  <span className="text-muted-foreground/50 mt-0.5 flex-shrink-0 w-4 flex justify-center">
-                    <Building2 size={12} />
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider leading-none mb-1">
-                      Project
-                    </p>
-                    <p className="text-sm font-semibold text-foreground">
-                      {app.ProjectName}
-                    </p>
-                    {/* Block and Unit nested under project */}
-                    {(app.BlockName || app.UnitName) && (
-                      <div className="mt-2 ml-1 border-l-2 border-violet-300/40 pl-3 space-y-1.5">
-                        {app.BlockName && (
-                          <div>
-                            <p className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider leading-none mb-0.5">
-                              Block
-                            </p>
-                            <p className="text-[13px] text-foreground">
-                              {app.BlockName}
-                            </p>
-                          </div>
-                        )}
-                        {app.UnitName && (
-                          <div>
-                            <p className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider leading-none mb-0.5">
-                              Unit
-                            </p>
-                            <p className="text-[13px] font-medium text-violet-600">
-                              {app.UnitName}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-            <CascadeRow
-              label="Preferred Type"
-              value={app.PreferredUnitType}
-              icon={<Home size={12} />}
-            />
-            <CascadeRow
-              label="Budget"
-              value={fmtCurrency(app.BudgetAmount)}
-              icon={<IndianRupee size={12} />}
-            />
-          </CascadeSection>
-        )}
-
-        {/* Co-Applicant */}
-        {hasCoApplicant && (
-          <CascadeSection
-            title="Co-Applicant"
-            icon={<Users size={11} />}
-            accent="bg-amber-500/10 text-amber-600"
-            defaultOpen={false}
-          >
-            <CascadeRow
-              label="Name"
-              value={app.CoApplicantName}
-              icon={<User size={12} />}
-            />
-            <CascadeRow
-              label="Phone"
-              value={app.CoApplicantPhone}
-              icon={<Phone size={12} />}
-            />
-            <CascadeRow
-              label="Correspondence Address"
-              value={app.CorrespondenceAddress}
+            <DetailRow
+              label="City"
+              value={app.City}
               icon={<MapPin size={12} />}
             />
-          </CascadeSection>
-        )}
-
-        {/* Lead Info */}
-        {hasLeadInfo && (
-          <CascadeSection
-            title="Lead Info"
-            icon={<Tag size={11} />}
-            accent="bg-emerald-500/10 text-emerald-600"
-            defaultOpen={false}
-          >
-            <CascadeRow
-              label="Source"
-              value={app.Source}
-              icon={<Tag size={12} />}
+            <DetailRow
+              label="Address"
+              value={app.ApplicantAddress}
+              icon={<MapPin size={12} />}
             />
-            <CascadeRow
-              label="Assigned To"
-              value={app.AssignedToName}
-              icon={<UserCheck size={12} />}
+          </DetailSection>
+
+          {(app.ProjectName ||
+            app.UnitName ||
+            app.CompanyName ||
+            app.PreferredUnitType) && (
+            <DetailSection title="Property">
+              <DetailRow
+                label="Project"
+                value={app.ProjectName}
+                icon={<Building2 size={12} />}
+              />
+              {(app.BlockName || app.UnitName) && (
+                <DetailRow
+                  label="Unit"
+                  value={[app.BlockName, app.UnitName]
+                    .filter(Boolean)
+                    .join(" › ")}
+                  icon={<Home size={12} />}
+                />
+              )}
+              <DetailRow
+                label="Company"
+                value={app.CompanyName}
+                icon={<Building2 size={12} />}
+              />
+              <DetailRow
+                label="Preferred Type"
+                value={app.PreferredUnitType}
+                icon={<Home size={12} />}
+              />
+            </DetailSection>
+          )}
+
+          {(app.CoApplicantName ||
+            app.CoApplicantPhone ||
+            app.CorrespondenceAddress) && (
+            <DetailSection title="Co-Applicant">
+              <DetailRow
+                label="Name"
+                value={app.CoApplicantName}
+                icon={<User size={12} />}
+              />
+              <DetailRow
+                label="Phone"
+                value={app.CoApplicantPhone}
+                icon={<Phone size={12} />}
+              />
+              <DetailRow
+                label="Correspondence Address"
+                value={app.CorrespondenceAddress}
+                icon={<MapPin size={12} />}
+              />
+            </DetailSection>
+          )}
+
+          {(app.Source || app.AssignedToName) && (
+            <DetailSection title="Lead Info">
+              <DetailRow
+                label="Source"
+                value={app.Source}
+                icon={<Tag size={12} />}
+              />
+              <DetailRow
+                label="Assigned To"
+                value={app.AssignedToName}
+                icon={<UserCheck size={12} />}
+              />
+            </DetailSection>
+          )}
+
+          {app.Notes && (
+            <DetailSection title="Notes">
+              <div className="py-3">
+                <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
+                  {app.Notes}
+                </p>
+              </div>
+            </DetailSection>
+          )}
+
+          <DetailSection title="Audit">
+            <DetailRow
+              label="Application No"
+              value={app.ApplicantNo}
+              icon={<Hash size={12} />}
             />
-          </CascadeSection>
-        )}
-
-        {/* Notes */}
-        {app.Notes && (
-          <CascadeSection
-            title="Notes"
-            icon={<FileText size={11} />}
-            accent="bg-muted text-muted-foreground"
-            defaultOpen={false}
-          >
-            <div className="px-4 py-3">
-              <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
-                {app.Notes}
-              </p>
-            </div>
-          </CascadeSection>
-        )}
-
-        {/* Audit — collapsed by default */}
-        <CascadeSection
-          title="Audit Info"
-          icon={<Hash size={11} />}
-          accent="bg-muted text-muted-foreground/70"
-          defaultOpen={false}
-        >
-          <CascadeRow
-            label="Application No"
-            value={app.ApplicantNo}
-            icon={<Hash size={12} />}
-          />
-          <CascadeRow
-            label="Created"
-            value={
-              app.CreatedBy
-                ? `${app.CreatedBy}${app.CreatedAt ? ` · ${fmtDate(app.CreatedAt)}` : ""}`
-                : fmtDate(app.CreatedAt)
-            }
-            icon={<Clock size={12} />}
-          />
-          <CascadeRow
-            label="Last Updated"
-            value={
-              app.UpdatedBy
-                ? `${app.UpdatedBy}${app.UpdatedAt ? ` · ${fmtDate(app.UpdatedAt)}` : ""}`
-                : fmtDate(app.UpdatedAt)
-            }
-            icon={<Clock size={12} />}
-          />
-        </CascadeSection>
+            <DetailRow
+              label="Created"
+              value={
+                app.CreatedBy
+                  ? `${app.CreatedBy} · ${fmtDate(app.CreatedAt)}`
+                  : fmtDate(app.CreatedAt)
+              }
+              icon={<Clock size={12} />}
+            />
+            <DetailRow
+              label="Last Updated"
+              value={
+                app.UpdatedBy
+                  ? `${app.UpdatedBy} · ${fmtDate(app.UpdatedAt)}`
+                  : fmtDate(app.UpdatedAt)
+              }
+              icon={<Clock size={12} />}
+            />
+          </DetailSection>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
-// ── Application card ──────────────────────────────────────────────────────────
-function AppCard({
+// ── Table Row ─────────────────────────────────────────────────────────────────
+function TableRow({
   app,
   onClick,
   isSelected,
 }: {
   app: Application;
   onClick: () => void;
-  isSelected?: boolean;
+  isSelected: boolean;
 }) {
   const bg = avatarColor(app.ApplicantName);
-  const statusCls =
-    STATUS_STYLE[app.Status] ?? "bg-muted text-muted-foreground border-border";
-
   return (
-    <div
-      className={`group flex items-start gap-3.5 bg-card border rounded-xl px-4 py-3.5 cursor-pointer transition-all duration-200 hover:shadow-md hover:-translate-y-px
-        ${isSelected ? "border-primary/50 ring-1 ring-primary/20 shadow-sm" : "border-border hover:border-primary/30"}`}
+    <tr
       onClick={onClick}
-      tabIndex={0}
-      onKeyDown={(e) => e.key === "Enter" && onClick()}
+      className={`group cursor-pointer border-b border-border/50 transition-colors
+      ${isSelected ? "bg-primary/5" : "hover:bg-muted/40"}`}
     >
-      <div
-        className="w-11 h-11 rounded-xl flex items-center justify-center text-[14px] font-bold text-white flex-shrink-0"
-        style={{ background: bg }}
-      >
-        {initials(app.ApplicantName)}
-      </div>
-
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap mb-0.5">
-          <span className="text-[15px] font-semibold text-foreground">
-            {app.ApplicantName}
-          </span>
-          <span
-            className={`inline-flex items-center gap-1 text-[11px] font-semibold rounded-full px-2 py-0.5 border ${statusCls}`}
+      {/* Applicant */}
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0"
+            style={{ background: bg }}
           >
-            {app.Status}
-          </span>
+            {initials(app.ApplicantName)}
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground truncate">
+              {app.ApplicantName}
+            </p>
+            {app.ApplicantNo && (
+              <p className="text-[11px] font-mono text-muted-foreground">
+                {app.ApplicantNo}
+              </p>
+            )}
+          </div>
         </div>
-        {app.ApplicantNo && (
-          <span className="block text-[12px] text-muted-foreground font-mono mb-1.5">
-            {app.ApplicantNo}
-          </span>
-        )}
-        <div className="flex flex-wrap gap-x-3 gap-y-1 mb-1.5">
+      </td>
+      {/* Contact */}
+      <td className="px-4 py-3">
+        <div className="space-y-0.5">
           {app.PrimaryMobile && (
-            <span className="flex items-center gap-1 text-[12.5px] text-muted-foreground">
-              <Phone size={11} />
-              {app.PrimaryMobile}
-            </span>
+            <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+              <Phone size={11} className="flex-shrink-0" /> {app.PrimaryMobile}
+            </p>
           )}
           {app.Email && (
-            <span className="flex items-center gap-1 text-[12.5px] text-muted-foreground">
-              <Mail size={11} />
-              <span className="max-w-[160px] truncate">{app.Email}</span>
-            </span>
+            <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground truncate max-w-[160px]">
+              <Mail size={11} className="flex-shrink-0" />{" "}
+              <span className="truncate">{app.Email}</span>
+            </p>
           )}
-          {app.ApplicationDate && (
-            <span className="flex items-center gap-1 text-[12.5px] text-muted-foreground">
-              <Calendar size={11} />
-              {app.ApplicationDate.slice(0, 10)}
-            </span>
+          {!app.PrimaryMobile && !app.Email && (
+            <span className="text-[12px] text-muted-foreground/50">—</span>
           )}
         </div>
-        <div className="flex flex-wrap gap-1.5">
-          {app.ProjectName && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-blue-500/10 text-blue-600 border border-blue-400/20 rounded-md px-2 py-0.5">
-              <Building2 size={10} />
+      </td>
+      {/* Project / Unit */}
+      <td className="px-4 py-3">
+        {app.ProjectName ? (
+          <div>
+            <p className="text-[12px] font-medium text-foreground">
               {app.ProjectName}
-            </span>
-          )}
-          {(app.BlockName || app.UnitName) && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-violet-500/10 text-violet-600 border border-violet-400/20 rounded-md px-2 py-0.5">
-              <Home size={10} />
-              {app.BlockName && app.UnitName
-                ? `${app.BlockName} › ${app.UnitName}`
-                : (app.UnitName ?? app.BlockName)}
-            </span>
-          )}
-          {app.PanNumber && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-500/10 text-amber-600 border border-amber-400/20 rounded-md px-2 py-0.5">
-              <CreditCard size={10} />
-              PAN: {app.PanNumber}
-            </span>
-          )}
-          {app.CoApplicantName && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-muted text-muted-foreground border border-border rounded-md px-2 py-0.5">
-              <Users size={10} />
-              {app.CoApplicantName}
-            </span>
-          )}
-        </div>
-      </div>
-
-      <ChevronRight
-        size={16}
-        className={`text-muted-foreground/40 mt-1 flex-shrink-0 transition-all
-          ${isSelected ? "text-primary rotate-0" : "group-hover:text-primary group-hover:translate-x-0.5"}`}
-      />
-    </div>
+            </p>
+            {(app.BlockName || app.UnitName) && (
+              <p className="text-[11px] text-muted-foreground">
+                {[app.BlockName, app.UnitName].filter(Boolean).join(" › ")}
+              </p>
+            )}
+          </div>
+        ) : (
+          <span className="text-[12px] text-muted-foreground/50">—</span>
+        )}
+      </td>
+      {/* Status */}
+      <td className="px-4 py-3">
+        <StatusBadge status={app.Status} />
+      </td>
+      {/* Date */}
+      <td className="px-4 py-3">
+        <span className="text-[12px] text-muted-foreground">
+          {fmtDate(app.ApplicationDate)}
+        </span>
+      </td>
+      {/* Budget */}
+      <td className="px-4 py-3">
+        {app.BudgetAmount ? (
+          <span className="text-[12px] font-medium text-foreground">
+            {fmtCurrency(app.BudgetAmount)}
+          </span>
+        ) : (
+          <span className="text-[12px] text-muted-foreground/50">—</span>
+        )}
+      </td>
+      {/* Arrow */}
+      <td className="px-3 py-3 w-8">
+        <ChevronRight
+          size={15}
+          className={`text-muted-foreground/30 transition-all ${isSelected ? "text-primary" : "group-hover:text-primary group-hover:translate-x-0.5"}`}
+        />
+      </td>
+    </tr>
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Main Page ─────────────────────────────────────────────────────────────────
 const Applications: React.FC = () => {
   const queryClient = useQueryClient();
-
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editApp, setEditApp] = useState<Application | null>(null);
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
 
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    const t = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 300);
     return () => clearTimeout(t);
   }, [search]);
 
-  // ── Queries ─────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, projectFilter]);
+
+  // Queries
   const {
     data: appData,
     isLoading,
@@ -1018,15 +983,21 @@ const Applications: React.FC = () => {
       debouncedSearch,
       statusFilter,
       projectFilter,
+      page,
     ],
     queryFn: async () => {
       const p = new URLSearchParams();
       if (debouncedSearch) p.set("search", debouncedSearch);
       if (statusFilter) p.set("status", statusFilter);
       if (projectFilter) p.set("projectId", projectFilter);
+      p.set("page", String(page));
+      p.set("pageSize", String(pageSize));
       const res = await fetchWithAuth(`${API}?${p}`);
       if (!res.ok) throw new Error("Failed to load");
-      return res.json() as Promise<{ data: Application[]; total: number }>;
+      return res.json() as Promise<{
+        data: Application[];
+        pagination: { total: number; totalPages: number };
+      }>;
     },
     staleTime: 60_000,
   });
@@ -1040,7 +1011,6 @@ const Applications: React.FC = () => {
     },
     staleTime: 300_000,
   });
-
   const { data: projects = [] } = useQuery<Project[]>({
     queryKey: ["followup-app-projects"],
     queryFn: async () => {
@@ -1050,7 +1020,6 @@ const Applications: React.FC = () => {
     },
     staleTime: 600_000,
   });
-
   const { data: units = [] } = useQuery<Unit[]>({
     queryKey: ["followup-app-units"],
     queryFn: async () => {
@@ -1062,40 +1031,19 @@ const Applications: React.FC = () => {
   });
 
   const apps = appData?.data ?? [];
-  const total = appData?.total ?? 0;
+  const totalPages = appData?.pagination?.totalPages ?? 1;
+  const total = appData?.pagination?.total ?? 0;
+  const hasFilters = !!(search || statusFilter || projectFilter);
 
-  const kpis = [
-    {
-      label: "Total",
-      value: total,
-      icon: <FileText size={16} />,
-      accent: "text-blue-600",
-      bg: "bg-blue-500/10",
-    },
-    {
-      label: "Qualified",
-      value: apps.filter((a) => a.Status === "Qualified").length,
-      icon: <CheckCircle size={16} />,
-      accent: "text-emerald-600",
-      bg: "bg-emerald-500/10",
-    },
-    {
-      label: "Shortlisted",
-      value: apps.filter((a) => a.Status === "Shortlisted").length,
-      icon: <TrendingUp size={16} />,
-      accent: "text-violet-600",
-      bg: "bg-violet-500/10",
-    },
-    {
-      label: "Doc Pending",
-      value: apps.filter((a) => a.Status === "Document Pending").length,
-      icon: <Clock size={16} />,
-      accent: "text-amber-600",
-      bg: "bg-amber-500/10",
-    },
-  ];
+  const statusCounts = {
+    New: apps.filter((a) => a.Status === "New").length,
+    Qualified: apps.filter((a) => a.Status === "Qualified").length,
+    Shortlisted: apps.filter((a) => a.Status === "Shortlisted").length,
+    "Document Pending": apps.filter((a) => a.Status === "Document Pending")
+      .length,
+  };
 
-  // ── Save ───────────────────────────────────────────────────────────────────
+  // Save
   const handleSave = async (form: FormData) => {
     const customerName =
       customers.find((c) => String(c.Id) === form.customerId)?.Name ?? "";
@@ -1115,7 +1063,6 @@ const Applications: React.FC = () => {
       Status: form.status,
       Notes: form.notes || null,
     };
-
     if (editApp) {
       const res = await fetchWithAuth(`${API}/${editApp.Id}`, {
         method: "PUT",
@@ -1126,8 +1073,7 @@ const Applications: React.FC = () => {
         const j = await res.json();
         throw new Error(j.error || "Update failed");
       }
-      toast.success("Application updated!");
-      // Refresh selected app with new data
+      toast.success("Application updated");
       const updated = await fetchWithAuth(`${API}/${editApp.Id}`)
         .then((r) => r.json())
         .catch(() => null);
@@ -1142,9 +1088,8 @@ const Applications: React.FC = () => {
         const j = await res.json();
         throw new Error(j.error || "Create failed");
       }
-      toast.success("Application created!");
+      toast.success("Application created");
     }
-
     await queryClient.invalidateQueries({
       queryKey: ["followup-applications"],
     });
@@ -1152,52 +1097,27 @@ const Applications: React.FC = () => {
     setEditApp(null);
   };
 
+  const openNew = () => {
+    setEditApp(null);
+    setSelectedApp(null);
+    setShowForm(true);
+  };
   const openEdit = (app: Application) => {
     setEditApp(app);
+    setSelectedApp(null);
     setShowForm(true);
-    setSelectedApp(null);
   };
-
-  const handleCardClick = (app: Application) => {
-    if (showForm) {
-      setShowForm(false);
-      setEditApp(null);
-    }
-    setSelectedApp((prev) => (prev?.Id === app.Id ? null : app));
+  const closeForm = () => {
+    setShowForm(false);
+    setEditApp(null);
   };
-
-  const closeDetail = () => {
-    setSelectedApp(null);
-  };
-
-  const initialForm: Partial<FormData> | undefined = editApp
-    ? {
-        customerId: String(editApp.CustomerId ?? ""),
-        applicantName: editApp.ApplicantName,
-        primaryMobile: editApp.PrimaryMobile ?? "",
-        email: editApp.Email ?? "",
-        panNumber: editApp.PanNumber ?? "",
-        applicantAddress: editApp.ApplicantAddress ?? "",
-        coApplicantName: editApp.CoApplicantName ?? "",
-        coApplicantPhone: editApp.CoApplicantPhone ?? "",
-        correspondenceAddress: editApp.CorrespondenceAddress ?? "",
-        applicationDate: editApp.ApplicationDate?.slice(0, 10) ?? "",
-        projectId: String(editApp.ProjectId ?? ""),
-        unitId: String(editApp.UnitId ?? ""),
-        status: editApp.Status,
-        notes: editApp.Notes ?? "",
-      }
-    : undefined;
-
-  const hasFilters = search || statusFilter || projectFilter;
-  const detailOpen = !!selectedApp && !showForm;
 
   return (
     <>
       <DashboardBackground />
-      <div className="relative z-10 p-6 space-y-5 max-w-[1400px] mx-auto">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
+      <div className="relative z-10 p-6 max-w-[1400px] mx-auto space-y-5">
+        {/* ── Header ── */}
+        <div className="flex items-center justify-between gap-4">
           <div>
             <Breadcrumbs
               items={[
@@ -1206,37 +1126,33 @@ const Applications: React.FC = () => {
               ]}
             />
             <div className="flex items-center gap-3 mt-1.5">
-              <div className="p-2.5 rounded-xl bg-blue-500/10">
-                <FileText size={20} className="text-blue-600" />
+              <div className="p-2 rounded-xl bg-blue-500/10">
+                <FileText size={18} className="text-blue-600" />
               </div>
               <div>
-                <h1 className="text-2xl font-heading font-bold text-foreground">
+                <h1 className="text-xl font-heading font-bold text-foreground">
                   Applications
                 </h1>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  All property applications and leads
+                <p className="text-xs text-muted-foreground">
+                  Property applications and leads
                 </p>
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => refetch()}
               disabled={isLoading}
               className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
             >
               <RefreshCw
-                size={13}
+                size={12}
                 className={isLoading ? "animate-spin" : ""}
               />{" "}
               Refresh
             </button>
             <button
-              onClick={() => {
-                setEditApp(null);
-                setSelectedApp(null);
-                setShowForm(true);
-              }}
+              onClick={openNew}
               className="flex items-center gap-1.5 text-xs bg-primary text-primary-foreground rounded-lg px-3 py-1.5 hover:bg-primary/90 transition-colors font-medium"
             >
               <Plus size={13} /> New Application
@@ -1244,71 +1160,37 @@ const Applications: React.FC = () => {
           </div>
         </div>
 
-        {/* KPIs */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {kpis.map((k) => (
-            <div
-              key={k.label}
-              className="rounded-xl border border-border bg-card p-4"
+        {/* ── Status pill filters ── */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setStatusFilter("")}
+            className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors
+              ${!statusFilter ? "bg-foreground text-background border-foreground" : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"}`}
+          >
+            All <span className="font-mono">{total}</span>
+          </button>
+          {Object.entries(STATUS_CONFIG).map(([s, cfg]) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(statusFilter === s ? "" : s)}
+              className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors
+                ${statusFilter === s ? `${cfg.bg} ${cfg.text} border-current` : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"}`}
             >
-              <div className={`p-2 rounded-lg ${k.bg} w-fit mb-3`}>
-                <span className={k.accent}>{k.icon}</span>
-              </div>
-              <p className="text-2xl font-bold font-heading text-foreground leading-none">
-                {k.value}
-              </p>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                {k.label}
-              </p>
-            </div>
+              <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+              {s}
+            </button>
           ))}
         </div>
 
-        {/* Create/Edit Form panel */}
-        {showForm && (
-          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-muted/30">
-              <h2 className="text-sm font-semibold text-foreground">
-                {editApp
-                  ? `Edit Application — ${editApp.ApplicantNo}`
-                  : "New Application"}
-              </h2>
-              <button
-                onClick={() => {
-                  setShowForm(false);
-                  setEditApp(null);
-                }}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="p-5">
-              <ApplicationForm
-                key={editApp?.Id ?? "new"}
-                initial={initialForm}
-                onSave={handleSave}
-                onCancel={() => {
-                  setShowForm(false);
-                  setEditApp(null);
-                }}
-                customers={customers}
-                projects={projects}
-                units={units}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Filters */}
-        <div className="flex gap-2.5 items-center flex-wrap">
+        {/* ── Search + filters bar ── */}
+        <div className="flex gap-2 items-center flex-wrap">
           <div className="relative flex-1 min-w-[220px]">
             <Search
-              size={14}
+              size={13}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
             />
             <input
-              className="w-full pl-9 pr-9 py-[9px] border border-border rounded-lg text-sm bg-card text-foreground outline-none focus:border-primary/60 transition-colors"
+              className="w-full pl-9 pr-9 py-2 border border-border rounded-lg text-sm bg-card text-foreground outline-none focus:border-primary/60 transition-colors"
               placeholder="Search name, mobile, email, PAN…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -1323,17 +1205,7 @@ const Applications: React.FC = () => {
             )}
           </div>
           <select
-            className="px-3 py-[9px] border border-border rounded-lg text-sm bg-card text-muted-foreground outline-none cursor-pointer focus:border-primary/60"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="">All Status</option>
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-          <select
-            className="px-3 py-[9px] border border-border rounded-lg text-sm bg-card text-muted-foreground outline-none cursor-pointer focus:border-primary/60"
+            className="px-3 py-2 border border-border rounded-lg text-sm bg-card text-muted-foreground outline-none cursor-pointer focus:border-primary/60 min-w-[140px]"
             value={projectFilter}
             onChange={(e) => setProjectFilter(e.target.value)}
           >
@@ -1346,93 +1218,196 @@ const Applications: React.FC = () => {
           </select>
           {hasFilters && (
             <button
-              className="flex items-center gap-1.5 px-3 py-[9px] border border-red-400/30 bg-red-500/5 text-red-500 rounded-lg text-xs font-medium hover:bg-red-500/10 transition-colors"
               onClick={() => {
                 setSearch("");
                 setStatusFilter("");
                 setProjectFilter("");
               }}
+              className="flex items-center gap-1.5 px-3 py-2 border border-red-400/30 bg-red-500/5 text-red-500 rounded-lg text-xs font-medium hover:bg-red-500/10 transition-colors"
             >
-              <X size={13} /> Clear
+              <X size={12} /> Clear
             </button>
           )}
+          <span className="ml-auto text-xs text-muted-foreground">
+            {total} application{total !== 1 ? "s" : ""}
+          </span>
         </div>
 
-        {/* ── Split layout: List + Detail ── */}
-        <div className={`flex gap-4 items-start transition-all duration-300`}>
-          {/* List column */}
-          <div
-            className={`transition-all duration-300 min-w-0 ${detailOpen ? "flex-[0_0_42%] max-w-[42%]" : "flex-1"}`}
-          >
-            {isLoading ? (
-              <div className="space-y-2.5">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="flex gap-3.5 bg-card border border-border rounded-xl px-4 py-3.5 animate-pulse"
-                  >
-                    <div className="w-11 h-11 rounded-xl bg-muted flex-shrink-0" />
-                    <div className="flex-1 space-y-2 pt-1">
-                      <div className="h-4 bg-muted rounded w-3/5" />
-                      <div className="h-3 bg-muted rounded w-2/5" />
-                      <div className="h-3 bg-muted rounded w-4/5" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : apps.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-center">
-                <div className="p-4 rounded-2xl bg-muted mb-4">
-                  <FileText size={28} className="text-muted-foreground" />
-                </div>
-                <p className="text-sm font-semibold text-foreground">
-                  No applications found
-                </p>
-                {hasFilters ? (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Try clearing filters
-                  </p>
+        {/* ── Table ── */}
+        <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    Applicant
+                  </th>
+                  <th className="px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    Contact
+                  </th>
+                  <th className="px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    Project / Unit
+                  </th>
+                  <th className="px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    Status
+                  </th>
+                  <th className="px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    Date
+                  </th>
+                  <th className="px-4 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    Budget
+                  </th>
+                  <th className="w-8" />
+                </tr>
+              </thead>
+              <tbody>
+                {isLoading ? (
+                  Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i} className="border-b border-border/50">
+                      {Array.from({ length: 7 }).map((_, j) => (
+                        <td key={j} className="px-4 py-3">
+                          <div
+                            className="h-4 bg-muted rounded animate-pulse"
+                            style={{ width: `${60 + Math.random() * 30}%` }}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))
+                ) : apps.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-20 text-center">
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="p-4 rounded-2xl bg-muted">
+                          <FileText
+                            size={24}
+                            className="text-muted-foreground"
+                          />
+                        </div>
+                        <p className="text-sm font-semibold text-foreground">
+                          No applications found
+                        </p>
+                        {hasFilters ? (
+                          <p className="text-xs text-muted-foreground">
+                            Try clearing your filters
+                          </p>
+                        ) : (
+                          <button
+                            onClick={openNew}
+                            className="flex items-center gap-1.5 text-xs bg-primary text-primary-foreground rounded-lg px-3 py-1.5 hover:bg-primary/90 transition-colors mt-1"
+                          >
+                            <Plus size={13} /> Add First Application
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
                 ) : (
-                  <button
-                    onClick={() => {
-                      setEditApp(null);
-                      setShowForm(true);
-                    }}
-                    className="mt-3 flex items-center gap-1.5 text-xs bg-primary text-primary-foreground rounded-lg px-3 py-1.5 hover:bg-primary/90 transition-colors"
-                  >
-                    <Plus size={13} /> Add First Application
-                  </button>
+                  apps.map((a) => (
+                    <TableRow
+                      key={a.Id}
+                      app={a}
+                      onClick={() =>
+                        setSelectedApp((prev) => (prev?.Id === a.Id ? null : a))
+                      }
+                      isSelected={selectedApp?.Id === a.Id}
+                    />
+                  ))
                 )}
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                {apps.map((a) => (
-                  <AppCard
-                    key={a.Id}
-                    app={a}
-                    onClick={() => handleCardClick(a)}
-                    isSelected={selectedApp?.Id === a.Id}
-                  />
-                ))}
-              </div>
-            )}
+              </tbody>
+            </table>
           </div>
 
-          {/* Detail panel */}
-          {detailOpen && selectedApp && (
-            <div
-              className="flex-1 min-w-0 sticky top-6"
-              style={{ maxHeight: "calc(100vh - 7rem)" }}
-            >
-              <ApplicationDetail
-                app={selectedApp}
-                onClose={closeDetail}
-                onEdit={() => openEdit(selectedApp)}
-              />
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-muted/20">
+              <p className="text-xs text-muted-foreground">
+                Page {page} of {totalPages}
+              </p>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs border border-border rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                >
+                  <ChevronLeft size={13} /> Prev
+                </button>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs border border-border rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                >
+                  Next <ChevronRight size={13} />
+                </button>
+              </div>
             </div>
           )}
         </div>
       </div>
+
+      {/* ── Slide-over Form ── */}
+      {showForm && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px]"
+            onClick={closeForm}
+          />
+          <div className="fixed right-0 top-0 bottom-0 z-50 w-[600px] max-w-[95vw] bg-card border-l border-border shadow-2xl flex flex-col">
+            <div className="flex-shrink-0 flex items-center justify-between px-5 py-4 border-b border-border">
+              <h2 className="text-sm font-semibold text-foreground">
+                {editApp ? `Edit — ${editApp.ApplicantNo}` : "New Application"}
+              </h2>
+              <button
+                onClick={closeForm}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <ApplicationForm
+                key={editApp?.Id ?? "new"}
+                initial={
+                  editApp
+                    ? {
+                        customerId: String(editApp.CustomerId ?? ""),
+                        applicantName: editApp.ApplicantName,
+                        primaryMobile: editApp.PrimaryMobile ?? "",
+                        email: editApp.Email ?? "",
+                        panNumber: editApp.PanNumber ?? "",
+                        applicantAddress: editApp.ApplicantAddress ?? "",
+                        coApplicantName: editApp.CoApplicantName ?? "",
+                        coApplicantPhone: editApp.CoApplicantPhone ?? "",
+                        correspondenceAddress:
+                          editApp.CorrespondenceAddress ?? "",
+                        applicationDate:
+                          editApp.ApplicationDate?.slice(0, 10) ?? "",
+                        projectId: String(editApp.ProjectId ?? ""),
+                        unitId: String(editApp.UnitId ?? ""),
+                        status: editApp.Status,
+                        notes: editApp.Notes ?? "",
+                      }
+                    : undefined
+                }
+                onSave={handleSave}
+                onCancel={closeForm}
+                customers={customers}
+                projects={projects}
+                units={units}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Detail Drawer ── */}
+      {selectedApp && !showForm && (
+        <ApplicationDrawer
+          app={selectedApp}
+          onClose={() => setSelectedApp(null)}
+          onEdit={() => openEdit(selectedApp)}
+        />
+      )}
     </>
   );
 };
