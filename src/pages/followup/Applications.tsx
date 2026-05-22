@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -26,6 +25,12 @@ import {
   ChevronDown,
   Save,
   Loader2,
+  Edit2,
+  IndianRupee,
+  Tag,
+  UserCheck,
+  Info,
+  Hash,
 } from "lucide-react";
 import { DashboardBackground } from "@/components/DashboardBackground";
 
@@ -48,8 +53,20 @@ interface Application {
   UnitId: number | null;
   UnitName: string | null;
   BlockName: string | null;
+  CompanyId: number | null;
+  CompanyName: string | null;
+  City: string | null;
+  Source: string | null;
+  PreferredUnitType: string | null;
+  BudgetAmount: number | null;
+  AssignedTo: number | null;
+  AssignedToName: string | null;
   Status: string;
   Notes: string | null;
+  CreatedBy: string | null;
+  CreatedAt: string | null;
+  UpdatedBy: string | null;
+  UpdatedAt: string | null;
 }
 
 interface Customer {
@@ -110,6 +127,22 @@ function initials(name: string) {
     .map((w) => w[0])
     .join("")
     .toUpperCase();
+}
+function fmtDate(d: string | null) {
+  if (!d) return null;
+  return new Date(d).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+function fmtCurrency(v: number | null) {
+  if (v == null) return null;
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(v);
 }
 
 // ── Searchable combobox ───────────────────────────────────────────────────────
@@ -208,8 +241,7 @@ function Combobox({
                     setOpen(false);
                     setQ("");
                   }}
-                  className={`w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors
-                  ${value === o.value ? "bg-primary/10 text-primary font-medium" : "text-foreground"}`}
+                  className={`w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors ${value === o.value ? "bg-primary/10 text-primary font-medium" : "text-foreground"}`}
                 >
                   {o.label}
                   {o.sub && (
@@ -244,7 +276,6 @@ const EMPTY_FORM = {
   status: "New",
   notes: "",
 };
-
 type FormData = typeof EMPTY_FORM;
 
 function ApplicationForm({
@@ -388,7 +419,6 @@ function ApplicationForm({
           </div>
         </div>
       </div>
-
       {/* Property */}
       <div>
         <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
@@ -413,7 +443,6 @@ function ApplicationForm({
           />
         </div>
       </div>
-
       {/* Co-Applicant */}
       <div>
         <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
@@ -450,7 +479,6 @@ function ApplicationForm({
           </div>
         </div>
       </div>
-
       {/* Actions */}
       <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-border">
         <button
@@ -478,15 +506,404 @@ function ApplicationForm({
   );
 }
 
+// ── Detail field helper ───────────────────────────────────────────────────────
+// ── Cascade accordion section ─────────────────────────────────────────────────
+function CascadeSection({
+  title,
+  icon,
+  children,
+  defaultOpen = true,
+  accent = "bg-primary/10 text-primary",
+}: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  accent?: string;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="rounded-xl border border-border/70 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-2.5 px-4 py-2.5 bg-muted/20 hover:bg-muted/40 transition-colors text-left"
+      >
+        <span
+          className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 ${accent}`}
+        >
+          {icon}
+        </span>
+        <span className="flex-1 text-[11px] font-bold text-foreground uppercase tracking-widest">
+          {title}
+        </span>
+        <ChevronDown
+          size={13}
+          className={`text-muted-foreground/60 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {open && <div className="divide-y divide-border/40">{children}</div>}
+    </div>
+  );
+}
+
+function CascadeRow({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: React.ReactNode;
+  icon?: React.ReactNode;
+}) {
+  if (!value) return null;
+  return (
+    <div className="flex items-start gap-3 px-4 py-2.5 hover:bg-muted/20 transition-colors">
+      {icon && (
+        <span className="text-muted-foreground/50 mt-0.5 flex-shrink-0 w-4 flex justify-center">
+          {icon}
+        </span>
+      )}
+      <div className={`flex-1 min-w-0 ${icon ? "" : "pl-7"}`}>
+        <p className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider leading-none mb-1">
+          {label}
+        </p>
+        <p className="text-sm text-foreground break-words leading-snug">
+          {value}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Application Detail Panel ──────────────────────────────────────────────────
+function ApplicationDetail({
+  app,
+  onClose,
+  onEdit,
+}: {
+  app: Application;
+  onClose: () => void;
+  onEdit: () => void;
+}) {
+  const bg = avatarColor(app.ApplicantName);
+  const statusCls =
+    STATUS_STYLE[app.Status] ?? "bg-muted text-muted-foreground border-border";
+
+  const hasPropertyData =
+    app.ProjectId ||
+    app.ProjectName ||
+    app.UnitName ||
+    app.BlockName ||
+    app.CompanyName ||
+    app.PreferredUnitType ||
+    app.BudgetAmount;
+  const hasCoApplicant =
+    app.CoApplicantName || app.CoApplicantPhone || app.CorrespondenceAddress;
+  const hasLeadInfo = app.Source || app.AssignedToName;
+
+  return (
+    <div className="flex flex-col h-full bg-card border border-border rounded-xl overflow-hidden shadow-lg">
+      {/* ── Header ── */}
+      <div className="flex-shrink-0 px-4 pt-4 pb-3 border-b border-border">
+        {/* Top row: avatar + name + actions */}
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-12 h-12 rounded-2xl flex items-center justify-center text-[15px] font-bold text-white flex-shrink-0 shadow-sm"
+              style={{ background: bg }}
+            >
+              {initials(app.ApplicantName)}
+            </div>
+            <div>
+              <h2 className="text-[15px] font-bold text-foreground leading-tight">
+                {app.ApplicantName}
+              </h2>
+              {app.ApplicantNo && (
+                <span className="font-mono text-[11px] text-muted-foreground">
+                  {app.ApplicantNo}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <button
+              onClick={onEdit}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors"
+            >
+              <Edit2 size={12} /> Edit
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </div>
+
+        {/* Chips row */}
+        <div className="flex items-center flex-wrap gap-1.5">
+          <span
+            className={`inline-flex items-center gap-1 text-[11px] font-semibold rounded-full px-2.5 py-1 border ${statusCls}`}
+          >
+            {app.Status}
+          </span>
+          {app.ApplicationDate && (
+            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground bg-muted/50 rounded-full px-2 py-0.5 border border-border/50">
+              <Calendar size={9} /> {fmtDate(app.ApplicationDate)}
+            </span>
+          )}
+          {app.BudgetAmount && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-400/20 rounded-full px-2 py-0.5">
+              <IndianRupee size={9} /> {fmtCurrency(app.BudgetAmount)}
+            </span>
+          )}
+        </div>
+
+        {/* Contact quick-row */}
+        {(app.PrimaryMobile || app.Email) && (
+          <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-2.5">
+            {app.PrimaryMobile && (
+              <a
+                href={`tel:${app.PrimaryMobile}`}
+                className="flex items-center gap-1.5 text-[12px] text-primary hover:underline"
+              >
+                <Phone size={11} /> {app.PrimaryMobile}
+              </a>
+            )}
+            {app.Email && (
+              <a
+                href={`mailto:${app.Email}`}
+                className="flex items-center gap-1.5 text-[12px] text-primary hover:underline truncate max-w-full"
+              >
+                <Mail size={11} /> {app.Email}
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Scrollable cascade body ── */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        {/* Applicant Details */}
+        <CascadeSection
+          title="Applicant"
+          icon={<User size={11} />}
+          accent="bg-blue-500/10 text-blue-600"
+        >
+          <CascadeRow
+            label="Phone"
+            value={app.PrimaryMobile}
+            icon={<Phone size={12} />}
+          />
+          <CascadeRow
+            label="Email"
+            value={app.Email}
+            icon={<Mail size={12} />}
+          />
+          <CascadeRow
+            label="PAN Number"
+            value={app.PanNumber}
+            icon={<CreditCard size={12} />}
+          />
+          <CascadeRow
+            label="City"
+            value={app.City}
+            icon={<MapPin size={12} />}
+          />
+          <CascadeRow
+            label="Address"
+            value={app.ApplicantAddress}
+            icon={<MapPin size={12} />}
+          />
+        </CascadeSection>
+
+        {/* Property Details — only shown if there's data */}
+        {hasPropertyData && (
+          <CascadeSection
+            title="Property"
+            icon={<Building2 size={11} />}
+            accent="bg-violet-500/10 text-violet-600"
+          >
+            <CascadeRow
+              label="Company"
+              value={app.CompanyName}
+              icon={<Building2 size={12} />}
+            />
+            {/* Project → Block → Unit hierarchy */}
+            {app.ProjectName && (
+              <div className="px-4 py-2.5 hover:bg-muted/20 transition-colors">
+                <div className="flex items-start gap-3">
+                  <span className="text-muted-foreground/50 mt-0.5 flex-shrink-0 w-4 flex justify-center">
+                    <Building2 size={12} />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider leading-none mb-1">
+                      Project
+                    </p>
+                    <p className="text-sm font-semibold text-foreground">
+                      {app.ProjectName}
+                    </p>
+                    {/* Block and Unit nested under project */}
+                    {(app.BlockName || app.UnitName) && (
+                      <div className="mt-2 ml-1 border-l-2 border-violet-300/40 pl-3 space-y-1.5">
+                        {app.BlockName && (
+                          <div>
+                            <p className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider leading-none mb-0.5">
+                              Block
+                            </p>
+                            <p className="text-[13px] text-foreground">
+                              {app.BlockName}
+                            </p>
+                          </div>
+                        )}
+                        {app.UnitName && (
+                          <div>
+                            <p className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider leading-none mb-0.5">
+                              Unit
+                            </p>
+                            <p className="text-[13px] font-medium text-violet-600">
+                              {app.UnitName}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            <CascadeRow
+              label="Preferred Type"
+              value={app.PreferredUnitType}
+              icon={<Home size={12} />}
+            />
+            <CascadeRow
+              label="Budget"
+              value={fmtCurrency(app.BudgetAmount)}
+              icon={<IndianRupee size={12} />}
+            />
+          </CascadeSection>
+        )}
+
+        {/* Co-Applicant */}
+        {hasCoApplicant && (
+          <CascadeSection
+            title="Co-Applicant"
+            icon={<Users size={11} />}
+            accent="bg-amber-500/10 text-amber-600"
+            defaultOpen={false}
+          >
+            <CascadeRow
+              label="Name"
+              value={app.CoApplicantName}
+              icon={<User size={12} />}
+            />
+            <CascadeRow
+              label="Phone"
+              value={app.CoApplicantPhone}
+              icon={<Phone size={12} />}
+            />
+            <CascadeRow
+              label="Correspondence Address"
+              value={app.CorrespondenceAddress}
+              icon={<MapPin size={12} />}
+            />
+          </CascadeSection>
+        )}
+
+        {/* Lead Info */}
+        {hasLeadInfo && (
+          <CascadeSection
+            title="Lead Info"
+            icon={<Tag size={11} />}
+            accent="bg-emerald-500/10 text-emerald-600"
+            defaultOpen={false}
+          >
+            <CascadeRow
+              label="Source"
+              value={app.Source}
+              icon={<Tag size={12} />}
+            />
+            <CascadeRow
+              label="Assigned To"
+              value={app.AssignedToName}
+              icon={<UserCheck size={12} />}
+            />
+          </CascadeSection>
+        )}
+
+        {/* Notes */}
+        {app.Notes && (
+          <CascadeSection
+            title="Notes"
+            icon={<FileText size={11} />}
+            accent="bg-muted text-muted-foreground"
+            defaultOpen={false}
+          >
+            <div className="px-4 py-3">
+              <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
+                {app.Notes}
+              </p>
+            </div>
+          </CascadeSection>
+        )}
+
+        {/* Audit — collapsed by default */}
+        <CascadeSection
+          title="Audit Info"
+          icon={<Hash size={11} />}
+          accent="bg-muted text-muted-foreground/70"
+          defaultOpen={false}
+        >
+          <CascadeRow
+            label="Application No"
+            value={app.ApplicantNo}
+            icon={<Hash size={12} />}
+          />
+          <CascadeRow
+            label="Created"
+            value={
+              app.CreatedBy
+                ? `${app.CreatedBy}${app.CreatedAt ? ` · ${fmtDate(app.CreatedAt)}` : ""}`
+                : fmtDate(app.CreatedAt)
+            }
+            icon={<Clock size={12} />}
+          />
+          <CascadeRow
+            label="Last Updated"
+            value={
+              app.UpdatedBy
+                ? `${app.UpdatedBy}${app.UpdatedAt ? ` · ${fmtDate(app.UpdatedAt)}` : ""}`
+                : fmtDate(app.UpdatedAt)
+            }
+            icon={<Clock size={12} />}
+          />
+        </CascadeSection>
+      </div>
+    </div>
+  );
+}
+
 // ── Application card ──────────────────────────────────────────────────────────
-function AppCard({ app, onClick }: { app: Application; onClick: () => void }) {
+function AppCard({
+  app,
+  onClick,
+  isSelected,
+}: {
+  app: Application;
+  onClick: () => void;
+  isSelected?: boolean;
+}) {
   const bg = avatarColor(app.ApplicantName);
   const statusCls =
     STATUS_STYLE[app.Status] ?? "bg-muted text-muted-foreground border-border";
 
   return (
     <div
-      className="group flex items-start gap-3.5 bg-card border border-border rounded-xl px-4 py-3.5 cursor-pointer transition-all duration-200 hover:border-primary/30 hover:shadow-md hover:-translate-y-px"
+      className={`group flex items-start gap-3.5 bg-card border rounded-xl px-4 py-3.5 cursor-pointer transition-all duration-200 hover:shadow-md hover:-translate-y-px
+        ${isSelected ? "border-primary/50 ring-1 ring-primary/20 shadow-sm" : "border-border hover:border-primary/30"}`}
       onClick={onClick}
       tabIndex={0}
       onKeyDown={(e) => e.key === "Enter" && onClick()}
@@ -566,7 +983,8 @@ function AppCard({ app, onClick }: { app: Application; onClick: () => void }) {
 
       <ChevronRight
         size={16}
-        className="text-muted-foreground/40 mt-1 flex-shrink-0 group-hover:text-primary group-hover:translate-x-0.5 transition-all"
+        className={`text-muted-foreground/40 mt-1 flex-shrink-0 transition-all
+          ${isSelected ? "text-primary rotate-0" : "group-hover:text-primary group-hover:translate-x-0.5"}`}
       />
     </div>
   );
@@ -574,7 +992,6 @@ function AppCard({ app, onClick }: { app: Application; onClick: () => void }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 const Applications: React.FC = () => {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const [search, setSearch] = useState("");
@@ -582,8 +999,8 @@ const Applications: React.FC = () => {
   const [projectFilter, setProjectFilter] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editApp, setEditApp] = useState<Application | null>(null);
+  const [selectedApp, setSelectedApp] = useState<Application | null>(null);
 
-  // Debounced search
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300);
@@ -618,7 +1035,7 @@ const Applications: React.FC = () => {
     queryKey: ["followup-app-customers"],
     queryFn: async () => {
       const res = await fetchWithAuth(`${API}/customers`);
-      if (!res.ok) throw new Error("Failed to load customers");
+      if (!res.ok) throw new Error("Failed");
       return res.json();
     },
     staleTime: 300_000,
@@ -628,7 +1045,7 @@ const Applications: React.FC = () => {
     queryKey: ["followup-app-projects"],
     queryFn: async () => {
       const res = await fetchWithAuth(`${API}/projects`);
-      if (!res.ok) throw new Error("Failed to load projects");
+      if (!res.ok) throw new Error("Failed");
       return res.json();
     },
     staleTime: 600_000,
@@ -638,7 +1055,7 @@ const Applications: React.FC = () => {
     queryKey: ["followup-app-units"],
     queryFn: async () => {
       const res = await fetchWithAuth(`${API}/units`);
-      if (!res.ok) throw new Error("Failed to load units");
+      if (!res.ok) throw new Error("Failed");
       return res.json();
     },
     staleTime: 300_000,
@@ -647,7 +1064,6 @@ const Applications: React.FC = () => {
   const apps = appData?.data ?? [];
   const total = appData?.total ?? 0;
 
-  // ── KPIs ──────────────────────────────────────────────────────────────────
   const kpis = [
     {
       label: "Total",
@@ -711,6 +1127,11 @@ const Applications: React.FC = () => {
         throw new Error(j.error || "Update failed");
       }
       toast.success("Application updated!");
+      // Refresh selected app with new data
+      const updated = await fetchWithAuth(`${API}/${editApp.Id}`)
+        .then((r) => r.json())
+        .catch(() => null);
+      if (updated) setSelectedApp(updated);
     } else {
       const res = await fetchWithAuth(API, {
         method: "POST",
@@ -734,6 +1155,19 @@ const Applications: React.FC = () => {
   const openEdit = (app: Application) => {
     setEditApp(app);
     setShowForm(true);
+    setSelectedApp(null);
+  };
+
+  const handleCardClick = (app: Application) => {
+    if (showForm) {
+      setShowForm(false);
+      setEditApp(null);
+    }
+    setSelectedApp((prev) => (prev?.Id === app.Id ? null : app));
+  };
+
+  const closeDetail = () => {
+    setSelectedApp(null);
   };
 
   const initialForm: Partial<FormData> | undefined = editApp
@@ -756,6 +1190,7 @@ const Applications: React.FC = () => {
     : undefined;
 
   const hasFilters = search || statusFilter || projectFilter;
+  const detailOpen = !!selectedApp && !showForm;
 
   return (
     <>
@@ -799,6 +1234,7 @@ const Applications: React.FC = () => {
             <button
               onClick={() => {
                 setEditApp(null);
+                setSelectedApp(null);
                 setShowForm(true);
               }}
               className="flex items-center gap-1.5 text-xs bg-primary text-primary-foreground rounded-lg px-3 py-1.5 hover:bg-primary/90 transition-colors font-medium"
@@ -828,7 +1264,7 @@ const Applications: React.FC = () => {
           ))}
         </div>
 
-        {/* Form panel */}
+        {/* Create/Edit Form panel */}
         {showForm && (
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-muted/30">
@@ -922,54 +1358,80 @@ const Applications: React.FC = () => {
           )}
         </div>
 
-        {/* List */}
-        {isLoading ? (
-          <div className="space-y-2.5">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div
-                key={i}
-                className="flex gap-3.5 bg-card border border-border rounded-xl px-4 py-3.5 animate-pulse"
-              >
-                <div className="w-11 h-11 rounded-xl bg-muted flex-shrink-0" />
-                <div className="flex-1 space-y-2 pt-1">
-                  <div className="h-4 bg-muted rounded w-3/5" />
-                  <div className="h-3 bg-muted rounded w-2/5" />
-                  <div className="h-3 bg-muted rounded w-4/5" />
-                </div>
+        {/* ── Split layout: List + Detail ── */}
+        <div className={`flex gap-4 items-start transition-all duration-300`}>
+          {/* List column */}
+          <div
+            className={`transition-all duration-300 min-w-0 ${detailOpen ? "flex-[0_0_42%] max-w-[42%]" : "flex-1"}`}
+          >
+            {isLoading ? (
+              <div className="space-y-2.5">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="flex gap-3.5 bg-card border border-border rounded-xl px-4 py-3.5 animate-pulse"
+                  >
+                    <div className="w-11 h-11 rounded-xl bg-muted flex-shrink-0" />
+                    <div className="flex-1 space-y-2 pt-1">
+                      <div className="h-4 bg-muted rounded w-3/5" />
+                      <div className="h-3 bg-muted rounded w-2/5" />
+                      <div className="h-3 bg-muted rounded w-4/5" />
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        ) : apps.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="p-4 rounded-2xl bg-muted mb-4">
-              <FileText size={28} className="text-muted-foreground" />
-            </div>
-            <p className="text-sm font-semibold text-foreground">
-              No applications found
-            </p>
-            {hasFilters ? (
-              <p className="text-xs text-muted-foreground mt-1">
-                Try clearing filters
-              </p>
+            ) : apps.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <div className="p-4 rounded-2xl bg-muted mb-4">
+                  <FileText size={28} className="text-muted-foreground" />
+                </div>
+                <p className="text-sm font-semibold text-foreground">
+                  No applications found
+                </p>
+                {hasFilters ? (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Try clearing filters
+                  </p>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setEditApp(null);
+                      setShowForm(true);
+                    }}
+                    className="mt-3 flex items-center gap-1.5 text-xs bg-primary text-primary-foreground rounded-lg px-3 py-1.5 hover:bg-primary/90 transition-colors"
+                  >
+                    <Plus size={13} /> Add First Application
+                  </button>
+                )}
+              </div>
             ) : (
-              <button
-                onClick={() => {
-                  setEditApp(null);
-                  setShowForm(true);
-                }}
-                className="mt-3 flex items-center gap-1.5 text-xs bg-primary text-primary-foreground rounded-lg px-3 py-1.5 hover:bg-primary/90 transition-colors"
-              >
-                <Plus size={13} /> Add First Application
-              </button>
+              <div className="space-y-2.5">
+                {apps.map((a) => (
+                  <AppCard
+                    key={a.Id}
+                    app={a}
+                    onClick={() => handleCardClick(a)}
+                    isSelected={selectedApp?.Id === a.Id}
+                  />
+                ))}
+              </div>
             )}
           </div>
-        ) : (
-          <div className="space-y-2.5">
-            {apps.map((a) => (
-              <AppCard key={a.Id} app={a} onClick={() => openEdit(a)} />
-            ))}
-          </div>
-        )}
+
+          {/* Detail panel */}
+          {detailOpen && selectedApp && (
+            <div
+              className="flex-1 min-w-0 sticky top-6"
+              style={{ maxHeight: "calc(100vh - 7rem)" }}
+            >
+              <ApplicationDetail
+                app={selectedApp}
+                onClose={closeDetail}
+                onEdit={() => openEdit(selectedApp)}
+              />
+            </div>
+          )}
+        </div>
       </div>
     </>
   );
