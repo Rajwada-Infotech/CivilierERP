@@ -6,8 +6,6 @@ import MyTickets from "@/pages/ticket/MyTickets";
 
 import PendingTickets from "@/pages/ticket/PendingTickets";
 
-import AllTickets from "@/pages/ticket/AllTickets";
-
 import ResolvedTickets from "@/pages/ticket/ResolvedTickets";
 import React, { Suspense, lazy, useState, useEffect } from "react";
 import { RouteErrorBoundary } from "./components/ErrorBoundary";
@@ -104,7 +102,7 @@ const Records = lazy(() => import("./pages/Records"));
 const ReceivedPayment = lazy(() => import("./pages/ReceivedPayment"));
 
 // Task Detail
-const TaskDetail = lazy(() => import("./pages/tasks/TaskDetail"));
+const TaskDetail = lazy(() => import("./pages/ticket/tasks/TaskDetail"));
 
 // Masters
 const ContractorMaster = lazy(() => import("./pages/masters/ContractorMaster"));
@@ -1005,15 +1003,6 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <PendingTickets />
-          </AdminRoute>
-        }
-      />
-
-      <Route
-        path="/ticket/all"
-        element={
-          <AdminRoute>
-            <AllTickets />
           </AdminRoute>
         }
       />

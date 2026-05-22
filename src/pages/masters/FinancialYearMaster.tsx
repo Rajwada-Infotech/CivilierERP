@@ -35,8 +35,8 @@ const toPayload = (r: Record<string, unknown>) => ({
   fy_label: (r.year as string) || null,
   start_date: (r.startDate as string) || null,
   end_date: (r.endDate as string) || null,
-  FStatus: r.status !== false && r.status !== "Closed",
-  FisLocked: r.locked === true || r.locked === "true",
+  is_active: r.status !== false && r.status !== "Closed",
+  is_locked: r.locked === true || r.locked === "true",
 });
 
 // ─── Component ────────────────────────────────────────────────────────────────

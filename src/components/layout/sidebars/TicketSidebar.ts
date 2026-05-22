@@ -20,7 +20,6 @@ export const buildTicketNavItems = (isAdminUser: boolean): NavItem[] => [
       // Admin-only items
       ...(isAdminUser
         ? [
-            { label: "All Tickets", path: "/ticket/all" },
             { label: "Pending Tickets", path: "/ticket/pending" },
           ]
         : []),
