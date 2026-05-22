@@ -338,13 +338,18 @@ router.get("/:id", async (req, res) => {
         `SELECT * FROM dbo.ticket_comments WHERE ticket_id = @tid ORDER BY created_at ASC`,
       );
 
+    const visibleComments =
+      isTicketAdmin(actor.role)
+        ? comments.recordset
+        : comments.recordset.filter((comment) => !Number(comment.is_internal));
+
     // Coerce Pending → InProgress if the ticket already has replies
     const ticket = { ...access.ticket };
     if (ticket.status === "Pending" && comments.recordset.length > 0) {
       ticket.status = "InProgress";
     }
 
-    res.json({ ticket, comments: comments.recordset });
+    res.json({ ticket, comments: visibleComments });
   } catch (err) {
     console.error("[Tickets GET /:id]", err.message);
     res.status(500).json({ error: err.message });

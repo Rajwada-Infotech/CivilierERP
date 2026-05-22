@@ -1,0 +1,185 @@
+import React from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import {
+  MasterPage,
+  type DataChangeEvent,
+  type RecordWithId,
+  type FieldDef,
+} from "@/components/MasterPage";
+import type { ExportColumn } from "@/lib/export";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+
+const API = "/api/block-master";
+
+async function fetchBlocks(): Promise<any[]> {
+  const res = await fetchWithAuth(API);
+  if (!res.ok) throw new Error("Failed to fetch blocks");
+  return res.json();
+}
+
+async function fetchProjectOptions(): Promise<
+  { value: string; label: string }[]
+> {
+  const res = await fetchWithAuth(`${API}/projects`);
+  if (!res.ok) throw new Error("Failed to fetch projects");
+  const data: { Id: number; Name: string }[] = await res.json();
+  return data.map((p) => ({ value: String(p.Id), label: p.Name }));
+}
+
+// ── Fields ────────────────────────────────────────────────────────────────────
+const fields: FieldDef[] = [
+  {
+    name: "projectId",
+    label: "Project",
+    type: "select",
+    required: true,
+    asyncOptions: fetchProjectOptions,
+  },
+  {
+    name: "blockName",
+    label: "Block Name",
+    type: "text",
+    required: true,
+  },
+  {
+    name: "isActive",
+    label: "Status",
+    type: "toggle",
+    defaultValue: true,
+  },
+];
+
+const columns = [
+  { key: "projectName", label: "Project" },
+  { key: "blockName", label: "Block Name" },
+  { key: "isActive", label: "Status" },
+];
+
+const exportColumns: ExportColumn[] = [
+  { header: "Project", accessor: "projectName" },
+  { header: "Block Name", accessor: "blockName" },
+  { header: "Status", accessor: "isActive" },
+];
+
+// ── Component ─────────────────────────────────────────────────────────────────
+const BlockMaster: React.FC = () => {
+  const queryClient = useQueryClient();
+
+  const {
+    data: blocks,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["block-master"],
+    queryFn: fetchBlocks,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const mappedData: RecordWithId[] = React.useMemo(() => {
+    if (!Array.isArray(blocks)) return [];
+    return blocks.map((item) => ({
+      _id: String(item.Id),
+      projectId: String(item.ProjectId),
+      projectName: item.ProjectName ?? "",
+      blockName: item.BlockName ?? "",
+      isActive: Boolean(item.IsActive),
+    }));
+  }, [blocks]);
+
+  const toPayload = (r: Record<string, any>) => ({
+    ProjectId: parseInt(r.projectId),
+    BlockName: r.blockName?.trim() || null,
+    IsActive: r.isActive !== false,
+  });
+
+  const handleDataEvent = async (event: DataChangeEvent) => {
+    try {
+      if (event.action === "add") {
+        const res = await fetchWithAuth(API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(toPayload(event.record)),
+        });
+        if (!res.ok)
+          throw new Error((await res.json()).error || "Failed to add block");
+        toast.success("Block added!");
+      }
+      if (event.action === "update") {
+        const res = await fetchWithAuth(`${API}/${event.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(toPayload(event.record)),
+        });
+        if (!res.ok)
+          throw new Error((await res.json()).error || "Failed to update block");
+        toast.success("Block updated!");
+      }
+      if (event.action === "delete") {
+        const res = await fetchWithAuth(`${API}/${event.id}`, {
+          method: "DELETE",
+        });
+        if (!res.ok)
+          throw new Error((await res.json()).error || "Failed to delete block");
+        toast.success("Block deleted!");
+      }
+      await queryClient.invalidateQueries({ queryKey: ["block-master"] });
+    } catch (err: any) {
+      toast.error(err.message || "Operation failed");
+    }
+  };
+
+  if (isLoading)
+    return <div className="p-6 text-muted-foreground">Loading blocks...</div>;
+  if (error)
+    return <div className="p-6 text-red-500">Failed to load blocks.</div>;
+
+  return (
+    <>
+      <Breadcrumbs
+        items={["Dashboard", "Follow-Up", "Setup", "Block Master"]}
+      />
+      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
+        Block Master
+      </h1>
+      <MasterPage
+        title="Block"
+        fields={fields}
+        columns={columns}
+        initialData={mappedData}
+        onDataEvent={handleDataEvent}
+        exportConfig={{
+          title: "Block Master",
+          filename: "block-master",
+          columns: exportColumns,
+        }}
+        viewConfig={{
+          title: "Block Details",
+          fields: [
+            { key: "projectName", label: "Project" },
+            { key: "blockName", label: "Block Name" },
+            { key: "isActive", label: "Status" },
+          ],
+        }}
+        onPrint={(row) => {
+          const win = window.open("", "_blank", "width=600,height=400");
+          if (!win) return;
+          win.document.write(`
+            <html><head><title>Block — ${row.blockName}</title>
+            <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
+            </head><body><h2>Block Card</h2><table>
+              <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
+              <tr><td>Block Name</td><td>${row.blockName || "—"}</td></tr>
+              <tr><td>Status</td><td>${row.isActive ? "Active" : "Inactive"}</td></tr>
+            </table></body></html>
+          `);
+          win.document.close();
+          win.print();
+        }}
+      />
+    </>
+  );
+};
+
+export default BlockMaster;
