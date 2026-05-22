@@ -171,7 +171,13 @@ router.get("/", async (req, res) => {
     const result = await req2.query(`
         SELECT
           t.id, t.subject, t.priority, t.customer_name, t.customer_phone,
-          t.company_id, t.project_id, t.status, t.created_at,
+          t.company_id, t.project_id,
+          CASE
+            WHEN t.status = 'Pending' AND ISNULL(c.comment_count, 0) > 0
+            THEN 'InProgress'
+            ELSE t.status
+          END AS status,
+          t.created_at,
           t.assigned_to, t.assigned_to_id,
           t.resolved_by, t.resolved_by_id,
           t.created_by, t.created_by_id,
@@ -266,8 +272,15 @@ async function myTicketsHandler(req, res) {
 
     const result = await pool.request().input("userId", sql.Int, actor.id)
       .query(`
-        SELECT t.*,
-               (SELECT COUNT(*) FROM dbo.ticket_comments tc WHERE tc.ticket_id = t.id) AS comment_count
+        SELECT
+          t.*,
+          (SELECT COUNT(*) FROM dbo.ticket_comments tc WHERE tc.ticket_id = t.id) AS comment_count,
+          CASE
+            WHEN t.status = 'Pending'
+              AND (SELECT COUNT(*) FROM dbo.ticket_comments tc WHERE tc.ticket_id = t.id) > 0
+            THEN 'InProgress'
+            ELSE t.status
+          END AS status
         FROM dbo.tickets t
         WHERE t.created_by_id = @userId OR t.assigned_to_id = @userId
         ORDER BY
@@ -326,6 +339,18 @@ router.get("/:id", async (req, res) => {
       );
 
     res.json({ ticket: access.ticket, comments: comments.recordset });
+      const visibleComments =
+      isTicketAdmin(actor.role)
+        ? comments.recordset
+        : comments.recordset.filter((comment) => !Number(comment.is_internal));
+    
+    // Coerce Pending → InProgress if the ticket already has replies
+    const ticket = { ...access.ticket };
+    if (ticket.status === "Pending" && comments.recordset.length > 0) {
+      ticket.status = "InProgress";
+    }
+    
+    res.json({ ticket, comments: visibleComments });
   } catch (err) {
     console.error("[Tickets GET /:id]", err.message);
     res.status(500).json({ error: err.message });
