@@ -29,7 +29,13 @@ const LIST_COLUMNS = `
   fa.UpdatedAt
 `;
 
-const STATUS_OPTIONS = ["New", "Qualified", "Shortlisted", "Document Pending", "Rejected"];
+const STATUS_OPTIONS = [
+  "New",
+  "Qualified",
+  "Shortlisted",
+  "Document Pending",
+  "Rejected",
+];
 const PERMISSION_MODULE = "Followup";
 const PERMISSION_SUBMODULE = "Applicants";
 
@@ -67,7 +73,6 @@ function assertValidNumber(value, fieldName) {
   if (value === null) return null;
   return Number.isNaN(value) ? `${fieldName} must be a valid number` : null;
 }
-
 
 function getPayload(body) {
   const projectId = normalizeNumber(body?.ProjectId);
@@ -152,25 +157,94 @@ router.get(
   },
 );
 
+// ── Dropdown lookup routes (auth only, no page-permission required) ──────────
+
+router.get("/customers", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT LHeadId AS Id,
+             ISNULL(DisplayName, LHeadName) AS Name
+      FROM dbo.AccountHeadMaster
+      WHERE LHeadType = 'A' AND ISNULL(LHeadStatus, 1) = 1
+      ORDER BY LHeadName
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("followupApplicants /customers error:", err);
+    res.status(500).json({ error: "Failed to load customers" });
+  }
+});
+
+router.get("/projects", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT id AS Id, name AS Name
+      FROM dbo.enterprise
+      WHERE business_type = 'P' AND ISNULL(discontinue, 0) = 0
+      ORDER BY name
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("followupApplicants /projects error:", err);
+    res.status(500).json({ error: "Failed to load projects" });
+  }
+});
+
+router.get("/units", async (req, res) => {
+  try {
+    const pool = getPool();
+    const projectId = req.query.projectId
+      ? parseInt(req.query.projectId, 10)
+      : null;
+    const request = pool.request();
+    let whereClause = "WHERE 1=1";
+    if (projectId) {
+      whereClause += " AND u.ProjectId = @ProjectId";
+      request.input("ProjectId", sql.Int, projectId);
+    }
+    const result = await request.query(`
+      SELECT u.Id, u.UnitName AS Name, u.ProjectId,
+             b.BlockName
+      FROM dbo.UnitMaster u
+      LEFT JOIN dbo.BlockMaster b ON b.Id = u.BlockId
+      ${whereClause}
+      ORDER BY u.UnitName
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("followupApplicants /units error:", err);
+    res.status(500).json({ error: "Failed to load units" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 router.get(
   "/",
   checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
   async (req, res) => {
-  try {
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 20));
-    const offset = (page - 1) * pageSize;
-    const search = normalizeText(req.query.search);
-    const status = normalizeText(req.query.status);
-    const projectId = normalizeNumber(req.query.projectId);
+    try {
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const pageSize = Math.min(
+        100,
+        Math.max(1, parseInt(req.query.pageSize, 10) || 20),
+      );
+      const offset = (page - 1) * pageSize;
+      const search = normalizeText(req.query.search);
+      const status = normalizeText(req.query.status);
+      const projectId = normalizeNumber(req.query.projectId);
 
-    if (Number.isNaN(projectId)) {
-      return res.status(400).json({ error: "projectId must be a valid number" });
-    }
+      if (Number.isNaN(projectId)) {
+        return res
+          .status(400)
+          .json({ error: "projectId must be a valid number" });
+      }
 
-    const filters = ["fa.IsDeleted = 0"];
-    if (search) {
-      filters.push(`
+      const filters = ["fa.IsDeleted = 0"];
+      if (search) {
+        filters.push(`
         (
           fa.ApplicantNo LIKE @Search
           OR fa.ApplicantName LIKE @Search
@@ -180,21 +254,21 @@ router.get(
           OR cm.Name LIKE @Search
         )
       `);
-    }
-    if (status) filters.push("fa.Status = @Status");
-    if (projectId) filters.push("fa.ProjectId = @ProjectId");
+      }
+      if (status) filters.push("fa.Status = @Status");
+      if (projectId) filters.push("fa.ProjectId = @ProjectId");
 
-    const whereClause = `WHERE ${filters.join(" AND ")}`;
-    const pool = getPool();
-    const buildRequest = () => {
-      const request = pool.request();
-      if (search) request.input("Search", sql.NVarChar(255), `%${search}%`);
-      if (status) request.input("Status", sql.NVarChar(30), status);
-      if (projectId) request.input("ProjectId", sql.Int, projectId);
-      return request;
-    };
+      const whereClause = `WHERE ${filters.join(" AND ")}`;
+      const pool = getPool();
+      const buildRequest = () => {
+        const request = pool.request();
+        if (search) request.input("Search", sql.NVarChar(255), `%${search}%`);
+        if (status) request.input("Status", sql.NVarChar(30), status);
+        if (projectId) request.input("ProjectId", sql.Int, projectId);
+        return request;
+      };
 
-    const countResult = await buildRequest().query(`
+      const countResult = await buildRequest().query(`
       SELECT COUNT(*) AS Total
       FROM dbo.FollowupApplicants fa
       LEFT JOIN dbo.ProjectMaster pm ON pm.Id = fa.ProjectId
@@ -202,10 +276,9 @@ router.get(
       ${whereClause}
     `);
 
-    const dataResult = await buildRequest()
-      .input("Offset", sql.Int, offset)
-      .input("PageSize", sql.Int, pageSize)
-      .query(`
+      const dataResult = await buildRequest()
+        .input("Offset", sql.Int, offset)
+        .input("PageSize", sql.Int, pageSize).query(`
         SELECT ${LIST_COLUMNS}
         FROM dbo.FollowupApplicants fa
         LEFT JOIN dbo.ProjectMaster pm ON pm.Id = fa.ProjectId
@@ -216,20 +289,20 @@ router.get(
         OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
       `);
 
-    const total = Number(countResult.recordset[0]?.Total ?? 0);
-    res.json({
-      data: dataResult.recordset,
-      pagination: {
-        page,
-        pageSize,
-        total,
-        totalPages: Math.ceil(total / pageSize),
-      },
-    });
-  } catch (err) {
-    console.error("followupApplicants GET error:", err);
-    res.status(500).json({ error: "Failed to fetch applicants" });
-  }
+      const total = Number(countResult.recordset[0]?.Total ?? 0);
+      res.json({
+        data: dataResult.recordset,
+        pagination: {
+          page,
+          pageSize,
+          total,
+          totalPages: Math.ceil(total / pageSize),
+        },
+      });
+    } catch (err) {
+      console.error("followupApplicants GET error:", err);
+      res.status(500).json({ error: "Failed to fetch applicants" });
+    }
   },
 );
 
@@ -243,10 +316,7 @@ router.get(
     }
 
     try {
-      const result = await getPool()
-        .request()
-        .input("Id", sql.Int, id)
-        .query(`
+      const result = await getPool().request().input("Id", sql.Int, id).query(`
         SELECT TOP 1 ${LIST_COLUMNS}
         FROM dbo.FollowupApplicants fa
         LEFT JOIN dbo.ProjectMaster pm ON pm.Id = fa.ProjectId
@@ -272,34 +342,37 @@ router.post(
   "/",
   checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanAdd"),
   async (req, res) => {
-  const userName = requireUserName(req, res);
-  if (!userName) return;
+    const userName = requireUserName(req, res);
+    if (!userName) return;
 
-  const payload = getPayload(req.body);
-  if (payload.error) {
-    return res.status(400).json({ error: payload.error });
-  }
+    const payload = getPayload(req.body);
+    if (payload.error) {
+      return res.status(400).json({ error: payload.error });
+    }
 
-  const transaction = new sql.Transaction(getPool());
+    const transaction = new sql.Transaction(getPool());
 
-  try {
-    await transaction.begin();
+    try {
+      await transaction.begin();
 
-    const insertResult = await new sql.Request(transaction)
-      .input("ApplicantName", sql.NVarChar(255), payload.ApplicantName)
-      .input("PrimaryMobile", sql.NVarChar(20), payload.PrimaryMobile)
-      .input("Email", sql.NVarChar(255), payload.Email)
-      .input("City", sql.NVarChar(100), payload.City)
-      .input("Source", sql.NVarChar(100), payload.Source)
-      .input("ProjectId", sql.Int, payload.ProjectId)
-      .input("CompanyId", sql.Int, payload.CompanyId)
-      .input("PreferredUnitType", sql.NVarChar(100), payload.PreferredUnitType)
-      .input("BudgetAmount", sql.Decimal(18, 2), payload.BudgetAmount)
-      .input("Status", sql.NVarChar(30), payload.Status)
-      .input("AssignedTo", sql.Int, payload.AssignedTo)
-      .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
-      .input("CreatedBy", sql.NVarChar(100), userName)
-      .query(`
+      const insertResult = await new sql.Request(transaction)
+        .input("ApplicantName", sql.NVarChar(255), payload.ApplicantName)
+        .input("PrimaryMobile", sql.NVarChar(20), payload.PrimaryMobile)
+        .input("Email", sql.NVarChar(255), payload.Email)
+        .input("City", sql.NVarChar(100), payload.City)
+        .input("Source", sql.NVarChar(100), payload.Source)
+        .input("ProjectId", sql.Int, payload.ProjectId)
+        .input("CompanyId", sql.Int, payload.CompanyId)
+        .input(
+          "PreferredUnitType",
+          sql.NVarChar(100),
+          payload.PreferredUnitType,
+        )
+        .input("BudgetAmount", sql.Decimal(18, 2), payload.BudgetAmount)
+        .input("Status", sql.NVarChar(30), payload.Status)
+        .input("AssignedTo", sql.Int, payload.AssignedTo)
+        .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
+        .input("CreatedBy", sql.NVarChar(100), userName).query(`
         INSERT INTO dbo.FollowupApplicants (
           ApplicantNo,
           ApplicantName,
@@ -337,27 +410,28 @@ router.post(
         )
       `);
 
-    const id = insertResult.recordset[0]?.Id;
-    const applicantNo = `APP${String(id).padStart(6, "0")}`;
+      const id = insertResult.recordset[0]?.Id;
+      const applicantNo = `APP${String(id).padStart(6, "0")}`;
 
-    await new sql.Request(transaction)
-      .input("Id", sql.Int, id)
-      .input("ApplicantNo", sql.NVarChar(50), applicantNo)
-      .query(`
+      await new sql.Request(transaction)
+        .input("Id", sql.Int, id)
+        .input("ApplicantNo", sql.NVarChar(50), applicantNo).query(`
         UPDATE dbo.FollowupApplicants
         SET ApplicantNo = @ApplicantNo
         WHERE Id = @Id
       `);
 
-    await transaction.commit();
-    res.status(201).json({ Id: id, ApplicantNo: applicantNo, Status: payload.Status });
-  } catch (err) {
-    try {
-      await transaction.rollback();
-    } catch {}
-    console.error("followupApplicants POST error:", err);
-    res.status(500).json({ error: "Failed to create applicant" });
-  }
+      await transaction.commit();
+      res
+        .status(201)
+        .json({ Id: id, ApplicantNo: applicantNo, Status: payload.Status });
+    } catch (err) {
+      try {
+        await transaction.rollback();
+      } catch {}
+      console.error("followupApplicants POST error:", err);
+      res.status(500).json({ error: "Failed to create applicant" });
+    }
   },
 );
 
@@ -379,9 +453,7 @@ router.put(
     }
 
     try {
-      const existingResult = await getPool()
-        .request()
-        .input("Id", sql.Int, id)
+      const existingResult = await getPool().request().input("Id", sql.Int, id)
         .query(`
         SELECT Id
         FROM dbo.FollowupApplicants
@@ -396,19 +468,22 @@ router.put(
         .request()
         .input("Id", sql.Int, id)
         .input("ApplicantName", sql.NVarChar(255), payload.ApplicantName)
-      .input("PrimaryMobile", sql.NVarChar(20), payload.PrimaryMobile)
-      .input("Email", sql.NVarChar(255), payload.Email)
-      .input("City", sql.NVarChar(100), payload.City)
-      .input("Source", sql.NVarChar(100), payload.Source)
-      .input("ProjectId", sql.Int, payload.ProjectId)
-      .input("CompanyId", sql.Int, payload.CompanyId)
-      .input("PreferredUnitType", sql.NVarChar(100), payload.PreferredUnitType)
-      .input("BudgetAmount", sql.Decimal(18, 2), payload.BudgetAmount)
-      .input("Status", sql.NVarChar(30), payload.Status)
-      .input("AssignedTo", sql.Int, payload.AssignedTo)
-      .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
-        .input("UpdatedBy", sql.NVarChar(100), userName)
-        .query(`
+        .input("PrimaryMobile", sql.NVarChar(20), payload.PrimaryMobile)
+        .input("Email", sql.NVarChar(255), payload.Email)
+        .input("City", sql.NVarChar(100), payload.City)
+        .input("Source", sql.NVarChar(100), payload.Source)
+        .input("ProjectId", sql.Int, payload.ProjectId)
+        .input("CompanyId", sql.Int, payload.CompanyId)
+        .input(
+          "PreferredUnitType",
+          sql.NVarChar(100),
+          payload.PreferredUnitType,
+        )
+        .input("BudgetAmount", sql.Decimal(18, 2), payload.BudgetAmount)
+        .input("Status", sql.NVarChar(30), payload.Status)
+        .input("AssignedTo", sql.Int, payload.AssignedTo)
+        .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
+        .input("UpdatedBy", sql.NVarChar(100), userName).query(`
         UPDATE dbo.FollowupApplicants
         SET
           ApplicantName = @ApplicantName,
@@ -451,25 +526,27 @@ router.delete(
     try {
       const dependencyResult = await getPool()
         .request()
-        .input("Id", sql.Int, id)
-        .query(`
+        .input("Id", sql.Int, id).query(`
         SELECT
           (SELECT COUNT(*) FROM dbo.FollowupUnitSelections WHERE ApplicantId = @Id AND IsDeleted = 0) AS UnitSelections,
           (SELECT COUNT(*) FROM dbo.FollowupAgreements WHERE ApplicantId = @Id AND IsDeleted = 0) AS Agreements
       `);
 
       const dependency = dependencyResult.recordset[0];
-      if (Number(dependency?.UnitSelections ?? 0) > 0 || Number(dependency?.Agreements ?? 0) > 0) {
+      if (
+        Number(dependency?.UnitSelections ?? 0) > 0 ||
+        Number(dependency?.Agreements ?? 0) > 0
+      ) {
         return res.status(400).json({
-          error: "This applicant is already linked to downstream sales records and cannot be deleted.",
+          error:
+            "This applicant is already linked to downstream sales records and cannot be deleted.",
         });
       }
 
       await getPool()
         .request()
         .input("Id", sql.Int, id)
-        .input("UpdatedBy", sql.NVarChar(100), userName)
-        .query(`
+        .input("UpdatedBy", sql.NVarChar(100), userName).query(`
         UPDATE dbo.FollowupApplicants
         SET IsDeleted = 1, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
         WHERE Id = @Id AND IsDeleted = 0

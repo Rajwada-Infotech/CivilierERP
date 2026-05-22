@@ -133,6 +133,7 @@ const ALL_ROUTES = [
   { path: "/api/followup-log", file: "./routes/followupLog" },
   { path: "/api/applicants", file: "./routes/applicants" },
   { path: "/api/followup-applicants", file: "./routes/followupApplicants" },
+  { path: "/api/followup-applications", file: "./routes/followupApplicants" },
   {
     path: "/api/followup-unit-selections",
     file: "./routes/followupUnitSelections",
