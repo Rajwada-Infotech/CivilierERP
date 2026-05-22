@@ -294,7 +294,7 @@ export default function TicketDashboard() {
     mutationFn: async (id: number) => {
       const res = await fetchWithAuth(`/api/tickets/resolve/${id}`, {
         method: "PUT",
-        body: JSON.stringify({}),
+        body: JSON.stringify({ resolution_note: "Resolved from dashboard" }),
       });
       if (!res.ok) throw new Error("Failed to resolve ticket");
     },

@@ -27,7 +27,9 @@ export function useTicketSync(refetch: RefetchFn, ticketId?: number | null) {
 
     socket.on("ticket:updated", refetchTicket);
     socket.on("ticket:escalated", refetchTicket);
-    socket.on("ticket:message", refetchTicket);
+    if (!ticketId) {
+      socket.on("ticket:message", refetchTicket);
+    }
 
     return () => {
       if (ticketId) {
@@ -35,7 +37,9 @@ export function useTicketSync(refetch: RefetchFn, ticketId?: number | null) {
       }
       socket.off("ticket:updated", refetchTicket);
       socket.off("ticket:escalated", refetchTicket);
-      socket.off("ticket:message", refetchTicket);
+      if (!ticketId) {
+        socket.off("ticket:message", refetchTicket);
+      }
     };
   }, [refetch, ticketId]);
 }

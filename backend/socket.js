@@ -140,6 +140,38 @@ function initSocket(httpServer) {
       }
     });
 
+    socket.on("ticket:typing", async (payload = {}) => {
+      const id = Number(payload.ticketId);
+      if (!Number.isInteger(id) || id <= 0) return;
+
+      try {
+        const allowed = await canAccessTicket(id, socket.data.user);
+        if (!allowed) return;
+
+        // SEC-002: always derive identity from the authenticated JWT token.
+        // Never trust client-supplied name/role/userId — they can be spoofed
+        // to impersonate other users in the typing indicator UI.
+        const authedUser = socket.data.user || {};
+        socket.to(`ticket:${id}`).emit("ticket:typing", {
+          ticketId: id,
+          userId: Number(authedUser.userId ?? authedUser.id ?? null) || null,
+          name: String(authedUser.name ?? authedUser.username ?? "Unknown"),
+          role: String(authedUser.role ?? "user"),
+          isTyping: Boolean(payload.isTyping),
+        });
+      } catch (err) {
+        logger.warn(
+          {
+            event: "SOCKET_TICKET_TYPING_ERROR",
+            socketId: socket.id,
+            ticketId: id,
+            err,
+          },
+          "Ticket typing broadcast failed",
+        );
+      }
+    });
+
     socket.on("disconnect", (reason) => {
       logger.info(
         { event: "SOCKET_DISCONNECT", socketId: socket.id, userId, reason },
