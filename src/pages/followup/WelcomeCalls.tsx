@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -1034,7 +1035,8 @@ export function WelcomeCallsPage() {
             <div className="wc-empty">
               <div className="wc-empty-icon">
                 <PhoneCall
-                  style={{ width: 26, height: 26 }} className="text-primary"
+                  style={{ width: 26, height: 26 }}
+                  className="text-primary"
                 />
               </div>
               <h3>
@@ -1078,7 +1080,7 @@ export function WelcomeCallsPage() {
           if (!v) setDialogOpen(false);
         }}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle className="text-base font-bold flex items-center gap-2">
               <div
@@ -1092,7 +1094,13 @@ export function WelcomeCallsPage() {
                   justifyContent: "center",
                 }}
               >
-                <Phone style={{ width: 14, height: 14, color: "hsl(var(--primary-foreground))" }} />
+                <Phone
+                  style={{
+                    width: 14,
+                    height: 14,
+                    color: "hsl(var(--primary-foreground))",
+                  }}
+                />
               </div>
               Log Welcome Call
             </DialogTitle>
@@ -1125,8 +1133,13 @@ export function WelcomeCallsPage() {
                         className="icon-wrap"
                         style={{
                           background:
-                            form.outcome === o ? "hsl(var(--primary) / 0.15)" : "hsl(var(--muted))",
-                          color: form.outcome === o ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))",
+                            form.outcome === o
+                              ? "hsl(var(--primary) / 0.15)"
+                              : "hsl(var(--muted))",
+                          color:
+                            form.outcome === o
+                              ? "hsl(var(--primary))"
+                              : "hsl(var(--muted-foreground))",
                         }}
                       >
                         {cfg.icon}

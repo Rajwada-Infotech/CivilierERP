@@ -38,6 +38,7 @@ export interface FieldDef {
   optionsProvider?: (
     data: RecordWithId[],
     currentId?: string,
+    form?: Record<string, unknown>,
   ) => { value: string; label: string }[];
   asyncOptions?: () => Promise<{ value: string; label: string }[]>;
   prefix?: string;
@@ -193,6 +194,25 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  // Cache for asyncOptions — keyed by field name
+  const [asyncOptionsCache, setAsyncOptionsCache] = useState<
+    Record<string, { value: string; label: string }[]>
+  >({});
+
+  React.useEffect(() => {
+    fields.forEach((field) => {
+      if (field.type === "select" && field.asyncOptions) {
+        field
+          .asyncOptions()
+          .then((opts) => {
+            setAsyncOptionsCache((prev) => ({ ...prev, [field.name]: opts }));
+          })
+          .catch(() => {});
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // keep internal data in sync when initialData changes (e.g. after DB refetch)
   const prevInitialRef = React.useRef<Record<string, unknown>[]>([]);
@@ -454,7 +474,13 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                           ? data.find((r) => r._id === editingId)
                           : undefined;
                         if (field.optionsProvider) {
-                          opts = field.optionsProvider(data, editingRow?._id);
+                          opts = field.optionsProvider(
+                            data,
+                            editingRow?._id,
+                            form,
+                          );
+                        } else if (asyncOptionsCache[field.name]) {
+                          opts = asyncOptionsCache[field.name];
                         } else if (field.options) {
                           opts = field.options.map((o) => ({
                             value: o,
