@@ -61,61 +61,181 @@ interface TicketDetail {
   comments: Comment[];
 }
 
-type StatusFilter = "Open" | "Pending" | "InProgress" | "Resolved" | "Closed" | "All";
+type StatusFilter =
+  | "Open"
+  | "Pending"
+  | "InProgress"
+  | "Resolved"
+  | "Closed"
+  | "All";
 
 // ─── Sentiment options — 3 SVG icons only ────────────────────────────────────
 
 function IconUnhappy({ active }: { active: boolean }) {
   return (
-    <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-8 h-8">
-      <circle cx="18" cy="18" r="17" fill={active ? "#fee2e2" : "currentColor"} fillOpacity={active ? 1 : 0.06} stroke={active ? "#ef4444" : "currentColor"} strokeOpacity={active ? 1 : 0.2} strokeWidth="1.5"/>
-      <circle cx="13" cy="14" r="1.8" fill={active ? "#ef4444" : "currentColor"} fillOpacity={active ? 1 : 0.5}/>
-      <circle cx="23" cy="14" r="1.8" fill={active ? "#ef4444" : "currentColor"} fillOpacity={active ? 1 : 0.5}/>
-      <path d="M12 24c1.5-2.5 4-4 6-4s4.5 1.5 6 4" stroke={active ? "#ef4444" : "currentColor"} strokeOpacity={active ? 1 : 0.5} strokeWidth="1.8" strokeLinecap="round"/>
-      <path d="M10 11.5 L13.5 13" stroke={active ? "#ef4444" : "currentColor"} strokeOpacity={active ? 1 : 0.4} strokeWidth="1.4" strokeLinecap="round"/>
-      <path d="M26 11.5 L22.5 13" stroke={active ? "#ef4444" : "currentColor"} strokeOpacity={active ? 1 : 0.4} strokeWidth="1.4" strokeLinecap="round"/>
+    <svg
+      viewBox="0 0 36 36"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className="w-8 h-8"
+    >
+      <circle
+        cx="18"
+        cy="18"
+        r="17"
+        fill={active ? "#fee2e2" : "currentColor"}
+        fillOpacity={active ? 1 : 0.06}
+        stroke={active ? "#ef4444" : "currentColor"}
+        strokeOpacity={active ? 1 : 0.2}
+        strokeWidth="1.5"
+      />
+      <circle
+        cx="13"
+        cy="14"
+        r="1.8"
+        fill={active ? "#ef4444" : "currentColor"}
+        fillOpacity={active ? 1 : 0.5}
+      />
+      <circle
+        cx="23"
+        cy="14"
+        r="1.8"
+        fill={active ? "#ef4444" : "currentColor"}
+        fillOpacity={active ? 1 : 0.5}
+      />
+      <path
+        d="M12 24c1.5-2.5 4-4 6-4s4.5 1.5 6 4"
+        stroke={active ? "#ef4444" : "currentColor"}
+        strokeOpacity={active ? 1 : 0.5}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M10 11.5 L13.5 13"
+        stroke={active ? "#ef4444" : "currentColor"}
+        strokeOpacity={active ? 1 : 0.4}
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+      <path
+        d="M26 11.5 L22.5 13"
+        stroke={active ? "#ef4444" : "currentColor"}
+        strokeOpacity={active ? 1 : 0.4}
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
 
 function IconHappy({ active }: { active: boolean }) {
   return (
-    <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-8 h-8">
-      <circle cx="18" cy="18" r="17" fill={active ? "#dcfce7" : "currentColor"} fillOpacity={active ? 1 : 0.06} stroke={active ? "#22c55e" : "currentColor"} strokeOpacity={active ? 1 : 0.2} strokeWidth="1.5"/>
-      <circle cx="13" cy="15" r="1.8" fill={active ? "#22c55e" : "currentColor"} fillOpacity={active ? 1 : 0.5}/>
-      <circle cx="23" cy="15" r="1.8" fill={active ? "#22c55e" : "currentColor"} fillOpacity={active ? 1 : 0.5}/>
-      <path d="M12 21c1.5 2.8 4 4.5 6 4.5s4.5-1.7 6-4.5" stroke={active ? "#22c55e" : "currentColor"} strokeOpacity={active ? 1 : 0.5} strokeWidth="1.8" strokeLinecap="round"/>
+    <svg
+      viewBox="0 0 36 36"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className="w-8 h-8"
+    >
+      <circle
+        cx="18"
+        cy="18"
+        r="17"
+        fill={active ? "#dcfce7" : "currentColor"}
+        fillOpacity={active ? 1 : 0.06}
+        stroke={active ? "#22c55e" : "currentColor"}
+        strokeOpacity={active ? 1 : 0.2}
+        strokeWidth="1.5"
+      />
+      <circle
+        cx="13"
+        cy="15"
+        r="1.8"
+        fill={active ? "#22c55e" : "currentColor"}
+        fillOpacity={active ? 1 : 0.5}
+      />
+      <circle
+        cx="23"
+        cy="15"
+        r="1.8"
+        fill={active ? "#22c55e" : "currentColor"}
+        fillOpacity={active ? 1 : 0.5}
+      />
+      <path
+        d="M12 21c1.5 2.8 4 4.5 6 4.5s4.5-1.7 6-4.5"
+        stroke={active ? "#22c55e" : "currentColor"}
+        strokeOpacity={active ? 1 : 0.5}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
 
 function IconExcellent({ active }: { active: boolean }) {
   return (
-    <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-8 h-8">
-      <circle cx="18" cy="18" r="17" fill={active ? "#fef9c3" : "currentColor"} fillOpacity={active ? 1 : 0.06} stroke={active ? "#eab308" : "currentColor"} strokeOpacity={active ? 1 : 0.2} strokeWidth="1.5"/>
-      <path d="M11 14c.5-1 1.5-1.5 2.5-1s1.5 1.5 1 2.5" stroke={active ? "#eab308" : "currentColor"} strokeOpacity={active ? 1 : 0.5} strokeWidth="1.6" strokeLinecap="round"/>
-      <path d="M25 14c-.5-1-1.5-1.5-2.5-1s-1.5 1.5-1 2.5" stroke={active ? "#eab308" : "currentColor"} strokeOpacity={active ? 1 : 0.5} strokeWidth="1.6" strokeLinecap="round"/>
-      <path d="M10.5 21.5c1.5 4 4.5 6 7.5 6s6-2 7.5-6" stroke={active ? "#eab308" : "currentColor"} strokeOpacity={active ? 1 : 0.5} strokeWidth="1.8" strokeLinecap="round"/>
-      <path d="M13 21.5h10" stroke={active ? "#eab308" : "currentColor"} strokeOpacity={active ? 1 : 0.4} strokeWidth="1.4" strokeLinecap="round"/>
+    <svg
+      viewBox="0 0 36 36"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className="w-8 h-8"
+    >
+      <circle
+        cx="18"
+        cy="18"
+        r="17"
+        fill={active ? "#fef9c3" : "currentColor"}
+        fillOpacity={active ? 1 : 0.06}
+        stroke={active ? "#eab308" : "currentColor"}
+        strokeOpacity={active ? 1 : 0.2}
+        strokeWidth="1.5"
+      />
+      <path
+        d="M11 14c.5-1 1.5-1.5 2.5-1s1.5 1.5 1 2.5"
+        stroke={active ? "#eab308" : "currentColor"}
+        strokeOpacity={active ? 1 : 0.5}
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M25 14c-.5-1-1.5-1.5-2.5-1s-1.5 1.5-1 2.5"
+        stroke={active ? "#eab308" : "currentColor"}
+        strokeOpacity={active ? 1 : 0.5}
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M10.5 21.5c1.5 4 4.5 6 7.5 6s6-2 7.5-6"
+        stroke={active ? "#eab308" : "currentColor"}
+        strokeOpacity={active ? 1 : 0.5}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M13 21.5h10"
+        stroke={active ? "#eab308" : "currentColor"}
+        strokeOpacity={active ? 1 : 0.4}
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
 
 const SENTIMENTS = [
-  { value: 1, Icon: IconUnhappy,   label: "Unhappy" },
-  { value: 4, Icon: IconHappy,     label: "Happy" },
+  { value: 1, Icon: IconUnhappy, label: "Unhappy" },
+  { value: 4, Icon: IconHappy, label: "Happy" },
   { value: 5, Icon: IconExcellent, label: "Excellent" },
 ];
 
 // ─── Status labels ────────────────────────────────────────────────────────────
 
 const STATUS_LABELS: Record<StatusFilter, string> = {
-  Open:       "Open",
-  Pending:    "Pending",
+  Open: "Open",
+  Pending: "Pending",
   InProgress: "Resolving",
-  Resolved:   "Resolved",
-  Closed:     "Closed",
-  All:        "All",
+  Resolved: "Resolved",
+  Closed: "Closed",
+  All: "All",
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -158,24 +278,67 @@ const registerAttachmentCacheCleanup = () => {
 
 // ─── Priority / Status config ─────────────────────────────────────────────────
 
-const priorityConfig: Record<string, { cls: string; dot: string; bar: string }> = {
-  Urgent: { cls: "bg-red-500/10 text-red-600 border-red-400/20",         dot: "bg-red-500",    bar: "bg-red-500" },
-  High:   { cls: "bg-orange-500/10 text-orange-600 border-orange-400/20", dot: "bg-orange-500", bar: "bg-orange-500" },
-  Medium: { cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",    dot: "bg-amber-400",  bar: "bg-amber-400" },
-  Low:    { cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",       dot: "bg-blue-400",   bar: "bg-blue-400" },
+const priorityConfig: Record<
+  string,
+  { cls: string; dot: string; bar: string }
+> = {
+  Urgent: {
+    cls: "bg-red-500/10 text-red-600 border-red-400/20",
+    dot: "bg-red-500",
+    bar: "bg-red-500",
+  },
+  High: {
+    cls: "bg-orange-500/10 text-orange-600 border-orange-400/20",
+    dot: "bg-orange-500",
+    bar: "bg-orange-500",
+  },
+  Medium: {
+    cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+    dot: "bg-amber-400",
+    bar: "bg-amber-400",
+  },
+  Low: {
+    cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",
+    dot: "bg-blue-400",
+    bar: "bg-blue-400",
+  },
 };
 
-const statusConfig: Record<string, { cls: string; label: string; icon: React.ElementType }> = {
-  Pending:    { cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",       label: "Pending",     icon: Clock },
-  InProgress: { cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",          label: "In Progress", icon: RefreshCw },
-  Resolved:   { cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20", label: "Resolved",    icon: CheckCircle2 },
-  Closed:     { cls: "bg-slate-500/10 text-slate-500 border-slate-400/20",       label: "Closed",      icon: XCircle },
+const statusConfig: Record<
+  string,
+  { cls: string; label: string; icon: React.ElementType }
+> = {
+  Pending: {
+    cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+    label: "Pending",
+    icon: Clock,
+  },
+  InProgress: {
+    cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",
+    label: "In Progress",
+    icon: RefreshCw,
+  },
+  Resolved: {
+    cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
+    label: "Resolved",
+    icon: CheckCircle2,
+  },
+  Closed: {
+    cls: "bg-slate-500/10 text-slate-500 border-slate-400/20",
+    label: "Closed",
+    icon: XCircle,
+  },
 };
 
 function PriorityBadge({ priority }: { priority: string }) {
-  const cfg = priorityConfig[priority] ?? { cls: "bg-muted text-muted-foreground border-border", dot: "bg-muted" };
+  const cfg = priorityConfig[priority] ?? {
+    cls: "bg-muted text-muted-foreground border-border",
+    dot: "bg-muted",
+  };
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}
+    >
       <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
       {priority}
     </span>
@@ -183,17 +346,23 @@ function PriorityBadge({ priority }: { priority: string }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const cfg = statusConfig[status] ?? { cls: "bg-muted text-muted-foreground border-border", label: status, icon: Clock };
+  const cfg = statusConfig[status] ?? {
+    cls: "bg-muted text-muted-foreground border-border",
+    label: status,
+    icon: Clock,
+  };
   const Icon = cfg.icon;
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}
+    >
       <Icon size={10} />
       {cfg.label}
     </span>
   );
 }
 
-// ─── Authenticated image component (from backend branch) ──────────────────────
+// ─── Authenticated image component ───────────────────────────────────────────
 
 function AuthenticatedAttachmentImage({
   url,
@@ -221,7 +390,9 @@ function AuthenticatedAttachmentImage({
     if (cachedSrc) {
       setSrc(cachedSrc);
       setFailed(false);
-      return () => { alive = false; };
+      return () => {
+        alive = false;
+      };
     }
 
     setSrc("");
@@ -234,14 +405,21 @@ function AuthenticatedAttachmentImage({
       })
       .then((blob) => {
         const objectUrl = URL.createObjectURL(blob);
-        if (!alive) { URL.revokeObjectURL(objectUrl); return; }
+        if (!alive) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
         attachmentBlobUrlCache.set(url, objectUrl);
         registerAttachmentCacheCleanup();
         setSrc(objectUrl);
       })
-      .catch(() => { if (alive) setFailed(true); });
+      .catch(() => {
+        if (alive) setFailed(true);
+      });
 
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [url]);
 
   if (failed) {
@@ -257,7 +435,9 @@ function AuthenticatedAttachmentImage({
   }
 
   if (!src) {
-    return <div className="h-24 min-w-24 rounded-lg border border-border bg-muted animate-pulse" />;
+    return (
+      <div className="h-24 min-w-24 rounded-lg border border-border bg-muted animate-pulse" />
+    );
   }
 
   return <img src={src} alt={alt} className={className} onClick={onClick} />;
@@ -287,7 +467,7 @@ function openAttachmentViewer(url: string, filename: string) {
         }
       } catch {
         win.document.body.innerHTML =
-          "<p style=\"color:#ccc;font-family:sans-serif;padding:24px\">Unable to load attachment.</p>";
+          '<p style="color:#ccc;font-family:sans-serif;padding:24px">Unable to load attachment.</p>';
         return;
       }
     }
@@ -295,7 +475,7 @@ function openAttachmentViewer(url: string, filename: string) {
       ? `<iframe src="${blobUrl}" style="width:100%;height:90vh;border:none;border-radius:8px"></iframe>`
       : `<img src="${blobUrl}" style="max-width:100%;max-height:90vh;border-radius:8px;box-shadow:0 4px 32px rgba(0,0,0,.6)"/>`;
     win.document.write(
-      `<!DOCTYPE html><html><head><title>${filename}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#111;display:flex;flex-direction:column;align-items:center;min-height:100vh;font-family:sans-serif}header{width:100%;background:#1a1a1a;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;position:sticky;top:0;z-index:10}header span{color:#ccc;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%}a.dl{background:#6366f1;color:#fff;text-decoration:none;padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0}main{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;width:100%}</style></head><body><header><span>${filename}</span><a class="dl" href="${blobUrl}" download="${filename}">⬇ Download</a></header><main>${content}</main></body></html>`
+      `<!DOCTYPE html><html><head><title>${filename}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#111;display:flex;flex-direction:column;align-items:center;min-height:100vh;font-family:sans-serif}header{width:100%;background:#1a1a1a;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;position:sticky;top:0;z-index:10}header span{color:#ccc;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%}a.dl{background:#6366f1;color:#fff;text-decoration:none;padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0}main{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;width:100%}</style></head><body><header><span>${filename}</span><a class="dl" href="${blobUrl}" download="${filename}">⬇ Download</a></header><main>${content}</main></body></html>`,
     );
     win.document.close();
   };
@@ -310,7 +490,9 @@ function AttachmentList({ path: attachmentPath }: { path: string }) {
   try {
     const parsed = JSON.parse(attachmentPath);
     urls = Array.isArray(parsed) ? parsed : [attachmentPath];
-  } catch { urls = [attachmentPath]; }
+  } catch {
+    urls = [attachmentPath];
+  }
 
   return (
     <div className="flex flex-wrap gap-2 mt-1">
@@ -324,7 +506,8 @@ function AttachmentList({ path: attachmentPath }: { path: string }) {
               onClick={() => openAttachmentViewer(url, filename)}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"
             >
-              <Paperclip size={10} /> {filename.length > 20 ? `PDF ${i + 1}` : filename}
+              <Paperclip size={10} />{" "}
+              {filename.length > 20 ? `PDF ${i + 1}` : filename}
             </button>
           );
         }
@@ -344,7 +527,13 @@ function AttachmentList({ path: attachmentPath }: { path: string }) {
 
 // ─── Ticket List Card ─────────────────────────────────────────────────────────
 
-function TicketListCard({ ticket, onClick }: { ticket: Ticket; onClick: () => void }) {
+function TicketListCard({
+  ticket,
+  onClick,
+}: {
+  ticket: Ticket;
+  onClick: () => void;
+}) {
   const bar = priorityConfig[ticket.priority]?.bar ?? "bg-muted";
   return (
     <button
@@ -357,26 +546,34 @@ function TicketListCard({ ticket, onClick }: { ticket: Ticket; onClick: () => vo
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] text-muted-foreground/50">#{ticket.id}</span>
-                <h3 className="text-sm font-semibold text-foreground leading-snug truncate">{ticket.subject}</h3>
+                <span className="font-mono text-[10px] text-muted-foreground/50">
+                  #{ticket.id}
+                </span>
+                <h3 className="text-sm font-semibold text-foreground leading-snug truncate">
+                  {ticket.subject}
+                </h3>
               </div>
               <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                 <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                  <User size={10} /><span>{ticket.customer_name || "—"}</span>
+                  <User size={10} />
+                  <span>{ticket.customer_name || "—"}</span>
                 </div>
                 {ticket.customer_phone && (
                   <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                    <Phone size={10} /><span>{ticket.customer_phone}</span>
+                    <Phone size={10} />
+                    <span>{ticket.customer_phone}</span>
                   </div>
                 )}
                 {fmtDate(ticket.created_at) && (
                   <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                    <CalendarDays size={10} /><span>{fmtDate(ticket.created_at)}</span>
+                    <CalendarDays size={10} />
+                    <span>{fmtDate(ticket.created_at)}</span>
                   </div>
                 )}
                 {(ticket.comment_count ?? 0) > 0 && (
                   <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                    <MessageCircle size={10} /><span>{ticket.comment_count}</span>
+                    <MessageCircle size={10} />
+                    <span>{ticket.comment_count}</span>
                   </div>
                 )}
               </div>
@@ -384,7 +581,10 @@ function TicketListCard({ ticket, onClick }: { ticket: Ticket; onClick: () => vo
             <div className="flex items-center gap-1.5 shrink-0">
               <PriorityBadge priority={ticket.priority} />
               <StatusBadge status={ticket.status} />
-              <ChevronRight size={14} className="text-muted-foreground/40 group-hover:text-muted-foreground transition-colors ml-1" />
+              <ChevronRight
+                size={14}
+                className="text-muted-foreground/40 group-hover:text-muted-foreground transition-colors ml-1"
+              />
             </div>
           </div>
         </div>
@@ -411,6 +611,7 @@ function TicketDetailView({
   const queryClient = useQueryClient();
   const [commentText, setCommentText] = useState("");
   const [adminAttachFiles, setAdminAttachFiles] = useState<File[]>([]);
+  const [isSending, setIsSending] = useState(false);
   const [showResolveFlow, setShowResolveFlow] = useState(false);
   const [showReviewSection, setShowReviewSection] = useState(false);
   const [sentiment, setSentiment] = useState<number>(0);
@@ -441,23 +642,54 @@ function TicketDetailView({
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [comments.length]);
 
-  const commentMutation = useMutation({
-    mutationFn: async ({ text }: { text: string }) => {
+  // Upload files to server, returns array of public URLs
+  const uploadFiles = async (files: File[]): Promise<string[]> => {
+    if (files.length === 0) return [];
+    const token =
+      localStorage.getItem("token") || sessionStorage.getItem("token") || "";
+    const formData = new FormData();
+    files.forEach((f) => formData.append("file", f));
+    const res = await fetch("/api/tickets/upload", {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    if (!res.ok) throw new Error("File upload failed");
+    const data = await res.json();
+    return Array.isArray(data.urls) ? data.urls : data.url ? [data.url] : [];
+  };
+
+  // Send a comment — uploads files first, then posts JSON
+  const handleSend = async () => {
+    const text = commentText.trim();
+    const files = adminAttachFiles;
+    if (!text && files.length === 0) return;
+    setIsSending(true);
+    setCommentText("");
+    setAdminAttachFiles([]);
+    if (textareaRef.current) textareaRef.current.style.height = "36px";
+    try {
+      let finalComment = text;
+      if (files.length > 0) {
+        const urls = await uploadFiles(files);
+        const markers = urls.map((u) => `[attachment:${u}]`).join(" ");
+        finalComment = text ? `${text}\n${markers}` : markers;
+      }
       const res = await fetchWithAuth(`/api/tickets/comment/${ticketId}`, {
         method: "POST",
-        body: JSON.stringify({ comment: text }),
+        body: JSON.stringify({ comment: finalComment }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    },
-    onSuccess: () => {
-      setCommentText("");
-      setAdminAttachFiles([]);
       refetch();
       onTicketUpdated();
       queryClient.invalidateQueries({ queryKey: ["tickets"] });
-    },
-    onError: () => toast.error("Failed to send reply"),
-  });
+    } catch {
+      toast.error("Failed to send reply");
+      setCommentText(text);
+    } finally {
+      setIsSending(false);
+    }
+  };
 
   const resolveMutation = useMutation({
     mutationFn: async () => {
@@ -480,7 +712,9 @@ function TicketDetailView({
 
   const reopenMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetchWithAuth(`/api/tickets/reopen/${ticketId}`, { method: "PUT" });
+      const res = await fetchWithAuth(`/api/tickets/reopen/${ticketId}`, {
+        method: "PUT",
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     },
     onSuccess: () => {
@@ -496,7 +730,9 @@ function TicketDetailView({
 
   const closeMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetchWithAuth(`/api/tickets/close/${ticketId}`, { method: "PUT" });
+      const res = await fetchWithAuth(`/api/tickets/close/${ticketId}`, {
+        method: "PUT",
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     },
     onSuccess: () => {
@@ -547,13 +783,6 @@ function TicketDetailView({
     el.style.height = Math.min(el.scrollHeight, 120) + "px";
   };
 
-  const handleSend = () => {
-    const text = commentText.trim();
-    if (!text) return;
-    commentMutation.mutate({ text });
-    if (textareaRef.current) textareaRef.current.style.height = "36px";
-  };
-
   const handleAdminFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
     setAdminAttachFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
@@ -577,13 +806,18 @@ function TicketDetailView({
     return (
       <div className="px-4 py-3 rounded-xl bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
         <AlertCircle size={14} /> Failed to load ticket.{" "}
-        <button onClick={() => refetch()} className="underline">Retry</button>
+        <button onClick={() => refetch()} className="underline">
+          Retry
+        </button>
       </div>
     );
   }
 
+  const isActive =
+    ticket.status === "Pending" || ticket.status === "InProgress";
   const isResolved = ticket.status === "Resolved";
   const isClosed = ticket.status === "Closed";
+  const canReply = isActive;
   const bar = priorityConfig[ticket.priority]?.bar ?? "bg-muted";
 
   let attachUrls: string[] = [];
@@ -591,7 +825,9 @@ function TicketDetailView({
     try {
       const p = JSON.parse(ticket.attachment_path);
       attachUrls = Array.isArray(p) ? p : [ticket.attachment_path];
-    } catch { attachUrls = [ticket.attachment_path]; }
+    } catch {
+      attachUrls = [ticket.attachment_path];
+    }
   }
 
   const reviewComment = comments.find((c) => c.comment.startsWith("[Review:"));
@@ -610,25 +846,34 @@ function TicketDetailView({
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[11px] text-muted-foreground/50">#{ticket.id}</span>
-                <h1 className="text-lg font-bold text-foreground leading-tight">{ticket.subject}</h1>
+                <span className="font-mono text-[11px] text-muted-foreground/50">
+                  #{ticket.id}
+                </span>
+                <h1 className="text-lg font-bold text-foreground leading-tight">
+                  {ticket.subject}
+                </h1>
               </div>
               <div className="flex items-center gap-3 mt-1 flex-wrap">
                 <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                  <User size={10} /><span>{ticket.customer_name}</span>
+                  <User size={10} />
+                  <span>{ticket.customer_name}</span>
                 </div>
                 {ticket.customer_phone && (
                   <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                    <Phone size={10} /><span>{ticket.customer_phone}</span>
+                    <Phone size={10} />
+                    <span>{ticket.customer_phone}</span>
                   </div>
                 )}
                 {ticket.created_at && (
                   <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                    <CalendarDays size={10} /><span>{fmtDateTime(ticket.created_at)}</span>
+                    <CalendarDays size={10} />
+                    <span>{fmtDateTime(ticket.created_at)}</span>
                   </div>
                 )}
                 {ticket.assigned_to && (
-                  <span className="text-[11px] text-muted-foreground">→ {ticket.assigned_to}</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    → {ticket.assigned_to}
+                  </span>
                 )}
               </div>
             </div>
@@ -640,17 +885,24 @@ function TicketDetailView({
         </div>
       </div>
 
-      {/* Issue description */}
+      {/* Issue description card */}
       <div className="rounded-xl border border-border bg-card overflow-hidden mb-4">
         <div className="flex items-stretch">
           <div className={`w-1 shrink-0 ${bar}`} />
           <div className="flex-1 px-4 py-4">
-            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Issue Description</p>
-            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{ticket.issue_details}</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">
+              Issue Description
+            </p>
+            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
+              {ticket.issue_details}
+            </p>
             {attachUrls.length > 0 && (
               <div className="mt-3">
                 <p className="text-[11px] text-muted-foreground flex items-center gap-1 mb-1.5">
-                  <Paperclip size={10} />{attachUrls.length > 1 ? `${attachUrls.length} Attachments` : "Attachment"}
+                  <Paperclip size={10} />
+                  {attachUrls.length > 1
+                    ? `${attachUrls.length} Attachments`
+                    : "Attachment"}
                 </p>
                 <AttachmentList path={ticket.attachment_path!} />
               </div>
@@ -659,34 +911,49 @@ function TicketDetailView({
         </div>
       </div>
 
-      {/* Resolved / Closed banner */}
+      {/* Resolved / Closed banner with Reopen */}
       {(isResolved || isClosed) && (
-        <div className={`rounded-xl border px-4 py-3 mb-4 flex items-center gap-3 ${
-          isClosed
-            ? "bg-slate-500/5 border-slate-400/20"
-            : "bg-emerald-500/5 border-emerald-400/20"
-        }`}>
-          {isClosed
-            ? <XCircle size={16} className="text-slate-500 shrink-0" />
-            : <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />}
+        <div
+          className={`rounded-xl border px-4 py-3 mb-4 flex items-center gap-3 ${
+            isClosed
+              ? "bg-slate-500/5 border-slate-400/20"
+              : "bg-emerald-500/5 border-emerald-400/20"
+          }`}
+        >
+          {isClosed ? (
+            <XCircle size={16} className="text-slate-500 shrink-0" />
+          ) : (
+            <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+          )}
           <div className="flex-1">
-            <p className={`text-xs font-semibold ${isClosed ? "text-slate-500" : "text-emerald-600"}`}>
+            <p
+              className={`text-xs font-semibold ${isClosed ? "text-slate-500" : "text-emerald-600"}`}
+            >
               {isClosed ? "Ticket Closed" : "Ticket Resolved"}
             </p>
             {ticket.resolution_note && (
-              <p className="text-xs text-muted-foreground mt-0.5">{ticket.resolution_note}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {ticket.resolution_note}
+              </p>
             )}
             {reviewComment && (
-              <p className="text-xs text-muted-foreground mt-1 italic">{reviewComment.comment}</p>
+              <p className="text-xs text-muted-foreground mt-1 italic">
+                {reviewComment.comment}
+              </p>
             )}
           </div>
-          {isAdmin && (
+          {/* Reopen — admin always, user only when resolved (not closed) */}
+          {(isAdmin || isResolved) && (
             <button
               onClick={() => reopenMutation.mutate()}
               disabled={reopenMutation.isPending}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-blue-400/30 bg-blue-500/5 text-blue-600 hover:bg-blue-500/10 transition-colors disabled:opacity-50 shrink-0"
             >
-              {reopenMutation.isPending ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />}
+              {reopenMutation.isPending ? (
+                <Loader2 size={10} className="animate-spin" />
+              ) : (
+                <RotateCcw size={10} />
+              )}
               Reopen
             </button>
           )}
@@ -698,9 +965,11 @@ function TicketDetailView({
         <div className="px-4 py-3 border-b border-border flex items-center gap-2">
           <MessageCircle size={13} className="text-muted-foreground" />
           <p className="text-xs font-semibold text-foreground">
-            Conversation{" "}
+            Conversation
             {comments.length > 0 && (
-              <span className="text-muted-foreground font-normal">({comments.length})</span>
+              <span className="text-muted-foreground font-normal ml-1">
+                ({comments.length})
+              </span>
             )}
           </p>
         </div>
@@ -708,18 +977,32 @@ function TicketDetailView({
         {comments.length === 0 ? (
           <div className="px-4 py-8 text-center text-muted-foreground">
             <MessageCircle size={24} className="mx-auto mb-2 opacity-20" />
-            <p className="text-xs">No messages yet. Start the conversation below.</p>
+            <p className="text-xs">
+              No messages yet. Start the conversation below.
+            </p>
           </div>
         ) : (
           <div className="px-4 py-3 space-y-3 max-h-80 overflow-y-auto">
             {comments.map((c) => {
               const isMe = c.author_name === currentUserName;
               const isReview = c.comment.startsWith("[Review:");
+
+              const attachPattern = /\[attachment:([^\]]+)\]/g;
+              const commentAttachUrls: string[] = [];
+              const textOnly = c.comment
+                .replace(attachPattern, (_, url) => {
+                  commentAttachUrls.push(url);
+                  return "";
+                })
+                .trim();
+
               if (isReview) {
                 return (
                   <div key={c.id} className="flex justify-center">
                     <div className="bg-emerald-500/5 border border-emerald-400/15 rounded-xl px-4 py-2.5 max-w-sm text-center">
-                      <p className="text-xs text-emerald-600 font-medium">{c.comment}</p>
+                      <p className="text-xs text-emerald-600 font-medium">
+                        {textOnly || c.comment}
+                      </p>
                       <p className="text-[10px] text-muted-foreground/60 mt-0.5">
                         {c.author_name} · {fmtDateTime(c.created_at)}
                       </p>
@@ -728,23 +1011,73 @@ function TicketDetailView({
                 );
               }
               return (
-                <div key={c.id} className={`flex gap-2.5 ${isMe ? "flex-row-reverse" : ""}`}>
+                <div
+                  key={c.id}
+                  className={`flex gap-2.5 ${isMe ? "flex-row-reverse" : ""}`}
+                >
                   <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5">
                     <User size={12} className="text-muted-foreground" />
                   </div>
-                  <div className={`max-w-[75%] ${isMe ? "items-end" : "items-start"} flex flex-col gap-0.5`}>
+                  <div
+                    className={`max-w-[75%] flex flex-col gap-0.5 ${isMe ? "items-end" : "items-start"}`}
+                  >
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-muted-foreground font-medium">{c.author_name}</span>
-                      <span className="text-[9px] text-muted-foreground/50 capitalize">{c.author_role}</span>
-                      <span className="text-[10px] text-muted-foreground/40">{fmtDateTime(c.created_at)}</span>
+                      <span className="text-[10px] text-muted-foreground font-medium">
+                        {c.author_name}
+                      </span>
+                      <span className="text-[9px] text-muted-foreground/50 capitalize">
+                        {c.author_role}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground/40">
+                        {fmtDateTime(c.created_at)}
+                      </span>
                     </div>
-                    <div className={`px-3 py-2 rounded-xl text-xs leading-relaxed whitespace-pre-wrap ${
-                      isMe
-                        ? "bg-primary text-primary-foreground rounded-tr-sm"
-                        : "bg-muted text-foreground rounded-tl-sm"
-                    }`}>
-                      {c.comment}
-                    </div>
+                    {textOnly && (
+                      <div
+                        className={`px-3 py-2 rounded-xl text-xs leading-relaxed whitespace-pre-wrap ${
+                          isMe
+                            ? "bg-primary text-primary-foreground rounded-tr-sm"
+                            : "bg-muted text-foreground rounded-tl-sm"
+                        }`}
+                      >
+                        {textOnly}
+                      </div>
+                    )}
+                    {commentAttachUrls.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {commentAttachUrls.map((url, ai) => {
+                          const isPdf = url.toLowerCase().endsWith(".pdf");
+                          const filename =
+                            url.split("/").pop() ?? `file-${ai + 1}`;
+                          if (isPdf)
+                            return (
+                              <button
+                                key={ai}
+                                onClick={() =>
+                                  openAttachmentViewer(url, filename)
+                                }
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"
+                              >
+                                <Paperclip size={10} />{" "}
+                                {filename.length > 20
+                                  ? `PDF ${ai + 1}`
+                                  : filename}
+                              </button>
+                            );
+                          return (
+                            <img
+                              key={ai}
+                              src={url}
+                              alt={`Attachment ${ai + 1}`}
+                              className="h-24 w-auto rounded-lg border border-border object-cover cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-primary/40 transition-all"
+                              onClick={() =>
+                                openAttachmentViewer(url, filename)
+                              }
+                            />
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -753,80 +1086,136 @@ function TicketDetailView({
           </div>
         )}
 
-        {/* Reply input */}
-        <div className="px-4 py-3 border-t border-border">
-          {isAdmin && adminAttachFiles.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-2">
-              {adminAttachFiles.map((f, i) => (
-                <div key={i} className="relative group">
-                  {f.type.startsWith("image/") ? (
-                    <img
-                      src={URL.createObjectURL(f)}
-                      alt={f.name}
-                      className="h-12 w-auto rounded-lg border border-border object-cover"
-                    />
-                  ) : (
-                    <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted text-[11px] text-muted-foreground">
-                      <Paperclip size={10} />{f.name.length > 18 ? f.name.slice(0, 18) + "…" : f.name}
-                    </div>
-                  )}
+        {/* Reply input — only shown when ticket is active (Pending / InProgress) */}
+        {canReply && (
+          <div className="px-4 py-3 border-t border-border">
+            {isAdmin && adminAttachFiles.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {adminAttachFiles.map((f, i) => (
+                  <div key={i} className="relative group">
+                    {f.type.startsWith("image/") ? (
+                      <img
+                        src={URL.createObjectURL(f)}
+                        alt={f.name}
+                        className="h-12 w-auto rounded-lg border border-border object-cover"
+                      />
+                    ) : (
+                      <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted text-[11px] text-muted-foreground">
+                        <Paperclip size={10} />
+                        {f.name.length > 18
+                          ? f.name.slice(0, 18) + "…"
+                          : f.name}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => removeAdminFile(i)}
+                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X size={9} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex items-end gap-2">
+              {isAdmin && (
+                <>
+                  <input
+                    ref={adminFileInputRef}
+                    type="file"
+                    accept="image/*,.pdf"
+                    multiple
+                    className="hidden"
+                    onChange={handleAdminFileChange}
+                  />
+                  <input
+                    ref={adminCameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handleAdminFileChange}
+                  />
                   <button
-                    onClick={() => removeAdminFile(i)}
-                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={() => adminFileInputRef.current?.click()}
+                    title="Attach files"
+                    className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors shrink-0"
                   >
-                    <X size={9} />
+                    <Paperclip size={14} />
                   </button>
-                </div>
-              ))}
+                  <button
+                    onClick={() => adminCameraInputRef.current?.click()}
+                    title="Take photo"
+                    className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors shrink-0"
+                  >
+                    <Camera size={14} />
+                  </button>
+                </>
+              )}
+              <textarea
+                ref={textareaRef}
+                value={commentText}
+                onChange={(e) => {
+                  setCommentText(e.target.value);
+                  autoExpand(e.target);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                placeholder="Write a reply… (Enter to send, Shift+Enter for new line)"
+                rows={1}
+                style={{
+                  minHeight: "36px",
+                  maxHeight: "120px",
+                  height: "36px",
+                }}
+                className="flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all overflow-hidden"
+              />
+              <button
+                onClick={handleSend}
+                disabled={
+                  isSending ||
+                  (!commentText.trim() && adminAttachFiles.length === 0)
+                }
+                className="w-9 h-9 flex items-center justify-center rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 shrink-0"
+              >
+                {isSending ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Send size={14} />
+                )}
+              </button>
             </div>
-          )}
-          <div className="flex items-end gap-2">
-            {isAdmin && (
+          </div>
+        )}
+
+        {/* When closed or resolved — notice inside conversation box */}
+        {!canReply && (
+          <div className="px-4 py-3 border-t border-border flex items-center gap-2 text-muted-foreground">
+            {isClosed ? (
               <>
-                <input ref={adminFileInputRef} type="file" accept="image/*,.pdf" multiple className="hidden" onChange={handleAdminFileChange} />
-                <input ref={adminCameraInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleAdminFileChange} />
-                <button
-                  onClick={() => adminFileInputRef.current?.click()}
-                  disabled={isClosed}
-                  title="Attach file"
-                  className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-30 shrink-0"
-                >
-                  <Paperclip size={14} />
-                </button>
-                <button
-                  onClick={() => adminCameraInputRef.current?.click()}
-                  disabled={isClosed}
-                  title="Take photo"
-                  className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-30 shrink-0"
-                >
-                  <Camera size={14} />
-                </button>
+                <XCircle size={13} />
+                <p className="text-xs">
+                  Ticket is closed — reopen to continue the conversation.
+                </p>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 size={13} className="text-emerald-500" />
+                <p className="text-xs text-emerald-600">
+                  Ticket resolved — reopen to continue the conversation.
+                </p>
               </>
             )}
-            <textarea
-              ref={textareaRef}
-              value={commentText}
-              onChange={(e) => { setCommentText(e.target.value); autoExpand(e.target); }}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              placeholder={isClosed ? "Ticket is closed — reopen to reply" : "Write a reply… (Enter to send, Shift+Enter for new line)"}
-              disabled={isClosed}
-              rows={1}
-              style={{ minHeight: "36px", maxHeight: "120px", height: "36px" }}
-              className="flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
-            />
-            <button
-              onClick={handleSend}
-              disabled={!commentText.trim() || commentMutation.isPending || isClosed}
-              className="w-9 h-9 flex items-center justify-center rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 shrink-0"
-            >
-              {commentMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-            </button>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Admin action buttons */}
-      {isAdmin && (ticket.status === "Pending" || ticket.status === "InProgress") && !showResolveFlow && (
+      {/* Admin action buttons (Pending / InProgress only) */}
+      {isAdmin && isActive && !showResolveFlow && (
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setShowResolveFlow(true)}
@@ -839,7 +1228,11 @@ function TicketDetailView({
             disabled={closeMutation.isPending}
             className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-400/20 bg-slate-500/5 text-slate-500 hover:bg-slate-500/10 transition-colors disabled:opacity-50"
           >
-            {closeMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />}
+            {closeMutation.isPending ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <XCircle size={12} />
+            )}
             Close Ticket
           </button>
         </div>
@@ -850,16 +1243,25 @@ function TicketDetailView({
         <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-5 py-4 space-y-3">
           <div className="flex items-center gap-2">
             <CheckCircle2 size={16} className="text-emerald-600" />
-            <p className="text-sm font-semibold text-emerald-700">Confirm Resolution</p>
+            <p className="text-sm font-semibold text-emerald-700">
+              Confirm Resolution
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground">This will mark the ticket as resolved. The customer will be able to leave a review.</p>
+          <p className="text-xs text-muted-foreground">
+            This will mark the ticket as resolved. The customer will be able to
+            leave a review.
+          </p>
           <div className="flex items-center gap-2">
             <button
               onClick={() => resolveMutation.mutate()}
               disabled={resolveMutation.isPending}
               className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50"
             >
-              {resolveMutation.isPending ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+              {resolveMutation.isPending ? (
+                <Loader2 size={11} className="animate-spin" />
+              ) : (
+                <CheckCircle2 size={11} />
+              )}
               {resolveMutation.isPending ? "Resolving…" : "Confirm & Resolve"}
             </button>
             <button
@@ -876,14 +1278,20 @@ function TicketDetailView({
       {showReviewSection && !reviewDone && (
         <div className="rounded-xl border border-border bg-card px-5 py-5 space-y-4 animate-in fade-in slide-in-from-bottom-3 duration-300">
           <div>
-            <p className="text-sm font-semibold text-foreground">How was the resolution?</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Completely optional — feel free to skip.</p>
+            <p className="text-sm font-semibold text-foreground">
+              How was the resolution?
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Completely optional — feel free to skip.
+            </p>
           </div>
           <div className="flex items-center gap-3">
             {SENTIMENTS.map((s) => (
               <button
                 key={s.value}
-                onClick={() => setSentiment(sentiment === s.value ? 0 : s.value)}
+                onClick={() =>
+                  setSentiment(sentiment === s.value ? 0 : s.value)
+                }
                 className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl border text-center transition-all text-muted-foreground ${
                   sentiment === s.value
                     ? "border-primary bg-primary/5 scale-105"
@@ -897,7 +1305,10 @@ function TicketDetailView({
           </div>
           <textarea
             value={reviewRemarks}
-            onChange={(e) => { setReviewRemarks(e.target.value); autoExpand(e.target); }}
+            onChange={(e) => {
+              setReviewRemarks(e.target.value);
+              autoExpand(e.target);
+            }}
             placeholder="Add a comment about your experience… (optional)"
             rows={1}
             style={{ minHeight: "36px", maxHeight: "120px", height: "36px" }}
@@ -909,11 +1320,18 @@ function TicketDetailView({
               disabled={reviewSubmitting}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
             >
-              {reviewSubmitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+              {reviewSubmitting ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Send size={13} />
+              )}
               {reviewSubmitting ? "Submitting…" : "Submit Review"}
             </button>
             <button
-              onClick={() => { setReviewDone(true); setShowReviewSection(false); }}
+              onClick={() => {
+                setReviewDone(true);
+                setShowReviewSection(false);
+              }}
               className="px-4 py-2 rounded-xl text-sm border border-border text-muted-foreground hover:bg-muted transition-colors"
             >
               Skip
@@ -925,7 +1343,9 @@ function TicketDetailView({
       {reviewDone && (
         <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-4 py-3 flex items-center gap-2">
           <CheckCircle2 size={14} className="text-emerald-600" />
-          <p className="text-xs text-emerald-600 font-medium">Thank you for your feedback!</p>
+          <p className="text-xs text-emerald-600 font-medium">
+            Thank you for your feedback!
+          </p>
         </div>
       )}
     </div>
@@ -934,7 +1354,14 @@ function TicketDetailView({
 
 // ─── MyTickets main page ──────────────────────────────────────────────────────
 
-const STATUS_TABS: StatusFilter[] = ["Open", "Pending", "InProgress", "Resolved", "Closed", "All"];
+const STATUS_TABS: StatusFilter[] = [
+  "Open",
+  "Pending",
+  "InProgress",
+  "Resolved",
+  "Closed",
+  "All",
+];
 
 const MyTickets: React.FC = () => {
   const navigate = useNavigate();
@@ -945,7 +1372,7 @@ const MyTickets: React.FC = () => {
   const currentUserName = currentUser?.name ?? "Me";
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("Open");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
 
@@ -956,7 +1383,7 @@ const MyTickets: React.FC = () => {
     refetch,
     isFetching,
   } = useQuery<Ticket[]>({
-    queryKey: ["tickets", isAdmin ? "all" : "my", currentUser?.id],
+    queryKey: ["tickets", isAdmin ? "all" : "my"],
     queryFn: async () => {
       const endpoint = isAdmin ? "/api/tickets?limit=100" : "/api/tickets/my";
       const res = await fetchWithAuth(endpoint);
@@ -966,6 +1393,8 @@ const MyTickets: React.FC = () => {
     },
     staleTime: 0,
     refetchOnWindowFocus: true,
+    refetchOnMount: "always",
+    refetchInterval: 20_000,
   });
 
   useTicketSync(refetch);
@@ -973,11 +1402,14 @@ const MyTickets: React.FC = () => {
   const tickets = useMemo(() => {
     let list = [...allTickets];
     if (statusFilter === "Open") {
-      list = list.filter((t) => t.status === "Pending" || t.status === "InProgress");
+      list = list.filter(
+        (t) => t.status === "Pending" || t.status === "InProgress",
+      );
     } else if (statusFilter !== "All") {
       list = list.filter((t) => t.status === statusFilter);
     }
-    if (priorityFilter !== "all") list = list.filter((t) => t.priority === priorityFilter);
+    if (priorityFilter !== "all")
+      list = list.filter((t) => t.priority === priorityFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(
@@ -990,22 +1422,27 @@ const MyTickets: React.FC = () => {
     return list;
   }, [allTickets, statusFilter, priorityFilter, search]);
 
-  const openTickets = allTickets.filter((t) => t.status === "Pending" || t.status === "InProgress");
+  const openTickets = allTickets.filter(
+    (t) => t.status === "Pending" || t.status === "InProgress",
+  );
   const urgentCount = openTickets.filter((t) => t.priority === "Urgent").length;
   const tabCounts: Record<StatusFilter, number> = {
-    Open:       openTickets.length,
-    Pending:    allTickets.filter((t) => t.status === "Pending").length,
+    Open: openTickets.length,
+    Pending: allTickets.filter((t) => t.status === "Pending").length,
     InProgress: allTickets.filter((t) => t.status === "InProgress").length,
-    Resolved:   allTickets.filter((t) => t.status === "Resolved").length,
-    Closed:     allTickets.filter((t) => t.status === "Closed").length,
-    All:        allTickets.length,
+    Resolved: allTickets.filter((t) => t.status === "Resolved").length,
+    Closed: allTickets.filter((t) => t.status === "Closed").length,
+    All: allTickets.length,
   };
-  const isFiltered = statusFilter !== "Open" || priorityFilter !== "all" || !!search.trim();
+  const isFiltered =
+    statusFilter !== "All" || priorityFilter !== "all" || !!search.trim();
 
   if (selectedTicketId !== null) {
     return (
       <>
-        <Breadcrumbs items={["Tickets", "My Tickets", `#${selectedTicketId}`]} />
+        <Breadcrumbs
+          items={["Tickets", "My Tickets", `#${selectedTicketId}`]}
+        />
         <div className="max-w-3xl mx-auto pb-10">
           <TicketDetailView
             ticketId={selectedTicketId}
@@ -1036,12 +1473,17 @@ const MyTickets: React.FC = () => {
               <ArrowLeft size={14} />
             </button>
             <div>
-              <h1 className="text-xl font-heading font-bold text-foreground">My Tickets</h1>
+              <h1 className="text-xl font-heading font-bold text-foreground">
+                My Tickets
+              </h1>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {openTickets.length} open
-                {allTickets.length !== openTickets.length && ` · ${allTickets.length} total`}
+                {allTickets.length !== openTickets.length &&
+                  ` · ${allTickets.length} total`}
                 {urgentCount > 0 && (
-                  <span className="text-red-500 ml-1.5 font-medium">· {urgentCount} urgent</span>
+                  <span className="text-red-500 ml-1.5 font-medium">
+                    · {urgentCount} urgent
+                  </span>
                 )}
               </p>
             </div>
@@ -1058,7 +1500,10 @@ const MyTickets: React.FC = () => {
               disabled={isFetching}
               className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50"
             >
-              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              <RefreshCw
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
+              />
             </button>
           </div>
         </div>
@@ -1083,9 +1528,13 @@ const MyTickets: React.FC = () => {
             >
               {STATUS_LABELS[tab]}
               {!isLoading && (
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
-                  statusFilter === tab ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
-                }`}>
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
+                    statusFilter === tab
+                      ? "bg-white/20 text-white"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
                   {tabCounts[tab]}
                 </span>
               )}
@@ -1096,7 +1545,10 @@ const MyTickets: React.FC = () => {
         {/* Search + Priority filter */}
         <div className="space-y-2">
           <div className="relative">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Search
+              size={13}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -1113,7 +1565,9 @@ const MyTickets: React.FC = () => {
             )}
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[11px] text-muted-foreground font-medium">Priority:</span>
+            <span className="text-[11px] text-muted-foreground font-medium">
+              Priority:
+            </span>
             {(["all", "Urgent", "High", "Medium", "Low"] as const).map((p) => (
               <button
                 key={p}
@@ -1134,7 +1588,10 @@ const MyTickets: React.FC = () => {
         {isLoading ? (
           <div className="space-y-3">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="rounded-xl border border-border bg-card overflow-hidden animate-pulse">
+              <div
+                key={i}
+                className="rounded-xl border border-border bg-card overflow-hidden animate-pulse"
+              >
                 <div className="flex">
                   <div className="w-1 bg-muted" />
                   <div className="flex-1 px-4 py-4 space-y-2">
@@ -1148,7 +1605,11 @@ const MyTickets: React.FC = () => {
         ) : tickets.length === 0 ? (
           <div className="rounded-xl border border-border bg-card py-16 flex flex-col items-center gap-3 text-muted-foreground">
             <CheckCircle2 size={32} className="opacity-20" />
-            <p className="text-sm">{isFiltered ? "No tickets match your filters" : "No tickets found"}</p>
+            <p className="text-sm">
+              {isFiltered
+                ? "No tickets match your filters"
+                : "No tickets found"}
+            </p>
             {!isFiltered && (
               <button
                 onClick={() => navigate("/ticket/create")}
@@ -1159,7 +1620,11 @@ const MyTickets: React.FC = () => {
             )}
             {isFiltered && (
               <button
-                onClick={() => { setSearch(""); setPriorityFilter("all"); setStatusFilter("Open"); }}
+                onClick={() => {
+                  setSearch("");
+                  setPriorityFilter("all");
+                  setStatusFilter("All");
+                }}
                 className="text-xs text-primary hover:underline"
               >
                 Clear filters
@@ -1169,7 +1634,11 @@ const MyTickets: React.FC = () => {
         ) : (
           <div className="space-y-2.5">
             {tickets.map((t) => (
-              <TicketListCard key={t.id} ticket={t} onClick={() => setSelectedTicketId(t.id)} />
+              <TicketListCard
+                key={t.id}
+                ticket={t}
+                onClick={() => setSelectedTicketId(t.id)}
+              />
             ))}
           </div>
         )}
