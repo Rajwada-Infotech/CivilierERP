@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { unwrapTicketList } from "@/lib/ticketListResponse";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTicketSync } from "@/hooks/useTicketSync";
 import {
@@ -120,7 +119,18 @@ const ResolvedTickets: React.FC = () => {
         const res = await fetchWithAuth(endpoint);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const payload = await res.json();
-        return unwrapTicketList<Ticket>(payload).data;
+        // Handle both response shapes:
+        // paginated: { data: [...], pagination: {...} }
+        // plain array: [...]
+        const raw: Ticket[] = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.data)
+          ? payload.data
+          : [];
+        // Always filter to only Resolved/Closed regardless of endpoint
+        return raw.filter(
+          (t) => t.status === "Resolved" || t.status === "Closed",
+        );
       },
       staleTime: 0,
       gcTime: 0,
@@ -132,9 +142,8 @@ const ResolvedTickets: React.FC = () => {
   // Show resolved OR closed tickets based on active tab
   // Non-admin /my endpoint returns all statuses — filter to only resolved/closed here
   const filteredTickets = useMemo(() => {
-    let list = allTickets.filter(
-      (t) => t.status === "Resolved" || t.status === "Closed"
-    ).filter((t) => t.status === activeTab);
+    // allTickets already contains only Resolved/Closed (filtered in queryFn)
+    let list = allTickets.filter((t) => t.status === activeTab);
     if (priorityFilter !== "All") list = list.filter((t) => t.priority === priorityFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
