@@ -79,12 +79,11 @@ function getPayload(body) {
   const companyId = normalizeNumber(body?.CompanyId);
   const budgetAmount = normalizeNumber(body?.BudgetAmount);
   const assignedTo = normalizeNumber(body?.AssignedTo);
+  const customerId = normalizeNumber(body?.CustomerId);
+  const unitId = normalizeNumber(body?.UnitId);
 
-  const numericError =
-    assertValidNumber(projectId, "ProjectId") ||
-    assertValidNumber(companyId, "CompanyId") ||
-    assertValidNumber(budgetAmount, "BudgetAmount") ||
-    assertValidNumber(assignedTo, "AssignedTo");
+  // ProjectId required; CompanyId, AssignedTo, CustomerId, UnitId optional
+  const numericError = assertValidNumber(projectId, "ProjectId");
   if (numericError) return { error: numericError };
 
   const status = normalizeText(body?.Status) || "New";
@@ -110,6 +109,14 @@ function getPayload(body) {
     Status: status,
     AssignedTo: assignedTo,
     Notes: normalizeText(body?.Notes),
+    CustomerId: customerId,
+    PanNumber: normalizeText(body?.PanNumber),
+    ApplicantAddress: normalizeText(body?.ApplicantAddress),
+    CoApplicantName: normalizeText(body?.CoApplicantName),
+    CoApplicantPhone: normalizeText(body?.CoApplicantPhone),
+    CorrespondenceAddress: normalizeText(body?.CorrespondenceAddress),
+    ApplicationDate: normalizeText(body?.ApplicationDate) || null,
+    UnitId: unitId,
   };
 }
 
@@ -372,7 +379,19 @@ router.post(
         .input("Status", sql.NVarChar(30), payload.Status)
         .input("AssignedTo", sql.Int, payload.AssignedTo)
         .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
-        .input("CreatedBy", sql.NVarChar(100), userName).query(`
+        .input("CreatedBy", sql.NVarChar(100), userName)
+        .input("CustomerId", sql.Int, payload.CustomerId)
+        .input("PanNumber", sql.NVarChar(20), payload.PanNumber)
+        .input("ApplicantAddress", sql.NVarChar(500), payload.ApplicantAddress)
+        .input("CoApplicantName", sql.NVarChar(255), payload.CoApplicantName)
+        .input("CoApplicantPhone", sql.NVarChar(20), payload.CoApplicantPhone)
+        .input(
+          "CorrespondenceAddress",
+          sql.NVarChar(500),
+          payload.CorrespondenceAddress,
+        )
+        .input("ApplicationDate", sql.Date, payload.ApplicationDate)
+        .input("UnitId", sql.Int, payload.UnitId).query(`
         INSERT INTO dbo.FollowupApplicants (
           ApplicantNo,
           ApplicantName,
@@ -388,9 +407,16 @@ router.post(
           AssignedTo,
           Notes,
           CreatedBy,
-          CreatedAt
+          CreatedAt,
+          CustomerId,
+          PanNumber,
+          ApplicantAddress,
+          CoApplicantName,
+          CoApplicantPhone,
+          CorrespondenceAddress,
+          ApplicationDate,
+          UnitId
         )
-        OUTPUT INSERTED.Id
         VALUES (
           NULL,
           @ApplicantName,
@@ -406,8 +432,17 @@ router.post(
           @AssignedTo,
           @Notes,
           @CreatedBy,
-          SYSDATETIME()
-        )
+          SYSDATETIME(),
+          @CustomerId,
+          @PanNumber,
+          @ApplicantAddress,
+          @CoApplicantName,
+          @CoApplicantPhone,
+          @CorrespondenceAddress,
+          @ApplicationDate,
+          @UnitId
+        );
+        SELECT SCOPE_IDENTITY() AS Id;
       `);
 
       const id = insertResult.recordset[0]?.Id;
@@ -483,7 +518,19 @@ router.put(
         .input("Status", sql.NVarChar(30), payload.Status)
         .input("AssignedTo", sql.Int, payload.AssignedTo)
         .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
-        .input("UpdatedBy", sql.NVarChar(100), userName).query(`
+        .input("UpdatedBy", sql.NVarChar(100), userName)
+        .input("CustomerId", sql.Int, payload.CustomerId)
+        .input("PanNumber", sql.NVarChar(20), payload.PanNumber)
+        .input("ApplicantAddress", sql.NVarChar(500), payload.ApplicantAddress)
+        .input("CoApplicantName", sql.NVarChar(255), payload.CoApplicantName)
+        .input("CoApplicantPhone", sql.NVarChar(20), payload.CoApplicantPhone)
+        .input(
+          "CorrespondenceAddress",
+          sql.NVarChar(500),
+          payload.CorrespondenceAddress,
+        )
+        .input("ApplicationDate", sql.Date, payload.ApplicationDate)
+        .input("UnitId", sql.Int, payload.UnitId).query(`
         UPDATE dbo.FollowupApplicants
         SET
           ApplicantName = @ApplicantName,
@@ -499,7 +546,15 @@ router.put(
           AssignedTo = @AssignedTo,
           Notes = @Notes,
           UpdatedBy = @UpdatedBy,
-          UpdatedAt = SYSDATETIME()
+          UpdatedAt = SYSDATETIME(),
+          CustomerId = @CustomerId,
+          PanNumber = @PanNumber,
+          ApplicantAddress = @ApplicantAddress,
+          CoApplicantName = @CoApplicantName,
+          CoApplicantPhone = @CoApplicantPhone,
+          CorrespondenceAddress = @CorrespondenceAddress,
+          ApplicationDate = @ApplicationDate,
+          UnitId = @UnitId
         WHERE Id = @Id AND IsDeleted = 0
       `);
 
