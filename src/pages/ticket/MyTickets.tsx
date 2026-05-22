@@ -281,18 +281,17 @@ function TicketDetail({
 }) {
   const queryClient = useQueryClient();
   const [commentText, setCommentText] = useState("");
-  const [attachFiles, setAttachFiles] = useState<File[]>([]);
   const [adminAttachFiles, setAdminAttachFiles] = useState<File[]>([]);
+  const [isSending, setIsSending] = useState(false);
   const [showResolveFlow, setShowResolveFlow] = useState(false);
   const [showReviewSection, setShowReviewSection] = useState(false);
   const [sentiment, setSentiment] = useState<number>(0);
   const [reviewRemarks, setReviewRemarks] = useState("");
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewDone, setReviewDone] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const adminFileInputRef = useRef<HTMLInputElement>(null);
-  const adminCameraInputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { data, isLoading, isError, refetch } = useQuery<TicketDetail>({
     queryKey: ["ticket-detail", ticketId],
@@ -313,24 +312,56 @@ function TicketDetail({
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [comments.length]);
 
-  // Comment mutation
-  const commentMutation = useMutation({
-    mutationFn: async ({ text }: { text: string }) => {
+  // Upload files to server, returns array of public URLs
+  const uploadFiles = async (files: File[]): Promise<string[]> => {
+    if (files.length === 0) return [];
+    const token = localStorage.getItem("token") || sessionStorage.getItem("token") || "";
+    const formData = new FormData();
+    files.forEach((f) => formData.append("file", f));
+    const res = await fetch("/api/tickets/upload", {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    if (!res.ok) throw new Error("File upload failed");
+    const data = await res.json();
+    // endpoint returns { urls: [...] } or { url: "...", urls: [...] }
+    return Array.isArray(data.urls) ? data.urls : data.url ? [data.url] : [];
+  };
+
+  // Send a comment — uploads files first, then posts JSON
+  const handleSend = async () => {
+    const text = commentText.trim();
+    const files = adminAttachFiles;
+    if (!text && files.length === 0) return;
+    setIsSending(true);
+    // Clear input immediately for snappy UX
+    setCommentText("");
+    setAdminAttachFiles([]);
+    if (textareaRef.current) textareaRef.current.style.height = "36px";
+    try {
+      let finalComment = text;
+      if (files.length > 0) {
+        const urls = await uploadFiles(files);
+        const markers = urls.map((u) => `[attachment:${u}]`).join(" ");
+        finalComment = text ? `${text}\n${markers}` : markers;
+      }
       const res = await fetchWithAuth(`/api/tickets/comment/${ticketId}`, {
         method: "POST",
-        body: JSON.stringify({ comment: text }),
+        body: JSON.stringify({ comment: finalComment }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    },
-    onSuccess: () => {
-      setCommentText("");
-      setAttachFiles([]);
       refetch();
       onTicketUpdated();
       queryClient.invalidateQueries({ queryKey: ["tickets"] });
-    },
-    onError: () => toast.error("Failed to send reply"),
-  });
+    } catch {
+      toast.error("Failed to send reply");
+      // Restore text so user doesn't lose it
+      setCommentText(text);
+    } finally {
+      setIsSending(false);
+    }
+  };
 
   // Resolve mutation
   const resolveMutation = useMutation({
@@ -419,18 +450,6 @@ function TicketDetail({
     }
   };
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const handleSend = () => {
-    const text = commentText.trim();
-    if (!text) return;
-    commentMutation.mutate({ text });
-    // Reset height immediately
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "36px";
-    }
-  };
-
   const handleAdminFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
     setAdminAttachFiles(prev => [...prev, ...Array.from(e.target.files!)]);
@@ -460,12 +479,14 @@ function TicketDetail({
     </div>
   );
 
-  const isActive = ticket.status === "Pending" || ticket.status === "InProgress" || ticket.status === "Resolved";
+  const isActive = ticket.status === "Pending" || ticket.status === "InProgress";
   const isResolved = ticket.status === "Resolved";
   const isClosed = ticket.status === "Closed";
+  // Can reply only when Pending or InProgress (not Resolved, not Closed)
+  const canReply = isActive;
   const bar = priorityConfig[ticket.priority]?.bar ?? "bg-muted";
 
-  // Extract attachment URLs
+  // Extract attachment URLs from ticket
   let attachUrls: string[] = [];
   if (ticket.attachment_path) {
     try {
@@ -520,7 +541,7 @@ function TicketDetail({
       </div>
 
       {/* ── Issue description card ── */}
-      <div className={`rounded-xl border border-border bg-card overflow-hidden mb-4`}>
+      <div className="rounded-xl border border-border bg-card overflow-hidden mb-4">
         <div className="flex items-stretch">
           <div className={`w-1 shrink-0 ${bar}`} />
           <div className="flex-1 px-4 py-4">
@@ -538,14 +559,14 @@ function TicketDetail({
         </div>
       </div>
 
-      {/* ── Resolved info banner ── */}
+      {/* ── Resolved / Closed banner with Reopen ── */}
       {(isResolved || isClosed) && (
         <div className={`rounded-xl border px-4 py-3 mb-4 flex items-center gap-3 ${
-          isClosed
-            ? "bg-slate-500/5 border-slate-400/20"
-            : "bg-emerald-500/5 border-emerald-400/20"
+          isClosed ? "bg-slate-500/5 border-slate-400/20" : "bg-emerald-500/5 border-emerald-400/20"
         }`}>
-          {isClosed ? <XCircle size={16} className="text-slate-500 shrink-0" /> : <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />}
+          {isClosed
+            ? <XCircle size={16} className="text-slate-500 shrink-0" />
+            : <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />}
           <div className="flex-1">
             <p className={`text-xs font-semibold ${isClosed ? "text-slate-500" : "text-emerald-600"}`}>
               {isClosed ? "Ticket Closed" : "Ticket Resolved"}
@@ -557,8 +578,8 @@ function TicketDetail({
               <p className="text-xs text-muted-foreground mt-1 italic">{reviewComment.comment}</p>
             )}
           </div>
-          {/* Admin: reopen button */}
-          {isAdmin && (
+          {/* Reopen button — admin always, user only when resolved (not closed) */}
+          {(isAdmin || isResolved) && (
             <button onClick={() => reopenMutation.mutate()}
               disabled={reopenMutation.isPending}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-blue-400/30 bg-blue-500/5 text-blue-600 hover:bg-blue-500/10 transition-colors disabled:opacity-50 shrink-0">
@@ -574,7 +595,7 @@ function TicketDetail({
         <div className="px-4 py-3 border-b border-border flex items-center gap-2">
           <MessageCircle size={13} className="text-muted-foreground" />
           <p className="text-xs font-semibold text-foreground">
-            Conversation {comments.length > 0 && <span className="text-muted-foreground font-normal">({comments.length})</span>}
+            Conversation{comments.length > 0 && <span className="text-muted-foreground font-normal ml-1">({comments.length})</span>}
           </p>
         </div>
 
@@ -588,12 +609,19 @@ function TicketDetail({
             {comments.map((c) => {
               const isMe = c.author_name === currentUserName;
               const isReview = c.comment.startsWith("[Review:");
+
+              // Parse [attachment:url] markers out of the comment text
+              const attachPattern = /\[attachment:([^\]]+)\]/g;
+              const commentAttachUrls: string[] = [];
+              const textOnly = c.comment
+                .replace(attachPattern, (_, url) => { commentAttachUrls.push(url); return ""; })
+                .trim();
+
               if (isReview) {
-                // Display review comment styled differently
                 return (
                   <div key={c.id} className="flex justify-center">
                     <div className="bg-emerald-500/5 border border-emerald-400/15 rounded-xl px-4 py-2.5 max-w-sm text-center">
-                      <p className="text-xs text-emerald-600 font-medium">{c.comment}</p>
+                      <p className="text-xs text-emerald-600 font-medium">{textOnly || c.comment}</p>
                       <p className="text-[10px] text-muted-foreground/60 mt-0.5">{c.author_name} · {fmtDateTime(c.created_at)}</p>
                     </div>
                   </div>
@@ -604,19 +632,38 @@ function TicketDetail({
                   <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5">
                     <User size={12} className="text-muted-foreground" />
                   </div>
-                  <div className={`max-w-[75%] ${isMe ? "items-end" : "items-start"} flex flex-col gap-0.5`}>
+                  <div className={`max-w-[75%] flex flex-col gap-0.5 ${isMe ? "items-end" : "items-start"}`}>
                     <div className="flex items-center gap-1.5">
                       <span className="text-[10px] text-muted-foreground font-medium">{c.author_name}</span>
                       <span className="text-[9px] text-muted-foreground/50 capitalize">{c.author_role}</span>
                       <span className="text-[10px] text-muted-foreground/40">{fmtDateTime(c.created_at)}</span>
                     </div>
-                    <div className={`px-3 py-2 rounded-xl text-xs leading-relaxed whitespace-pre-wrap ${
-                      isMe
-                        ? "bg-primary text-primary-foreground rounded-tr-sm"
-                        : "bg-muted text-foreground rounded-tl-sm"
-                    }`}>
-                      {c.comment}
-                    </div>
+                    {textOnly && (
+                      <div className={`px-3 py-2 rounded-xl text-xs leading-relaxed whitespace-pre-wrap ${
+                        isMe ? "bg-primary text-primary-foreground rounded-tr-sm" : "bg-muted text-foreground rounded-tl-sm"
+                      }`}>
+                        {textOnly}
+                      </div>
+                    )}
+                    {commentAttachUrls.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {commentAttachUrls.map((url, ai) => {
+                          const isPdf = url.toLowerCase().endsWith(".pdf");
+                          const filename = url.split("/").pop() ?? `file-${ai + 1}`;
+                          if (isPdf) return (
+                            <button key={ai} onClick={() => openAttachmentViewer(url, filename)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors">
+                              <Paperclip size={10} /> {filename.length > 20 ? `PDF ${ai + 1}` : filename}
+                            </button>
+                          );
+                          return (
+                            <img key={ai} src={url} alt={`Attachment ${ai + 1}`}
+                              className="h-24 w-auto rounded-lg border border-border object-cover cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-primary/40 transition-all"
+                              onClick={() => openAttachmentViewer(url, filename)} />
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -625,77 +672,112 @@ function TicketDetail({
           </div>
         )}
 
-        {/* Reply input — disabled when Resolved or Closed */}
-        <div className="px-4 py-3 border-t border-border">
-          {/* Admin attachment previews */}
-          {isAdmin && adminAttachFiles.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-2">
-              {adminAttachFiles.map((f, i) => (
-                <div key={i} className="relative group">
-                  {f.type.startsWith("image/") ? (
-                    <img src={URL.createObjectURL(f)} alt={f.name}
-                      className="h-12 w-auto rounded-lg border border-border object-cover" />
-                  ) : (
-                    <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted text-[11px] text-muted-foreground">
-                      <Paperclip size={10} />{f.name.length > 18 ? f.name.slice(0, 18) + "…" : f.name}
-                    </div>
-                  )}
-                  <button onClick={() => removeAdminFile(i)}
-                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <X size={9} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="flex items-end gap-2">
-            {/* Admin: attach file + camera */}
-            {isAdmin && (
-              <>
-                <input ref={adminFileInputRef} type="file" accept="image/*,.pdf" multiple className="hidden" onChange={handleAdminFileChange} />
-                <input ref={adminCameraInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleAdminFileChange} />
-                <button
-                  onClick={() => adminFileInputRef.current?.click()}
-                  disabled={isClosed}
-                  title="Attach file"
-                  className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-30 shrink-0"
-                >
-                  <Paperclip size={14} />
-                </button>
-                <button
-                  onClick={() => adminCameraInputRef.current?.click()}
-                  disabled={isClosed}
-                  title="Take photo"
-                  className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-30 shrink-0"
-                >
-                  <Camera size={14} />
-                </button>
-              </>
+        {/* Reply input — only shown when ticket is active (Pending / InProgress) */}
+        {canReply && (
+          <div className="px-4 py-3 border-t border-border">
+            {/* Attachment previews */}
+            {isAdmin && adminAttachFiles.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {adminAttachFiles.map((f, i) => (
+                  <div key={i} className="relative group">
+                    {f.type.startsWith("image/") ? (
+                      <img src={URL.createObjectURL(f)} alt={f.name}
+                        className="h-12 w-auto rounded-lg border border-border object-cover" />
+                    ) : (
+                      <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted text-[11px] text-muted-foreground">
+                        <Paperclip size={10} />{f.name.length > 18 ? f.name.slice(0, 18) + "…" : f.name}
+                      </div>
+                    )}
+                    <button onClick={() => removeAdminFile(i)}
+                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <X size={9} />
+                    </button>
+                  </div>
+                ))}
+              </div>
             )}
-            <textarea
-              ref={textareaRef}
-              value={commentText}
-              onChange={(e) => { setCommentText(e.target.value); autoExpand(e.target); }}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }}}
-              placeholder={isClosed ? "Ticket is closed — reopen to reply" : "Write a reply… (Enter to send, Shift+Enter for new line)"}
-              disabled={isClosed}
-              rows={1}
-              style={{ minHeight: "36px", maxHeight: "120px", height: "36px" }}
-              className="flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
-            />
-            <button
-              onClick={handleSend}
-              disabled={!commentText.trim() || commentMutation.isPending || isClosed}
-              className="w-9 h-9 flex items-center justify-center rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 shrink-0"
-            >
-              {commentMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-            </button>
+            <div className="flex items-end gap-2">
+              {/* Admin: file attach + camera buttons */}
+              {isAdmin && (
+                <>
+                  {/* Hidden file input for attachments */}
+                  <input
+                    ref={adminFileInputRef}
+                    type="file"
+                    accept="image/*,.pdf"
+                    multiple
+                    className="hidden"
+                    onChange={handleAdminFileChange}
+                  />
+                  {/* Paperclip = file picker */}
+                  <button
+                    onClick={() => adminFileInputRef.current?.click()}
+                    title="Attach files"
+                    className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors shrink-0"
+                  >
+                    <Paperclip size={14} />
+                  </button>
+                  {/* Camera = file picker filtered to images only (opens camera on mobile) */}
+                  <button
+                    onClick={() => {
+                      // Create a temporary input with capture to open camera
+                      const input = document.createElement("input");
+                      input.type = "file";
+                      input.accept = "image/*";
+                      input.capture = "environment";
+                      input.multiple = true;
+                      input.onchange = (ev) => {
+                        const files = (ev.target as HTMLInputElement).files;
+                        if (files) setAdminAttachFiles(prev => [...prev, ...Array.from(files)]);
+                      };
+                      input.click();
+                    }}
+                    title="Take photo"
+                    className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors shrink-0"
+                  >
+                    <Camera size={14} />
+                  </button>
+                </>
+              )}
+              <textarea
+                ref={textareaRef}
+                value={commentText}
+                onChange={(e) => { setCommentText(e.target.value); autoExpand(e.target); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+                }}
+                placeholder="Write a reply… (Enter to send, Shift+Enter for new line)"
+                rows={1}
+                style={{ minHeight: "36px", maxHeight: "120px", height: "36px" }}
+                className="flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all overflow-hidden"
+              />
+              <button
+                onClick={handleSend}
+                disabled={
+                  isSending ||
+                  (!commentText.trim() && adminAttachFiles.length === 0)
+                }
+                className="w-9 h-9 flex items-center justify-center rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 shrink-0"
+              >
+                {isSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* When closed or resolved — show a notice inside the conversation box */}
+        {!canReply && (
+          <div className="px-4 py-3 border-t border-border flex items-center gap-2 text-muted-foreground">
+            {isClosed
+              ? <><XCircle size={13} /><p className="text-xs">Ticket is closed — reopen to continue the conversation.</p></>
+              : <><CheckCircle2 size={13} className="text-emerald-500" /><p className="text-xs text-emerald-600">Ticket resolved — reopen to continue the conversation.</p></>
+            }
+          </div>
+        )}
       </div>
 
-      {/* ── Admin action buttons ── */}
-      {isAdmin && (ticket.status === "Pending" || ticket.status === "InProgress") && !showResolveFlow && (
+      {/* ── Admin action buttons (Pending / InProgress only) ── */}
+      {isAdmin && isActive && !showResolveFlow && (
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setShowResolveFlow(true)}
@@ -816,7 +898,7 @@ const MyTickets: React.FC = () => {
   const currentUserName = currentUser?.name ?? "Me";
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("Open");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
 
@@ -827,9 +909,8 @@ const MyTickets: React.FC = () => {
     refetch,
     isFetching,
   } = useQuery<Ticket[]>({
-    queryKey: ["tickets", isAdmin ? "all" : "my", currentUser?.id],
+    queryKey: ["tickets", isAdmin ? "all" : "my"],
     queryFn: async () => {
-      // Non-admins always fetch only their own tickets
       const endpoint = isAdmin ? "/api/tickets" : "/api/tickets/my";
       const res = await fetchWithAuth(endpoint);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -837,6 +918,8 @@ const MyTickets: React.FC = () => {
     },
     staleTime: 0,
     refetchOnWindowFocus: true,
+    refetchOnMount: "always",
+    refetchInterval: 20_000,
   });
 
   useTicketSync(refetch);
@@ -871,7 +954,7 @@ const MyTickets: React.FC = () => {
     Closed:     allTickets.filter((t) => t.status === "Closed").length,
     All:        allTickets.length,
   };
-  const isFiltered = statusFilter !== "Open" || priorityFilter !== "all" || !!search.trim();
+  const isFiltered = statusFilter !== "All" || priorityFilter !== "all" || !!search.trim();
 
   // If a ticket is selected — show detail view
   if (selectedTicketId !== null) {
@@ -1027,7 +1110,7 @@ const MyTickets: React.FC = () => {
             )}
             {isFiltered && (
               <button
-                onClick={() => { setSearch(""); setPriorityFilter("all"); setStatusFilter("Open"); }}
+                onClick={() => { setSearch(""); setPriorityFilter("all"); setStatusFilter("All"); }}
                 className="text-xs text-primary hover:underline"
               >
                 Clear filters
