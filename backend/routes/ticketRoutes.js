@@ -121,23 +121,26 @@ function sendTicketAccessError(res, access) {
   return null;
 }
 
-async function addCommentToTicket(pool, ticketId, comment, actor) {
+async function addCommentToTicket(pool, ticketId, comment, actor, isInternal = false) {
   const result = await pool
     .request()
     .input("ticket_id", sql.Int, ticketId)
     .input("comment", sql.NVarChar(sql.MAX), comment)
     .input("author_name", sql.NVarChar(255), actor.name)
     .input("author_id", sql.Int, actor.id)
-    .input("author_role", sql.NVarChar(50), actor.role).query(`
-      INSERT INTO dbo.ticket_comments (ticket_id, comment, author_name, author_id, author_role)
+    .input("author_role", sql.NVarChar(50), actor.role)
+    .input("is_internal", sql.Bit, isInternal ? 1 : 0).query(`
+      INSERT INTO dbo.ticket_comments (
+        ticket_id, comment, author_name, author_id, author_role, is_internal
+      )
       OUTPUT INSERTED.*
-      VALUES (@ticket_id, @comment, @author_name, @author_id, @author_role)
+      VALUES (@ticket_id, @comment, @author_name, @author_id, @author_role, @is_internal)
     `);
   return result.recordset[0] || null;
 }
 
-async function addAndEmitCommentToTicket(pool, ticketId, comment, actor) {
-  const inserted = await addCommentToTicket(pool, ticketId, comment, actor);
+async function addAndEmitCommentToTicket(pool, ticketId, comment, actor, isInternal = false) {
+  const inserted = await addCommentToTicket(pool, ticketId, comment, actor, isInternal);
   if (inserted) emitTicketMessage(ticketId, inserted);
   return inserted;
 }
@@ -331,7 +334,12 @@ router.get("/:id", async (req, res) => {
         `SELECT * FROM dbo.ticket_comments WHERE ticket_id = @tid ORDER BY created_at ASC`,
       );
 
-    res.json({ ticket: access.ticket, comments: comments.recordset });
+    const visibleComments =
+      isTicketAdmin(actor.role)
+        ? comments.recordset
+        : comments.recordset.filter((comment) => !Number(comment.is_internal));
+
+    res.json({ ticket: access.ticket, comments: visibleComments });
   } catch (err) {
     console.error("[Tickets GET /:id]", err.message);
     res.status(500).json({ error: err.message });
@@ -570,6 +578,11 @@ router.put("/resolve/:id", async (req, res) => {
     const access = await getAccessibleTicket(pool, id, actor);
     const accessError = sendTicketAccessError(res, access);
     if (accessError) return accessError;
+    if (!isTicketAdmin(actor.role) && access.ticket.assigned_to_id !== actor.id) {
+      return res
+        .status(403)
+        .json({ error: "Only the assignee or an admin can resolve this ticket" });
+    }
 
     const result = await pool
       .request()
@@ -684,14 +697,25 @@ router.put(
 );
 
 // ─── POST /api/tickets/comment/:id ───────────────────────────────────────────
-router.post("/comment/:id", async (req, res) => {
+const rateLimit = require("express-rate-limit");
+
+const commentRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { error: "Too many comments. Try again later." },
+  keyGenerator: (req) => String(req.user?.userId ?? "anonymous"),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+router.post("/comment/:id", commentRateLimiter, async (req, res) => {
   try {
     const actor = requireActor(req, res);
     if (!actor) return;
     const pool = getPool();
     const id = parseTicketId(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid ticket id" });
-    const { comment } = req.body;
+    const { comment, is_internal } = req.body;
 
     if (!comment?.trim())
       return res.status(400).json({ error: "Comment cannot be empty" });
@@ -705,6 +729,7 @@ router.post("/comment/:id", async (req, res) => {
       id,
       comment.trim(),
       actor,
+      isTicketAdmin(actor.role) ? Boolean(is_internal) : false,
     );
 
     await pool

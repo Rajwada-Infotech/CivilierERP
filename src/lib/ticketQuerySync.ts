@@ -14,6 +14,10 @@ const TICKET_QUERY_ROOTS = new Set([
   "ticket-dashboard",
   "tickets",
   "admin-resolution-tickets",
+  "admin-tickets",
+  "admin-ticket-stats",
+  "admin-ticket-detail",
+  "ticket-detail",
 ]);
 
 export function invalidateTicketQueries(queryClient: QueryClient) {
