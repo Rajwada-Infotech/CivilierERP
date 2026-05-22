@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
+import Webcam from "react-webcam";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -377,11 +378,13 @@ function AuthenticatedAttachmentImage({
 }) {
   const [src, setSrc] = useState(url.startsWith("data:") ? url : "");
   const [failed, setFailed] = useState(false);
+  const [isNonImage, setIsNonImage] = useState(false);
 
   useEffect(() => {
     if (url.startsWith("data:")) {
       setSrc(url);
       setFailed(false);
+      setIsNonImage(false);
       return;
     }
 
@@ -390,13 +393,13 @@ function AuthenticatedAttachmentImage({
     if (cachedSrc) {
       setSrc(cachedSrc);
       setFailed(false);
-      return () => {
-        alive = false;
-      };
+      setIsNonImage(false);
+      return () => { alive = false; };
     }
 
     setSrc("");
     setFailed(false);
+    setIsNonImage(false);
 
     fetchWithAuth(url)
       .then((res) => {
@@ -404,11 +407,13 @@ function AuthenticatedAttachmentImage({
         return res.blob();
       })
       .then((blob) => {
-        const objectUrl = URL.createObjectURL(blob);
-        if (!alive) {
-          URL.revokeObjectURL(objectUrl);
+        if (!alive) return;
+        // If server returned non-image content type, treat as non-image file
+        if (blob.type && !blob.type.startsWith("image/")) {
+          setIsNonImage(true);
           return;
         }
+        const objectUrl = URL.createObjectURL(blob);
         attachmentBlobUrlCache.set(url, objectUrl);
         registerAttachmentCacheCleanup();
         setSrc(objectUrl);
@@ -417,19 +422,31 @@ function AuthenticatedAttachmentImage({
         if (alive) setFailed(true);
       });
 
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [url]);
+
+  const filename = url.split("/").pop()?.split("?")[0] ?? "file";
+
+  if (isNonImage) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"
+      >
+        <Paperclip size={10} /> {filename.length > 20 ? "File" : filename}
+      </button>
+    );
+  }
 
   if (failed) {
     return (
       <button
         type="button"
         onClick={onClick}
-        className="h-24 min-w-24 rounded-lg border border-border bg-muted px-3 text-[11px] text-muted-foreground hover:bg-muted/80"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted text-[11px] text-muted-foreground hover:bg-muted/80 transition-colors"
       >
-        Preview unavailable
+        <Paperclip size={10} /> {filename.length > 20 ? "Attachment" : filename}
       </button>
     );
   }
@@ -446,12 +463,13 @@ function AuthenticatedAttachmentImage({
 // ─── Attachment viewer helper ─────────────────────────────────────────────────
 
 function openAttachmentViewer(url: string, filename: string) {
-  const isPdf = url.toLowerCase().endsWith(".pdf");
+  const isPdfByUrl = url.split("?")[0].toLowerCase().endsWith(".pdf");
   const win = window.open();
   if (!win) return;
 
   const loadContent = async () => {
     let blobUrl = url;
+    let isPdf = isPdfByUrl;
     if (!url.startsWith("data:")) {
       try {
         const cachedBlobUrl = attachmentBlobUrlCache.get(url);
@@ -461,6 +479,9 @@ function openAttachmentViewer(url: string, filename: string) {
           const r = await fetchWithAuth(url);
           if (!r.ok) throw new Error(`Attachment fetch failed: ${r.status}`);
           const blob = await r.blob();
+          // Detect by content-type if URL doesn't reveal type
+          if (blob.type === "application/pdf") isPdf = true;
+          else if (blob.type.startsWith("image/")) isPdf = false;
           blobUrl = URL.createObjectURL(blob);
           attachmentBlobUrlCache.set(url, blobUrl);
           registerAttachmentCacheCleanup();
@@ -485,6 +506,11 @@ function openAttachmentViewer(url: string, filename: string) {
 
 // ─── Attachment list ──────────────────────────────────────────────────────────
 
+function isImageUrl(url: string): boolean {
+  const clean = url.split("?")[0].toLowerCase();
+  return /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/.test(clean);
+}
+
 function AttachmentList({ path: attachmentPath }: { path: string }) {
   let urls: string[] = [];
   try {
@@ -497,8 +523,9 @@ function AttachmentList({ path: attachmentPath }: { path: string }) {
   return (
     <div className="flex flex-wrap gap-2 mt-1">
       {urls.map((url, i) => {
-        const isPdf = url.toLowerCase().endsWith(".pdf");
-        const filename = url.split("/").pop() ?? `attachment-${i + 1}`;
+        const cleanUrl = url.split("?")[0].toLowerCase();
+        const isPdf = cleanUrl.endsWith(".pdf");
+        const filename = url.split("/").pop()?.split("?")[0] ?? `attachment-${i + 1}`;
         if (isPdf) {
           return (
             <button
@@ -511,6 +538,8 @@ function AttachmentList({ path: attachmentPath }: { path: string }) {
             </button>
           );
         }
+        // For images AND unknown types, use AuthenticatedAttachmentImage
+        // (it will auto-detect non-image blobs and render as a link button instead)
         return (
           <AuthenticatedAttachmentImage
             key={i}
@@ -618,8 +647,11 @@ function TicketDetailView({
   const [reviewRemarks, setReviewRemarks] = useState("");
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewDone, setReviewDone] = useState(false);
+  // Camera modal state
+  const [showCamera, setShowCamera] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const adminFileInputRef = useRef<HTMLInputElement>(null);
-  const adminCameraInputRef = useRef<HTMLInputElement>(null);
+  const webcamRef = useRef<Webcam>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -643,23 +675,44 @@ function TicketDetailView({
   }, [comments.length]);
 
   // Upload files to server, returns array of public URLs
+  // Uploads each file individually (same pattern as CreateTicket) to avoid multipart issues
   const uploadFiles = async (files: File[]): Promise<string[]> => {
     if (files.length === 0) return [];
     const token =
       localStorage.getItem("token") || sessionStorage.getItem("token") || "";
-    const formData = new FormData();
-    files.forEach((f) => formData.append("file", f));
-    const res = await fetch("/api/tickets/upload", {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: formData,
-    });
-    if (!res.ok) throw new Error("File upload failed");
-    const data = await res.json();
-    return Array.isArray(data.urls) ? data.urls : data.url ? [data.url] : [];
+    const allUrls: string[] = [];
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/tickets/upload", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      });
+      if (!res.ok) throw new Error(`Failed to upload ${file.name}`);
+      const data = await res.json();
+      const url = data.url ?? (Array.isArray(data.urls) ? data.urls[0] : null);
+      if (url) allUrls.push(url);
+    }
+    return allUrls;
+  };
+
+  const capturePhoto = () => {
+    const img = webcamRef.current?.getScreenshot();
+    if (img) {
+      // Convert base64 data URL to a File object and add to adminAttachFiles
+      fetch(img)
+        .then((r) => r.blob())
+        .then((blob) => {
+          const file = new File([blob], `capture-${Date.now()}.jpg`, { type: "image/jpeg" });
+          setAdminAttachFiles((prev) => [...prev, file]);
+        });
+      setShowCamera(false);
+    }
   };
 
   // Send a comment — uploads files first, then posts JSON
+  // Also auto-moves Pending → InProgress so it shows in "Resolving" tab
   const handleSend = async () => {
     const text = commentText.trim();
     const files = adminAttachFiles;
@@ -680,6 +733,17 @@ function TicketDetailView({
         body: JSON.stringify({ comment: finalComment }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // If ticket is still Pending, move it to InProgress (Resolving)
+      if (ticket?.status === "Pending") {
+        try {
+          await fetchWithAuth(`/api/tickets/status/${ticketId}`, {
+            method: "PUT",
+            body: JSON.stringify({ status: "InProgress" }),
+          });
+        } catch {
+          // Non-fatal — comment was posted, status update failed silently
+        }
+      }
       refetch();
       onTicketUpdated();
       queryClient.invalidateQueries({ queryKey: ["tickets"] });
@@ -784,9 +848,12 @@ function TicketDetailView({
   };
 
   const handleAdminFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files) return;
-    setAdminAttachFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
-    e.target.value = "";
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const newFiles = Array.from(files);
+    setAdminAttachFiles((prev) => [...prev, ...newFiles]);
+    // Reset after reading — use setTimeout to ensure files are read first
+    setTimeout(() => { e.target.value = ""; }, 100);
   };
 
   const removeAdminFile = (i: number) => {
@@ -1046,9 +1113,9 @@ function TicketDetailView({
                     {commentAttachUrls.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mt-1">
                         {commentAttachUrls.map((url, ai) => {
-                          const isPdf = url.toLowerCase().endsWith(".pdf");
+                          const isPdf = url.split("?")[0].toLowerCase().endsWith(".pdf");
                           const filename =
-                            url.split("/").pop() ?? `file-${ai + 1}`;
+                            url.split("/").pop()?.split("?")[0] ?? `file-${ai + 1}`;
                           if (isPdf)
                             return (
                               <button
@@ -1065,9 +1132,9 @@ function TicketDetailView({
                               </button>
                             );
                           return (
-                            <img
+                            <AuthenticatedAttachmentImage
                               key={ai}
-                              src={url}
+                              url={url}
                               alt={`Attachment ${ai + 1}`}
                               className="h-24 w-auto rounded-lg border border-border object-cover cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-primary/40 transition-all"
                               onClick={() =>
@@ -1089,69 +1156,64 @@ function TicketDetailView({
         {/* Reply input — only shown when ticket is active (Pending / InProgress) */}
         {canReply && (
           <div className="px-4 py-3 border-t border-border">
-            {isAdmin && adminAttachFiles.length > 0 && (
+            {adminAttachFiles.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
-                {adminAttachFiles.map((f, i) => (
-                  <div key={i} className="relative group">
-                    {f.type.startsWith("image/") ? (
-                      <img
-                        src={URL.createObjectURL(f)}
-                        alt={f.name}
-                        className="h-12 w-auto rounded-lg border border-border object-cover"
-                      />
-                    ) : (
-                      <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted text-[11px] text-muted-foreground">
-                        <Paperclip size={10} />
-                        {f.name.length > 18
-                          ? f.name.slice(0, 18) + "…"
-                          : f.name}
-                      </div>
-                    )}
-                    <button
-                      onClick={() => removeAdminFile(i)}
-                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X size={9} />
-                    </button>
-                  </div>
-                ))}
+                {adminAttachFiles.map((f, i) => {
+                  const isImg = f.type.startsWith("image/");
+                  const isPdf = f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
+                  return (
+                    <div key={`${f.name}-${i}`} className="relative group">
+                      {isImg ? (
+                        <img
+                          src={URL.createObjectURL(f)}
+                          alt={f.name}
+                          className="h-14 w-auto rounded-lg border border-border object-cover"
+                        />
+                      ) : (
+                        <div className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-border bg-muted text-[11px] text-muted-foreground ${isPdf ? "text-primary border-primary/30 bg-primary/5" : ""}`}>
+                          <Paperclip size={10} />
+                          {f.name.length > 18 ? f.name.slice(0, 18) + "…" : f.name}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => removeAdminFile(i)}
+                        className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X size={9} />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
             <div className="flex items-end gap-2">
-              {isAdmin && (
-                <>
-                  <input
-                    ref={adminFileInputRef}
-                    type="file"
-                    accept="image/*,.pdf"
-                    multiple
-                    className="hidden"
-                    onChange={handleAdminFileChange}
-                  />
-                  <input
-                    ref={adminCameraInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={handleAdminFileChange}
-                  />
-                  <button
-                    onClick={() => adminFileInputRef.current?.click()}
-                    title="Attach files"
-                    className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors shrink-0"
-                  >
-                    <Paperclip size={14} />
-                  </button>
-                  <button
-                    onClick={() => adminCameraInputRef.current?.click()}
-                    title="Take photo"
-                    className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors shrink-0"
-                  >
-                    <Camera size={14} />
-                  </button>
-                </>
-              )}
+              <>
+                <input
+                  ref={adminFileInputRef}
+                  type="file"
+                  accept="image/*,.pdf"
+                  multiple
+                  className="hidden"
+                  onChange={handleAdminFileChange}
+                />
+                <button
+                  onClick={() => adminFileInputRef.current?.click()}
+                  title="Attach files"
+                  className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors shrink-0"
+                >
+                  <Paperclip size={14} />
+                </button>
+                <button
+                  onClick={() => {
+                    setCameraError(null);
+                    setShowCamera(true);
+                  }}
+                  title="Take photo"
+                  className="w-8 h-8 flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors shrink-0"
+                >
+                  <Camera size={14} />
+                </button>
+              </>
               <textarea
                 ref={textareaRef}
                 value={commentText}
@@ -1346,6 +1408,74 @@ function TicketDetailView({
           <p className="text-xs text-emerald-600 font-medium">
             Thank you for your feedback!
           </p>
+        </div>
+      )}
+
+      {/* Camera modal — same as CreateTicket */}
+      {showCamera && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Camera size={15} className="text-muted-foreground" />
+                <h2 className="text-sm font-semibold text-foreground">Capture Photo</h2>
+              </div>
+              <button
+                onClick={() => setShowCamera(false)}
+                className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-muted transition-colors text-muted-foreground"
+              >
+                <XCircle size={15} />
+              </button>
+            </div>
+            <div className="p-4">
+              {cameraError ? (
+                <div className="flex flex-col items-center justify-center py-8 gap-3 text-center">
+                  <XCircle size={32} className="text-red-400" />
+                  <p className="text-sm text-muted-foreground">{cameraError}</p>
+                  <p className="text-xs text-muted-foreground/60">
+                    Please allow camera access in your browser settings and try again.
+                  </p>
+                </div>
+              ) : (
+                <Webcam
+                  ref={webcamRef}
+                  screenshotFormat="image/jpeg"
+                  className="rounded-xl w-full"
+                  width={640}
+                  height={480}
+                  mirrored={true}
+                  videoConstraints={{
+                    width: 640,
+                    height: 480,
+                    facingMode: { ideal: "environment" },
+                  }}
+                  onUserMediaError={(err) => {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    setCameraError(
+                      msg.toLowerCase().includes("permission")
+                        ? "Camera permission denied."
+                        : "Could not access camera: " + msg,
+                    );
+                  }}
+                />
+              )}
+            </div>
+            <div className="flex gap-3 px-5 py-4 border-t border-border">
+              <button
+                onClick={capturePhoto}
+                disabled={!!cameraError}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50"
+              >
+                <CheckCircle2 size={14} /> Capture
+              </button>
+              <button
+                onClick={() => setShowCamera(false)}
+                className="flex-1 px-4 py-2 rounded-xl text-sm border border-border text-muted-foreground hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
