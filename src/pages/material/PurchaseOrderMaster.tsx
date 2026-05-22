@@ -647,7 +647,12 @@ const PurchaseOrderMaster: React.FC = () => {
 
   // ── Pre-populate form when arriving from Material Request ─────────────────
   useEffect(() => {
-    if (!mrPrefill || companies.length === 0 || allProjects.length === 0)
+    if (
+      !mrPrefill ||
+      companies.length === 0 ||
+      allProjects.length === 0 ||
+      uoms.length === 0
+    )
       return;
 
     const matchCompany = companies.find(
@@ -672,14 +677,25 @@ const PurchaseOrderMaster: React.FC = () => {
       const qty = Number(it.Quantity ?? 1);
       const rate = 0;
       const taxAmount = (qty * rate * gstRate) / 100;
+
+      // Resolve UOM: match UOMCode against master code, fallback to UOMName
+      const uomCodeNorm = (it.UOMCode ?? "").trim().toLowerCase();
+      const uomNameNorm = (it.UOMName ?? "").trim().toLowerCase();
+      const uomMatch =
+        uoms.find(
+          (u) =>
+            (uomCodeNorm && u.code.toLowerCase() === uomCodeNorm) ||
+            (uomNameNorm && u.name.toLowerCase() === uomNameNorm),
+        ) ?? null;
+
       return {
         id: uid(),
         itemId: it.ItemId ?? "",
         itemName: it.ItemName ?? "",
         itemDescription: "",
         quantity: qty,
-        uomId: null,
-        unit: it.UOMCode ?? "",
+        uomId: uomMatch?.id ?? null,
+        unit: uomMatch?.name ?? it.UOMName ?? it.UOMCode ?? "",
         rate,
         cgstRate: cgst,
         sgstRate: sgst,
@@ -695,7 +711,7 @@ const PurchaseOrderMaster: React.FC = () => {
     setViewMode("create");
     // Only run once when mrPrefill is present and master data is loaded
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mrPrefill, companies.length, allProjects.length]);
+  }, [mrPrefill, companies.length, allProjects.length, uoms.length]);
 
   // ── Pre-populate form when arriving from Work Done "Create WO_PO" ─────────
   useEffect(() => {
@@ -747,7 +763,8 @@ const PurchaseOrderMaster: React.FC = () => {
       companies.length === 0 ||
       allProjects.length === 0 ||
       suppliers.length === 0 ||
-      uoms.length === 0
+      uoms.length === 0 ||
+      items.length === 0
     )
       return;
 
@@ -782,15 +799,30 @@ const PurchaseOrderMaster: React.FC = () => {
       const base = qty * rate;
       const taxAmt = (base * totalGst) / 100;
 
-      // Resolve unit string → UOM master entry (match by code or name)
+      // Resolve unit string → UOM master entry
+      // 1. Try direct match on the unit string (code or name)
       const unitNorm = (it.unit || "").trim().toLowerCase();
-      const uomMatch = unitNorm
-        ? uoms.find(
+      let uomMatch = unitNorm
+        ? (uoms.find(
             (u) =>
               u.code.toLowerCase() === unitNorm ||
               u.name.toLowerCase() === unitNorm,
-          )
+          ) ?? null)
         : null;
+
+      // 2. Fallback: look up item master M_UOM when itemId is available
+      if (!uomMatch && it.itemId) {
+        const masterItem = items.find((i) => i.id === it.itemId);
+        if (masterItem?.uom) {
+          const mUomNorm = masterItem.uom.trim().toLowerCase();
+          uomMatch =
+            uoms.find(
+              (u) =>
+                u.code.toLowerCase() === mUomNorm ||
+                u.name.toLowerCase() === mUomNorm,
+            ) ?? null;
+        }
+      }
 
       return {
         id: crypto.randomUUID(),
@@ -822,6 +854,7 @@ const PurchaseOrderMaster: React.FC = () => {
     allProjects.length,
     suppliers.length,
     uoms.length,
+    items.length,
   ]);
 
   const filteredList = useMemo(() => {
