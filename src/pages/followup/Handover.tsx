@@ -23,6 +23,7 @@ import {
   Gift,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -459,6 +460,8 @@ function ChecklistToggle({
 export function HandoverPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { currentUser } = useAuth();
+  const canDeleteRecords = currentUser?.role !== "engineer";
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<HandoverStatus | "">("");
@@ -1289,15 +1292,17 @@ export function HandoverPage() {
                                   >
                                     <Pencil size={14} /> Edit
                                   </button>
-                                  <button
-                                    className="ho-menu-item danger"
-                                    onClick={() => {
-                                      setDeleteId(ho.Id);
-                                      setOpenMenuId(null);
-                                    }}
-                                  >
-                                    <Trash2 size={14} /> Delete
-                                  </button>
+                                  {canDeleteRecords && (
+                                    <button
+                                      className="ho-menu-item danger"
+                                      onClick={() => {
+                                        setDeleteId(ho.Id);
+                                        setOpenMenuId(null);
+                                      }}
+                                    >
+                                      <Trash2 size={14} /> Delete
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </div>

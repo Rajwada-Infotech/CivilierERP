@@ -333,46 +333,7 @@ const CreateTicket = () => {
     if (!validate()) return;
     setSubmitting(true);
     try {
-      const allUrls: string[] = [];
-
-      // Step 1a — upload each file via raw fetch (avoids fetchWithAuth setting Content-Type: application/json)
-      const token = localStorage.getItem("token") || sessionStorage.getItem("token") || "";
-      for (const file of attachmentFiles) {
-        const formData = new FormData();
-        formData.append("file", file);
-        const uploadRes = await fetch("/api/tickets/upload", {
-          method: "POST",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-          body: formData,
-        });
-        if (!uploadRes.ok) {
-          const err = await uploadRes.json().catch(() => ({}));
-          throw new Error(err.error ?? `Failed to upload ${file.name}`);
-        }
-        const { url } = await uploadRes.json();
-        allUrls.push(url);
-      }
-
-      // Step 1b — upload each camera-captured image as a blob
-      for (let i = 0; i < capturedImages.length; i++) {
-        const base64 = capturedImages[i];
-        const blob = await fetch(base64).then((r) => r.blob());
-        const formData = new FormData();
-        formData.append("file", blob, `capture-${i + 1}.jpg`);
-        const uploadRes = await fetch("/api/tickets/upload", {
-          method: "POST",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-          body: formData,
-        });
-        if (!uploadRes.ok) {
-          const err = await uploadRes.json().catch(() => ({}));
-          throw new Error(err.error ?? "Failed to upload captured photo");
-        }
-        const { url } = await uploadRes.json();
-        allUrls.push(url);
-      }
-
-      // Step 2 — create the ticket; store URLs as JSON array string
+      // Step 1 — create the ticket first so we have a ticketId to attach files to
       const res = await fetchWithAuth("/api/tickets/create", {
         method: "POST",
         body: JSON.stringify({
@@ -383,17 +344,49 @@ const CreateTicket = () => {
           customer_phone: customerPhone.trim(),
           company_id: companyId || null,
           project_id: projectId || null,
-          attachment_path: allUrls.length > 0 ? JSON.stringify(allUrls) : null,
         }),
       });
       const data = await res.json();
-      if (data.success) {
-        invalidateTicketQueries(queryClient);
-        toast.success("Ticket created successfully");
-        navigate("/ticket/pending");
-      } else {
+      if (!data.success || !data.ticketId) {
         toast.error(data.error || "Failed to create ticket");
+        return;
       }
+      const ticketId: number = data.ticketId;
+
+      // Step 2 — upload files (if any) now that we have the ticketId
+      // The backend links each attachment to this ticket automatically.
+      const token =
+        localStorage.getItem("token") || sessionStorage.getItem("token") || "";
+
+      const uploadOne = async (formData: FormData): Promise<void> => {
+        formData.append("ticketId", String(ticketId));
+        const uploadRes = await fetch("/api/tickets/upload", {
+          method: "POST",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: formData,
+        });
+        if (!uploadRes.ok) {
+          const err = await uploadRes.json().catch(() => ({}));
+          throw new Error(err.error ?? "Failed to upload attachment");
+        }
+      };
+
+      for (const file of attachmentFiles) {
+        const fd = new FormData();
+        fd.append("file", file);
+        await uploadOne(fd);
+      }
+
+      for (let i = 0; i < capturedImages.length; i++) {
+        const blob = await fetch(capturedImages[i]).then((r) => r.blob());
+        const fd = new FormData();
+        fd.append("file", blob, `capture-${i + 1}.jpg`);
+        await uploadOne(fd);
+      }
+
+      invalidateTicketQueries(queryClient);
+      toast.success("Ticket created successfully");
+      navigate("/ticket/pending");
     } catch (err: any) {
       toast.error(err?.message ?? "Failed to create ticket");
     } finally {
@@ -570,7 +563,10 @@ const CreateTicket = () => {
                     const picked = Array.from(e.target.files ?? []);
                     setAttachmentFiles((prev) => {
                       const names = new Set(prev.map((f) => f.name));
-                      return [...prev, ...picked.filter((f) => !names.has(f.name))];
+                      return [
+                        ...prev,
+                        ...picked.filter((f) => !names.has(f.name)),
+                      ];
                     });
                     e.target.value = "";
                   }}
@@ -612,11 +608,19 @@ const CreateTicket = () => {
             {(attachmentFiles.length > 0 || capturedImages.length > 0) && (
               <div className="flex flex-wrap gap-2 mt-4">
                 {attachmentFiles.map((file, i) => (
-                  <Badge key={`file-${i}`} variant="secondary" className="gap-1.5 pr-1">
+                  <Badge
+                    key={`file-${i}`}
+                    variant="secondary"
+                    className="gap-1.5 pr-1"
+                  >
                     <Paperclip size={11} />
                     <span className="max-w-[160px] truncate">{file.name}</span>
                     <button
-                      onClick={() => setAttachmentFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                      onClick={() =>
+                        setAttachmentFiles((prev) =>
+                          prev.filter((_, idx) => idx !== i),
+                        )
+                      }
                       className="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5 transition-colors"
                     >
                       <X size={10} />
@@ -631,7 +635,11 @@ const CreateTicket = () => {
                       className="h-20 w-auto rounded-lg border border-border object-cover"
                     />
                     <button
-                      onClick={() => setCapturedImages((prev) => prev.filter((_, idx) => idx !== i))}
+                      onClick={() =>
+                        setCapturedImages((prev) =>
+                          prev.filter((_, idx) => idx !== i),
+                        )
+                      }
                       className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-colors"
                     >
                       <X size={10} />
