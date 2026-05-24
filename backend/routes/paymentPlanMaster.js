@@ -1,195 +1,141 @@
-// routes/paymentPlanMaster.js
+// routes/paymentPlanMaster.js  — flat PaymentTermMaster CRUD
+// Mounted at: /api/payment-plan-master  (no server.js change needed)
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
-bumpCacheVersion("payment-plan-master").catch(() => {});
+const CACHE_KEY = "payment-term-master";
+bumpCacheVersion(CACHE_KEY).catch(() => {});
 
-// ── GET all plans (header rows only) ─────────────────────────────────────────
-router.get("/", cache("payment-plan-master", 300), async (req, res) => {
+// ── GET all ──────────────────────────────────────────────────────────────────
+router.get("/", cache(CACHE_KEY, 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT
-        p.Id,
-        p.PlanName,
-        p.IsActive,
-        p.CreatedAt,
-        p.UpdatedAt,
-        (
-          SELECT COUNT(*)
-          FROM dbo.PaymentPlanMilestone m
-          WHERE m.PlanId = p.Id
-        ) AS MilestoneCount,
-        (
-          SELECT SUM(CASE WHEN ValueType = 'P' THEN Value ELSE 0 END)
-          FROM dbo.PaymentPlanMilestone m
-          WHERE m.PlanId = p.Id
-        ) AS TotalPercentage
-      FROM dbo.PaymentPlanMaster p
-      ORDER BY p.PlanName
+      SELECT TermID, TermName, ValueType, TermValue, IsActive, CreatedAt, UpdatedAt
+      FROM dbo.PaymentTermMaster
+      ORDER BY TermName
     `);
     res.json(result.recordset);
   } catch (err) {
-    console.error("[payment-plan-master] GET error:", err.message);
+    console.error("[payment-term-master] GET error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── GET single plan with milestones ─────────────────────────────────────────
+// ── GET single ───────────────────────────────────────────────────────────────
 router.get("/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const r = await pool
+      .request()
+      .input("TermID", sql.Int, id)
+      .query("SELECT * FROM dbo.PaymentTermMaster WHERE TermID = @TermID");
+    if (!r.recordset.length)
+      return res.status(404).json({ error: "Not found" });
+    res.json(r.recordset[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST ─────────────────────────────────────────────────────────────────────
+router.post("/", async (req, res) => {
+  const { TermName, ValueType, TermValue } = req.body;
+  if (!TermName?.trim())
+    return res.status(400).json({ error: "TermName is required" });
+  const validTypes = ["percent", "fixed", "deduction"];
+  if (!validTypes.includes(ValueType))
+    return res
+      .status(400)
+      .json({ error: "ValueType must be percent, fixed, or deduction" });
+  const val = parseFloat(TermValue);
+  if (isNaN(val) || val < 0)
+    return res.status(400).json({ error: "TermValue must be >= 0" });
 
   try {
     const pool = getPool();
-
-    const planRes = await pool
+    const r = await pool
       .request()
-      .input("Id", sql.Int, id)
-      .query(
-        "SELECT Id, PlanName, IsActive FROM dbo.PaymentPlanMaster WHERE Id = @Id",
-      );
-
-    if (!planRes.recordset.length)
-      return res.status(404).json({ error: "Plan not found" });
-
-    const milestonesRes = await pool.request().input("PlanId", sql.Int, id)
-      .query(`
-        SELECT Id, MilestoneNo, PaymentTerm, ValueType, Value
-        FROM dbo.PaymentPlanMilestone
-        WHERE PlanId = @PlanId
-        ORDER BY MilestoneNo
-      `);
-
-    res.json({
-      ...planRes.recordset[0],
-      milestones: milestonesRes.recordset,
-    });
-  } catch (err) {
-    console.error("[payment-plan-master] GET /:id error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── POST — create plan + milestones ─────────────────────────────────────────
-router.post("/", async (req, res) => {
-  const { PlanName, IsActive, milestones = [] } = req.body;
-  if (!PlanName?.trim())
-    return res.status(400).json({ error: "PlanName is required" });
-
-  const createdBy = req.user?.userId || null;
-  const pool = getPool();
-  const transaction = pool.transaction();
-
-  try {
-    await transaction.begin();
-
-    const planRes = await transaction
-      .request()
-      .input("PlanName", sql.NVarChar(150), PlanName.trim())
-      .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
-      .input("CreatedBy", sql.Int, createdBy)
+      .input("TermName", sql.NVarChar(200), TermName.trim())
+      .input("ValueType", sql.NVarChar(20), ValueType)
+      .input("TermValue", sql.Decimal(18, 4), val)
+      .input("CreatedBy", sql.Int, req.user?.userId || null)
       .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
-        INSERT INTO dbo.PaymentPlanMaster (PlanName, IsActive, CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES (@PlanName, @IsActive, @CreatedBy, @CreatedAt)
+        INSERT INTO dbo.PaymentTermMaster (TermName, ValueType, TermValue, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.*
+        VALUES (@TermName, @ValueType, @TermValue, @CreatedBy, @CreatedAt)
       `);
-
-    const planId = planRes.recordset[0].Id;
-
-    for (let i = 0; i < milestones.length; i++) {
-      const m = milestones[i];
-      if (!m.PaymentTerm?.trim()) continue;
-      await transaction
-        .request()
-        .input("PlanId", sql.Int, planId)
-        .input("MilestoneNo", sql.Int, i + 1)
-        .input("PaymentTerm", sql.NVarChar(200), m.PaymentTerm.trim())
-        .input("ValueType", sql.Char(1), m.ValueType === "A" ? "A" : "P")
-        .input("Value", sql.Decimal(18, 4), parseFloat(m.Value) || 0)
-        .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
-          INSERT INTO dbo.PaymentPlanMilestone (PlanId, MilestoneNo, PaymentTerm, ValueType, Value, CreatedAt)
-          VALUES (@PlanId, @MilestoneNo, @PaymentTerm, @ValueType, @Value, @CreatedAt)
-        `);
-    }
-
-    await transaction.commit();
-    await bumpCacheVersion("payment-plan-master");
-    res.json({ message: "Payment plan created", id: planId });
+    await bumpCacheVersion(CACHE_KEY);
+    res.json(r.recordset[0]);
   } catch (err) {
-    await transaction.rollback().catch(() => {});
-    console.error("[payment-plan-master] POST error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── PUT — update plan + replace milestones ───────────────────────────────────
+// ── PUT ──────────────────────────────────────────────────────────────────────
 router.put("/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });
 
-  const { PlanName, IsActive, milestones = [] } = req.body;
-  if (!PlanName?.trim())
-    return res.status(400).json({ error: "PlanName is required" });
+  const { TermName, ValueType, TermValue, IsActive } = req.body;
+  const sets = [];
+  const request = (await getPool()).request().input("TermID", sql.Int, id);
 
-  const updatedBy = req.user?.userId || null;
-  const pool = getPool();
-  const transaction = pool.transaction();
+  if (TermName !== undefined) {
+    if (!TermName?.trim())
+      return res.status(400).json({ error: "TermName cannot be empty" });
+    sets.push("TermName = @TermName");
+    request.input("TermName", sql.NVarChar(200), TermName.trim());
+  }
+  if (ValueType !== undefined) {
+    const validTypes = ["percent", "fixed", "deduction"];
+    if (!validTypes.includes(ValueType))
+      return res.status(400).json({ error: "Invalid ValueType" });
+    sets.push("ValueType = @ValueType");
+    request.input("ValueType", sql.NVarChar(20), ValueType);
+  }
+  if (TermValue !== undefined) {
+    const val = parseFloat(TermValue);
+    if (isNaN(val) || val < 0)
+      return res.status(400).json({ error: "TermValue must be >= 0" });
+    sets.push("TermValue = @TermValue");
+    request.input("TermValue", sql.Decimal(18, 4), val);
+  }
+  if (IsActive !== undefined) {
+    sets.push("IsActive = @IsActive");
+    request.input("IsActive", sql.Bit, IsActive ? 1 : 0);
+  }
+  if (!sets.length) return res.status(400).json({ error: "Nothing to update" });
+
+  sets.push("UpdatedAt = @UpdatedAt", "UpdatedBy = @UpdatedBy");
+  request
+    .input("UpdatedAt", sql.DateTime2(3), new Date())
+    .input("UpdatedBy", sql.Int, req.user?.userId || null);
 
   try {
-    await transaction.begin();
-
-    await transaction
-      .request()
-      .input("Id", sql.Int, id)
-      .input("PlanName", sql.NVarChar(150), PlanName.trim())
-      .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
-      .input("UpdatedBy", sql.Int, updatedBy)
-      .input("UpdatedAt", sql.DateTime2(3), new Date()).query(`
-        UPDATE dbo.PaymentPlanMaster
-        SET PlanName = @PlanName, IsActive = @IsActive,
-            UpdatedBy = @UpdatedBy, UpdatedAt = @UpdatedAt
-        WHERE Id = @Id
-      `);
-
-    // Replace all milestones
-    await transaction
-      .request()
-      .input("PlanId", sql.Int, id)
-      .query("DELETE FROM dbo.PaymentPlanMilestone WHERE PlanId = @PlanId");
-
-    for (let i = 0; i < milestones.length; i++) {
-      const m = milestones[i];
-      if (!m.PaymentTerm?.trim()) continue;
-      await transaction
-        .request()
-        .input("PlanId", sql.Int, id)
-        .input("MilestoneNo", sql.Int, i + 1)
-        .input("PaymentTerm", sql.NVarChar(200), m.PaymentTerm.trim())
-        .input("ValueType", sql.Char(1), m.ValueType === "A" ? "A" : "P")
-        .input("Value", sql.Decimal(18, 4), parseFloat(m.Value) || 0)
-        .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
-          INSERT INTO dbo.PaymentPlanMilestone (PlanId, MilestoneNo, PaymentTerm, ValueType, Value, CreatedAt)
-          VALUES (@PlanId, @MilestoneNo, @PaymentTerm, @ValueType, @Value, @CreatedAt)
-        `);
-    }
-
-    await transaction.commit();
-    await bumpCacheVersion("payment-plan-master");
-    res.json({ message: "Payment plan updated" });
+    const r = await request.query(`
+      UPDATE dbo.PaymentTermMaster
+      SET ${sets.join(", ")}
+      OUTPUT INSERTED.*
+      WHERE TermID = @TermID
+    `);
+    if (!r.recordset.length)
+      return res.status(404).json({ error: "Not found" });
+    await bumpCacheVersion(CACHE_KEY);
+    res.json(r.recordset[0]);
   } catch (err) {
-    await transaction.rollback().catch(() => {});
-    console.error("[payment-plan-master] PUT error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── DELETE ────────────────────────────────────────────────────────────────────
+// ── DELETE — hard if unused, soft otherwise ──────────────────────────────────
 router.delete("/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
@@ -199,24 +145,76 @@ router.delete("/:id", async (req, res) => {
     const pool = getPool();
     const existing = await pool
       .request()
-      .input("Id", sql.Int, id)
-      .query("SELECT PlanName FROM dbo.PaymentPlanMaster WHERE Id = @Id");
-
+      .input("TermID", sql.Int, id)
+      .query(
+        "SELECT TermName FROM dbo.PaymentTermMaster WHERE TermID = @TermID",
+      );
     if (!existing.recordset.length)
-      return res.status(404).json({ error: "Plan not found" });
+      return res.status(404).json({ error: "Not found" });
 
-    const { PlanName } = existing.recordset[0];
+    const inUse = await pool.request().input("TermID", sql.Int, id).query(`
+      SELECT TOP 1 1 AS Used FROM dbo.BookingPaymentTerms WHERE TermID = @TermID
+      UNION ALL
+      SELECT TOP 1 1 FROM dbo.UnitPaymentTerms WHERE TermID = @TermID
+    `);
 
-    // Milestones cascade-delete via FK
+    if (inUse.recordset.length) {
+      await pool
+        .request()
+        .input("TermID", sql.Int, id)
+        .query(
+          "UPDATE dbo.PaymentTermMaster SET IsActive = 0 WHERE TermID = @TermID",
+        );
+      await bumpCacheVersion(CACHE_KEY);
+      return res.json({
+        message: "Term is in use — deactivated",
+        softDeleted: true,
+      });
+    }
+
     await pool
       .request()
-      .input("Id", sql.Int, id)
-      .query("DELETE FROM dbo.PaymentPlanMaster WHERE Id = @Id");
-
-    await bumpCacheVersion("payment-plan-master");
-    res.json({ message: `Payment plan "${PlanName}" deleted` });
+      .input("TermID", sql.Int, id)
+      .query("DELETE FROM dbo.PaymentTermMaster WHERE TermID = @TermID");
+    await bumpCacheVersion(CACHE_KEY);
+    res.json({ message: "Term deleted", softDeleted: false });
   } catch (err) {
-    console.error("[payment-plan-master] DELETE error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Booking / Unit term lookups (for future use) ─────────────────────────────
+router.get("/booking/:bookingId", async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool
+      .request()
+      .input("BookingID", sql.Int, parseInt(req.params.bookingId, 10)).query(`
+        SELECT b.Id, b.DueDate, b.IsPaid, b.PaidOn,
+               t.TermID, t.TermName, t.ValueType, t.TermValue
+        FROM dbo.BookingPaymentTerms b
+        JOIN dbo.PaymentTermMaster t ON t.TermID = b.TermID
+        WHERE b.BookingID = @BookingID
+      `);
+    res.json(r.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/unit/:unitId", async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool
+      .request()
+      .input("UnitID", sql.Int, parseInt(req.params.unitId, 10)).query(`
+        SELECT u.Id, t.TermID, t.TermName, t.ValueType, t.TermValue
+        FROM dbo.UnitPaymentTerms u
+        JOIN dbo.PaymentTermMaster t ON t.TermID = u.TermID
+        WHERE u.UnitID = @UnitID
+      `);
+    res.json(r.recordset);
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
