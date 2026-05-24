@@ -5,7 +5,7 @@
 
 [![Status](https://img.shields.io/badge/status-under%20active%20development-orange)](https://rajwadainfotech.com)
 [![License](https://img.shields.io/badge/license-proprietary-red)](#license)
-[![Stack](https://img.shields.io/badge/stack-React%20%2B%20Node.js%20%2B%20PostgreSQL-blue)](#tech-stack)
+[![Stack](https://img.shields.io/badge/stack-React%20%2B%20Node.js%20%2B%20MSSQL-blue)](#tech-stack)
 
 ---
 
