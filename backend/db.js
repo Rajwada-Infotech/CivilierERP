@@ -2,12 +2,10 @@ const logger = require("./logger");
 require("./config/env").loadEnv();
 const sql = require("mssql");
 
-// POOL_BURST: number of connections to pre-open at startup.
-// On page load the app fires ~12-15 concurrent queries. Each connection beyond
-// pool.min that hasn't been opened yet costs a full TDS handshake (~1-3 s over
-// LAN), which is why every cold db.query was 1000-7000 ms even for trivial
-// SELECT * queries. Setting min=15 and warming all 15 connections at startup
-// means the pool is fully pre-heated before the first request arrives.
+// POOL_BURST: connections to pre-open at startup.
+// On page load the app fires ~12-15 concurrent queries per socket reconnect.
+// min=15 keeps that many connections alive; max=30 gives headroom for burst
+// storms without hitting the tarn "operation timed out" error seen at 08:22.
 const POOL_BURST = 15;
 
 const config = {
@@ -22,10 +20,10 @@ const config = {
     packetSize: 32768,
   },
   pool: {
-    max: 20,
+    max: 30, // was 20 — raised to survive reconnect burst storms
     min: POOL_BURST, // keep POOL_BURST connections alive at all times
-    idleTimeoutMillis: 60000, // raised: don't tear down connections after 30 s
-    acquireTimeoutMillis: 10000,
+    idleTimeoutMillis: 60000,
+    acquireTimeoutMillis: 15000, // was 10000 — extra 5 s for new connection handshake
   },
   connectionTimeout: 30000,
   requestTimeout: 30000,
@@ -120,4 +118,40 @@ async function isDbReady() {
   }
 }
 
-module.exports = { sql, connectDB, getPool, getPoolStats, closeDB, isDbReady };
+module.exports = {
+  sql,
+  connectDB,
+  getPool,
+  getPoolStats,
+  closeDB,
+  isDbReady,
+  queryWithRetry,
+};
+
+// Retry a DB operation up to `retries` times on ECONNRESET.
+// Usage: await queryWithRetry(pool, req => req.input(...).query(...))
+async function queryWithRetry(poolOrFn, fn, retries = 2) {
+  // Support both queryWithRetry(pool, fn) and queryWithRetry(fn) signatures
+  if (typeof poolOrFn === "function") {
+    fn = poolOrFn;
+    poolOrFn = null;
+  }
+  const getP = () => poolOrFn || getPool();
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn(getP().request());
+    } catch (err) {
+      const isReset =
+        err.code === "ECONNRESET" ||
+        (err.message && err.message.includes("ECONNRESET"));
+      if (i < retries && isReset) {
+        logger.warn(
+          { event: "DB_ECONNRESET_RETRY", attempt: i + 1, retries },
+          "ECONNRESET — retrying query",
+        );
+        continue;
+      }
+      throw err;
+    }
+  }
+}

@@ -22,6 +22,10 @@ import {
   FileCheck,
   Users,
   Database,
+  Ticket,
+  HardHat as EngineerHat,
+  TriangleAlert,
+  CheckCircle2,
 } from "lucide-react";
 import { formatINR } from "@/utils/formatCurrency";
 import {
@@ -32,6 +36,9 @@ import {
   type RecentPO,
   type ApprovalInboxItem,
   type TaskSummary,
+  type TicketSummaryData,
+  type EngineeringSummaryData,
+  type FollowupSummaryData,
 } from "@/api/homeDashboardApi";
 
 // ─── Animated Counter ─────────────────────────────────────────────────────────
@@ -557,16 +564,20 @@ export default function Home() {
   const finance = data?.finance;
   const material = data?.material;
   const admin = data?.admin;
+  const tickets = data?.tickets;
+  const engineering = data?.engineering;
+  const followup = data?.followup;
   const pendingApprovalCount = data?.pendingApprovals?.length ?? 0;
 
   const stats: StatDef[] = [
     {
       label: "Work Orders",
-      numericValue: material?.workOrders?.total ?? 0,
+      numericValue:
+        engineering?.workOrders?.total ?? material?.workOrders?.total ?? 0,
       icon: Hammer,
       color: "hsl(var(--primary))",
       glow: "hsl(var(--primary))",
-      description: "Total work orders raised across all projects",
+      description: `${engineering?.workOrders?.open ?? material?.workOrders?.open ?? 0} open · ${engineering?.workOrders?.thisMonth ?? 0} this month`,
       delay: 0.08,
       loading: isLoading,
     },
@@ -643,11 +654,31 @@ export default function Home() {
             loading: isLoading,
           } as StatDef,
         ]),
+    {
+      label: "Open Tickets",
+      numericValue: (tickets?.pending ?? 0) + (tickets?.inProgress ?? 0),
+      icon: Ticket,
+      color: "#f97316",
+      glow: "#f97316",
+      description: `${tickets?.urgent ?? 0} urgent · ${tickets?.resolvedPct ?? 0}% resolved`,
+      delay: 0.5,
+      loading: isLoading,
+    },
+    {
+      label: "Active Projects",
+      numericValue: engineering?.projects?.active ?? 0,
+      icon: EngineerHat,
+      color: "#ec4899",
+      glow: "#ec4899",
+      description: `${engineering?.workOrders?.open ?? 0} open WOs · ${engineering?.workDone?.pending ?? 0} work done pending`,
+      delay: 0.57,
+      loading: isLoading,
+    },
   ];
 
   const modules = [
     {
-      label: "Finance Dashboard",
+      label: "Finance",
       desc: `${finance?.payments?.totalCount ?? "—"} payments · ${finance?.purchaseOrders?.openCount ?? "—"} open POs`,
       icon: BarChart3,
       href: "/finance",
@@ -655,20 +686,37 @@ export default function Home() {
       badge: undefined,
     },
     {
-      label: "Material & GRN",
-      desc: `${material?.grns?.total ?? "—"} GRNs · ${material?.workOrders?.total ?? "—"} work orders`,
+      label: "Material",
+      desc: `${material?.grns?.total ?? "—"} GRNs · ${engineering?.workOrders?.open ?? material?.workOrders?.open ?? "—"} open WOs`,
       icon: Hammer,
       href: "/material",
       accent: "#8b5cf6",
       badge: undefined,
     },
     {
-      label: "Approval Inbox",
-      desc: "Pending across all modules",
-      icon: FileCheck,
-      href: "/admin/approval/inbox",
-      accent: "#ef4444",
-      badge: pendingApprovalCount || undefined,
+      label: "Engineering",
+      desc: `${engineering?.projects?.active ?? "—"} active projects · ${engineering?.workOrders?.open ?? "—"} open WOs`,
+      icon: EngineerHat,
+      href: "/engineering",
+      accent: "#ec4899",
+      badge: undefined,
+    },
+    {
+      label: "Followup",
+      desc: `${followup?.applications ?? "—"} applications · ${followup?.confirmedBookings ?? "—"} confirmed bookings`,
+      icon: Users,
+      href: "/followup",
+      accent: "#6366f1",
+      badge:
+        (followup?.pendingNOCs ?? 0) > 0 ? followup!.pendingNOCs : undefined,
+    },
+    {
+      label: "Tickets",
+      desc: `${(tickets?.pending ?? 0) + (tickets?.inProgress ?? 0)} open · ${tickets?.urgent ?? 0} urgent · ${tickets?.resolvedPct ?? 0}% resolved`,
+      icon: Ticket,
+      href: "/tickets",
+      accent: "#f97316",
+      badge: tickets?.urgent ? tickets.urgent : undefined,
     },
     {
       label: "Tasks",
@@ -679,17 +727,17 @@ export default function Home() {
       badge: undefined,
     },
     {
-      label: "Follow-Up",
-      desc: "Scheduled site follow-ups",
-      icon: ClipboardList,
-      href: "/followup",
-      accent: "#10b981",
-      badge: undefined,
+      label: "Approval Inbox",
+      desc: `${pendingApprovalCount} pending across all modules`,
+      icon: FileCheck,
+      href: "/admin/approval/inbox",
+      accent: "#ef4444",
+      badge: pendingApprovalCount || undefined,
     },
     ...(isAdmin
       ? [
           {
-            label: "Admin Panel",
+            label: "Admin",
             desc: `${admin?.stats?.totalUsers ?? "—"} users · ${admin?.stats?.totalRoles ?? "—"} roles`,
             icon: ShieldCheck,
             href: "/admin",

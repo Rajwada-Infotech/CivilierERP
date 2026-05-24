@@ -82,6 +82,7 @@ function isLocalRequest(req) {
 const ALL_ROUTES = [
   { path: "/api/roles", file: "./routes/roles" },
   { path: "/api/user-rights", file: "./routes/userRights" },
+  { path: "/api/user-widget-rights", file: "./routes/userWidgetRights" },
   { path: "/api/account-group", file: "./routes/accountGroup" },
   { path: "/api/account-head", file: "./routes/accountHeadMaster" },
   { path: "/api/activity-master", file: "./routes/activityMaster" },
@@ -150,6 +151,7 @@ const ALL_ROUTES = [
   { path: "/api/project-master", file: "./routes/projectMaster" },
   { path: "/api/block-master", file: "./routes/blockMaster" },
   { path: "/api/unit-master", file: "./routes/unitMaster" },
+  { path: "/api/payment-plan-master", file: "./routes/paymentPlanMaster" },
   { path: "/api/business", file: "./routes/businessRoutes" },
   { path: "/api/tickets", file: "./routes/ticketRoutes" },
   { path: "/api/signatures", file: "./routes/signatures" },

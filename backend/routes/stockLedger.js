@@ -172,7 +172,7 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
       SELECT
         sl.StockID,
         CONVERT(NVARCHAR(50), sl.ItemID) AS ItemID,
-        COALESCE(sl.ItemName, img.M_Name) AS ItemName,
+        COALESCE(img.M_Name, CONVERT(NVARCHAR(50), sl.ItemID)) AS ItemName,
         parent.M_Name AS ItemGroupName,
         sl.Qty,
         sl.Type,

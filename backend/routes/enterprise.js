@@ -7,23 +7,42 @@ const { getPool, sql } = require("../db");
 // GET all
 router.get(
   "/",
-  cache("enterprises", 300, { shared: true }),
+  cache("enterprises", 60, { shared: true }),
   async (req, res) => {
     try {
       const pool = getPool();
-      const result = await pool.request().query(`
+      const request = pool.request();
+
+      // Allow filtering by business_type (e.g. ?business_type=S for suppliers,
+      // ?business_type=C for companies). Defaults to 'E' (Enterprises) when omitted.
+      const businessType = req.query.business_type
+        ? String(req.query.business_type).trim().toUpperCase()
+        : "E";
+
+      request.input("businessType", sql.NVarChar(10), businessType);
+
+      const result = await request.query(`
       SELECT
         id, name, short_name, business_identity, entity_type,
         b_sub_identity_type, belongs_to,
-        address, address_line2, city, state, country, pincode,
-        phone_number, email, website,
-        pan, tan, cin, gst_type, gst_issue_date, trade_license,
+        address, address_line2, address_line3, city, state, country, pincode,
+        phone_number, email, website, fax,
+        pan, cin, tan, gst_type, gst_issue_date, trade_license,
         currency, fiscal_year_start,
-        start_date, date_of_entry,
+        start_date, start_fin_year, end_date, date_of_entry, date_of_establishment,
         CASE WHEN discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
-        discontinue
+        discontinue, status, cr_code, rera_no, rera_date,
+        latitude, longitude,
+        cost_center, profit_center,
+        auditor_name, authorized_capital, paid_up_capital,
+        client_name, client_code, team_size,
+        jv_enabled, jv_company_name,
+        remarks, description, tds_limit,
+        gst_no, pan_no, contact_person, phone,
+        logo, business_type
       FROM dbo.enterprise
-      WHERE business_type = 'E' AND discontinue = 0
+      WHERE business_type = @businessType
+        AND (discontinue IS NULL OR discontinue = 0)
       ORDER BY name
     `);
       res.json(result.recordset);
@@ -32,6 +51,10 @@ router.get(
     }
   },
 );
+
+// Bust enterprise cache on module load so pre-existing DB rows are always visible
+// after a server restart (avoids serving a stale empty-array from Redis).
+bumpCacheVersion("enterprises").catch(() => {});
 
 // ADD
 router.post("/", async (req, res) => {
@@ -340,46 +363,6 @@ router.get("/options", async (req, res) => {
     res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch enterprise options" });
-  }
-});
-
-// SEED
-router.post("/seed", async (req, res) => {
-  try {
-    const pool = getPool();
-    const countResult = await pool
-      .request()
-      .query("SELECT COUNT(*) AS cnt FROM dbo.enterprise");
-    const existing = countResult.recordset[0].cnt;
-    if (existing >= 5) {
-      const rows = await pool
-        .request()
-        .query("SELECT TOP 5 id, name FROM dbo.enterprise ORDER BY id");
-      return res.json({ message: "Already seeded.", rows: rows.recordset });
-    }
-    const seeds = [
-      { name: "Civilier Infrastructure Pvt Ltd", entity_type: "Enterprise" },
-      { name: "Apex Constructions Ltd", entity_type: "Company" },
-      { name: "SiteCraft Engineers", entity_type: "Company" },
-      { name: "Raj Builders & Co", entity_type: "Business Unit" },
-      { name: "Metro Rail Project", entity_type: "Business Unit" },
-    ];
-    for (const s of seeds) {
-      await pool
-        .request()
-        .input("name", sql.NVarChar, s.name)
-        .input("entity_type", sql.NVarChar, s.entity_type)
-        .query(`IF NOT EXISTS (SELECT 1 FROM dbo.enterprise WHERE name = @name)
-          INSERT INTO dbo.enterprise (name, entity_type) VALUES (@name, @entity_type)`);
-    }
-    const rows = await pool
-      .request()
-      .query(
-        "SELECT id, name FROM dbo.enterprise WHERE name IN ('Civilier Infrastructure Pvt Ltd','Apex Constructions Ltd','SiteCraft Engineers','Raj Builders & Co','Metro Rail Project') ORDER BY id",
-      );
-    res.json({ message: "Seed complete.", rows: rows.recordset });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
   }
 });
 
