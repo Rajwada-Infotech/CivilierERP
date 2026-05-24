@@ -449,6 +449,7 @@ export default function TicketDashboard() {
                 iconColor="text-red-600"
                 iconBg="bg-red-500/10"
                 trend={stats.urgent + stats.high > 0 ? "down" : "neutral"}
+                onClick={() => navigate("/ticket/pending")}
               />
             </>
           )}
