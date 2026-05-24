@@ -16,14 +16,13 @@ import {
   Search,
   IndianRupee,
   Percent,
-  Minus,
 } from "lucide-react";
 
 // Same mount path — no server.js change needed
 const API = "/api/payment-plan-master";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type ValueType = "percent" | "fixed" | "deduction";
+type ValueType = "percent" | "fixed";
 
 interface PaymentTerm {
   TermID: number;
@@ -68,16 +67,10 @@ const TYPE_META: Record<
     icon: <IndianRupee size={10} />,
     badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
   },
-  deduction: {
-    label: "Deduct",
-    icon: <Minus size={10} />,
-    badge: "bg-rose-500/10 text-rose-400 border-rose-500/20",
-  },
 };
 
 const formatValue = (t: PaymentTerm) => {
   if (t.ValueType === "percent") return `${t.TermValue}%`;
-  if (t.ValueType === "deduction") return `-${t.TermValue}%`;
   return `₹${Number(t.TermValue).toLocaleString("en-IN")}`;
 };
 
@@ -149,14 +142,6 @@ const PaymentPlanMaster: React.FC = () => {
     [terms],
   );
 
-  const totalDeduction = useMemo(
-    () =>
-      terms
-        .filter((t) => t.ValueType === "deduction" && t.IsActive)
-        .reduce((acc, t) => acc + t.TermValue, 0),
-    [terms],
-  );
-
   const activeCount = useMemo(
     () => terms.filter((t) => t.IsActive).length,
     [terms],
@@ -166,8 +151,8 @@ const PaymentPlanMaster: React.FC = () => {
     if (!d.TermName.trim()) return "Term name is required";
     const v = parseFloat(d.TermValue);
     if (isNaN(v) || v < 0) return "Value must be a positive number";
-    if ((d.ValueType === "percent" || d.ValueType === "deduction") && v > 100)
-      return "Percent/deduction cannot exceed 100";
+    if (d.ValueType === "percent" && v > 100)
+      return "Percent cannot exceed 100";
     return null;
   };
 
@@ -306,7 +291,7 @@ const PaymentPlanMaster: React.FC = () => {
             Payment Plan Master
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Define payment milestones — % terms, fixed charges, and deductions
+            Define reusable payment milestone terms for bookings &amp; units
           </p>
         </div>
         <button
@@ -340,11 +325,6 @@ const PaymentPlanMaster: React.FC = () => {
             {totalPercent === 100 ? " ✓" : totalPercent > 100 ? " !" : ""}
           </span>
         )}
-        {totalDeduction > 0 && (
-          <span className="px-3 py-1 rounded-full text-xs font-heading bg-rose-500/10 text-rose-400 border border-rose-500/20">
-            Deductions: -{totalDeduction.toFixed(2)}%
-          </span>
-        )}
       </div>
 
       {/* ── Table card ─────────────────────────────────────────────────────── */}
@@ -364,7 +344,7 @@ const PaymentPlanMaster: React.FC = () => {
             />
           </div>
           <div className="flex items-center gap-1 flex-wrap">
-            {(["all", "percent", "fixed", "deduction"] as const).map((f) => (
+            {(["all", "percent", "fixed"] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilterType(f)}
@@ -378,9 +358,7 @@ const PaymentPlanMaster: React.FC = () => {
                   ? "All"
                   : f === "percent"
                     ? "% Percent"
-                    : f === "fixed"
-                      ? "₹ Fixed"
-                      : "− Deduction"}
+                    : "₹ Fixed"}
               </button>
             ))}
           </div>
