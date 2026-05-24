@@ -189,6 +189,26 @@ function cache(namespace, ttl = 300, { shared = false } = {}) {
         return res.json(data);
       }
 
+      // Cache miss — intercept res.json to populate cache on the way out.
+      //
+      // LOCK LEAK FIX: releaseLock and the "finish" safety-net listener must be
+      // set up BEFORE any branch that calls next() or returns early. Previously
+      // they were only attached inside the lockAcquired===true block, so 304
+      // responses (which bypass res.json entirely) left the lock held for the
+      // full 30-second TTL — a perpetual cache-miss loop on every cached route.
+      const dbStart = req.timing?.startStage();
+      const originalJson = res.json.bind(res);
+      let lockReleased = false;
+
+      const releaseLock = () => {
+        if (lockReleased) return;
+        lockReleased = true;
+        redisOp(() => redisDel(lockKey)).catch(() => {});
+      };
+
+      // Always fires — covers 304, errors, stream ends, anything bypassing res.json
+      res.on("finish", releaseLock);
+
       // Stampede protection
       const lockStart = req.timing?.startStage();
       const lockAcquired = await redisOp(() => redisLock(lockKey, 30));
@@ -220,34 +240,7 @@ function cache(namespace, ttl = 300, { shared = false } = {}) {
         return next();
       }
 
-      // Cache miss — intercept res.json to populate on the way out.
-      // Also instrument the DB query time so it appears in timing stages.
-      //
-      // BUG FIX: When a route responds 304 Not Modified, Express bypasses
-      // res.json() entirely and sends the conditional-GET response directly.
-      // The old code released the stampede-protection lock only inside res.json,
-      // so 304 responses left the lock held for its full 30-second TTL.
-      // Every subsequent request found the lock held, fell through to the stale
-      // path (no stale either), hit the DB, got another 304, left another lock —
-      // a perpetual cache-miss loop on all heavily-cached routes during idle
-      // polling (approval-inbox/count, purchase-orders, billing-terms, etc.).
-      //
-      // Fix: attach a one-shot "finish" listener that always releases the lock.
-      // releaseLock() is idempotent — calling it from both res.json and "finish"
-      // is safe and ensures the lock is freed regardless of response path.
-      const dbStart = req.timing?.startStage();
-      const originalJson = res.json.bind(res);
-      let lockReleased = false;
-
-      const releaseLock = () => {
-        if (lockReleased) return;
-        lockReleased = true;
-        redisOp(() => redisDel(lockKey)).catch(() => {});
-      };
-
-      // Always fires — covers 304, errors, stream ends, anything that bypasses res.json
-      res.on("finish", releaseLock);
-
+      // Cache miss — write to cache after DB responds
       res.json = async (data) => {
         try {
           if (dbStart) req.timing.mark("db.query", dbStart);
