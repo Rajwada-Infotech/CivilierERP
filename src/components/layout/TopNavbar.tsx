@@ -777,7 +777,7 @@ export const TopNavbar = () => {
   const [moduleOpen, setModuleOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
-  const [bellOpen, setBellOpen] = useState(false);
+
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isDba = currentUser?.role === "dba";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
@@ -875,13 +875,11 @@ export const TopNavbar = () => {
     setModuleOpen(false);
     setUserOpen(false);
     setThemeOpen(false);
-    setBellOpen(false);
   }, []);
   const closeSetup = useCallback(() => setSetupOpen(false), []);
   const closeModule = useCallback(() => setModuleOpen(false), []);
   const closeTheme = useCallback(() => setThemeOpen(false), []);
   const closeUser = useCallback(() => setUserOpen(false), []);
-  const closeBell = useCallback(() => setBellOpen(false), []);
 
   const toggleSetup = useCallback(() => {
     if (setupConfig.available) {
@@ -889,7 +887,6 @@ export const TopNavbar = () => {
       setModuleOpen(false);
       setUserOpen(false);
       setThemeOpen(false);
-      setBellOpen(false);
     }
   }, [setupConfig.available]);
 
@@ -898,7 +895,6 @@ export const TopNavbar = () => {
     setSetupOpen(false);
     setUserOpen(false);
     setThemeOpen(false);
-    setBellOpen(false);
   }, []);
 
   const toggleTheme = useCallback(() => {
@@ -906,22 +902,12 @@ export const TopNavbar = () => {
     setSetupOpen(false);
     setModuleOpen(false);
     setUserOpen(false);
-    setBellOpen(false);
   }, []);
 
   const toggleUser = useCallback(() => {
     setUserOpen((p) => !p);
     setSetupOpen(false);
     setModuleOpen(false);
-    setThemeOpen(false);
-    setBellOpen(false);
-  }, []);
-
-  const toggleBell = useCallback(() => {
-    setBellOpen((p) => !p);
-    setSetupOpen(false);
-    setModuleOpen(false);
-    setUserOpen(false);
     setThemeOpen(false);
   }, []);
 
@@ -1099,11 +1085,7 @@ export const TopNavbar = () => {
             </Dropdown>
           </div>
 
-          <ReminderBell
-            open={bellOpen}
-            onToggle={toggleBell}
-            onClose={closeBell}
-          />
+          <ReminderBell />
           <ThemeSwitcher
             open={themeOpen}
             onToggle={toggleTheme}
@@ -1153,11 +1135,7 @@ export const TopNavbar = () => {
 
         {/* Mobile right side */}
         <div className="flex md:hidden items-center gap-1 justify-end">
-          <ReminderBell
-            open={bellOpen}
-            onToggle={toggleBell}
-            onClose={closeBell}
-          />
+          <ReminderBell />
 
           <Dropdown
             open={userOpen}
