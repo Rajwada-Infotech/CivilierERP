@@ -548,6 +548,30 @@ function buildInsights({ role, isPrivileged, summary, trends }) {
   return insights.slice(0, 4);
 }
 
+router.get("/catalog", async (_req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT
+        WidgetKey AS [key],
+        Label AS label,
+        IconKey AS iconKey,
+        Category AS category,
+        ISNULL(Description, '') AS description,
+        SortOrder AS sortOrder,
+        CAST(IsActive AS bit) AS isActive
+      FROM dbo.WidgetCatalog
+      WHERE IsActive = 1
+      ORDER BY SortOrder ASC, Label ASC
+    `);
+
+    return res.json(result.recordset);
+  } catch (error) {
+    console.error("Widget catalog error:", error.message);
+    return res.status(500).json({ error: "Failed to load widget catalog" });
+  }
+});
+
 router.get("/", async (req, res) => {
   const role = req.user?.role || "user";
   const userId = Number(req.user?.userId || 0);
