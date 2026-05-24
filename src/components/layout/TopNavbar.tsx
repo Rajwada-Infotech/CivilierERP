@@ -80,14 +80,13 @@ const Dropdown = ({
   className?: string;
   style?: React.CSSProperties;
 }) => {
-  const panelRef = useRef<HTMLDivElement>(null);
-  useClickOutside(panelRef, onClose, open);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  useClickOutside(wrapperRef, onClose, open);
 
   return (
-    <div className="relative shrink-0">
+    <div className="relative shrink-0" ref={wrapperRef}>
       {trigger}
       <div
-        ref={panelRef}
         style={style}
         className={`absolute top-full mt-2 z-50 rounded-xl border border-border bg-card shadow-2xl transition-all duration-200 origin-top-right
           ${open ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"} ${className || ""}`}
@@ -228,12 +227,6 @@ const followupSetupItems = [
     path: "/followup/setup/customer-master",
     color: "text-violet-500",
   },
-  {
-    icon: FileText,
-    label: "Payment Plan",
-    path: "/followup/setup/payment-plan-master",
-    color: "text-emerald-500",
-  },
 ];
 
 const engineeringSetupItems = [
@@ -289,7 +282,7 @@ const SetupDropdown = ({
   onClose: () => void;
   onToggle: () => void;
   items: {
-    icon: React.ElementType;
+    icon: React.ElementType<any>;
     label: string;
     path: string;
     color: string;
@@ -513,7 +506,7 @@ const ModuleDropdownContent = ({
   moduleOptions: Array<{
     id: NonNullable<Module>;
     name: string;
-    icon: React.ElementType;
+    icon: React.ElementType<any>;
     desc: string;
     route: string;
   }>;
@@ -622,7 +615,7 @@ const ModuleDropdownContent = ({
             onMouseDown={() =>
               handleModuleSwitch(
                 "Admin",
-                "admin",
+                "admin" as Module,
                 MODULE_DASHBOARD_ROUTES.admin,
               )
             }
@@ -936,10 +929,10 @@ export const TopNavbar = () => {
   const navBtnCls = (active: boolean) =>
     `flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${active ? "bg-muted text-foreground" : "hover:bg-muted text-foreground"}`;
 
-  const moduleOptions: Array<{
+  const allModuleOptions: Array<{
     id: NonNullable<Module>;
     name: string;
-    icon: React.ElementType;
+    icon: React.ElementType<any>;
     desc: string;
     route: string;
   }> = [
@@ -978,11 +971,13 @@ export const TopNavbar = () => {
       desc: "Support & issue tracking",
       route: MODULE_DASHBOARD_ROUTES.ticket,
     },
-  ].filter((m) =>
-    currentUser?.role === "engineer"
-      ? ["followup", "engineering", "ticket"].includes(m.id)
-      : true,
-  );
+  ];
+
+  const engineerModules: NonNullable<Module>[] = ["followup", "engineering", "ticket"];
+
+  const moduleOptions = currentUser?.role === "engineer"
+    ? allModuleOptions.filter((m) => engineerModules.includes(m.id))
+    : allModuleOptions;
 
   // Close mobile menu on route change
   useEffect(() => {}, [location.pathname]);
