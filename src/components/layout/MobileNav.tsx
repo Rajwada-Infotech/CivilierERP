@@ -459,9 +459,14 @@ export const MobileNav: React.FC = () => {
   const activeModKey = isAdminPage ? "admin" : (activeModule ?? "__none__");
   const activeMod = MODULE_META[activeModKey] ?? MODULE_META.__none__;
 
-  const moduleModules = Object.entries(MODULE_META).filter(
-    ([id]) => id !== "__none__" && (id !== "admin" || isAdmin),
-  );
+  const moduleModules = Object.entries(MODULE_META).filter(([id]) => {
+    if (id === "__none__") return false;
+    if (id === "admin") return isAdmin;
+    if (currentUser?.role?.toLowerCase() === "engineer") {
+      return ["followup", "engineering", "ticket"].includes(id);
+    }
+    return true;
+  });
 
   // Theme checkmark colours
   const themeCheck: Record<Theme, string> = {

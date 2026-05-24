@@ -1,6 +1,7 @@
 const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 const router = express.Router();
 
@@ -33,6 +34,7 @@ const LIST_COLUMNS = `
 const STATUS_OPTIONS = ["Draft", "Issued", "Signed", "Cancelled"];
 
 router.use(authMiddleware);
+router.use(checkPermissionForMethod("Followup", "Agreements"));
 
 function requireUserName(req, res) {
   const userName = req.user?.name || req.user?.email || null;

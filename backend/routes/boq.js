@@ -3,11 +3,14 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition, guardEdit } = require("../services/approvalService");
 const {
   lockNextDocNumber,
   backPatchRecordId,
 } = require("../utils/docNumberLock");
+
+router.use(checkPermissionForMethod("Engineering", "BOQ"));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
