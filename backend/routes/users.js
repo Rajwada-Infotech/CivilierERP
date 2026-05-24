@@ -126,6 +126,7 @@ router.post("/login", async (req, res) => {
       .input("email", sql.NVarChar, normalizedEmail)
       .query(`
         SELECT u.id, u.name, u.email, u.RoleId, u.password, u.discontinue,
+               ISNULL(u.can_accept_tickets, 0) AS can_accept_tickets,
                r.RName AS roleName
         FROM dbo.users u
         LEFT JOIN dbo.Role r ON u.RoleId = r.RId
@@ -188,6 +189,7 @@ router.post("/login", async (req, res) => {
         email: user.email,
         role: normalizedRole,
         roleId: user.RoleId,
+        can_accept_tickets: !!user.can_accept_tickets,
         pagePermissions: await (async () => {
         try {
           const pr = await pool.request()
@@ -245,7 +247,8 @@ router.get(
       const result = await pool.request().query(`
         SELECT u.id, u.name, u.email, u.RoleId,
                r.RName AS roleName,
-               u.created_datetime, u.discontinue
+               u.created_datetime, u.discontinue,
+               ISNULL(u.can_accept_tickets, 0) AS can_accept_tickets
         FROM dbo.users u
         LEFT JOIN dbo.Role r ON u.RoleId = r.RId
       `);
@@ -255,6 +258,7 @@ router.get(
         ...user,
         role: normalizeRole(user.roleName),
         roleName: user.roleName,
+        can_accept_tickets: !!user.can_accept_tickets,
       }));
 
       res.json(normalizedUsers);
@@ -272,7 +276,7 @@ router.post(
   authMiddleware,
   checkPermission("Users", "List", "CanAdd"),
   async (req, res) => {
-    const { name, email, RoleId, roleId, password } = req.body;
+    const { name, email, RoleId, roleId, password, can_accept_tickets } = req.body;
     if (!password) {
       return res.status(400).json({ error: "Password required" });
     }
@@ -285,9 +289,10 @@ router.post(
         .input("name", sql.NVarChar, name)
         .input("email", sql.NVarChar, email)
         .input("RoleId", sql.Int, assignedRoleId)
+        .input("can_accept_tickets", sql.Bit, can_accept_tickets ? 1 : 0)
         .input("password", sql.NVarChar, hashed).query(`
-          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue)
-          VALUES (@name, @email, @password, @RoleId, GETDATE(), 0)
+          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue, can_accept_tickets)
+          VALUES (@name, @email, @password, @RoleId, GETDATE(), 0, @can_accept_tickets)
         `);
       res.json({ message: "User created" });
     } catch (err) {
@@ -315,7 +320,7 @@ router.put(
   checkPermission("Users", "List", "CanEdit"),
   async (req, res) => {
     const { id } = req.params;
-    const { name, email, RoleId, roleId, discontinue } = req.body;
+    const { name, email, RoleId, roleId, discontinue, can_accept_tickets } = req.body;
     try {
       const pool = getPool();
 
@@ -326,7 +331,8 @@ router.put(
         name === undefined &&
         email === undefined &&
         RoleId === undefined &&
-        roleId === undefined;
+        roleId === undefined &&
+        can_accept_tickets === undefined;
 
       if (isToggleOnly) {
         await pool
@@ -342,9 +348,18 @@ router.put(
           .input("name", sql.NVarChar, name)
           .input("email", sql.NVarChar, email)
           .input("RoleId", sql.Int, assignedRoleId)
+          .input(
+            "can_accept_tickets",
+            sql.Bit,
+            can_accept_tickets === undefined ? null : can_accept_tickets ? 1 : 0,
+          )
           .input("discontinue", sql.Bit, discontinue ? 1 : 0).query(`
           UPDATE dbo.users
-          SET name=@name, email=@email, RoleId=@RoleId, discontinue=@discontinue
+          SET name=@name,
+              email=@email,
+              RoleId=@RoleId,
+              discontinue=@discontinue,
+              can_accept_tickets=COALESCE(@can_accept_tickets, can_accept_tickets)
           WHERE id=@id
         `);
       }
@@ -379,12 +394,62 @@ router.delete(
     }
     try {
       const pool = getPool();
+
+      // Clear nullable audit/assignment references before deleting.
+      // Per-user rights rows are deleted because their UserId columns are required.
+      // NOT NULL FK columns reassigned to admin; nullable ones set NULL; ownership rows deleted
       await pool
         .request()
         .input("id", sql.Int, id)
-        .query("DELETE FROM dbo.users WHERE id=@id");
+        .input("adminId", sql.Int, req.user.userId)
+        .query(`
+          -- NOT NULL CreatedBy/UserId/AssignedTo: reassign to the deleting admin
+          UPDATE dbo.AccountGroup         SET CreatedBy  = @adminId WHERE CreatedBy  = @id;
+          UPDATE dbo.BankMaster           SET CreatedBy  = @adminId WHERE CreatedBy  = @id;
+          UPDATE dbo.FinYear              SET FCreatedBy = @adminId WHERE FCreatedBy = @id;
+          UPDATE dbo.HSN                  SET CreatedBy  = @adminId WHERE CreatedBy  = @id;
+          UPDATE dbo.TaskComments         SET UserId     = @adminId WHERE UserId     = @id;
+          UPDATE dbo.Tasks                SET AssignedTo = @adminId WHERE AssignedTo = @id;
+
+          -- Nullable audit columns: SET NULL
+          UPDATE dbo.AccountGroup         SET UpdatedBy   = NULL WHERE UpdatedBy   = @id;
+          UPDATE dbo.AccountGroup         SET ApprovedBy  = NULL WHERE ApprovedBy  = @id;
+          UPDATE dbo.BankMaster           SET UpdatedBy   = NULL WHERE UpdatedBy   = @id;
+          UPDATE dbo.BankMaster           SET ApprovedBy  = NULL WHERE ApprovedBy  = @id;
+          UPDATE dbo.Billing_Terms_Master SET CreatedBy   = NULL WHERE CreatedBy   = @id;
+          UPDATE dbo.Billing_Terms_Master SET UpdatedBy   = NULL WHERE UpdatedBy   = @id;
+          UPDATE dbo.Billing_Terms_Master SET ApprovedBy  = NULL WHERE ApprovedBy  = @id;
+          UPDATE dbo.DebitNote            SET created_by  = NULL WHERE created_by  = @id;
+          UPDATE dbo.DebitNote            SET updated_by  = NULL WHERE updated_by  = @id;
+          UPDATE dbo.DebitNote            SET approved_by = NULL WHERE approved_by = @id;
+          UPDATE dbo.ExpenseBooking       SET ECreatedBy  = NULL WHERE ECreatedBy  = @id;
+          UPDATE dbo.ExpenseBooking       SET EApprovedBy = NULL WHERE EApprovedBy = @id;
+          UPDATE dbo.FinYear              SET FUpdatedBy  = NULL WHERE FUpdatedBy  = @id;
+          UPDATE dbo.FinYear              SET FApprovedBy = NULL WHERE FApprovedBy = @id;
+          UPDATE dbo.FollowupApplications SET AssignedTo  = NULL WHERE AssignedTo  = @id;
+          UPDATE dbo.HSN                  SET UpdatedBy   = NULL WHERE UpdatedBy   = @id;
+          UPDATE dbo.HSN                  SET ApprovedBy  = NULL WHERE ApprovedBy  = @id;
+          UPDATE dbo.TCMaster             SET CreatedBy   = NULL WHERE CreatedBy   = @id;
+          UPDATE dbo.TCMaster             SET UpdatedBy   = NULL WHERE UpdatedBy   = @id;
+          UPDATE dbo.TCMaster             SET ApprovedBy  = NULL WHERE ApprovedBy  = @id;
+          UPDATE dbo.UOMMaster            SET CreatedBy   = NULL WHERE CreatedBy   = @id;
+          UPDATE dbo.UOMMaster            SET UpdatedBy   = NULL WHERE UpdatedBy   = @id;
+          UPDATE dbo.UOMMaster            SET ApprovedBy  = NULL WHERE ApprovedBy  = @id;
+
+          -- Ownership rows: delete entirely (UserId is NOT NULL in these tables)
+          DELETE FROM dbo.UserPageRightsJson WHERE UserId = @id;
+          DELETE FROM dbo.UserWidgetRights   WHERE UserId = @id;
+        `);
+
+      // All FK references cleared — safe to delete
+      await pool
+        .request()
+        .input("id", sql.Int, id)
+        .query("DELETE FROM dbo.users WHERE id = @id");
+
       res.json({ message: "User deleted" });
     } catch (err) {
+      console.error("[DELETE USER] SQL error:", err.message, "| errNum:", err.number);
       res.status(500).json({ error: err.message });
     }
   },
@@ -428,7 +493,51 @@ router.patch(
 );
 
 // ======================
-// RESET USER PASSWORD (admin action — no current password required)
+// PATCH USER TICKET ACCEPTANCE
+// ======================
+router.patch(
+  "/:id/ticket-access",
+  authMiddleware,
+  checkPermission("Users", "List", "CanEdit"),
+  async (req, res) => {
+    const { id } = req.params;
+    const { can_accept_tickets } = req.body;
+
+    if (typeof can_accept_tickets !== "boolean") {
+      return res
+        .status(400)
+        .json({ error: "can_accept_tickets must be a boolean" });
+    }
+
+    try {
+      const pool = getPool();
+      const result = await pool
+        .request()
+        .input("id", sql.Int, id)
+        .input("can_accept_tickets", sql.Bit, can_accept_tickets ? 1 : 0)
+        .query(`
+          UPDATE dbo.users
+          SET can_accept_tickets = @can_accept_tickets
+          WHERE id = @id
+        `);
+
+      if (result.rowsAffected?.[0] === 0) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.json({
+        message: "Ticket acceptance updated",
+        can_accept_tickets,
+      });
+    } catch (err) {
+      console.error("PATCH /users/:id/ticket-access error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// ======================
+// RESET USER PASSWORD (admin action - no current password required)
 // ======================
 router.patch(
   "/:id/reset-password",
