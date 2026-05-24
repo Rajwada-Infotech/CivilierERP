@@ -69,7 +69,7 @@ interface LegacyApplicant {
   LBranchName?: string | null;
 }
 
-// FollowupApplicants-based (from /api/followup-applicants)
+// FollowupApplicants-based (from /api/followup-applications)
 interface FollowupApplicant {
   Id: number;
   ApplicantNo?: string | null;
@@ -605,13 +605,12 @@ export default function ApplicantDetail() {
   const name = applicant?.LHeadName || "Applicant";
   const refId = applicant?.LHeadId ?? Number(id);
 
-
   // Try to find a matching FollowupApplicants record by LHeadId used as refId
   const { data: followupRecord } = useQuery<FollowupApplicant | null>({
     queryKey: ["followup-applicant-by-ref", refId],
     queryFn: async () => {
       const r = await fetchWithAuth(
-        `/api/followup-applicants?search=${encodeURIComponent(name)}&pageSize=5`,
+        `/api/followup-applications?search=${encodeURIComponent(name)}&pageSize=5`,
       );
       if (!r.ok) return null;
       const d = await r.json();

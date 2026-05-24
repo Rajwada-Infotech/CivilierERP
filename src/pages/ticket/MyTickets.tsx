@@ -32,6 +32,16 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface TicketAttachment {
+  id: number;
+  ticket_id: number;
+  comment_id: number | null;
+  filename: string;
+  mime_type: string;
+  file_size: number;
+  url: string;
+}
+
 interface Ticket {
   id: number;
   subject: string;
@@ -403,11 +413,16 @@ function AuthenticatedAttachmentImage({
 
     fetchWithAuth(url)
       .then((res) => {
+        if (res.status === 410) {
+          // File existed in DB but no longer on disk (migrated/deleted)
+          if (alive) setIsNonImage(true);
+          return null;
+        }
         if (!res.ok) throw new Error(`Attachment fetch failed: ${res.status}`);
         return res.blob();
       })
       .then((blob) => {
-        if (!alive) return;
+        if (!blob || !alive) return;
         // If server returned non-image content type, treat as non-image file
         if (blob.type && !blob.type.startsWith("image/")) {
           setIsNonImage(true);
@@ -511,14 +526,101 @@ function isImageUrl(url: string): boolean {
   return /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/.test(clean);
 }
 
-function AttachmentList({ path: attachmentPath }: { path: string }) {
-  let urls: string[] = [];
+// ─── DB-based attachment list component ──────────────────────────────────────
+// Uses /api/tickets/attachment/:id — no disk dependency, served directly from DB.
+
+function DbAttachmentList({ attachments }: { attachments: TicketAttachment[] }) {
+  if (!attachments || attachments.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-2 mt-1">
+      {attachments.map((a) => {
+        const isPdf = a.mime_type === "application/pdf" || a.filename.toLowerCase().endsWith(".pdf");
+        const isImage = a.mime_type.startsWith("image/");
+        if (isPdf) {
+          return (
+            <button
+              key={a.id}
+              onClick={() => openAttachmentViewer(a.url, a.filename)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"
+            >
+              <Paperclip size={10} />{" "}
+              {a.filename.length > 20 ? `PDF` : a.filename}
+            </button>
+          );
+        }
+        if (isImage) {
+          return (
+            <AuthenticatedAttachmentImage
+              key={a.id}
+              url={a.url}
+              alt={a.filename}
+              className="h-20 w-auto rounded-lg border border-border object-cover cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-primary/40 transition-all"
+              onClick={() => openAttachmentViewer(a.url, a.filename)}
+            />
+          );
+        }
+        // Other file types
+        return (
+          <button
+            key={a.id}
+            onClick={() => openAttachmentViewer(a.url, a.filename)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"
+          >
+            <Paperclip size={10} />{" "}
+            {a.filename.length > 24 ? a.filename.slice(0, 24) + "…" : a.filename}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Attachment path parser ───────────────────────────────────────────────────
+// Handles all DB formats:
+//   1. JSON array:           ["/api/tickets/file/a.png","/api/tickets/file/b.pdf"]
+//   2. Python-style array:   ['/api/tickets/file/a.png','/api/tickets/file/b.pdf']
+//   3. Space-separated URLs: /api/tickets/file/a.png /api/tickets/file/b.pdf
+//   4. Single URL:           /api/tickets/file/a.png
+function parseAttachmentPath(raw: string): string[] {
+  if (!raw || !raw.trim()) return [];
+  const trimmed = raw.trim();
+
+  // Try standard JSON first
   try {
-    const parsed = JSON.parse(attachmentPath);
-    urls = Array.isArray(parsed) ? parsed : [attachmentPath];
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) return parsed.map((u: unknown) => String(u)).filter(Boolean);
+    if (typeof parsed === "string") return [parsed];
   } catch {
-    urls = [attachmentPath];
+    // not JSON
   }
+
+  // Python-style single-quoted array: ['...','...']
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    const inner = trimmed.slice(1, -1);
+    const matches = inner.match(/'([^']+)'/g);
+    if (matches && matches.length > 0) {
+      return matches.map((m) => m.slice(1, -1)).filter(Boolean);
+    }
+    // Also try double-quote variant that JSON.parse may have missed
+    const dqMatches = inner.match(/"([^"]+)"/g);
+    if (dqMatches && dqMatches.length > 0) {
+      return dqMatches.map((m) => m.slice(1, -1)).filter(Boolean);
+    }
+  }
+
+  // Space-separated or comma-separated URLs
+  const parts = trimmed
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.startsWith("/api/") || s.startsWith("http"));
+  if (parts.length > 0) return parts;
+
+  // Fallback: treat entire string as single URL
+  return [trimmed];
+}
+
+function AttachmentList({ path: attachmentPath }: { path: string }) {
+  const urls = parseAttachmentPath(attachmentPath);
 
   return (
     <div className="flex flex-wrap gap-2 mt-1">
@@ -669,21 +771,22 @@ function TicketDetailView({
 
   const ticket = data?.ticket;
   const comments = data?.comments ?? [];
+  const attachments = data?.attachments ?? [];
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [comments.length]);
 
-  // Upload files to server, returns array of public URLs
-  // Uploads each file individually (same pattern as CreateTicket) to avoid multipart issues
-  const uploadFiles = async (files: File[]): Promise<string[]> => {
+  // Upload files to DB — returns attachment IDs (not URLs)
+  const uploadFiles = async (files: File[]): Promise<number[]> => {
     if (files.length === 0) return [];
     const token =
       localStorage.getItem("token") || sessionStorage.getItem("token") || "";
-    const allUrls: string[] = [];
+    const allIds: number[] = [];
     for (const file of files) {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("ticketId", String(ticketId));
       const res = await fetch("/api/tickets/upload", {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -691,10 +794,10 @@ function TicketDetailView({
       });
       if (!res.ok) throw new Error(`Failed to upload ${file.name}`);
       const data = await res.json();
-      const url = data.url ?? (Array.isArray(data.urls) ? data.urls[0] : null);
-      if (url) allUrls.push(url);
+      const firstId = data.attachments?.[0]?.id;
+      if (firstId) allIds.push(firstId);
     }
-    return allUrls;
+    return allIds;
   };
 
   const capturePhoto = () => {
@@ -722,15 +825,13 @@ function TicketDetailView({
     setAdminAttachFiles([]);
     if (textareaRef.current) textareaRef.current.style.height = "36px";
     try {
-      let finalComment = text;
+      let attachmentIds: number[] = [];
       if (files.length > 0) {
-        const urls = await uploadFiles(files);
-        const markers = urls.map((u) => `[attachment:${u}]`).join(" ");
-        finalComment = text ? `${text}\n${markers}` : markers;
+        attachmentIds = await uploadFiles(files);
       }
       const res = await fetchWithAuth(`/api/tickets/comment/${ticketId}`, {
         method: "POST",
-        body: JSON.stringify({ comment: finalComment }),
+        body: JSON.stringify({ comment: text, attachmentIds }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       // If ticket is still Pending, move it to InProgress (Resolving)
@@ -887,15 +988,8 @@ function TicketDetailView({
   const canReply = isActive;
   const bar = priorityConfig[ticket.priority]?.bar ?? "bg-muted";
 
-  let attachUrls: string[] = [];
-  if (ticket.attachment_path) {
-    try {
-      const p = JSON.parse(ticket.attachment_path);
-      attachUrls = Array.isArray(p) ? p : [ticket.attachment_path];
-    } catch {
-      attachUrls = [ticket.attachment_path];
-    }
-  }
+  // DB-based attachments (ticket-level only)
+  const ticketAttachments = attachments.filter((a) => a.comment_id === null);
 
   const reviewComment = comments.find((c) => c.comment.startsWith("[Review:"));
 
@@ -963,15 +1057,15 @@ function TicketDetailView({
             <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
               {ticket.issue_details}
             </p>
-            {attachUrls.length > 0 && (
+            {ticketAttachments.length > 0 && (
               <div className="mt-3">
                 <p className="text-[11px] text-muted-foreground flex items-center gap-1 mb-1.5">
                   <Paperclip size={10} />
-                  {attachUrls.length > 1
-                    ? `${attachUrls.length} Attachments`
+                  {ticketAttachments.length > 1
+                    ? `${ticketAttachments.length} Attachments`
                     : "Attachment"}
                 </p>
-                <AttachmentList path={ticket.attachment_path!} />
+                <DbAttachmentList attachments={ticketAttachments} />
               </div>
             )}
           </div>
@@ -1054,13 +1148,11 @@ function TicketDetailView({
               const isMe = c.author_name === currentUserName;
               const isReview = c.comment.startsWith("[Review:");
 
-              const attachPattern = /\[attachment:([^\]]+)\]/g;
-              const commentAttachUrls: string[] = [];
+              // DB-based: find attachments for this comment
+              const commentAttachments = attachments.filter((a) => a.comment_id === c.id);
+              // Strip legacy [attachment:...] markers from old comments
               const textOnly = c.comment
-                .replace(attachPattern, (_, url) => {
-                  commentAttachUrls.push(url);
-                  return "";
-                })
+                .replace(/\[attachment:[^\]]+\]/g, "")
                 .trim();
 
               if (isReview) {
@@ -1110,40 +1202,8 @@ function TicketDetailView({
                         {textOnly}
                       </div>
                     )}
-                    {commentAttachUrls.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-1">
-                        {commentAttachUrls.map((url, ai) => {
-                          const isPdf = url.split("?")[0].toLowerCase().endsWith(".pdf");
-                          const filename =
-                            url.split("/").pop()?.split("?")[0] ?? `file-${ai + 1}`;
-                          if (isPdf)
-                            return (
-                              <button
-                                key={ai}
-                                onClick={() =>
-                                  openAttachmentViewer(url, filename)
-                                }
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"
-                              >
-                                <Paperclip size={10} />{" "}
-                                {filename.length > 20
-                                  ? `PDF ${ai + 1}`
-                                  : filename}
-                              </button>
-                            );
-                          return (
-                            <AuthenticatedAttachmentImage
-                              key={ai}
-                              url={url}
-                              alt={`Attachment ${ai + 1}`}
-                              className="h-24 w-auto rounded-lg border border-border object-cover cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-primary/40 transition-all"
-                              onClick={() =>
-                                openAttachmentViewer(url, filename)
-                              }
-                            />
-                          );
-                        })}
-                      </div>
+                    {commentAttachments.length > 0 && (
+                      <DbAttachmentList attachments={commentAttachments} />
                     )}
                   </div>
                 </div>

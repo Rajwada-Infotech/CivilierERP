@@ -159,7 +159,9 @@ const EMPTY_LOG_FORM: LogFormState = {
 function formatDate(value?: string | null) {
   if (!value) return "-";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-IN");
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleDateString("en-IN");
 }
 
 function formatDateTime(value?: string | null) {
@@ -169,7 +171,9 @@ function formatDateTime(value?: string | null) {
 }
 
 function formatMoney(value?: number | null) {
-  return typeof value === "number" ? `Rs ${value.toLocaleString("en-IN")}` : "-";
+  return typeof value === "number"
+    ? `Rs ${value.toLocaleString("en-IN")}`
+    : "-";
 }
 
 function formatTimelineDate(value: string) {
@@ -193,7 +197,7 @@ function getLogIcon(type: LogType) {
 }
 
 async function fetchApplicant(id: string) {
-  const response = await fetchWithAuth(`/api/followup-applicants/${id}`);
+  const response = await fetchWithAuth(`/api/followup-applications/${id}`);
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.error || "Failed to load applicant");
@@ -202,16 +206,22 @@ async function fetchApplicant(id: string) {
 }
 
 async function fetchUnitSelections(applicantId: string) {
-  const response = await fetchWithAuth(`/api/followup-unit-selections?applicantId=${applicantId}`);
+  const response = await fetchWithAuth(
+    `/api/followup-unit-selections?applicantId=${applicantId}`,
+  );
   if (!response.ok) {
     throw new Error("Failed to load unit selections");
   }
   const data = await response.json();
-  return (Array.isArray(data?.data) ? data.data : data) as UnitSelectionRecord[];
+  return (
+    Array.isArray(data?.data) ? data.data : data
+  ) as UnitSelectionRecord[];
 }
 
 async function fetchAgreements(applicantId: string) {
-  const response = await fetchWithAuth(`/api/followup-agreements?applicantId=${applicantId}`);
+  const response = await fetchWithAuth(
+    `/api/followup-agreements?applicantId=${applicantId}`,
+  );
   if (!response.ok) {
     throw new Error("Failed to load agreements");
   }
@@ -220,7 +230,9 @@ async function fetchAgreements(applicantId: string) {
 }
 
 async function fetchLogs(applicantId: string) {
-  const response = await fetchWithAuth(`/api/followup-log?refId=${applicantId}`);
+  const response = await fetchWithAuth(
+    `/api/followup-log?refId=${applicantId}`,
+  );
   if (!response.ok) {
     throw new Error("Failed to load log entries");
   }
@@ -317,7 +329,9 @@ export default function ApplicantTimeline() {
     mutationFn: createLog,
     onSuccess: () => {
       toast.success("Log entry created");
-      queryClient.invalidateQueries({ queryKey: ["followup-applicant", applicantId, "logs"] });
+      queryClient.invalidateQueries({
+        queryKey: ["followup-applicant", applicantId, "logs"],
+      });
       setLogForm(EMPTY_LOG_FORM);
       setIsAddingLog(false);
     },
@@ -389,19 +403,32 @@ export default function ApplicantTimeline() {
       type: "reminder" as const,
       date: reminder.CreatedAt || reminder.dueDate || "",
       title: `Reminder ${reminder.tenantName}`,
-      description: [reminder.message, reminder.status, formatMoney(reminder.amountDue)]
+      description: [
+        reminder.message,
+        reminder.status,
+        formatMoney(reminder.amountDue),
+      ]
         .filter(Boolean)
         .join(" - "),
       sourceLabel: "Tenant reminders",
       badgeClassName: "border-amber-300 bg-amber-500/10 text-amber-700",
     }));
 
-    return [...applicantEvents, ...unitEvents, ...agreementEvents, ...logEvents, ...reminderEvents]
+    return [
+      ...applicantEvents,
+      ...unitEvents,
+      ...agreementEvents,
+      ...logEvents,
+      ...reminderEvents,
+    ]
       .filter((event) => event.date)
       .sort((left, right) => {
         const rightTime = new Date(right.date).getTime();
         const leftTime = new Date(left.date).getTime();
-        return (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime);
+        return (
+          (Number.isNaN(rightTime) ? 0 : rightTime) -
+          (Number.isNaN(leftTime) ? 0 : leftTime)
+        );
       });
   }, [applicant, unitSelections, agreements, logs, reminders]);
 
@@ -414,11 +441,17 @@ export default function ApplicantTimeline() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" onClick={() => navigate("/followup/sales/applicants")} className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => navigate("/followup/sales/applicants")}
+              className="gap-2"
+            >
               <ArrowLeft className="w-4 h-4" />
               Back
             </Button>
-            <Badge className="border-slate-300 bg-slate-500/10 text-slate-700">Applicant timeline</Badge>
+            <Badge className="border-slate-300 bg-slate-500/10 text-slate-700">
+              Applicant timeline
+            </Badge>
           </div>
           <div>
             <h1 className="text-3xl font-heading font-bold text-foreground">
@@ -441,7 +474,9 @@ export default function ApplicantTimeline() {
           </Button>
           <Button
             onClick={() => {
-              queryClient.invalidateQueries({ queryKey: ["followup-applicant", applicantId] });
+              queryClient.invalidateQueries({
+                queryKey: ["followup-applicant", applicantId],
+              });
             }}
             className="gap-2"
           >
@@ -469,7 +504,9 @@ export default function ApplicantTimeline() {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Status</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Status
+                </CardTitle>
               </CardHeader>
               <CardContent className="flex items-center gap-3">
                 <BadgeCheck className="w-5 h-5 text-primary" />
@@ -478,7 +515,9 @@ export default function ApplicantTimeline() {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Project / Company</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Project / Company
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-1">
                 <div className="flex items-center gap-2 text-sm">
@@ -493,23 +532,33 @@ export default function ApplicantTimeline() {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Assigned / Source</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Assigned / Source
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-1">
                 <div className="flex items-center gap-2 text-sm">
                   <UserRound className="w-4 h-4 text-primary" />
                   {applicant.AssignedToName || "-"}
                 </div>
-                <div className="text-sm text-muted-foreground">{applicant.Source || "-"}</div>
+                <div className="text-sm text-muted-foreground">
+                  {applicant.Source || "-"}
+                </div>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Budget / Preferred Unit</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Budget / Preferred Unit
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-1">
-                <div className="text-sm font-medium">{formatMoney(applicant.BudgetAmount)}</div>
-                <div className="text-sm text-muted-foreground">{applicant.PreferredUnitType || "-"}</div>
+                <div className="text-sm font-medium">
+                  {formatMoney(applicant.BudgetAmount)}
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {applicant.PreferredUnitType || "-"}
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -520,7 +569,8 @@ export default function ApplicantTimeline() {
                 <div>
                   <CardTitle>Activity timeline</CardTitle>
                   <p className="text-sm text-muted-foreground mt-1">
-                    Newest entries first. Applicant-created record is included at the bottom of the stream.
+                    Newest entries first. Applicant-created record is included
+                    at the bottom of the stream.
                   </p>
                 </div>
                 <Badge variant="outline">{timeline.length} events</Badge>
@@ -544,8 +594,13 @@ export default function ApplicantTimeline() {
                               : MessageSquare;
 
                     return (
-                      <div key={event.id} className="flex gap-4 rounded-lg border p-4">
-                        <div className={`mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${event.badgeClassName}`}>
+                      <div
+                        key={event.id}
+                        className="flex gap-4 rounded-lg border p-4"
+                      >
+                        <div
+                          className={`mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${event.badgeClassName}`}
+                        >
                           <Icon className="h-4 w-4" />
                         </div>
                         <div className="min-w-0 flex-1">
@@ -624,7 +679,10 @@ export default function ApplicantTimeline() {
                             type="date"
                             value={logForm.date}
                             onChange={(event) =>
-                              setLogForm((current) => ({ ...current, date: event.target.value }))
+                              setLogForm((current) => ({
+                                ...current,
+                                date: event.target.value,
+                              }))
                             }
                           />
                         </div>
@@ -633,7 +691,10 @@ export default function ApplicantTimeline() {
                           <Select
                             value={logForm.type}
                             onValueChange={(value) =>
-                              setLogForm((current) => ({ ...current, type: value as LogType }))
+                              setLogForm((current) => ({
+                                ...current,
+                                type: value as LogType,
+                              }))
                             }
                           >
                             <SelectTrigger>
@@ -655,7 +716,10 @@ export default function ApplicantTimeline() {
                         <Input
                           value={logForm.customer}
                           onChange={(event) =>
-                            setLogForm((current) => ({ ...current, customer: event.target.value }))
+                            setLogForm((current) => ({
+                              ...current,
+                              customer: event.target.value,
+                            }))
                           }
                           placeholder={applicant.ApplicantName || "Applicant"}
                         />
@@ -666,7 +730,10 @@ export default function ApplicantTimeline() {
                         <Input
                           value={logForm.amount}
                           onChange={(event) =>
-                            setLogForm((current) => ({ ...current, amount: event.target.value }))
+                            setLogForm((current) => ({
+                              ...current,
+                              amount: event.target.value,
+                            }))
                           }
                           placeholder="Optional amount"
                         />
@@ -677,7 +744,10 @@ export default function ApplicantTimeline() {
                         <Textarea
                           value={logForm.notes}
                           onChange={(event) =>
-                            setLogForm((current) => ({ ...current, notes: event.target.value }))
+                            setLogForm((current) => ({
+                              ...current,
+                              notes: event.target.value,
+                            }))
                           }
                           placeholder="Meeting notes, call outcome, payment status..."
                         />
@@ -685,13 +755,17 @@ export default function ApplicantTimeline() {
 
                       <Button
                         className="w-full gap-2"
-                        disabled={!logForm.customer.trim() || logMutation.isPending}
+                        disabled={
+                          !logForm.customer.trim() || logMutation.isPending
+                        }
                         onClick={() =>
                           logMutation.mutate({
                             date: logForm.date || undefined,
                             type: logForm.type,
                             customer: logForm.customer.trim(),
-                            amount: logForm.amount ? Number(logForm.amount) : undefined,
+                            amount: logForm.amount
+                              ? Number(logForm.amount)
+                              : undefined,
                             refId: applicant.Id,
                             notes: logForm.notes.trim() || undefined,
                           })
@@ -703,7 +777,8 @@ export default function ApplicantTimeline() {
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground">
-                      Open this panel to add a communication entry linked to this applicant.
+                      Open this panel to add a communication entry linked to
+                      this applicant.
                     </p>
                   )}
                 </CardContent>
@@ -716,15 +791,21 @@ export default function ApplicantTimeline() {
                 <CardContent className="space-y-4 text-sm">
                   <div>
                     <div className="font-medium">Unit selections</div>
-                    <div className="text-muted-foreground">{unitSelections.length} records</div>
+                    <div className="text-muted-foreground">
+                      {unitSelections.length} records
+                    </div>
                   </div>
                   <div>
                     <div className="font-medium">Agreements</div>
-                    <div className="text-muted-foreground">{agreements.length} records</div>
+                    <div className="text-muted-foreground">
+                      {agreements.length} records
+                    </div>
                   </div>
                   <div>
                     <div className="font-medium">Reminders</div>
-                    <div className="text-muted-foreground">{reminders.length} records</div>
+                    <div className="text-muted-foreground">
+                      {reminders.length} records
+                    </div>
                   </div>
                   <div>
                     <div className="font-medium">Tasks</div>
@@ -733,7 +814,9 @@ export default function ApplicantTimeline() {
                     </div>
                   </div>
                   <Button variant="outline" asChild className="w-full">
-                    <Link to="/followup/follow-ups/log">Open follow-up log</Link>
+                    <Link to="/followup/follow-ups/log">
+                      Open follow-up log
+                    </Link>
                   </Button>
                 </CardContent>
               </Card>
