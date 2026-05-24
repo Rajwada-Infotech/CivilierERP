@@ -2,10 +2,6 @@ const express = require("express");
 const router = express.Router();
 const { getPool } = require("../db");
 const { cache } = require("../middleware/cache");
-const { checkPermissionForMethod } = require("../middleware/routePermission");
-
-router.use(checkPermissionForMethod("Finance", "Dashboard"));
-
 /**
  * GET /api/finance-dashboard
  *
