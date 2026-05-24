@@ -182,7 +182,7 @@ export const AuthProvider = ({
         // Use DB-stored permissions for 'user' role; fall back to role-based defaults
         // for privileged roles (super_admin / admin / dba) which always get FULL_ACCESS.
         pagePermissions:
-          data.user.role === "user" &&
+          !["super_admin", "admin", "dba"].includes(data.user.role) &&
           Array.isArray(data.user.pagePermissions) &&
           data.user.pagePermissions.length > 0
             ? data.user.pagePermissions
@@ -200,6 +200,21 @@ export const AuthProvider = ({
       connectSocket();
 
       setCurrentUser(userWithInitials);
+      // Fetch fresh permissions from DB for non-privileged roles
+      if (!["super_admin", "admin", "dba"].includes(data.user.role)) {
+        fetch("/api/user-rights/my", {
+          headers: { Authorization: `Bearer ${data.token}` },
+        })
+          .then(r => r.ok ? r.json() : null)
+          .then(result => {
+            if (result?.rightsJson && Array.isArray(result.rightsJson) && result.rightsJson.length > 0) {
+              const updated = { ...userWithInitials, pagePermissions: result.rightsJson };
+              localStorage.setItem("user", JSON.stringify(updated));
+              setCurrentUser(updated);
+            }
+          })
+          .catch(() => {});
+      }
 
       // Fire-and-forget: log the login event to UserActivityLog.
       // Must run after setCurrentUser so the token is in localStorage.
