@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   TrendingUp,
+  RefreshCw,
   CreditCard,
   Landmark,
   BookOpen,
@@ -300,35 +301,42 @@ const FinanceDashboard = () => {
     : [];
 
   return (
-    <div className="relative">
-      <DashboardBackground />
+    <>
       <Breadcrumbs items={["Dashboard", "Finance"]} />
+      <div className="relative p-6 space-y-8">
+        <DashboardBackground />
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-heading font-bold text-foreground">
-          Finance Overview
-        </h1>
-        <button
-          onClick={() => refetch()}
-          disabled={isFetching}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-accent transition disabled:opacity-50"
-        >
-          <TrendingUp
-            className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`}
-          />
-          {isFetching ? "Refreshing…" : "Refresh"}
-        </button>
-      </div>
+        {/* Header */}
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Finance Overview
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Payments, cheques, cards and bank accounts at a glance
+            </p>
+          </div>
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            <RefreshCw
+              size={13}
+              className={isFetching ? "animate-spin" : ""}
+            />
+            Refresh
+          </button>
+        </div>
 
       {isError && (
-        <div className="mb-6 px-4 py-3 rounded-lg bg-destructive/10 text-destructive text-sm border border-destructive/20">
+        <div className="px-4 py-3 rounded-lg bg-destructive/10 text-destructive text-sm border border-destructive/20">
           Failed to load dashboard data. Please refresh the page.
         </div>
       )}
 
       {/* ── Primary stat cards ────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {isLoading
           ? Array.from({ length: 4 }).map((_, i) => (
               <StatCardSkeleton key={i} />
@@ -337,7 +345,7 @@ const FinanceDashboard = () => {
       </div>
 
       {/* ── Banks row ─────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {isLoading ? (
           Array.from({ length: 3 }).map((_, i) => <StatCardSkeleton key={i} />)
         ) : (
@@ -368,7 +376,7 @@ const FinanceDashboard = () => {
       </div>
 
       {/* ── Recent tables ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Payments Made */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
@@ -588,6 +596,7 @@ const FinanceDashboard = () => {
         </CardContent>
       </Card>
     </div>
+    </>
   );
 };
 
