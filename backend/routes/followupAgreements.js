@@ -66,10 +66,9 @@ async function getApplicantSnapshot(applicantId) {
   if (!applicantId) return null;
   const result = await getPool()
     .request()
-    .input("ApplicantId", sql.Int, applicantId)
-    .query(`
+    .input("ApplicantId", sql.Int, applicantId).query(`
       SELECT TOP 1 Id, ProjectId, CompanyId
-      FROM dbo.FollowupApplicants
+      FROM dbo.FollowupApplications
       WHERE Id = @ApplicantId AND IsDeleted = 0
     `);
 
@@ -80,8 +79,7 @@ async function getUnitSelectionSnapshot(unitSelectionId) {
   if (!unitSelectionId) return null;
   const result = await getPool()
     .request()
-    .input("UnitSelectionId", sql.Int, unitSelectionId)
-    .query(`
+    .input("UnitSelectionId", sql.Int, unitSelectionId).query(`
       SELECT TOP 1 Id, ApplicantId, ProjectId, CompanyId
       FROM dbo.FollowupUnitSelections
       WHERE Id = @UnitSelectionId AND IsDeleted = 0
@@ -140,15 +138,19 @@ function getPayload(body) {
 
 async function buildOptions() {
   const pool = getPool();
-  const [applicantsResult, unitSelectionsResult, projectsResult, companiesResult] =
-    await Promise.all([
-      pool.request().query(`
+  const [
+    applicantsResult,
+    unitSelectionsResult,
+    projectsResult,
+    companiesResult,
+  ] = await Promise.all([
+    pool.request().query(`
         SELECT Id, ApplicantNo, ApplicantName, ProjectId, CompanyId
-        FROM dbo.FollowupApplicants
+        FROM dbo.FollowupApplications
         WHERE IsDeleted = 0
         ORDER BY ApplicantName
       `),
-      pool.request().query(`
+    pool.request().query(`
         SELECT
           fus.Id,
           fus.SelectionNo,
@@ -160,19 +162,19 @@ async function buildOptions() {
         WHERE fus.IsDeleted = 0
         ORDER BY fus.CreatedAt DESC, fus.Id DESC
       `),
-      pool.request().query(`
+    pool.request().query(`
         SELECT Id, Name
         FROM dbo.ProjectMaster
         WHERE ISNULL(IsDeleted, 0) = 0 AND ISNULL(IsActive, 1) = 1
         ORDER BY Name
       `),
-      pool.request().query(`
+    pool.request().query(`
         SELECT Id, Name
         FROM dbo.CompanyMaster
         WHERE ISNULL(IsDeleted, 0) = 0 AND ISNULL(IsActive, 1) = 1
         ORDER BY Name
       `),
-    ]);
+  ]);
 
   return {
     applicants: applicantsResult.recordset,
@@ -195,14 +197,19 @@ router.get("/meta/options", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 20));
+    const pageSize = Math.min(
+      100,
+      Math.max(1, parseInt(req.query.pageSize, 10) || 20),
+    );
     const offset = (page - 1) * pageSize;
     const search = normalizeText(req.query.search);
     const status = normalizeText(req.query.status);
     const applicantId = normalizeNumber(req.query.applicantId);
 
     if (Number.isNaN(applicantId)) {
-      return res.status(400).json({ error: "applicantId must be a valid number" });
+      return res
+        .status(400)
+        .json({ error: "applicantId must be a valid number" });
     }
 
     const filters = ["fag.IsDeleted = 0"];
@@ -234,7 +241,7 @@ router.get("/", async (req, res) => {
     const countResult = await buildRequest().query(`
       SELECT COUNT(*) AS Total
       FROM dbo.FollowupAgreements fag
-      INNER JOIN dbo.FollowupApplicants fa ON fa.Id = fag.ApplicantId
+      INNER JOIN dbo.FollowupApplications fa ON fa.Id = fag.ApplicantId
       LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = fag.UnitSelectionId
       LEFT JOIN dbo.ProjectMaster pm ON pm.Id = fag.ProjectId
       ${whereClause}
@@ -242,11 +249,10 @@ router.get("/", async (req, res) => {
 
     const dataResult = await buildRequest()
       .input("Offset", sql.Int, offset)
-      .input("PageSize", sql.Int, pageSize)
-      .query(`
+      .input("PageSize", sql.Int, pageSize).query(`
         SELECT ${LIST_COLUMNS}
         FROM dbo.FollowupAgreements fag
-        INNER JOIN dbo.FollowupApplicants fa ON fa.Id = fag.ApplicantId
+        INNER JOIN dbo.FollowupApplications fa ON fa.Id = fag.ApplicantId
         LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = fag.UnitSelectionId
         LEFT JOIN dbo.ProjectMaster pm ON pm.Id = fag.ProjectId
         LEFT JOIN dbo.CompanyMaster cm ON cm.Id = fag.CompanyId
@@ -286,7 +292,9 @@ router.post("/", async (req, res) => {
       return res.status(404).json({ error: "Applicant not found" });
     }
 
-    const unitSelection = await getUnitSelectionSnapshot(payload.UnitSelectionId);
+    const unitSelection = await getUnitSelectionSnapshot(
+      payload.UnitSelectionId,
+    );
     if (payload.UnitSelectionId && !unitSelection) {
       return res.status(404).json({ error: "Unit selection not found" });
     }
@@ -303,9 +311,15 @@ router.post("/", async (req, res) => {
     await transaction.begin();
 
     const projectId =
-      payload.ProjectId || unitSelection?.ProjectId || applicant.ProjectId || null;
+      payload.ProjectId ||
+      unitSelection?.ProjectId ||
+      applicant.ProjectId ||
+      null;
     const companyId =
-      payload.CompanyId || unitSelection?.CompanyId || applicant.CompanyId || null;
+      payload.CompanyId ||
+      unitSelection?.CompanyId ||
+      applicant.CompanyId ||
+      null;
 
     const insertResult = await new sql.Request(transaction)
       .input("ApplicantId", sql.Int, payload.ApplicantId)
@@ -319,8 +333,7 @@ router.post("/", async (req, res) => {
       .input("RegistrationDate", sql.Date, payload.RegistrationDate)
       .input("Status", sql.NVarChar(30), payload.Status)
       .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
-      .input("CreatedBy", sql.NVarChar(100), userName)
-      .query(`
+      .input("CreatedBy", sql.NVarChar(100), userName).query(`
         INSERT INTO dbo.FollowupAgreements (
           AgreementNo,
           ApplicantId,
@@ -361,15 +374,16 @@ router.post("/", async (req, res) => {
 
     await new sql.Request(transaction)
       .input("Id", sql.Int, id)
-      .input("AgreementNo", sql.NVarChar(50), agreementNo)
-      .query(`
+      .input("AgreementNo", sql.NVarChar(50), agreementNo).query(`
         UPDATE dbo.FollowupAgreements
         SET AgreementNo = @AgreementNo
         WHERE Id = @Id
       `);
 
     await transaction.commit();
-    res.status(201).json({ Id: id, AgreementNo: agreementNo, Status: payload.Status });
+    res
+      .status(201)
+      .json({ Id: id, AgreementNo: agreementNo, Status: payload.Status });
   } catch (err) {
     console.error("followupAgreements POST error:", err);
     res.status(500).json({ error: "Failed to create agreement" });
@@ -396,7 +410,9 @@ router.put("/:id", async (req, res) => {
       return res.status(404).json({ error: "Applicant not found" });
     }
 
-    const unitSelection = await getUnitSelectionSnapshot(payload.UnitSelectionId);
+    const unitSelection = await getUnitSelectionSnapshot(
+      payload.UnitSelectionId,
+    );
     if (payload.UnitSelectionId && !unitSelection) {
       return res.status(404).json({ error: "Unit selection not found" });
     }
@@ -409,9 +425,7 @@ router.put("/:id", async (req, res) => {
       });
     }
 
-    const existingResult = await getPool()
-      .request()
-      .input("Id", sql.Int, id)
+    const existingResult = await getPool().request().input("Id", sql.Int, id)
       .query(`
         SELECT Id
         FROM dbo.FollowupAgreements
@@ -430,12 +444,18 @@ router.put("/:id", async (req, res) => {
       .input(
         "ProjectId",
         sql.Int,
-        payload.ProjectId || unitSelection?.ProjectId || applicant.ProjectId || null,
+        payload.ProjectId ||
+          unitSelection?.ProjectId ||
+          applicant.ProjectId ||
+          null,
       )
       .input(
         "CompanyId",
         sql.Int,
-        payload.CompanyId || unitSelection?.CompanyId || applicant.CompanyId || null,
+        payload.CompanyId ||
+          unitSelection?.CompanyId ||
+          applicant.CompanyId ||
+          null,
       )
       .input("AgreementDate", sql.Date, payload.AgreementDate)
       .input("AgreementValue", sql.Decimal(18, 2), payload.AgreementValue)
@@ -444,8 +464,7 @@ router.put("/:id", async (req, res) => {
       .input("RegistrationDate", sql.Date, payload.RegistrationDate)
       .input("Status", sql.NVarChar(30), payload.Status)
       .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
-      .input("UpdatedBy", sql.NVarChar(100), userName)
-      .query(`
+      .input("UpdatedBy", sql.NVarChar(100), userName).query(`
         UPDATE dbo.FollowupAgreements
         SET
           ApplicantId = @ApplicantId,
@@ -484,8 +503,7 @@ router.delete("/:id", async (req, res) => {
     await getPool()
       .request()
       .input("Id", sql.Int, id)
-      .input("UpdatedBy", sql.NVarChar(100), userName)
-      .query(`
+      .input("UpdatedBy", sql.NVarChar(100), userName).query(`
         UPDATE dbo.FollowupAgreements
         SET IsDeleted = 1, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
