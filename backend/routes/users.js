@@ -188,7 +188,15 @@ router.post("/login", async (req, res) => {
         email: user.email,
         role: normalizedRole,
         roleId: user.RoleId,
-        pagePermissions: null,
+        pagePermissions: await (async () => {
+        try {
+          const pr = await pool.request()
+            .input("UserId", sql.Int, user.id)
+            .query(`SELECT RightsJson FROM dbo.UserPageRightsJson WHERE UserId = @UserId AND IsActive = 1`);
+          const row = pr.recordset[0];
+          return row?.RightsJson ? JSON.parse(row.RightsJson) : null;
+        } catch { return null; }
+      })(),
       },
     });
   } catch (err) {
