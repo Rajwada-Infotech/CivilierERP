@@ -69,6 +69,27 @@ interface ActiveFilter {
   clear: () => void;
 }
 
+/**
+ * Per-report filter configuration.
+ * Keys map standard FilterState fields → the actual query param the backend accepts.
+ * Set a key to null to disable that filter for the report entirely.
+ * Omit a key to use the default (companyId, dateFrom, dateTo; no finYear by default).
+ */
+interface FilterConfig {
+  /** Backend param name for company filter, or null to skip. Default: "companyId" */
+  companyParam?: string | null;
+  /** Backend param name for financial year ID, or null to skip. Default: null (most routes don't have it) */
+  finYearParam?: string | null;
+  /** Backend param name for single-day date filter, or null to skip. Default: "dateFrom" */
+  singleDateParam?: string | null;
+  /** Backend param name for range-start date, or null to skip. Default: "dateFrom" */
+  dateFromParam?: string | null;
+  /** Backend param name for range-end date, or null to skip. Default: "dateTo" */
+  dateToParam?: string | null;
+  /** Key in the JSON response that holds the data array. Default: "data" */
+  dataKey?: string;
+}
+
 interface ReportDef {
   id: string;
   label: string;
@@ -78,6 +99,7 @@ interface ReportDef {
   apiPath: string;
   columns: ExportColumn[];
   defaultParams?: Record<string, string>;
+  filterConfig?: FilterConfig;
 }
 
 interface ModuleSection {
@@ -107,17 +129,25 @@ const ALL_REPORTS: ReportDef[] = [
     icon: Banknote,
     color: "#6366f1",
     apiPath: "/api/new-payment",
+    // newPayment: company filter is text-based (PCompany name), skip it.
+    // Fin-year filter uses ?finYear=<id>. Single-date uses ?date=. No range.
+    filterConfig: {
+      companyParam: null,
+      finYearParam: "finYear",
+      singleDateParam: "date",
+      dateFromParam: null,
+      dateToParam: null,
+    },
     columns: [
-      { header: "Doc No", accessor: "PaymentNo" },
+      { header: "Doc No", accessor: "DocNo" },
       {
         header: "Date",
-        accessor: (r) =>
-          r.PaymentDate ? String(r.PaymentDate).slice(0, 10) : "—",
+        accessor: (r) => (r.PDate ? String(r.PDate).slice(0, 10) : "—"),
       },
-      { header: "Party", accessor: "PartyName" },
-      { header: "Mode", accessor: "PaymentMode" },
-      { header: "Amount", accessor: (r) => fmt(r.Amount as number) },
-      { header: "Bank", accessor: "BankName" },
+      { header: "Party", accessor: "PPaymentName" },
+      { header: "Mode", accessor: "PMode" },
+      { header: "Amount", accessor: (r) => fmt(r.PAmount as number) },
+      { header: "Bank", accessor: "PBankName" },
       { header: "Status", accessor: "Status" },
     ],
   },
@@ -128,6 +158,14 @@ const ALL_REPORTS: ReportDef[] = [
     icon: TrendingUp,
     color: "#06d6a0",
     apiPath: "/api/received-payment",
+    // receivedPayment route has no company/date/finYear filter params.
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+    },
     columns: [
       { header: "Doc No", accessor: "RPDocNo" },
       {
@@ -149,6 +187,13 @@ const ALL_REPORTS: ReportDef[] = [
     color: "#8b5cf6",
     apiPath: "/api/received-payment",
     defaultParams: { isEmi: "1" },
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+    },
     columns: [
       { header: "Doc No", accessor: "RPDocNo" },
       {
@@ -169,17 +214,23 @@ const ALL_REPORTS: ReportDef[] = [
     icon: Clock,
     color: "#f43f5e",
     apiPath: "/api/new-payment",
-    defaultParams: { status: "pending" },
+    defaultParams: { status: "Pending" },
+    filterConfig: {
+      companyParam: null,
+      finYearParam: "finYear",
+      singleDateParam: "date",
+      dateFromParam: null,
+      dateToParam: null,
+    },
     columns: [
-      { header: "Doc No", accessor: "PaymentNo" },
+      { header: "Doc No", accessor: "DocNo" },
       {
         header: "Date",
-        accessor: (r) =>
-          r.PaymentDate ? String(r.PaymentDate).slice(0, 10) : "—",
+        accessor: (r) => (r.PDate ? String(r.PDate).slice(0, 10) : "—"),
       },
-      { header: "Party", accessor: "PartyName" },
-      { header: "Amount", accessor: (r) => fmt(r.Amount as number) },
-      { header: "Mode", accessor: "PaymentMode" },
+      { header: "Party", accessor: "PPaymentName" },
+      { header: "Amount", accessor: (r) => fmt(r.PAmount as number) },
+      { header: "Mode", accessor: "PMode" },
       { header: "Status", accessor: "Status" },
     ],
   },
@@ -190,17 +241,28 @@ const ALL_REPORTS: ReportDef[] = [
     icon: Landmark,
     color: "#0ea5e9",
     apiPath: "/api/brs",
+    // BRS route accepts fromDate/toDate (not dateFrom/dateTo). No company/finYear.
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: "fromDate",
+      dateFromParam: "fromDate",
+      dateToParam: "toDate",
+    },
     columns: [
       {
         header: "Date",
-        accessor: (r) =>
-          r.TransactionDate ? String(r.TransactionDate).slice(0, 10) : "—",
+        accessor: (r) => (r.PayDate ? String(r.PayDate).slice(0, 10) : "—"),
       },
       { header: "Bank", accessor: "BankName" },
-      { header: "Narration", accessor: "Narration" },
-      { header: "Debit", accessor: (r) => fmt(r.Debit as number) },
-      { header: "Credit", accessor: (r) => fmt(r.Credit as number) },
-      { header: "Balance", accessor: (r) => fmt(r.Balance as number) },
+      { header: "Party", accessor: "PaymentName" },
+      { header: "Amount", accessor: (r) => fmt(r.Amount as number) },
+      { header: "Mode", accessor: "Mode" },
+      { header: "Doc No", accessor: "DocNo" },
+      {
+        header: "Cleared",
+        accessor: (r) => (r.IsMatched ? "Yes" : "No"),
+      },
     ],
   },
   {
@@ -210,18 +272,28 @@ const ALL_REPORTS: ReportDef[] = [
     icon: ArrowUpDown,
     color: "#14b8a6",
     apiPath: "/api/brs",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: "fromDate",
+      dateFromParam: "fromDate",
+      dateToParam: "toDate",
+    },
     columns: [
-      { header: "Voucher No", accessor: "VoucherNo" },
+      { header: "Doc No", accessor: "DocNo" },
       {
         header: "Date",
-        accessor: (r) =>
-          r.TransactionDate ? String(r.TransactionDate).slice(0, 10) : "—",
+        accessor: (r) => (r.PayDate ? String(r.PayDate).slice(0, 10) : "—"),
       },
       { header: "Bank", accessor: "BankName" },
-      { header: "Particulars", accessor: "Narration" },
-      { header: "Debit", accessor: (r) => fmt(r.Debit as number) },
-      { header: "Credit", accessor: (r) => fmt(r.Credit as number) },
-      { header: "Cleared", accessor: (r) => (r.IsCleared ? "Yes" : "No") },
+      { header: "Party", accessor: "PaymentName" },
+      { header: "Amount", accessor: (r) => fmt(r.Amount as number) },
+      { header: "Type", accessor: "SourceType" },
+      { header: "Status", accessor: "PayStatus" },
+      {
+        header: "Cleared",
+        accessor: (r) => (r.IsMatched ? "Yes" : "No"),
+      },
     ],
   },
   {
@@ -231,16 +303,24 @@ const ALL_REPORTS: ReportDef[] = [
     icon: BookOpen,
     color: "#64748b",
     apiPath: "/api/general-ledger",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+    },
     columns: [
-      { header: "Account", accessor: "AccountName" },
-      { header: "Account Code", accessor: "AccountCode" },
-      { header: "Type", accessor: "LHeadType" },
       {
-        header: "Opening Balance",
-        accessor: (r) => fmt(r.OpeningBalance as number),
+        header: "Account",
+        accessor: (r) => (r.LHeadName ?? r.label ?? "—") as string,
       },
-      { header: "Debit", accessor: (r) => fmt(r.TotalDebit as number) },
-      { header: "Credit", accessor: (r) => fmt(r.TotalCredit as number) },
+      {
+        header: "Code",
+        accessor: (r) => (r.LHeadCode ?? r.code ?? "—") as string,
+      },
+      { header: "Type", accessor: "LHeadType" },
+      { header: "Group", accessor: "GroupName" },
     ],
   },
   {
@@ -250,13 +330,23 @@ const ALL_REPORTS: ReportDef[] = [
     icon: ShoppingCart,
     color: "#f59e0b",
     apiPath: "/api/purchase-orders",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+    },
     columns: [
-      { header: "PO No", accessor: "PONo" },
+      {
+        header: "PO No",
+        accessor: (r) => (r.PurchaseOrderNo ?? r.PONo ?? "—") as string,
+      },
       {
         header: "Date",
         accessor: (r) => (r.PODate ? String(r.PODate).slice(0, 10) : "—"),
       },
-      { header: "Vendor", accessor: "VendorName" },
+      { header: "Vendor", accessor: "SupplierName" },
       { header: "Project", accessor: "ProjectName" },
       { header: "Amount", accessor: (r) => fmt(r.TotalAmount as number) },
       { header: "Status", accessor: "Status" },
@@ -269,6 +359,13 @@ const ALL_REPORTS: ReportDef[] = [
     icon: Package,
     color: "#10b981",
     apiPath: "/api/grns",
+    // GRN accepts companyId ✓ but no date or finYear filters.
+    filterConfig: {
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+    },
     columns: [
       { header: "GRN No", accessor: "GRNNo" },
       {
@@ -276,9 +373,9 @@ const ALL_REPORTS: ReportDef[] = [
         accessor: (r) => (r.GRNDate ? String(r.GRNDate).slice(0, 10) : "—"),
       },
       { header: "Supplier", accessor: "SupplierName" },
-      { header: "PO Ref", accessor: "PONo" },
-      { header: "Total Qty", accessor: "TotalQty" },
-      { header: "Total Value", accessor: (r) => fmt(r.TotalValue as number) },
+      { header: "Doc No", accessor: "DocNo" },
+      { header: "Status", accessor: "Status" },
+      { header: "Remarks", accessor: "Remarks" },
     ],
   },
   {
@@ -288,17 +385,20 @@ const ALL_REPORTS: ReportDef[] = [
     icon: ArrowDownToLine,
     color: "#ef4444",
     apiPath: "/api/material-issues",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+    },
     columns: [
       { header: "Issue No", accessor: "IssueNo" },
-      {
-        header: "Date",
-        accessor: (r) => (r.IssueDate ? String(r.IssueDate).slice(0, 10) : "—"),
-      },
+      { header: "Doc No", accessor: "DocNo" },
       { header: "Project", accessor: "ProjectName" },
-      { header: "Item", accessor: "ItemName" },
-      { header: "Qty", accessor: "Quantity" },
-      { header: "UOM", accessor: "UOM" },
-      { header: "Issued By", accessor: "IssuedBy" },
+      { header: "Items", accessor: "ItemCount" },
+      { header: "Total Qty", accessor: "TotalQty" },
+      { header: "Status", accessor: "Status" },
     ],
   },
   {
@@ -308,14 +408,21 @@ const ALL_REPORTS: ReportDef[] = [
     icon: Layers,
     color: "#06b6d4",
     apiPath: "/api/stock-ledger",
+    defaultParams: { view: "summary" },
+    // stockLedger returns { data: ledger rows, byItem: item-level summary }.
+    // For the summary report we want the byItem array. Date params match defaults.
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      dataKey: "byItem",
+    },
     columns: [
       { header: "Item", accessor: "ItemName" },
-      { header: "Item Code", accessor: "ItemCode" },
-      { header: "Opening", accessor: "OpeningQty" },
-      { header: "Received", accessor: "ReceivedQty" },
-      { header: "Issued", accessor: "IssuedQty" },
-      { header: "Closing", accessor: "ClosingQty" },
-      { header: "UOM", accessor: "UOM" },
+      { header: "Group", accessor: "ItemGroupName" },
+      { header: "In", accessor: "stockIn" },
+      { header: "Out", accessor: "stockOut" },
+      { header: "Balance", accessor: "balance" },
+      { header: "UOM", accessor: (r) => (r.UOMName ?? r.UOM ?? "—") as string },
     ],
   },
   {
@@ -325,73 +432,110 @@ const ALL_REPORTS: ReportDef[] = [
     icon: Wrench,
     color: "#f97316",
     apiPath: "/api/work-orders",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+    },
     columns: [
-      { header: "WO No", accessor: "WONo" },
+      {
+        header: "WO No",
+        accessor: (r) => (r.DocumentNumber ?? r.DocNo ?? "—") as string,
+      },
       {
         header: "Date",
-        accessor: (r) => (r.WODate ? String(r.WODate).slice(0, 10) : "—"),
+        accessor: (r) =>
+          r.DocumentDate ? String(r.DocumentDate).slice(0, 10) : "—",
       },
       { header: "Contractor", accessor: "ContractorName" },
       { header: "Project", accessor: "ProjectName" },
-      { header: "Value", accessor: (r) => fmt(r.TotalValue as number) },
+      { header: "Value", accessor: (r) => fmt(r.TotalAmount as number) },
       { header: "Status", accessor: "Status" },
     ],
   },
   {
     id: "boq-register",
     label: "BOQ Register",
-    description: "Bill of quantities with item-wise breakdown",
+    description: "Bill of quantities with project breakdown",
     icon: FileBarChart2,
     color: "#84cc16",
     apiPath: "/api/boq",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+    },
     columns: [
-      { header: "BOQ No", accessor: "BOQNo" },
+      {
+        header: "BOQ No",
+        accessor: (r) => (r.DocNo ?? r.BoqNo ?? "—") as string,
+      },
       { header: "Project", accessor: "ProjectName" },
-      { header: "Item", accessor: "ItemDescription" },
-      { header: "Qty", accessor: "Quantity" },
-      { header: "Rate", accessor: (r) => fmt(r.Rate as number) },
-      { header: "Total", accessor: (r) => fmt(r.TotalAmount as number) },
+      { header: "Company", accessor: "CompanyName" },
+      { header: "Total Value", accessor: (r) => fmt(r.TotalAmount as number) },
+      { header: "Status", accessor: "Status" },
     ],
   },
   {
     id: "work-done",
     label: "Work Done",
-    description: "Completed work orders and progress summary",
+    description: "Certified work done entries",
     icon: ClipboardList,
     color: "#22c55e",
-    apiPath: "/api/work-orders",
-    defaultParams: { status: "completed" },
+    apiPath: "/api/engineering/work-done",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+    },
     columns: [
-      { header: "WO No", accessor: "WONo" },
-      { header: "Contractor", accessor: "ContractorName" },
+      { header: "Doc No", accessor: "DocNo" },
+      {
+        header: "Date",
+        accessor: (r) => (r.DocDate ? String(r.DocDate).slice(0, 10) : "—"),
+      },
+      { header: "WO No", accessor: "WorkOrderNo" },
       { header: "Project", accessor: "ProjectName" },
       {
-        header: "Completed",
-        accessor: (r) =>
-          r.CompletedDate ? String(r.CompletedDate).slice(0, 10) : "—",
+        header: "Certified",
+        accessor: (r) => fmt(r.CertifiedAmount as number),
       },
-      { header: "Value", accessor: (r) => fmt(r.TotalValue as number) },
       { header: "Status", accessor: "Status" },
     ],
   },
   {
     id: "invoice-register",
     label: "Invoice Register",
-    description: "Service & item invoices across all projects",
+    description: "Expense bookings & invoices across all projects",
     icon: Receipt,
     color: "#ec4899",
     apiPath: "/api/expense-booking",
+    // expenseBooking GET / accepts ?finYear=<id>. No date range or company filter.
+    filterConfig: {
+      companyParam: null,
+      finYearParam: "finYear",
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+    },
     columns: [
       { header: "Invoice No", accessor: "EDocNo" },
       {
         header: "Date",
-        accessor: (r) => (r.EDate ? String(r.EDate).slice(0, 10) : "—"),
+        accessor: (r) => (r.EDocDate ? String(r.EDocDate).slice(0, 10) : "—"),
       },
-      { header: "Party", accessor: "EPartyName" },
       { header: "Project", accessor: "EProjectName" },
       { header: "Amount", accessor: (r) => fmt(r.EAmount as number) },
-      { header: "GST", accessor: (r) => fmt(r.EGST as number) },
-      { header: "Total", accessor: (r) => fmt(r.ETotalAmount as number) },
+      {
+        header: "Net Amount",
+        accessor: (r) => fmt((r.ENetAmount ?? r.EAmount) as number),
+      },
       { header: "Status", accessor: "EStatus" },
     ],
   },
@@ -403,6 +547,14 @@ const ALL_REPORTS: ReportDef[] = [
     color: "#78716c",
     apiPath: "/api/enterprises",
     defaultParams: { business_type: "S" },
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+      dataKey: "_array", // enterprise GET / returns a raw array, handled by Array.isArray check
+    },
     columns: [
       { header: "Supplier Name", accessor: "name" },
       { header: "GST No", accessor: "gst_no" },
@@ -419,14 +571,21 @@ const ALL_REPORTS: ReportDef[] = [
     icon: GitPullRequest,
     color: "#fb923c",
     apiPath: "/api/approval-inbox",
+    // approval-inbox returns a plain array (no pagination wrapper). No filter params.
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+    },
     columns: [
-      { header: "Doc No", accessor: "DocNo" },
-      { header: "Module", accessor: "ModuleName" },
-      { header: "Requested By", accessor: "RequestedBy" },
+      { header: "Reference", accessor: "Reference" },
+      { header: "Module", accessor: "ModuleLabel" },
       {
         header: "Date",
         accessor: (r) =>
-          r.RequestedAt ? String(r.RequestedAt).slice(0, 10) : "—",
+          r.RecordDate ? String(r.RecordDate).slice(0, 10) : "—",
       },
       { header: "Status", accessor: "Status" },
       { header: "Amount", accessor: (r) => fmt(r.Amount as number) },
@@ -440,6 +599,11 @@ const ALL_REPORTS: ReportDef[] = [
     color: "#a855f7",
     apiPath: "/api/user-activity",
     defaultParams: { limit: "200" },
+    // userActivity accepts dateFrom/dateTo ✓ but no company or finYear filter.
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+    },
     columns: [
       { header: "User", accessor: "userName" },
       { header: "Email", accessor: "userEmail" },
@@ -693,19 +857,35 @@ const ReportTable: React.FC<{
   const PAGE_SIZE = 20;
 
   const buildParams = (): Record<string, string> => {
+    const fc = report.filterConfig ?? {};
     const f: Record<string, string> = {};
-    if (filters.companyId) f.companyId = filters.companyId;
-    if (filters.finYearId) f.finYearId = filters.finYearId;
-    else if (filters.dateMode === "single" && filters.singleDate)
-      f.dateFrom = filters.singleDate;
-    else if (
+
+    // ── Company ───────────────────────────────────────────────────────────────
+    // Default param name is "companyId". If filterConfig.companyParam is null, skip.
+    const compParam = "companyParam" in fc ? fc.companyParam : "companyId";
+    if (compParam && filters.companyId) f[compParam] = filters.companyId;
+
+    // ── Financial year / Date ─────────────────────────────────────────────────
+    // fin-year takes priority over calendar dates (same as the UI logic).
+    const fyParam = "finYearParam" in fc ? fc.finYearParam : null;
+    // Default single-date param: "dateFrom"  Default range params: "dateFrom"/"dateTo"
+    const sdParam = "singleDateParam" in fc ? fc.singleDateParam : "dateFrom";
+    const dfParam = "dateFromParam" in fc ? fc.dateFromParam : "dateFrom";
+    const dtParam = "dateToParam" in fc ? fc.dateToParam : "dateTo";
+
+    if (filters.finYearId) {
+      if (fyParam) f[fyParam] = filters.finYearId;
+    } else if (filters.dateMode === "single" && filters.singleDate) {
+      if (sdParam) f[sdParam] = filters.singleDate;
+    } else if (
       filters.dateMode === "range" &&
       filters.rangeFrom &&
       filters.rangeTo
     ) {
-      f.dateFrom = filters.rangeFrom;
-      f.dateTo = filters.rangeTo;
+      if (dfParam) f[dfParam] = filters.rangeFrom;
+      if (dtParam) f[dtParam] = filters.rangeTo;
     }
+
     return f;
   };
 
@@ -721,9 +901,12 @@ const ReportTable: React.FC<{
       const res = await fetchWithAuth(`${report.apiPath}?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
+      // Some routes return a plain array; others wrap in { data: [...] }.
+      // stock-summary uses { byItem: [...] }. Honour filterConfig.dataKey.
+      const dataKey = report.filterConfig?.dataKey ?? "data";
       const data: Record<string, unknown>[] = Array.isArray(json)
         ? json
-        : (json.data ?? json.records ?? []);
+        : (json[dataKey] ?? json.data ?? json.records ?? []);
       setRows(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
