@@ -82,7 +82,11 @@ interface PageConfig {
   getInitialForm: () => Record<string, string>;
   normalizeRecord: (record: RecordRow) => Record<string, string>;
   buildPayload: (form: Record<string, string>) => Record<string, unknown>;
-  syncForm?: (form: Record<string, string>, changedKey: string, options: OptionsBag) => Record<string, string>;
+  syncForm?: (
+    form: Record<string, string>,
+    changedKey: string,
+    options: OptionsBag,
+  ) => Record<string, string>;
 }
 
 interface OptionsBag {
@@ -114,7 +118,9 @@ function money(value: unknown) {
 function dateText(value: unknown) {
   if (!value) return "-";
   const date = new Date(String(value));
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("en-IN");
+  return Number.isNaN(date.getTime())
+    ? String(value)
+    : date.toLocaleDateString("en-IN");
 }
 
 function optionName(options: Option[] = [], id: string) {
@@ -129,7 +135,12 @@ function unitLabel(option: Option) {
   return `${option.SelectionNo ?? "Selection"}${option.UnitNo ? ` - ${option.UnitNo}` : ""}`;
 }
 
-async function fetchList(apiPath: string, search: string, status: string, page: number) {
+async function fetchList(
+  apiPath: string,
+  search: string,
+  status: string,
+  page: number,
+) {
   const params = new URLSearchParams({ page: String(page), pageSize: "20" });
   if (search.trim()) params.set("search", search.trim());
   if (status !== "all") params.set("status", status);
@@ -138,7 +149,12 @@ async function fetchList(apiPath: string, search: string, status: string, page: 
   if (!response.ok) throw new Error("Failed to load records");
   return response.json() as Promise<{
     data: RecordRow[];
-    pagination: { page: number; pageSize: number; total: number; totalPages: number };
+    pagination: {
+      page: number;
+      pageSize: number;
+      total: number;
+      totalPages: number;
+    };
   }>;
 }
 
@@ -148,7 +164,11 @@ async function fetchOptions(apiPath: string) {
   return response.json() as Promise<OptionsBag>;
 }
 
-async function saveRecord(apiPath: string, payload: Record<string, unknown>, id?: number) {
+async function saveRecord(
+  apiPath: string,
+  payload: Record<string, unknown>,
+  id?: number,
+) {
   const response = await fetchWithAuth(id ? `${apiPath}/${id}` : apiPath, {
     method: id ? "PUT" : "POST",
     body: JSON.stringify(payload),
@@ -161,7 +181,9 @@ async function saveRecord(apiPath: string, payload: Record<string, unknown>, id?
 }
 
 async function deleteRecord(apiPath: string, id: number) {
-  const response = await fetchWithAuth(`${apiPath}/${id}`, { method: "DELETE" });
+  const response = await fetchWithAuth(`${apiPath}/${id}`, {
+    method: "DELETE",
+  });
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.error || "Failed to delete record");
@@ -172,24 +194,50 @@ const configs: Record<Entity, PageConfig> = {
   applicants: {
     entity: "applicants",
     title: "Applicants",
-    description: "Sales enquiries, project interest, ownership, and qualification status.",
-    apiPath: "/api/followup-applicants",
-    queryKey: "followup-applicants",
+    description:
+      "Sales enquiries, project interest, ownership, and qualification status.",
+    apiPath: "/api/followup-applications",
+    queryKey: "followup-applications",
     createLabel: "New Applicant",
     emptyText: "No applicants found.",
     icon: UserRound,
     fields: [
-      { key: "ApplicantName", label: "Applicant Name", type: "text", required: true },
+      {
+        key: "ApplicantName",
+        label: "Applicant Name",
+        type: "text",
+        required: true,
+      },
       { key: "PrimaryMobile", label: "Mobile", type: "text" },
       { key: "Email", label: "Email", type: "text" },
       { key: "City", label: "City", type: "text" },
       { key: "Source", label: "Source", type: "text" },
-      { key: "ProjectId", label: "Project", type: "select", optionKey: "projects" },
-      { key: "CompanyId", label: "Company", type: "select", optionKey: "companies" },
+      {
+        key: "ProjectId",
+        label: "Project",
+        type: "select",
+        optionKey: "projects",
+      },
+      {
+        key: "CompanyId",
+        label: "Company",
+        type: "select",
+        optionKey: "companies",
+      },
       { key: "PreferredUnitType", label: "Preferred Unit", type: "text" },
       { key: "BudgetAmount", label: "Budget", type: "number" },
-      { key: "AssignedTo", label: "Assigned To", type: "select", optionKey: "users" },
-      { key: "Status", label: "Status", type: "select", optionKey: "statusOptions" },
+      {
+        key: "AssignedTo",
+        label: "Assigned To",
+        type: "select",
+        optionKey: "users",
+      },
+      {
+        key: "Status",
+        label: "Status",
+        type: "select",
+        optionKey: "statusOptions",
+      },
       { key: "Notes", label: "Notes", type: "textarea" },
     ],
     columns: [
@@ -246,9 +294,26 @@ const configs: Record<Entity, PageConfig> = {
     emptyText: "No unit selections found.",
     icon: Home,
     fields: [
-      { key: "ApplicantId", label: "Applicant", type: "select", required: true, optionKey: "applicants", optionLabel: applicantLabel },
-      { key: "ProjectId", label: "Project", type: "select", optionKey: "projects" },
-      { key: "CompanyId", label: "Company", type: "select", optionKey: "companies" },
+      {
+        key: "ApplicantId",
+        label: "Applicant",
+        type: "select",
+        required: true,
+        optionKey: "applicants",
+        optionLabel: applicantLabel,
+      },
+      {
+        key: "ProjectId",
+        label: "Project",
+        type: "select",
+        optionKey: "projects",
+      },
+      {
+        key: "CompanyId",
+        label: "Company",
+        type: "select",
+        optionKey: "companies",
+      },
       { key: "UnitNo", label: "Unit No.", type: "text", required: true },
       { key: "BlockName", label: "Block", type: "text" },
       { key: "FloorName", label: "Floor", type: "text" },
@@ -258,7 +323,12 @@ const configs: Record<Entity, PageConfig> = {
       { key: "TotalValue", label: "Total Value", type: "number" },
       { key: "BookingAmount", label: "Booking Amount", type: "number" },
       { key: "SelectionDate", label: "Selection Date", type: "date" },
-      { key: "Status", label: "Status", type: "select", optionKey: "statusOptions" },
+      {
+        key: "Status",
+        label: "Status",
+        type: "select",
+        optionKey: "statusOptions",
+      },
       { key: "Notes", label: "Notes", type: "textarea" },
     ],
     columns: [
@@ -313,7 +383,9 @@ const configs: Record<Entity, PageConfig> = {
     }),
     syncForm: (form, changedKey, options) => {
       if (changedKey !== "ApplicantId") return form;
-      const applicant = options.applicants?.find((item) => String(item.Id) === form.ApplicantId);
+      const applicant = options.applicants?.find(
+        (item) => String(item.Id) === form.ApplicantId,
+      );
       return {
         ...form,
         ProjectId: toStringValue(applicant?.ProjectId),
@@ -324,22 +396,51 @@ const configs: Record<Entity, PageConfig> = {
   agreements: {
     entity: "agreements",
     title: "Agreements",
-    description: "Agreement values, advances, balances, registration dates, and status.",
+    description:
+      "Agreement values, advances, balances, registration dates, and status.",
     apiPath: "/api/followup-agreements",
     queryKey: "followup-agreements",
     createLabel: "New Agreement",
     emptyText: "No agreements found.",
     icon: FileCheck2,
     fields: [
-      { key: "ApplicantId", label: "Applicant", type: "select", required: true, optionKey: "applicants", optionLabel: applicantLabel },
-      { key: "UnitSelectionId", label: "Unit Selection", type: "select", optionKey: "unitSelections", optionLabel: unitLabel },
-      { key: "ProjectId", label: "Project", type: "select", optionKey: "projects" },
-      { key: "CompanyId", label: "Company", type: "select", optionKey: "companies" },
+      {
+        key: "ApplicantId",
+        label: "Applicant",
+        type: "select",
+        required: true,
+        optionKey: "applicants",
+        optionLabel: applicantLabel,
+      },
+      {
+        key: "UnitSelectionId",
+        label: "Unit Selection",
+        type: "select",
+        optionKey: "unitSelections",
+        optionLabel: unitLabel,
+      },
+      {
+        key: "ProjectId",
+        label: "Project",
+        type: "select",
+        optionKey: "projects",
+      },
+      {
+        key: "CompanyId",
+        label: "Company",
+        type: "select",
+        optionKey: "companies",
+      },
       { key: "AgreementDate", label: "Agreement Date", type: "date" },
       { key: "AgreementValue", label: "Agreement Value", type: "number" },
       { key: "AdvanceAmount", label: "Advance", type: "number" },
       { key: "RegistrationDate", label: "Registration Date", type: "date" },
-      { key: "Status", label: "Status", type: "select", optionKey: "statusOptions" },
+      {
+        key: "Status",
+        label: "Status",
+        type: "select",
+        optionKey: "statusOptions",
+      },
       { key: "Notes", label: "Notes", type: "textarea" },
     ],
     columns: [
@@ -385,7 +486,9 @@ const configs: Record<Entity, PageConfig> = {
     }),
     syncForm: (form, changedKey, options) => {
       if (changedKey === "ApplicantId") {
-        const applicant = options.applicants?.find((item) => String(item.Id) === form.ApplicantId);
+        const applicant = options.applicants?.find(
+          (item) => String(item.Id) === form.ApplicantId,
+        );
         return {
           ...form,
           UnitSelectionId: "",
@@ -394,7 +497,9 @@ const configs: Record<Entity, PageConfig> = {
         };
       }
       if (changedKey === "UnitSelectionId") {
-        const unit = options.unitSelections?.find((item) => String(item.Id) === form.UnitSelectionId);
+        const unit = options.unitSelections?.find(
+          (item) => String(item.Id) === form.UnitSelectionId,
+        );
         return {
           ...form,
           ApplicantId: toStringValue(unit?.ApplicantId || form.ApplicantId),
@@ -407,11 +512,17 @@ const configs: Record<Entity, PageConfig> = {
   },
 };
 
-function fieldOptions(field: FieldConfig, options: OptionsBag, form: Record<string, string>) {
+function fieldOptions(
+  field: FieldConfig,
+  options: OptionsBag,
+  form: Record<string, string>,
+) {
   if (!field.optionKey) return [];
   const rawOptions = options[field.optionKey as keyof OptionsBag] ?? [];
   if (field.optionKey === "unitSelections" && form.ApplicantId) {
-    return (rawOptions as Option[]).filter((option) => String(option.ApplicantId) === form.ApplicantId);
+    return (rawOptions as Option[]).filter(
+      (option) => String(option.ApplicantId) === form.ApplicantId,
+    );
   }
   return rawOptions as Option[] | string[];
 }
@@ -445,9 +556,14 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
 
   const summary = useMemo(() => {
     const amountKeys = ["BudgetAmount", "TotalValue", "AgreementValue"];
-    const amountKey = amountKeys.find((key) => records.some((record) => record[key] !== undefined));
+    const amountKey = amountKeys.find((key) =>
+      records.some((record) => record[key] !== undefined),
+    );
     const totalValue = amountKey
-      ? records.reduce((sum, record) => sum + (Number(record[amountKey]) || 0), 0)
+      ? records.reduce(
+          (sum, record) => sum + (Number(record[amountKey]) || 0),
+          0,
+        )
       : 0;
 
     return {
@@ -458,7 +574,8 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
   }, [pagination?.total, records]);
 
   const saveMutation = useMutation({
-    mutationFn: () => saveRecord(config.apiPath, config.buildPayload(form), editing?.Id),
+    mutationFn: () =>
+      saveRecord(config.apiPath, config.buildPayload(form), editing?.Id),
     onSuccess: () => {
       toast.success(editing ? "Record updated" : "Record created");
       queryClient.invalidateQueries({ queryKey: [config.queryKey] });
@@ -504,7 +621,11 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
       return (
         <div className="md:col-span-2 space-y-2" key={field.key}>
           <Label htmlFor={commonId}>{field.label}</Label>
-          <Textarea id={commonId} value={value} onChange={(event) => updateForm(field.key, event.target.value)} />
+          <Textarea
+            id={commonId}
+            value={value}
+            onChange={(event) => updateForm(field.key, event.target.value)}
+          />
         </div>
       );
     }
@@ -514,9 +635,16 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
       return (
         <div className="space-y-2" key={field.key}>
           <Label>{field.label}</Label>
-          <Select value={value || NONE} onValueChange={(next) => updateForm(field.key, next === NONE ? "" : next)}>
+          <Select
+            value={value || NONE}
+            onValueChange={(next) =>
+              updateForm(field.key, next === NONE ? "" : next)
+            }
+          >
             <SelectTrigger>
-              <SelectValue placeholder={`Select ${field.label.toLowerCase()}`} />
+              <SelectValue
+                placeholder={`Select ${field.label.toLowerCase()}`}
+              />
             </SelectTrigger>
             <SelectContent>
               {!field.required && <SelectItem value={NONE}>None</SelectItem>}
@@ -530,7 +658,9 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
                 }
                 return (
                   <SelectItem key={option.Id} value={String(option.Id)}>
-                    {field.optionLabel ? field.optionLabel(option) : option.Name}
+                    {field.optionLabel
+                      ? field.optionLabel(option)
+                      : option.Name}
                   </SelectItem>
                 );
               })}
@@ -558,11 +688,17 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-heading font-bold text-foreground">{config.title}</h1>
+          <h1 className="text-3xl font-heading font-bold text-foreground">
+            {config.title}
+          </h1>
           <p className="text-muted-foreground mt-1">{config.description}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => navigate("/followup")} className="gap-2">
+          <Button
+            variant="outline"
+            onClick={() => navigate("/followup")}
+            className="gap-2"
+          >
             <ArrowLeft className="w-4 h-4" />
             Dashboard
           </Button>
@@ -576,7 +712,9 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Records</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Total Records
+            </CardTitle>
           </CardHeader>
           <CardContent className="flex items-center gap-3">
             <Icon className="w-5 h-5 text-primary" />
@@ -585,7 +723,9 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Visible Now</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Visible Now
+            </CardTitle>
           </CardHeader>
           <CardContent className="flex items-center gap-3">
             <Building2 className="w-5 h-5 text-primary" />
@@ -594,11 +734,15 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Visible Value</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Visible Value
+            </CardTitle>
           </CardHeader>
           <CardContent className="flex items-center gap-3">
             <IndianRupee className="w-5 h-5 text-primary" />
-            <span className="text-2xl font-bold">{summary.totalValue.toLocaleString("en-IN")}</span>
+            <span className="text-2xl font-bold">
+              {summary.totalValue.toLocaleString("en-IN")}
+            </span>
           </CardContent>
         </Card>
       </div>
@@ -659,7 +803,10 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
               <TableBody>
                 {isLoading && (
                   <TableRow>
-                    <TableCell colSpan={config.columns.length + 1} className="text-center text-muted-foreground">
+                    <TableCell
+                      colSpan={config.columns.length + 1}
+                      className="text-center text-muted-foreground"
+                    >
                       Loading...
                     </TableCell>
                   </TableRow>
@@ -669,7 +816,8 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
                     <TableRow key={record.Id}>
                       {config.columns.map((column) => (
                         <TableCell key={column.key}>
-                          {config.entity === "applicants" && column.key === "ApplicantName" ? (
+                          {config.entity === "applicants" &&
+                          column.key === "ApplicantName" ? (
                             <Link
                               to={`/followup/sales/applicants/${record.Id}`}
                               className="font-medium text-primary underline-offset-4 hover:underline"
@@ -677,14 +825,22 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
                               {toStringValue(record[column.key] || "-")}
                             </Link>
                           ) : column.key === "Status" ? (
-                            <Badge variant="secondary">{toStringValue(record.Status || "-")}</Badge>
+                            <Badge variant="secondary">
+                              {toStringValue(record.Status || "-")}
+                            </Badge>
                           ) : (
-                            column.format?.(record[column.key], record) ?? toStringValue(record[column.key] || "-")
+                            (column.format?.(record[column.key], record) ??
+                            toStringValue(record[column.key] || "-"))
                           )}
                         </TableCell>
                       ))}
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(record)} aria-label="Edit">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => openEdit(record)}
+                          aria-label="Edit"
+                        >
                           <Edit className="w-4 h-4" />
                         </Button>
                         <Button
@@ -700,7 +856,10 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
                   ))}
                 {!isLoading && records.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={config.columns.length + 1} className="text-center text-muted-foreground">
+                    <TableCell
+                      colSpan={config.columns.length + 1}
+                      className="text-center text-muted-foreground"
+                    >
                       {config.emptyText}
                     </TableCell>
                   </TableRow>
@@ -713,7 +872,11 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
               Page {pagination?.page ?? 1} of {pagination?.totalPages || 1}
             </p>
             <div className="flex gap-2">
-              <Button variant="outline" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
+              <Button
+                variant="outline"
+                disabled={page <= 1}
+                onClick={() => setPage((value) => value - 1)}
+              >
                 Previous
               </Button>
               <Button
@@ -731,7 +894,9 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editing ? `Edit ${config.title}` : config.createLabel}</DialogTitle>
+            <DialogTitle>
+              {editing ? `Edit ${config.title}` : config.createLabel}
+            </DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-2">
             {config.fields.map(renderField)}
@@ -739,7 +904,10 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
               <div className="space-y-2">
                 <Label>Balance</Label>
                 <Input
-                  value={String((Number(form.AgreementValue) || 0) - (Number(form.AdvanceAmount) || 0))}
+                  value={String(
+                    (Number(form.AgreementValue) || 0) -
+                      (Number(form.AdvanceAmount) || 0),
+                  )}
                   readOnly
                 />
               </div>
@@ -747,7 +915,13 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
             {entity === "unit-selections" && (
               <div className="space-y-2">
                 <Label>Computed Value</Label>
-                <Input value={String((Number(form.AreaSqFt) || 0) * (Number(form.RatePerSqFt) || 0))} readOnly />
+                <Input
+                  value={String(
+                    (Number(form.AreaSqFt) || 0) *
+                      (Number(form.RatePerSqFt) || 0),
+                  )}
+                  readOnly
+                />
               </div>
             )}
           </div>
@@ -755,7 +929,10 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
             <Button variant="outline" onClick={() => setIsOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+            <Button
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+            >
               {saveMutation.isPending ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
