@@ -57,7 +57,7 @@ function userFromReq(req) {
 }
 
 function isTicketAdmin(role) {
-  return ["admin", "super_admin", "dba"].includes(
+  return ["admin", "super_admin", "dba", "engineer"].includes(
     allowRoles.normalizeRole(role),
   );
 }
