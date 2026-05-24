@@ -166,7 +166,7 @@ async function createLog(payload: {
 
 async function fetchApplicants() {
   const response = await fetchWithAuth(
-    "/api/followup-applicants?page=1&pageSize=50",
+    "/api/followup-applications?page=1&pageSize=50",
   );
   if (!response.ok) throw new Error("Failed to load applicants");
   return response.json() as Promise<{

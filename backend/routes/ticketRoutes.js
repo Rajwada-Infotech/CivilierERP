@@ -1,8 +1,8 @@
 /**
  * ticketRoutes.js
  * Full ticket workflow: create → assign → comment → resolve/close/reopen
+ * Attachments are stored as binary in dbo.ticket_attachments (no disk dependency).
  * Auth-protected — all endpoints require valid JWT (via global authMiddleware in server.js).
- * Role-gated endpoints explicitly checked with allowRoles().
  */
 
 const express = require("express");
@@ -12,9 +12,8 @@ const allowRoles = require("../middleware/role");
 const canAcceptTickets = require("../middleware/canAcceptTickets");
 const multer = require("multer");
 const path = require("path");
-const fs = require("fs");
 
-// ─── Socket.IO — lazy-loaded (same pattern as userActivity.js) ───────────────
+// ─── Socket.IO — lazy-loaded ─────────────────────────────────────────────────
 let _getIo = null;
 function getIo() {
   if (!_getIo) _getIo = require("../socket").getIo;
@@ -24,27 +23,15 @@ function emitTicketUpdate(action, ticketId) {
   try {
     getIo().emit("ticket:updated", { action, ticketId });
   } catch (err) {
-    // Best-effort socket emit: never break HTTP flow if Socket.IO is unavailable.
     console.warn(
       `[ticketRoutes] Socket emit failed for action="${action}", ticketId="${ticketId}": ${err?.message || err}`,
     );
   }
 }
 
-// ─── Multer setup ─────────────────────────────────────────────────────────────
-const UPLOAD_DIR = path.join(__dirname, "../uploads/tickets");
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-  filename: (_req, file, cb) => {
-    const unique = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
-    cb(null, `${unique}${path.extname(file.originalname)}`);
-  },
-});
-
+// ─── Multer — memory storage (files go to DB, not disk) ──────────────────────
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
   fileFilter: (_req, file, cb) => {
     const allowed = /jpeg|jpg|png|gif|webp|pdf/i;
@@ -70,7 +57,9 @@ function userFromReq(req) {
 }
 
 function isTicketAdmin(role) {
-  return ["admin", "super_admin", "dba"].includes(allowRoles.normalizeRole(role));
+  return ["admin", "super_admin", "dba"].includes(
+    allowRoles.normalizeRole(role),
+  );
 }
 
 function requireActor(req, res) {
@@ -135,7 +124,6 @@ async function getAccessibleTicket(pool, id, actor) {
 }
 
 // ─── GET /api/tickets ─────────────────────────────────────────────────────────
-// Returns ALL tickets — for admins
 router.get("/", async (req, res) => {
   try {
     const actor = requireActor(req, res);
@@ -145,7 +133,6 @@ router.get("/", async (req, res) => {
     const limit = parsePositiveInt(req.query.limit, 25, 100);
     const offset = (page - 1) * limit;
 
-    // Optional comma-separated status filter: ?status=Resolved,Closed
     const VALID_STATUSES = ["Pending", "InProgress", "Resolved", "Closed"];
     const rawStatus = req.query.status ?? "";
     const statusFilter = rawStatus
@@ -160,8 +147,6 @@ router.get("/", async (req, res) => {
       .input("offset", sql.Int, offset)
       .input("limit", sql.Int, limit);
 
-    // Build WHERE clause — values validated against allowlist, safe to interpolate
-    // Use two variants: one with alias "t." for the main query, one without for COUNT
     const statusIn = hasStatusFilter
       ? statusFilter.map((s) => `'${s}'`).join(",")
       : null;
@@ -193,22 +178,7 @@ router.get("/", async (req, res) => {
         ) c ON c.ticket_id = t.id
         ${whereClause}
         ORDER BY
-          CASE WHEN t.escalated_at IS NOT NULL AND t.status IN ('Pending', 'InProgress') THEN 0 ELSE 1 END,
-          CASE
-            WHEN t.status = 'Pending' AND t.assigned_to_id IS NULL THEN 0
-            WHEN t.status = 'InProgress' THEN 1
-            WHEN t.status = 'Resolved' THEN 2
-            ELSE 3
-          END,
-          CASE t.priority
-            WHEN 'Urgent' THEN 0
-            WHEN 'High' THEN 1
-            WHEN 'Medium' THEN 2
-            WHEN 'Low' THEN 3
-            ELSE 4
-          END,
-          t.created_at ASC,
-          t.id ASC
+          t.id DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
 
@@ -261,9 +231,7 @@ router.get("/stats", async (req, res) => {
   }
 });
 
-// ─── GET /api/tickets/my  (alias for /mine — frontend uses this) ──────────────
-// ─── GET /api/tickets/mine ───────────────────────────────────────────────────
-// Personal ticket queue for the Ticket module.
+// ─── GET /api/tickets/my  (alias /mine) ──────────────────────────────────────
 async function myTicketsHandler(req, res) {
   try {
     const actor = requireActor(req, res);
@@ -284,8 +252,7 @@ async function myTicketsHandler(req, res) {
         FROM dbo.tickets t
         WHERE t.created_by_id = @userId OR t.assigned_to_id = @userId
         ORDER BY
-          CASE t.status WHEN 'Pending' THEN 0 WHEN 'InProgress' THEN 1 ELSE 2 END,
-          t.created_at DESC
+          t.id DESC
       `);
 
     res.json(result.recordset);
@@ -298,7 +265,6 @@ router.get("/my", myTicketsHandler);
 router.get("/mine", myTicketsHandler);
 
 // ─── GET /api/tickets/admin-users ─────────────────────────────────────────────
-// List users that can be assigned tickets
 router.get(
   "/admin-users",
   allowRoles("admin", "super_admin", "dba"),
@@ -338,18 +304,38 @@ router.get("/:id", async (req, res) => {
         `SELECT * FROM dbo.ticket_comments WHERE ticket_id = @tid ORDER BY created_at ASC`,
       );
 
-    const visibleComments =
-      isTicketAdmin(actor.role)
-        ? comments.recordset
-        : comments.recordset.filter((comment) => !Number(comment.is_internal));
+    // Fetch DB attachments for this ticket
+    const attachResult = await pool.request().input("tid", sql.Int, id).query(`
+        SELECT id, ticket_id, comment_id, filename, mime_type, file_size, uploaded_at
+        FROM dbo.ticket_attachments
+        WHERE ticket_id = @tid
+        ORDER BY uploaded_at ASC
+      `);
 
-    // Coerce Pending → InProgress if the ticket already has replies
+    const visibleComments = isTicketAdmin(actor.role)
+      ? comments.recordset
+      : comments.recordset.filter((comment) => !Number(comment.is_internal));
+
     const ticket = { ...access.ticket };
     if (ticket.status === "Pending" && comments.recordset.length > 0) {
       ticket.status = "InProgress";
     }
 
-    res.json({ ticket, comments: visibleComments });
+    const dbAttachments = attachResult.recordset.map((a) => ({
+      id: a.id,
+      ticket_id: a.ticket_id,
+      comment_id: a.comment_id,
+      filename: a.filename,
+      mime_type: a.mime_type,
+      file_size: a.file_size,
+      url: `/api/tickets/attachment/${a.id}`,
+    }));
+
+    res.json({
+      ticket,
+      comments: visibleComments,
+      attachments: dbAttachments,
+    });
   } catch (err) {
     console.error("[Tickets GET /:id]", err.message);
     res.status(500).json({ error: err.message });
@@ -357,83 +343,125 @@ router.get("/:id", async (req, res) => {
 });
 
 // ─── POST /api/tickets/upload ─────────────────────────────────────────────────
-// Accepts one or more files; returns array of stored URLs via /api/tickets/file/
-router.post("/upload", upload.array("file", 20), (req, res) => {
-  const files = req.files;
-  if (!files || files.length === 0)
-    return res.status(400).json({ error: "No file uploaded" });
-  const urls = files.map((f) => `/api/tickets/file/${f.filename}`);
-  res.json({ success: true, url: urls[0], urls });
-});
-
-// ─── GET /api/tickets/file/:filename ─────────────────────────────────────────
-// Serve uploaded attachment files after checking ticket access.
-async function serveTicketFile(req, res) {
+// Saves file binary to dbo.ticket_attachments. Returns attachment IDs + URLs.
+// ticketId is required in body or query. commentId is optional.
+router.post("/upload", upload.array("file", 20), async (req, res) => {
   try {
     const actor = requireActor(req, res);
     if (!actor) return;
 
-    const filename = path.basename(req.params.filename);
-    if (!/^[\w.-]+$/.test(filename)) {
-      return res.status(400).json({ error: "Invalid filename" });
-    }
+    const files = req.files;
+    if (!files || files.length === 0)
+      return res.status(400).json({ error: "No file uploaded" });
 
-    const uploadRoot = path.resolve(UPLOAD_DIR);
-    const filePath = path.resolve(uploadRoot, filename);
-    if (!filePath.startsWith(`${uploadRoot}${path.sep}`)) {
-      return res.status(400).json({ error: "Invalid filename" });
-    }
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: "File not found" });
+    const ticketId = parseTicketId(req.body.ticketId ?? req.query.ticketId);
+    const commentId =
+      parseTicketId(req.body.commentId ?? req.query.commentId) ?? null;
+
+    if (!ticketId) {
+      return res.status(400).json({ error: "ticketId is required" });
     }
 
     const pool = getPool();
-    const filePattern = `%${filename}%`;
-
-    // First: check ticket attachment_path (user-uploaded on create)
-    const ticketResult = await pool
-      .request()
-      .input("fileUrl", sql.NVarChar(512), filePattern)
-      .query(`
-        SELECT TOP 1 id
-        FROM dbo.tickets
-        WHERE attachment_path LIKE @fileUrl
-        ORDER BY id DESC
-      `);
-
-    let ticketId = ticketResult.recordset[0]?.id ?? null;
-
-    // Fallback: check ticket_comments (admin/user reply attachments)
-    if (!ticketId) {
-      const commentResult = await pool
-        .request()
-        .input("fileUrl", sql.NVarChar(512), filePattern)
-        .query(`
-          SELECT TOP 1 ticket_id
-          FROM dbo.ticket_comments
-          WHERE comment LIKE @fileUrl
-          ORDER BY id DESC
-        `);
-      ticketId = commentResult.recordset[0]?.ticket_id ?? null;
-    }
-
-    if (!ticketId) {
-      return res.status(404).json({ error: "File not found" });
-    }
-
     const access = await getAccessibleTicket(pool, ticketId, actor);
     const accessError = sendTicketAccessError(res, access);
     if (accessError) return accessError;
 
-    res.sendFile(filePath);
+    const results = [];
+    for (const file of files) {
+      const insertResult = await pool
+        .request()
+        .input("ticket_id", sql.Int, ticketId)
+        .input("comment_id", sql.Int, commentId)
+        .input("filename", sql.NVarChar(255), file.originalname)
+        .input("mime_type", sql.NVarChar(100), file.mimetype)
+        .input("file_size", sql.Int, file.size)
+        .input("file_data", sql.VarBinary(sql.MAX), file.buffer)
+        .input("uploaded_by", sql.Int, actor.id).query(`
+          INSERT INTO dbo.ticket_attachments
+            (ticket_id, comment_id, filename, mime_type, file_size, file_data, uploaded_by)
+          OUTPUT INSERTED.id
+          VALUES
+            (@ticket_id, @comment_id, @filename, @mime_type, @file_size, @file_data, @uploaded_by)
+        `);
+
+      const attachId = insertResult.recordset[0].id;
+      results.push({
+        id: attachId,
+        filename: file.originalname,
+        mime_type: file.mimetype,
+        url: `/api/tickets/attachment/${attachId}`,
+      });
+    }
+
+    res.json({
+      success: true,
+      url: results[0]?.url,
+      urls: results.map((r) => r.url),
+      attachments: results,
+    });
   } catch (err) {
-    console.error("[Tickets GET /file/:filename]", err.message);
+    console.error("[Tickets POST /upload]", err.message);
     res.status(500).json({ error: err.message });
   }
-}
-router.get("/file/:filename", serveTicketFile);
+});
 
-// ─── POST /api/tickets  (also accepts /create for backward compat) ─────────────
+// ─── GET /api/tickets/attachment/:id ─────────────────────────────────────────
+// Stream attachment binary from DB. Checks ticket access before serving.
+router.get("/attachment/:id", async (req, res) => {
+  try {
+    const actor = requireActor(req, res);
+    if (!actor) return;
+
+    const attachId = parseTicketId(req.params.id);
+    if (!attachId)
+      return res.status(400).json({ error: "Invalid attachment id" });
+
+    const pool = getPool();
+    const result = await pool.request().input("id", sql.Int, attachId).query(`
+        SELECT id, ticket_id, filename, mime_type, file_data
+        FROM dbo.ticket_attachments
+        WHERE id = @id
+      `);
+
+    if (!result.recordset.length) {
+      return res.status(404).json({ error: "Attachment not found" });
+    }
+
+    const attachment = result.recordset[0];
+
+    const access = await getAccessibleTicket(pool, attachment.ticket_id, actor);
+    const accessError = sendTicketAccessError(res, access);
+    if (accessError) return accessError;
+
+    res.setHeader("Content-Type", attachment.mime_type);
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${encodeURIComponent(attachment.filename)}"`,
+    );
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.send(attachment.file_data);
+  } catch (err) {
+    console.error("[Tickets GET /attachment/:id]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /api/tickets/file/:filename (LEGACY) ─────────────────────────────────
+// Keep for backward compat. Returns 410 Gone — all old disk files are gone.
+router.get("/file/:filename", async (req, res) => {
+  try {
+    const actor = requireActor(req, res);
+    if (!actor) return;
+    return res
+      .status(410)
+      .json({ error: "Attachment no longer available. Please re-upload." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /api/tickets  ───────────────────────────────────────────────────────
 async function createTicketHandler(req, res) {
   try {
     const actor = requireActor(req, res);
@@ -448,6 +476,7 @@ async function createTicketHandler(req, res) {
       company_id,
       project_id,
       attachment_path,
+      attachmentIds,
     } = req.body;
 
     if (!subject || !issue_details || !customer_name) {
@@ -456,7 +485,7 @@ async function createTicketHandler(req, res) {
       });
     }
 
-    await pool
+    const insertResult = await pool
       .request()
       .input("subject", sql.NVarChar(500), subject)
       .input("priority", sql.NVarChar(50), priority ?? "Medium")
@@ -474,7 +503,9 @@ async function createTicketHandler(req, res) {
           company_id, project_id,
           attachment_path, status,
           created_by, created_by_id
-        ) VALUES (
+        )
+        OUTPUT INSERTED.id
+        VALUES (
           @subject, @priority, @issue_details,
           @customer_name, @customer_phone,
           @company_id, @project_id,
@@ -483,7 +514,29 @@ async function createTicketHandler(req, res) {
         )
       `);
 
-    res.json({ success: true });
+    const newTicketId = insertResult.recordset[0]?.id;
+
+    if (
+      newTicketId &&
+      Array.isArray(attachmentIds) &&
+      attachmentIds.length > 0
+    ) {
+      for (const aid of attachmentIds) {
+        const parsedAid = Number(aid);
+        if (!Number.isInteger(parsedAid) || parsedAid <= 0) continue;
+        await pool
+          .request()
+          .input("ticket_id", sql.Int, newTicketId)
+          .input("id", sql.Int, parsedAid)
+          .input("uploaded_by", sql.Int, actor.id).query(`
+            UPDATE dbo.ticket_attachments
+            SET ticket_id = @ticket_id
+            WHERE id = @id AND uploaded_by = @uploaded_by
+          `);
+      }
+    }
+
+    res.json({ success: true, ticketId: newTicketId });
   } catch (err) {
     console.error("[Tickets POST /create]", err.message);
     res.status(500).json({ error: err.message });
@@ -492,7 +545,7 @@ async function createTicketHandler(req, res) {
 router.post("/", createTicketHandler);
 router.post("/create", createTicketHandler);
 
-// Accept an unassigned pending ticket into the current user's resolving queue.
+// ─── PUT /api/tickets/accept/:id ─────────────────────────────────────────────
 router.put("/accept/:id", canAcceptTickets, async (req, res) => {
   try {
     const actor = requireActor(req, res);
@@ -588,7 +641,6 @@ router.put(
 );
 
 // ─── PUT /api/tickets/resolve/:id ────────────────────────────────────────────
-// Accepts rating (1–5) and review_remarks in addition to resolution_note
 router.put("/resolve/:id", async (req, res) => {
   try {
     const actor = requireActor(req, res);
@@ -623,7 +675,6 @@ router.put("/resolve/:id", async (req, res) => {
       return res.status(404).json({ error: "Ticket not found" });
     }
 
-    // Build comment from resolution note + review
     const commentParts = [];
     if (resolution_note?.trim())
       commentParts.push(`[Resolved] ${resolution_note.trim()}`);
@@ -644,7 +695,6 @@ router.put("/resolve/:id", async (req, res) => {
 });
 
 // ─── PUT /api/tickets/reopen/:id ─────────────────────────────────────────────
-// Moves a Resolved or Closed ticket back to Pending status
 router.put("/reopen/:id", async (req, res) => {
   try {
     const actor = requireActor(req, res);
@@ -659,10 +709,7 @@ router.put("/reopen/:id", async (req, res) => {
     if (access.status === 403)
       return res.status(403).json({ error: "Access denied" });
 
-    await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query(`
+    await pool.request().input("id", sql.Int, id).query(`
         UPDATE dbo.tickets
         SET status          = 'Pending',
             resolved_by     = NULL,
@@ -712,9 +759,6 @@ router.put(
 );
 
 // ─── PUT /api/tickets/status/:id ─────────────────────────────────────────────
-// Lightweight status update — used by frontend to move Pending → InProgress
-// when an admin/user sends a reply. Only allows transitions that make sense:
-// Pending → InProgress (replying), InProgress → Pending (edge-case rollback)
 router.put("/status/:id", async (req, res) => {
   try {
     const actor = requireActor(req, res);
@@ -736,8 +780,7 @@ router.put("/status/:id", async (req, res) => {
     await pool
       .request()
       .input("id", sql.Int, id)
-      .input("status", sql.NVarChar(50), status)
-      .query(`
+      .input("status", sql.NVarChar(50), status).query(`
         UPDATE dbo.tickets
         SET status     = @status,
             updated_at = SYSUTCDATETIME()
@@ -760,26 +803,54 @@ router.post("/comment/:id", async (req, res) => {
     const pool = getPool();
     const id = parseTicketId(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid ticket id" });
-    const { comment } = req.body;
+    const { comment, attachmentIds } = req.body;
 
-    if (!comment?.trim())
-      return res.status(400).json({ error: "Comment cannot be empty" });
+    if (
+      !comment?.trim() &&
+      (!Array.isArray(attachmentIds) || attachmentIds.length === 0)
+    )
+      return res.status(400).json({ error: "Comment or attachment required" });
 
     const access = await getAccessibleTicket(pool, id, actor);
     const accessError = sendTicketAccessError(res, access);
     if (accessError) return accessError;
 
-    await addCommentToTicket(pool, id, comment.trim(), actor);
+    const commentText = comment?.trim() || "";
+    await addCommentToTicket(pool, id, commentText, actor);
 
-    // Auto-move Pending → InProgress when any reply is posted.
-    // This is the authoritative transition — the frontend PUT /status/:id
-    // does the same, but having it here ensures it always happens.
+    // Get the new comment's ID so we can link attachments to it
+    const commentResult = await pool
+      .request()
+      .input("tid", sql.Int, id)
+      .query(
+        `SELECT TOP 1 id FROM dbo.ticket_comments WHERE ticket_id = @tid ORDER BY id DESC`,
+      );
+    const newCommentId = commentResult.recordset[0]?.id ?? null;
+
+    // Link any pre-uploaded attachments to this comment
+    if (
+      newCommentId &&
+      Array.isArray(attachmentIds) &&
+      attachmentIds.length > 0
+    ) {
+      for (const aid of attachmentIds) {
+        const parsedAid = Number(aid);
+        if (!Number.isInteger(parsedAid) || parsedAid <= 0) continue;
+        await pool
+          .request()
+          .input("comment_id", sql.Int, newCommentId)
+          .input("id", sql.Int, parsedAid)
+          .input("uploaded_by", sql.Int, actor.id).query(`
+            UPDATE dbo.ticket_attachments
+            SET comment_id = @comment_id
+            WHERE id = @id AND uploaded_by = @uploaded_by
+          `);
+      }
+    }
+
     const currentTicket = access.ticket;
     if (currentTicket.status === "Pending") {
-      await pool
-        .request()
-        .input("id", sql.Int, id)
-        .query(`
+      await pool.request().input("id", sql.Int, id).query(`
           UPDATE dbo.tickets
           SET status     = 'InProgress',
               updated_at = SYSUTCDATETIME()
@@ -802,4 +873,3 @@ router.post("/comment/:id", async (req, res) => {
 });
 
 module.exports = router;
-module.exports.serveTicketFile = serveTicketFile;

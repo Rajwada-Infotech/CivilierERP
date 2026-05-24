@@ -1,4 +1,4 @@
-export type UserRole = "super_admin" | "admin" | "user" | "dba";
+export type UserRole = "super_admin" | "admin" | "user" | "dba" | "engineer";
 
 export type PageKey =
   | "dashboard"

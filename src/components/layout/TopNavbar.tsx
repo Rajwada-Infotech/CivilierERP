@@ -986,7 +986,11 @@ export const TopNavbar = () => {
       desc: "Support & issue tracking",
       route: MODULE_DASHBOARD_ROUTES.ticket,
     },
-  ];
+  ].filter((m) =>
+    currentUser?.role === "engineer"
+      ? ["followup", "engineering", "ticket"].includes(m.id)
+      : true,
+  );
 
   // Close mobile menu on route change
   useEffect(() => {}, [location.pathname]);

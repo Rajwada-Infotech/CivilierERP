@@ -275,7 +275,7 @@ const FinanceDashboard = () => {
           sub: `${fmt(data.receivedPayments.todayAmount)} received today · ${data.receivedPayments.totalCount} total`,
           icon: BadgeDollarSign,
           trend: "up" as const,
-          onClick: () => navigate("/received-payment"),
+          onClick: () => navigate("/received-payments"),
         },
         {
           label: "Pending Cheques",
@@ -347,7 +347,7 @@ const FinanceDashboard = () => {
               value={(data?.banks.activeCount ?? 0).toString()}
               sub={`${data?.banks.totalCount ?? 0} total bank heads`}
               icon={Landmark}
-              onClick={() => navigate("/masters/bank")}
+              onClick={() => navigate("/masters/banks")}
             />
             <StatCard
               label="Total Payments Made"
@@ -441,7 +441,7 @@ const FinanceDashboard = () => {
               <CardDescription>Last 8 entries</CardDescription>
             </div>
             <button
-              onClick={() => navigate("/received-payment")}
+              onClick={() => navigate("/received-payments")}
               className="text-xs text-primary hover:underline"
             >
               View all →
@@ -562,7 +562,7 @@ const FinanceDashboard = () => {
             {
               label: "New Received Payment",
               icon: BadgeDollarSign,
-              path: "/received-payment",
+              path: "/received-payments",
             },
             {
               label: "Manage Cheques",
@@ -570,7 +570,7 @@ const FinanceDashboard = () => {
               path: "/masters/cheque",
             },
             { label: "Manage Cards", icon: CreditCard, path: "/masters/card" },
-            { label: "Manage Banks", icon: Landmark, path: "/masters/bank" },
+            { label: "Manage Banks", icon: Landmark, path: "/masters/banks" },
           ].map(({ label, icon: Icon, path }) => (
             <button
               key={path}

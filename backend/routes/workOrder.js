@@ -1,6 +1,7 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition, guardEdit } = require("../services/approvalService");
 const router = express.Router();
 const { getPool, sql } = require("../db");
@@ -9,6 +10,8 @@ const {
   backPatchRecordId,
 } = require("../utils/docNumberLock");
 const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
+
+router.use(checkPermissionForMethod("Engineering", "WorkOrders"));
 
 const requireUserName = (req, res) => {
   const email = req.user?.name;

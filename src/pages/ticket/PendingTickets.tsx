@@ -165,8 +165,6 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
 const STATUS_TABS: StatusFilter[] = [
   "Pending",
   "InProgress",
-  "Resolved",
-  "Closed",
 ];
 
 const TAB_LABELS: Record<StatusFilter, string> = {

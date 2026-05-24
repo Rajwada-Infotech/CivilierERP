@@ -25,6 +25,7 @@ import {
   Home,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Button } from "@/components/ui/button";
 import {
@@ -384,6 +385,8 @@ function Combobox({
 export function AgreementsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { currentUser } = useAuth();
+  const canDeleteRecords = currentUser?.role !== "engineer";
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<AgreementStatus | "">("");
@@ -1186,15 +1189,17 @@ export function AgreementsPage() {
                                 >
                                   <Pencil size={13} /> Edit
                                 </button>
-                                <button
-                                  className="ag-menu-item danger"
-                                  onClick={() => {
-                                    setDeleteId(ag.Id);
-                                    setOpenMenuId(null);
-                                  }}
-                                >
-                                  <Trash2 size={13} /> Delete
-                                </button>
+                                {canDeleteRecords && (
+                                  <button
+                                    className="ag-menu-item danger"
+                                    onClick={() => {
+                                      setDeleteId(ag.Id);
+                                      setOpenMenuId(null);
+                                    }}
+                                  >
+                                    <Trash2 size={13} /> Delete
+                                  </button>
+                                )}
                               </div>
                             )}
                           </div>

@@ -37,6 +37,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useFinYear } from "@/contexts/FinYearContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1633,6 +1634,7 @@ interface DetailModalProps {
   onEdit: () => void;
   onPrint: () => void;
   onRefresh: () => void;
+  canDelete: boolean;
 }
 
 const DetailModal: React.FC<DetailModalProps> = ({
@@ -1642,6 +1644,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
   onEdit,
   onPrint,
   onRefresh,
+  canDelete,
 }) => {
   const [lineTab, setLineTab] = useState<"items" | "activities">("items");
   const [acting, setActing] = useState(false);
@@ -1733,15 +1736,17 @@ const DetailModal: React.FC<DetailModalProps> = ({
 
           {/* Right-side actions */}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={acting}
-              onClick={doDelete}
-              className="text-destructive hover:bg-destructive/10 border-destructive/30"
-            >
-              <Trash2 size={13} className="mr-1.5" /> Delete
-            </Button>
+            {canDelete && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={acting}
+                onClick={doDelete}
+                className="text-destructive hover:bg-destructive/10 border-destructive/30"
+              >
+                <Trash2 size={13} className="mr-1.5" /> Delete
+              </Button>
+            )}
             {record.Status === "Draft" && (
               <>
                 <Button
@@ -1871,14 +1876,16 @@ const DetailModal: React.FC<DetailModalProps> = ({
             flexShrink: 0,
           }}
         >
-          <Button
-            variant="outline"
-            disabled={acting}
-            onClick={doDelete}
-            className="text-destructive hover:bg-destructive/10 border-destructive/30"
-          >
-            <Trash2 size={14} className="mr-1.5" /> Delete
-          </Button>
+          {canDelete && (
+            <Button
+              variant="outline"
+              disabled={acting}
+              onClick={doDelete}
+              className="text-destructive hover:bg-destructive/10 border-destructive/30"
+            >
+              <Trash2 size={14} className="mr-1.5" /> Delete
+            </Button>
+          )}
           <div style={{ display: "flex", gap: 8 }}>
             <Button variant="outline" onClick={onPrint} className="gap-1.5">
               <Printer size={14} /> Print
@@ -1966,6 +1973,8 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
 
 export default function BOQ() {
   const { finYears } = useFinYear();
+  const { currentUser } = useAuth();
+  const canDeleteRecords = currentUser?.role !== "engineer";
   const [page, setPage] = useState(1);
   const PAGE_LIMIT = 10;
   const [search, setSearch] = useState("");
@@ -2392,6 +2401,7 @@ export default function BOQ() {
             setViewRecord(null);
             loadList();
           }}
+          canDelete={canDeleteRecords}
         />
       )}
 
