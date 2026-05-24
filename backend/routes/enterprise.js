@@ -7,7 +7,7 @@ const { getPool, sql } = require("../db");
 // GET all
 router.get(
   "/",
-  cache("enterprises", 300, { shared: true }),
+  cache("enterprises", 60, { shared: true }),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -25,15 +25,21 @@ router.get(
       SELECT
         id, name, short_name, business_identity, entity_type,
         b_sub_identity_type, belongs_to,
-        address, address_line2, city, state, country, pincode,
-        phone_number, email, website,
-        pan, tan, cin, gst_type, gst_issue_date, trade_license,
+        address, address_line2, address_line3, city, state, country, pincode,
+        phone_number, email, website, fax,
+        pan, cin, tan, gst_type, gst_issue_date, trade_license,
         currency, fiscal_year_start,
-        start_date, date_of_entry,
+        start_date, start_fin_year, end_date, date_of_entry, date_of_establishment,
         CASE WHEN discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
-        discontinue,
-        gst_no, pan_no, contact_person, phone, city AS business_city,
-        business_type
+        discontinue, status, cr_code, rera_no, rera_date,
+        latitude, longitude,
+        cost_center, profit_center,
+        auditor_name, authorized_capital, paid_up_capital,
+        client_name, client_code, team_size,
+        jv_enabled, jv_company_name,
+        remarks, description, tds_limit,
+        gst_no, pan_no, contact_person, phone,
+        logo, business_type
       FROM dbo.enterprise
       WHERE business_type = @businessType
         AND (discontinue IS NULL OR discontinue = 0)
@@ -45,6 +51,10 @@ router.get(
     }
   },
 );
+
+// Bust enterprise cache on module load so pre-existing DB rows are always visible
+// after a server restart (avoids serving a stale empty-array from Redis).
+bumpCacheVersion("enterprises").catch(() => {});
 
 // ADD
 router.post("/", async (req, res) => {

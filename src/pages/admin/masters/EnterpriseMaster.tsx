@@ -112,13 +112,14 @@ function EnterpriseViewModal({
   enterprise: Enterprise;
   onClose: () => void;
 }) {
-  const Row = ({ label, value }: { label: string; value?: string | null }) =>
-    (
+  const Row = ({ label, value }: { label: string; value?: string | null }) => (
     <div className="flex flex-col gap-0.5">
       <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
-      <span className="text-sm text-foreground break-words">{value || "—"}</span>
+      <span className="text-sm text-foreground break-words">
+        {value || "—"}
+      </span>
     </div>
   );
 
@@ -471,7 +472,10 @@ export default function EnterpriseMaster() {
   const [logoPreview, setLogoPreview] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const filtered = (rows as Enterprise[]).filter(
+  const safeRows: Enterprise[] = Array.isArray(rows)
+    ? (rows as Enterprise[])
+    : [];
+  const filtered = safeRows.filter(
     (r) =>
       (r.name || "").toLowerCase().includes(search.toLowerCase()) ||
       (r.short_name || "").toLowerCase().includes(search.toLowerCase()) ||
@@ -507,7 +511,7 @@ export default function EnterpriseMaster() {
         openEdit,
         setDeleteTarget,
       ),
-     
+
     [],
   );
 
