@@ -1,5 +1,4 @@
-import React from "react";
-import { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   ShieldCheck,
   Search,
@@ -189,6 +188,19 @@ export default function MenuRights() {
       .finally(() => setLoadingPerms(false));
   }, [selectedUserId]);
 
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+        setUserSearch("");
+      }
+    };
+    if (dropdownOpen) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [dropdownOpen]);
+
   // ── Filtering ──────────────────────────────────────────────────────────────
   const modules = useMemo(() => ["All", ...Array.from(new Set(PAGE_DEFINITIONS.map(p => p.module)))], []);
 
@@ -210,9 +222,13 @@ export default function MenuRights() {
     return groups;
   }, [filteredPages]);
 
-  const filteredUsers = useMemo(() =>
-    users.filter(u => u.name.toLowerCase().includes(userSearch.toLowerCase())),
-    [users, userSearch]);
+  const filteredUsers = useMemo(
+    () =>
+      users.filter((u) =>
+        u.name.toLowerCase().includes(userSearch.toLowerCase()),
+      ),
+    [users, userSearch],
+  );
 
   // ── Permission helpers ─────────────────────────────────────────────────────
   const getPermForPage = (pageKey: string) => permissions.find(p => p.page === pageKey);
@@ -335,61 +351,85 @@ export default function MenuRights() {
         )}
       </div>
 
-      {/* User selector */}
-      <div className="mb-5 relative w-full max-w-sm">
-        <button
-          onClick={() => setDropdownOpen(o => !o)}
-          className="w-full flex items-center justify-between gap-2 px-4 py-2.5 rounded-xl border border-border bg-card text-sm font-body text-foreground shadow-sm hover:bg-muted/40 transition-colors"
-        >
-          <div className="flex items-center gap-2">
-            <Users size={14} className="text-muted-foreground" />
-            {loadingUsers ? (
-              <span className="text-muted-foreground">Loading users…</span>
-            ) : selectedUser ? (
-              <span>{selectedUser.name} <span className="text-muted-foreground text-xs">({selectedUser.role})</span></span>
-            ) : (
-              <span className="text-muted-foreground">Select a user…</span>
-            )}
-          </div>
-          <ChevronDown size={14} className={`text-muted-foreground transition-transform ${dropdownOpen ? "rotate-180" : ""}`} />
-        </button>
+      {/* ── User Selector Card ───────────────────────────────────────────── */}
+      <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm p-5 mb-5 relative" style={{ zIndex: 40 }}>
+        <label className="flex items-center gap-2 text-xs font-heading font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+          <Users className="w-3.5 h-3.5" /> Select User
+        </label>
 
-        {dropdownOpen && (
-          <div className="absolute top-full mt-1 left-0 w-full z-50 rounded-xl border border-border bg-popover shadow-xl overflow-hidden">
-            <div className="p-2 border-b border-border">
-              <div className="relative">
-                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  autoFocus
-                  placeholder="Search user…"
-                  value={userSearch}
-                  onChange={e => setUserSearch(e.target.value)}
-                  className="w-full pl-7 pr-3 py-1.5 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-              </div>
-            </div>
-            <ul className="max-h-60 overflow-auto py-1">
-              {filteredUsers.length === 0 ? (
-                <li className="px-4 py-3 text-sm text-muted-foreground text-center">No users found</li>
-              ) : (
-                filteredUsers.map(u => (
-                  <li key={u.id}>
-                    <button
-                      onClick={() => { setSelectedUserId(u.id); setDropdownOpen(false); setUserSearch(""); }}
-                      className="w-full px-4 py-2.5 text-left hover:bg-muted/60 flex justify-between items-center transition-colors"
-                    >
-                      <div>
-                        <div className="text-sm font-medium text-foreground">{u.name}</div>
-                        <div className="text-xs text-muted-foreground capitalize">{u.role.replace(/_/g, " ")}</div>
-                      </div>
-                      {selectedUserId === u.id && <Check size={14} className="text-primary" />}
-                    </button>
-                  </li>
-                ))
+        <div className="relative w-full max-w-sm" ref={dropdownRef}>
+          {/* Trigger button */}
+          <button
+            onClick={() => setDropdownOpen(!dropdownOpen)}
+            className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg border border-border bg-muted hover:border-primary/60 transition-all text-sm font-body"
+          >
+            <span
+              className={
+                selectedUser
+                  ? "text-foreground font-medium"
+                  : "text-muted-foreground"
+              }
+            >
+              {loadingUsers
+                ? "Loading users…"
+                : selectedUser
+                  ? selectedUser.name
+                  : "Choose a user…"}
+            </span>
+            <div className="flex items-center gap-2">
+              {selectedUser && (
+                <span className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                  {selectedUser.role}
+                </span>
               )}
-            </ul>
-          </div>
-        )}
+              <ChevronDown
+                size={15}
+                className={`text-muted-foreground transition-transform duration-200 ${dropdownOpen ? "rotate-180" : ""}`}
+              />
+            </div>
+          </button>
+
+          {/* Dropdown panel */}
+          {dropdownOpen && (
+            <div className="absolute z-50 mt-1.5 w-full rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
+              <div className="p-2.5 border-b border-border bg-muted/40">
+                <div className="relative">
+                  <Search
+                    size={13}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  />
+                  <input
+                    autoFocus
+                    placeholder="Search user…"
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+              </div>
+              <ul className="max-h-60 overflow-auto py-1">
+                {filteredUsers.length === 0 ? (
+                  <li className="px-4 py-3 text-sm text-muted-foreground text-center">No users found</li>
+                ) : (
+                  filteredUsers.map(u => (
+                    <li key={u.id}>
+                      <button
+                        onClick={() => { setSelectedUserId(u.id); setDropdownOpen(false); setUserSearch(""); }}
+                        className="w-full px-4 py-2.5 text-left hover:bg-muted/60 flex justify-between items-center transition-colors"
+                      >
+                        <div>
+                          <div className="text-sm font-medium text-foreground">{u.name}</div>
+                          <div className="text-xs text-muted-foreground capitalize">{u.role.replace(/_/g, " ")}</div>
+                        </div>
+                        {selectedUserId === u.id && <Check size={14} className="text-primary" />}
+                      </button>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Main panel */}

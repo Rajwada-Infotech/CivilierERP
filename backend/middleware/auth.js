@@ -4,6 +4,28 @@ const logger = require("../logger");
 
 const BLACKLIST_PREFIX = "blacklist:";
 
+// In-process blacklist cache — avoids a Redis GET on every request.
+// TTL is intentionally short (10 s) so a logout propagates quickly.
+const BL_CACHE_TTL_MS = 10_000;
+const localBlacklist = new Map();
+
+async function checkBlacklist(token) {
+  const cached = localBlacklist.get(token);
+  if (cached !== undefined && Date.now() - cached.at < BL_CACHE_TTL_MS) {
+    return cached.val;
+  }
+  const val = await redisGetStrict(`${BLACKLIST_PREFIX}${token}`);
+  localBlacklist.set(token, { val, at: Date.now() });
+  // Evict stale entries lazily to avoid unbounded growth
+  if (localBlacklist.size > 5000) {
+    const cutoff = Date.now() - BL_CACHE_TTL_MS;
+    for (const [k, v] of localBlacklist) {
+      if (v.at < cutoff) localBlacklist.delete(k);
+    }
+  }
+  return val;
+}
+
 module.exports = async (req, res, next) => {
   try {
     let token = null;
@@ -27,7 +49,7 @@ module.exports = async (req, res, next) => {
     const blacklistStart = req.timing?.startStage();
     let isBlacklisted;
     try {
-      isBlacklisted = await redisGetStrict(`${BLACKLIST_PREFIX}${token}`);
+      isBlacklisted = await checkBlacklist(token);
     } catch (err) {
       logger.error(
         { event: "BLACKLIST_CHECK_FAILED", err },

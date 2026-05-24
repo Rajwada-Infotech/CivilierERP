@@ -249,7 +249,9 @@ const WO_DASH_COLS: ColumnDef<any>[] = [
     accessorKey: "DocNo",
     header: "Doc No",
     cell: ({ getValue }) => (
-      <span className="font-mono text-[11px] text-primary">{(getValue() as string) || "—"}</span>
+      <span className="font-mono text-[11px] text-primary">
+        {(getValue() as string) || "—"}
+      </span>
     ),
   },
   {
@@ -257,7 +259,9 @@ const WO_DASH_COLS: ColumnDef<any>[] = [
     accessorKey: "ContractorName",
     header: "Contractor",
     cell: ({ getValue }) => (
-      <span className="text-xs truncate max-w-[120px] block">{(getValue() as string) || "—"}</span>
+      <span className="text-xs truncate max-w-[120px] block">
+        {(getValue() as string) || "—"}
+      </span>
     ),
   },
   {
@@ -282,7 +286,9 @@ const BOQ_DASH_COLS: ColumnDef<any>[] = [
     accessorKey: "DocNo",
     header: "Doc No",
     cell: ({ getValue }) => (
-      <span className="font-mono text-[11px] text-primary">{(getValue() as string) || "—"}</span>
+      <span className="font-mono text-[11px] text-primary">
+        {(getValue() as string) || "—"}
+      </span>
     ),
   },
   {
@@ -290,7 +296,9 @@ const BOQ_DASH_COLS: ColumnDef<any>[] = [
     accessorKey: "ProjectName",
     header: "Project",
     cell: ({ getValue }) => (
-      <span className="text-xs truncate max-w-[120px] block">{(getValue() as string) || "—"}</span>
+      <span className="text-xs truncate max-w-[120px] block">
+        {(getValue() as string) || "—"}
+      </span>
     ),
   },
   {
@@ -315,7 +323,9 @@ const WORKDONE_DASH_COLS: ColumnDef<any>[] = [
     accessorKey: "DocNo",
     header: "Doc No",
     cell: ({ getValue }) => (
-      <span className="font-mono text-[11px] text-primary">{(getValue() as string) || "—"}</span>
+      <span className="font-mono text-[11px] text-primary">
+        {(getValue() as string) || "—"}
+      </span>
     ),
   },
   {
@@ -323,7 +333,9 @@ const WORKDONE_DASH_COLS: ColumnDef<any>[] = [
     accessorKey: "WorkOrderNo",
     header: "WO Ref",
     cell: ({ getValue }) => (
-      <span className="text-xs text-muted-foreground">{(getValue() as string) || "—"}</span>
+      <span className="text-xs text-muted-foreground">
+        {(getValue() as string) || "—"}
+      </span>
     ),
   },
   {
@@ -346,11 +358,24 @@ const WORKDONE_DASH_COLS: ColumnDef<any>[] = [
 export default function EngineeringDashboard() {
   const navigate = useNavigate();
 
-  const { data, isLoading, refetch, isFetching } = useQuery({
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["engineering-dashboard"],
-    queryFn: () =>
-      fetchWithAuth("/api/engineering/dashboard").then((r) => r.json()),
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/engineering/dashboard");
+      if (!res.ok) {
+        let msg = `Request failed (${res.status})`;
+        try {
+          const b = await res.json();
+          msg = b.error ?? b.message ?? msg;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(msg);
+      }
+      return res.json();
+    },
     staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: true,
   });
 
   // Fallback summary values if API not yet wired
@@ -401,6 +426,23 @@ export default function EngineeringDashboard() {
             Refresh
           </button>
         </div>
+
+        {/* Error banner */}
+        {isError && (
+          <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 flex items-center gap-2 text-sm text-red-600">
+            <AlertCircle size={16} className="shrink-0" />
+            <span>
+              {(error as Error)?.message ??
+                "Failed to load dashboard data. Please refresh."}
+            </span>
+            <button
+              onClick={() => refetch()}
+              className="ml-auto text-xs underline hover:no-underline"
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
