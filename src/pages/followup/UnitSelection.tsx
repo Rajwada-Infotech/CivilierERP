@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -248,10 +249,12 @@ function UnitCard({
   record,
   onEdit,
   onDelete,
+  canDelete,
 }: {
   record: UnitSelection;
   onEdit: () => void;
   onDelete: () => void;
+  canDelete: boolean;
 }) {
   const computed = computedValue({
     AreaSqFt: String(record.AreaSqFt ?? ""),
@@ -377,12 +380,14 @@ function UnitCard({
         >
           <Edit2 className="w-3.5 h-3.5" /> Edit
         </button>
-        <button
-          onClick={onDelete}
-          className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg py-2 transition-colors"
-        >
-          <Trash2 className="w-3.5 h-3.5" /> Delete
-        </button>
+        {canDelete && (
+          <button
+            onClick={onDelete}
+            className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg py-2 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" /> Delete
+          </button>
+        )}
       </div>
     </div>
   );
@@ -699,6 +704,8 @@ function FormDialog({
 export function UnitSelectionPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { currentUser } = useAuth();
+  const canDeleteRecords = currentUser?.role !== "engineer";
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -952,6 +959,7 @@ export function UnitSelectionPage() {
                 record={r}
                 onEdit={() => openEdit(r)}
                 onDelete={() => setDeleteTarget(r)}
+                canDelete={canDeleteRecords}
               />
             ))}
           </div>

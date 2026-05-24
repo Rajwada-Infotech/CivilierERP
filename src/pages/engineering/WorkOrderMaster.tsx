@@ -1576,6 +1576,8 @@ const WorkOrderDetailPanel: React.FC<{
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [creatingMaterialPO, setCreatingMaterialPO] = useState(false);
+  const { currentUser } = useAuth();
+  const canDeleteRecords = currentUser?.role !== "engineer";
 
   const { status: chainStatus } = useWOChainStatus(workOrderId ?? null);
 
@@ -1709,7 +1711,7 @@ const WorkOrderDetailPanel: React.FC<{
           <span>All Work Orders</span>
         </button>
         <div className="flex items-center gap-2">
-          {confirmDelete ? (
+          {confirmDelete && canDeleteRecords ? (
             <>
               <span className="text-xs text-red-500 font-medium">
                 Delete this work order?
@@ -1767,13 +1769,15 @@ const WorkOrderDetailPanel: React.FC<{
                   Create Material PO
                 </button>
               )}
-              <button
-                onClick={() => setConfirmDelete(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-800 text-red-500 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
-              >
-                <Trash2 size={12} />
-                Delete
-              </button>
+              {canDeleteRecords && (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-800 text-red-500 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+                >
+                  <Trash2 size={12} />
+                  Delete
+                </button>
+              )}
             </>
           )}
         </div>
