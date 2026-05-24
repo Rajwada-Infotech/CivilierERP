@@ -261,6 +261,7 @@ export default function TicketDashboard() {
   const { currentUser } = useAuth();
   const ADMIN_ROLES = ["super_admin", "admin", "dba"];
   const isAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
+  const canSeeAllTickets = isAdmin || currentUser?.role === "engineer";
 
   const {
     data: tickets = [],
@@ -272,7 +273,7 @@ export default function TicketDashboard() {
   } = useQuery<Ticket[]>({
     queryKey: ["ticket-dashboard", isAdmin ? "all" : "my"],
     queryFn: async () => {
-      const endpoint = isAdmin ? "/api/tickets?limit=100" : "/api/tickets/mine";
+      const endpoint = canSeeAllTickets ? "/api/tickets?limit=100" : "/api/tickets/mine";
       const res = await fetchWithAuth(endpoint);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));

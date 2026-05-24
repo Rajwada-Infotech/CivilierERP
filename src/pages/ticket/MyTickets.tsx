@@ -1499,6 +1499,7 @@ const MyTickets: React.FC = () => {
   const queryClient = useQueryClient();
   const ADMIN_ROLES = ["super_admin", "admin", "dba"];
   const isAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
+  const canSeeAllTickets = isAdmin || currentUser?.role === "engineer";
   const currentUserName = currentUser?.name ?? "Me";
 
   const [search, setSearch] = useState("");
@@ -1515,7 +1516,7 @@ const MyTickets: React.FC = () => {
   } = useQuery<Ticket[]>({
     queryKey: ["tickets", isAdmin ? "all" : "my"],
     queryFn: async () => {
-      const endpoint = isAdmin ? "/api/tickets?limit=100" : "/api/tickets/my";
+      const endpoint = canSeeAllTickets ? "/api/tickets?limit=100" : "/api/tickets/my";
       const res = await fetchWithAuth(endpoint);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const payload = await res.json();
