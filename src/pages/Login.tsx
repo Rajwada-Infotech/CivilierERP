@@ -29,24 +29,6 @@ const ROLE_HINTS = [
     password: "engineer123",
     color: "#14b8a6",
   },
-  {
-    role: "User",
-    email: "shivam123@gmail.com",
-    password: "user123",
-    color: "#059669",
-  },
-  {
-    role: "User",
-    email: "rahul123@gmail.com",
-    password: "user123",
-    color: "#d97706",
-  },
-  {
-    role: "User",
-    email: "rahul@gmail.com",
-    password: "user123",
-    color: "#0ea5e9",
-  },
 ];
 
 // ── SVG Scene: crane + buildings + blueprint grid ─────────────────────────────
@@ -1179,8 +1161,8 @@ export default function Login() {
                       <span className="text-xs text-slate-500 truncate flex-1 min-w-0">
                         {h.email}
                       </span>
-                      <span className="text-xs font-medium text-slate-500 shrink-0">
-                        {h.password}
+                      <span className="text-xs font-medium text-slate-500 shrink-0 tracking-widest">
+                        {"•".repeat(h.password.length)}
                       </span>
                     </button>
                   ))}
