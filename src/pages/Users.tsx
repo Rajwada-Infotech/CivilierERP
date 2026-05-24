@@ -90,7 +90,7 @@ const updateUserApi = async (id: number, data: Partial<User>) => {
 };
 
 const updateTicketAcceptanceApi = async (id: number, canAccept: boolean) => {
-  const res = await fetch(`${BASE_URL}/${id}/permissions`, {
+  const res = await fetch(`${BASE_URL}/${id}/ticket-access`, {
     method: "PATCH",
     headers: authHeaders(),
     body: JSON.stringify({ can_accept_tickets: canAccept }),
