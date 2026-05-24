@@ -1,8 +1,8 @@
-const { z } = require("zod");
+import { z } from "zod";
 
 const dateSchema = z.coerce.date();
 
-const finYearBaseSchema = z.object({
+export const finYearBaseSchema = z.object({
   fy_label: z.string().trim().min(1, "Financial year is required").max(20),
   start_date: dateSchema,
   end_date: dateSchema,
@@ -10,7 +10,7 @@ const finYearBaseSchema = z.object({
   is_locked: z.coerce.boolean().default(false),
 });
 
-const finYearCreateSchema = finYearBaseSchema.refine(
+export const finYearCreateSchema = finYearBaseSchema.refine(
   (value) => value.end_date >= value.start_date,
   {
     path: ["end_date"],
@@ -18,7 +18,7 @@ const finYearCreateSchema = finYearBaseSchema.refine(
   },
 );
 
-const finYearUpdateSchema = finYearBaseSchema
+export const finYearUpdateSchema = finYearBaseSchema
   .partial()
   .refine(
     (value) => Object.keys(value).length > 0,
@@ -35,4 +35,17 @@ const finYearUpdateSchema = finYearBaseSchema
     },
   );
 
-module.exports = { finYearCreateSchema, finYearUpdateSchema };
+export const finYearSchema = z
+  .object({
+    year: z.string().trim().min(1, "Financial year is required").max(20),
+    startDate: z.string().trim().min(1, "Start date is required"),
+    endDate: z.string().trim().min(1, "End date is required"),
+    status: z.enum(["Active", "Inactive"]),
+    locked: z.boolean().default(false),
+  })
+  .refine((value) => new Date(value.endDate) >= new Date(value.startDate), {
+    path: ["endDate"],
+    message: "End date must be on or after start date",
+  });
+
+export type FinYearForm = z.infer<typeof finYearSchema>;
