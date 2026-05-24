@@ -6,41 +6,33 @@
  * Completely separate from MenuRights (page/action permissions).
  */
 
+import type React from "react";
 import { useState, useEffect, useCallback } from "react";
 import {
   BarChart2, TrendingUp, PieChart, Hash, Table2,
   Calendar, Bell, MessageSquare, Map, Paperclip,
-  RefreshCw, Calculator, Search, Check, X,
+  RefreshCw, Calculator, Search, Check,
   Puzzle, ChevronDown, Save, Users, ToggleLeft, ToggleRight,
   AlertCircle,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { useAuth } from "@/contexts/AuthContext";
+import { getWidgetCatalog, type WidgetCatalogItem } from "@/api/widgetsApi";
 
 // ── Widget definitions — must match Widgets.tsx widgetItems exactly ───────────
-const ALL_WIDGETS: WidgetDef[] = [
-  { key: "Bar Chart",      icon: BarChart2,     category: "Charts",      description: "System activity bar chart — last 7 days" },
-  { key: "Line Chart",     icon: TrendingUp,    category: "Charts",      description: "Tasks vs activity trend line chart" },
-  { key: "Pie Chart",      icon: PieChart,      category: "Charts",      description: "Task status breakdown pie chart" },
-  { key: "Stat Card",      icon: Hash,          category: "KPIs",        description: "Key metrics summary cards" },
-  { key: "Data Table",     icon: Table2,        category: "Data",        description: "Tabular data view with sorting" },
-  { key: "Calendar",       icon: Calendar,      category: "Planning",    description: "Calendar view of tasks and events" },
-  { key: "Notifications",  icon: Bell,          category: "Alerts",      description: "System alerts and notifications" },
-  { key: "Activity Feed",  icon: MessageSquare, category: "Activity",    description: "Live user activity stream" },
-  { key: "Map View",       icon: Map,           category: "Geo",         description: "Geographic site map view" },
-  { key: "File Uploader",  icon: Paperclip,     category: "Tools",       description: "Quick file upload widget" },
-  { key: "Progress Ring",  icon: RefreshCw,     category: "KPIs",        description: "Task completion progress rings" },
-  { key: "Calculator",     icon: Calculator,    category: "Tools",       description: "Built-in calculator tool" },
-];
-
-const CATEGORIES = ["All", ...Array.from(new Set(ALL_WIDGETS.map(w => w.category)))];
-
-interface WidgetDef {
-  key: string;
-  icon: React.ElementType;
-  category: string;
-  description: string;
-}
+const widgetIcons: Record<string, React.ElementType> = {
+  "bar-chart-2": BarChart2,
+  "trending-up": TrendingUp,
+  "pie-chart": PieChart,
+  hash: Hash,
+  "table-2": Table2,
+  calendar: Calendar,
+  bell: Bell,
+  "message-square": MessageSquare,
+  map: Map,
+  paperclip: Paperclip,
+  "refresh-cw": RefreshCw,
+  calculator: Calculator,
+};
 
 interface UserEntry {
   id: number;
@@ -83,8 +75,6 @@ async function saveUserWidgets(userId: number, allowedWidgets: string[]): Promis
 
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function WidgetsRights() {
-  const { currentUser } = useAuth();
-
   const [users, setUsers] = useState<UserEntry[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
@@ -93,7 +83,10 @@ export default function WidgetsRights() {
   const [userSearch, setUserSearch] = useState("");
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
-  const [allowedWidgets, setAllowedWidgets] = useState<Set<string>>(new Set(ALL_WIDGETS.map(w => w.key)));
+  const [widgetCatalog, setWidgetCatalog] = useState<WidgetCatalogItem[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [allowedWidgets, setAllowedWidgets] = useState<Set<string>>(new Set());
   const [widgetsLoading, setWidgetsLoading] = useState(false);
 
   const [categoryFilter, setCategoryFilter] = useState("All");
@@ -109,6 +102,13 @@ export default function WidgetsRights() {
       .finally(() => setUsersLoading(false));
   }, []);
 
+  useEffect(() => {
+    getWidgetCatalog()
+      .then(setWidgetCatalog)
+      .catch(e => setCatalogError(e.message))
+      .finally(() => setCatalogLoading(false));
+  }, []);
+
   // Load widgets when user selected
   useEffect(() => {
     if (!selectedUser) return;
@@ -116,7 +116,7 @@ export default function WidgetsRights() {
     setSaveStatus("idle");
     fetchUserWidgets(selectedUser.id)
       .then(widgets => setAllowedWidgets(new Set(widgets)))
-      .catch(() => setAllowedWidgets(new Set(ALL_WIDGETS.map(w => w.key))))
+      .catch(() => setAllowedWidgets(new Set()))
       .finally(() => setWidgetsLoading(false));
   }, [selectedUser]);
 
@@ -130,7 +130,7 @@ export default function WidgetsRights() {
   }, []);
 
   const selectAll = () => {
-    setAllowedWidgets(new Set(ALL_WIDGETS.map(w => w.key)));
+    setAllowedWidgets(new Set(widgetCatalog.map(w => w.key)));
     setSaveStatus("idle");
   };
   const clearAll = () => {
@@ -158,7 +158,8 @@ export default function WidgetsRights() {
   );
 
   // Filtered widgets for display
-  const visibleWidgets = ALL_WIDGETS.filter(w => {
+  const categories = ["All", ...Array.from(new Set(widgetCatalog.map(w => w.category)))];
+  const visibleWidgets = widgetCatalog.filter(w => {
     const matchCat = categoryFilter === "All" || w.category === categoryFilter;
     const matchSearch = widgetSearch === "" ||
       w.key.toLowerCase().includes(widgetSearch.toLowerCase()) ||
@@ -282,7 +283,7 @@ export default function WidgetsRights() {
             <div className="flex items-center gap-2 text-xs text-muted-foreground pt-1">
               <span className="w-2 h-2 rounded-full bg-primary inline-block" />
               Configuring <strong className="text-foreground">{selectedUser.name}</strong> —
-              <strong className="text-foreground">{enabledCount}</strong> of {ALL_WIDGETS.length} widgets enabled
+              <strong className="text-foreground">{enabledCount}</strong> of {widgetCatalog.length} widgets enabled
             </div>
           )}
         </div>
@@ -305,7 +306,7 @@ export default function WidgetsRights() {
 
               {/* Category filter */}
               <div className="flex items-center gap-1 flex-wrap">
-                {CATEGORIES.map(cat => (
+                {categories.map(cat => (
                   <button
                     key={cat}
                     onClick={() => setCategoryFilter(cat)}
@@ -338,7 +339,11 @@ export default function WidgetsRights() {
             </div>
 
             {/* Widget grid */}
-            {widgetsLoading ? (
+            {catalogError ? (
+              <div className="p-8 text-center text-sm text-destructive">
+                {catalogError}
+              </div>
+            ) : widgetsLoading || catalogLoading ? (
               <div className="p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                 {Array.from({ length: 12 }).map((_, i) => (
                   <div key={i} className="h-24 rounded-xl bg-muted/30 animate-pulse" />
@@ -347,7 +352,7 @@ export default function WidgetsRights() {
             ) : (
               <div className="p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                 {visibleWidgets.map(widget => {
-                  const Icon = widget.icon;
+                  const Icon = widgetIcons[widget.iconKey] || Puzzle;
                   const enabled = allowedWidgets.has(widget.key);
                   return (
                     <button
@@ -371,7 +376,7 @@ export default function WidgetsRights() {
                       </div>
                       <div className="text-center">
                         <p className={`text-xs font-semibold font-heading leading-tight ${enabled ? "text-foreground" : "text-muted-foreground"}`}>
-                          {widget.key}
+                          {widget.label}
                         </p>
                         <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight hidden sm:block">
                           {widget.category}
@@ -396,7 +401,7 @@ export default function WidgetsRights() {
                 <span className="font-semibold text-foreground">{selectedUser.name}</span>
               </p>
               <div className="flex gap-1">
-                {ALL_WIDGETS.map(w => (
+                {widgetCatalog.map(w => (
                   <div
                     key={w.key}
                     title={w.key}

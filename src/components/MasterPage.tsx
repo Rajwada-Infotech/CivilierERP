@@ -218,10 +218,6 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   const prevInitialRef = React.useRef<Record<string, unknown>[]>([]);
   React.useEffect(() => {
     const prev = prevInitialRef.current;
-    // Guard: never replace existing rows with a transient empty array that
-    // arrives while invalidateQueries is mid-flight. Without this the list
-    // blanks out briefly every time a record is unlocked or updated.
-    if (initialData.length === 0 && prev.length > 0) return;
     const same =
       prev.length === initialData.length &&
       initialData.every(
