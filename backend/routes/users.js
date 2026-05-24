@@ -62,6 +62,10 @@ const normalizeRole = (role) => {
     "material manager": "store_manager",
     store_manager: "store_manager",
 
+    // engineer variants
+    engineer: "engineer",
+    "site engineer": "engineer",
+    "field engineer": "engineer",
     // user variants
     user: "user",
     "standard user": "user",
@@ -83,12 +87,18 @@ const normalizeRole = (role) => {
 // ======================
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
+
   if (!email || !password) {
     return res.status(400).json({ error: "Email and password are required" });
   }
 
-  const lockKey = `login:lock:${email.toLowerCase()}`;
-  const attemptsKey = `login:attempts:${email.toLowerCase()}`;
+  // Normalize email early to avoid subtle DB mismatches (whitespace, casing)
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const incomingPassword = String(password);
+
+  const lockKey = `login:lock:${normalizedEmail}`;
+  const attemptsKey = `login:attempts:${normalizedEmail}`;
+
 
   // Skip rate limiting for local development
   const isLocal =
@@ -111,7 +121,9 @@ router.post("/login", async (req, res) => {
     }
 
     const pool = getPool();
-    const result = await pool.request().input("email", sql.NVarChar, email)
+    const result = await pool
+      .request()
+      .input("email", sql.NVarChar, normalizedEmail)
       .query(`
         SELECT u.id, u.name, u.email, u.RoleId, u.password, u.discontinue,
                r.RName AS roleName
@@ -120,18 +132,29 @@ router.post("/login", async (req, res) => {
         WHERE u.email = @email
       `);
 
+
     const user = result.recordset[0];
     if (!user) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[Login] No user found for email:", normalizedEmail);
+      }
       if (!isLocal) await incrementLoginAttempts(attemptsKey, lockKey);
       return res.status(401).json({ error: "Invalid credentials" });
     }
+
 
     if (user.discontinue) {
       return res.status(403).json({ error: "User inactive" });
     }
 
     const match = await bcrypt.compare(password, user.password);
+
+    if (process.env.NODE_ENV === "development") {
+      console.warn("[Login] bcrypt compare result:", { matched: match, email: normalizedEmail });
+    }
+
     if (!match) {
+
       if (!isLocal) await incrementLoginAttempts(attemptsKey, lockKey);
       return res.status(401).json({ error: "Invalid credentials" });
     }
