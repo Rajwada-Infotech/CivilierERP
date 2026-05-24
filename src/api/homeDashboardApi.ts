@@ -136,6 +136,41 @@ export interface TaskSummary {
   assignedToName: string;
 }
 
+export interface TicketSummaryData {
+  total: number;
+  pending: number;
+  inProgress: number;
+  resolved: number;
+  closed: number;
+  urgent: number;
+  high: number;
+  resolvedPct: number;
+}
+
+export interface EngineeringSummaryData {
+  workOrders: {
+    total: number;
+    open: number;
+    thisMonth: number;
+    totalValue: number;
+  };
+  boq: { total: number; approved: number; totalValue: number };
+  workDone: { total: number; pending: number; certifiedAmount: number };
+  projects: { total: number; active: number };
+}
+
+export interface FollowupSummaryData {
+  applications: number;
+  bookings: number;
+  confirmedBookings: number;
+  agreements: number;
+  activeAgreements: number;
+  nocs: number;
+  pendingNOCs: number;
+  handovers: number;
+  scheduledHandovers: number;
+}
+
 // ─── Aggregated home dashboard shape ─────────────────────────────────────────
 
 export interface HomeDashboardData {
@@ -144,12 +179,17 @@ export interface HomeDashboardData {
   admin: AdminDashboardData | null;
   pendingApprovals: ApprovalInboxItem[];
   recentTasks: TaskSummary[];
+  tickets: TicketSummaryData | null;
+  engineering: EngineeringSummaryData | null;
+  followup: FollowupSummaryData | null;
   errors: Record<string, string>;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-async function safeFetch<T>(url: string): Promise<{ data: T | null; error: string | null }> {
+async function safeFetch<T>(
+  url: string,
+): Promise<{ data: T | null; error: string | null }> {
   try {
     const res = await fetchWithAuth(url);
     if (!res.ok) return { data: null, error: `HTTP ${res.status}` };
@@ -198,36 +238,185 @@ function normalizeFinanceDashboard(
 
 // ─── Main fetcher ─────────────────────────────────────────────────────────────
 
-export async function fetchHomeDashboard(isAdmin: boolean): Promise<HomeDashboardData> {
+export async function fetchHomeDashboard(
+  isAdmin: boolean,
+): Promise<HomeDashboardData> {
   const baseRequests = [
     safeFetch<FinanceDashboardApiData>("/api/finance-dashboard"),
     safeFetch<MaterialDashboardData>("/api/material-dashboard"),
     safeFetch<ApprovalInboxItem[]>("/api/approval-inbox"),
-    safeFetch<{ data: TaskSummary[] }>("/api/tasks?limit=5&sort=dueDate&order=asc"),
+    safeFetch<{ data: TaskSummary[] }>(
+      "/api/tasks?limit=5&sort=dueDate&order=asc",
+    ),
+    safeFetch<unknown>("/api/tickets?limit=500"),
+    safeFetch<EngineeringSummaryData>("/api/engineering/dashboard"),
+    safeFetch<unknown>("/api/followup-applications?pageSize=500"),
+    safeFetch<unknown>("/api/followup-bookings?pageSize=500"),
+    safeFetch<unknown>("/api/followup-agreements?pageSize=500"),
+    safeFetch<unknown>("/api/followup-noc?pageSize=500"),
+    safeFetch<unknown>("/api/followup-handover?pageSize=500"),
+    // Fetch active project count independently — engineering/dashboard is
+    // permission-gated so non-engineering users would always see 0 otherwise.
+    safeFetch<unknown>("/api/project-master"),
   ] as const;
 
   const adminRequest = isAdmin
     ? safeFetch<AdminDashboardData>("/api/admin-dashboard")
     : Promise.resolve({ data: null, error: null });
 
-  const [financeRes, materialRes, approvalRes, tasksRes, adminRes] = await Promise.all([
-    ...baseRequests,
-    adminRequest,
-  ]);
+  const [
+    financeRes,
+    materialRes,
+    approvalRes,
+    tasksRes,
+    ticketsRes,
+    engineeringRes,
+    appRes,
+    bookingsRes,
+    agreementsRes,
+    nocRes,
+    handoverRes,
+    projectMasterRes,
+    adminRes,
+  ] = await Promise.all([...baseRequests, adminRequest]);
 
   const errors: Record<string, string> = {};
-  if (financeRes.error)  errors.finance  = financeRes.error;
+  if (financeRes.error) errors.finance = financeRes.error;
   if (materialRes.error) errors.material = materialRes.error;
   if (approvalRes.error) errors.approvals = approvalRes.error;
-  if (tasksRes.error)    errors.tasks    = tasksRes.error;
-  if (adminRes.error)    errors.admin    = adminRes.error;
+  if (tasksRes.error) errors.tasks = tasksRes.error;
+  if (ticketsRes.error) errors.tickets = ticketsRes.error;
+  if (engineeringRes.error) errors.engineering = engineeringRes.error;
+  if (adminRes.error) errors.admin = adminRes.error;
+
+  // Unwrap ticket list (may be raw array or { data: [], pagination: {} })
+  let tickets: TicketSummaryData | null = null;
+  if (!ticketsRes.error) {
+    const raw = ticketsRes.data;
+    const rawTickets: any[] = Array.isArray(raw)
+      ? raw
+      : Array.isArray((raw as any)?.data)
+        ? (raw as any).data
+        : [];
+    const total = rawTickets.length;
+    const pending = rawTickets.filter((t) => t.status === "Pending").length;
+    const inProgress = rawTickets.filter(
+      (t) => t.status === "InProgress",
+    ).length;
+    const resolved = rawTickets.filter((t) => t.status === "Resolved").length;
+    const closed = rawTickets.filter((t) => t.status === "Closed").length;
+    const openStatuses = ["Pending", "InProgress"];
+    const urgent = rawTickets.filter(
+      (t) => t.priority === "Urgent" && openStatuses.includes(t.status),
+    ).length;
+    const high = rawTickets.filter(
+      (t) => t.priority === "High" && openStatuses.includes(t.status),
+    ).length;
+    tickets = {
+      total,
+      pending,
+      inProgress,
+      resolved,
+      closed,
+      urgent,
+      high,
+      resolvedPct: total > 0 ? Math.round((resolved / total) * 100) : 0,
+    };
+  }
+
+  const engRaw = engineeringRes.data as any;
+
+  // Compute active project count from the project-master list — this works for
+  // ALL roles because /api/project-master has no engineering permission gate.
+  // The engineering dashboard count is used when available (admins/engineers),
+  // otherwise we fall back to the project-master list.
+  const projectMasterList: any[] = (() => {
+    const d = projectMasterRes.data;
+    return Array.isArray(d)
+      ? d
+      : Array.isArray((d as any)?.data)
+        ? (d as any).data
+        : [];
+  })();
+  const activeProjectsFromMaster = projectMasterList.filter(
+    (p: any) =>
+      p.IsActive === 1 ||
+      p.isActive === true ||
+      p.discontinue === 0 ||
+      p.discontinue === false,
+  ).length;
+
+  const engineering: EngineeringSummaryData | null = engRaw
+    ? {
+        workOrders: engRaw.workOrders ?? {
+          total: 0,
+          open: 0,
+          thisMonth: 0,
+          totalValue: 0,
+        },
+        boq: engRaw.boq ?? { total: 0, approved: 0, totalValue: 0 },
+        workDone: engRaw.workDone ?? {
+          total: 0,
+          pending: 0,
+          certifiedAmount: 0,
+        },
+        projects: {
+          total: engRaw.projects?.total ?? projectMasterList.length,
+          // Prefer engineering dashboard count; fall back to project-master list
+          active: engRaw.projects?.active ?? activeProjectsFromMaster,
+        },
+      }
+    : {
+        // Engineering dashboard unreachable (permission gate) — still show project counts
+        workOrders: { total: 0, open: 0, thisMonth: 0, totalValue: 0 },
+        boq: { total: 0, approved: 0, totalValue: 0 },
+        workDone: { total: 0, pending: 0, certifiedAmount: 0 },
+        projects: {
+          total: projectMasterList.length,
+          active: activeProjectsFromMaster,
+        },
+      };
+
+  // Helper to unwrap paginated or raw array responses
+  const unwrap = (res: { data: unknown }) => {
+    const d = res.data;
+    return Array.isArray(d)
+      ? d
+      : Array.isArray((d as any)?.data)
+        ? (d as any).data
+        : [];
+  };
+  const applications: any[] = unwrap(appRes);
+  const bookings: any[] = unwrap(bookingsRes);
+  const agreements: any[] = unwrap(agreementsRes);
+  const nocs: any[] = unwrap(nocRes);
+  const handovers: any[] = unwrap(handoverRes);
+  const followup: FollowupSummaryData = {
+    applications: applications.length,
+    bookings: bookings.length,
+    confirmedBookings: bookings.filter((b) => b.Status === "Confirmed").length,
+    agreements: agreements.length,
+    activeAgreements: agreements.filter((a) => a.Status === "Signed").length,
+    nocs: nocs.length,
+    pendingNOCs: nocs.filter((n) => n.Status === "Pending").length,
+    handovers: handovers.length,
+    scheduledHandovers: handovers.filter((h) => h.Status === "Scheduled")
+      .length,
+  };
 
   return {
-    finance:          normalizeFinanceDashboard(financeRes.data),
-    material:         materialRes.data,
-    admin:            adminRes.data,
+    finance: normalizeFinanceDashboard(financeRes.data),
+    material: materialRes.data,
+    admin: adminRes.data,
     pendingApprovals: Array.isArray(approvalRes.data) ? approvalRes.data : [],
-    recentTasks:      tasksRes.data?.data ?? (Array.isArray(tasksRes.data) ? tasksRes.data as unknown as TaskSummary[] : []),
+    recentTasks:
+      tasksRes.data?.data ??
+      (Array.isArray(tasksRes.data)
+        ? (tasksRes.data as unknown as TaskSummary[])
+        : []),
+    tickets,
+    engineering,
+    followup,
     errors,
   };
 }

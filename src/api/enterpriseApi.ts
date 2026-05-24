@@ -50,8 +50,9 @@ async function handle<T>(res: Response): Promise<T> {
 }
 
 export const getEnterprises = async (): Promise<Enterprise[]> => {
-  const res = await fetchWithAuth(BASE_URL);
-  return handle(res);
+  const res = await fetchWithAuth(`${BASE_URL}?business_type=E`);
+  const data = await handle<unknown>(res);
+  return Array.isArray(data) ? (data as Enterprise[]) : [];
 };
 
 export const addEnterprise = async (data: Partial<Enterprise>) => {
