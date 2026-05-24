@@ -82,6 +82,7 @@ function isLocalRequest(req) {
 const ALL_ROUTES = [
   { path: "/api/roles", file: "./routes/roles" },
   { path: "/api/user-rights", file: "./routes/userRights" },
+  { path: "/api/user-widget-rights", file: "./routes/userWidgetRights" },
   { path: "/api/account-group", file: "./routes/accountGroup" },
   { path: "/api/account-head", file: "./routes/accountHeadMaster" },
   { path: "/api/activity-master", file: "./routes/activityMaster" },

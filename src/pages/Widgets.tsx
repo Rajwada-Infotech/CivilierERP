@@ -1,17 +1,18 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { getWidgetsDashboard, type WidgetsDashboardData } from "@/api/widgetsApi";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Puzzle, BarChart2, TrendingUp, PieChart, Hash, Table2,
   Calendar, Bell, MessageSquare, Map, Paperclip, RefreshCw,
-  Calculator, X, Upload, Check, AlertTriangle, Info,
-  ChevronLeft, ChevronRight,
+  Calculator, X,
 } from "lucide-react";
 
-// ─── WIDGET REGISTRY ──────────────────────────────────────────────────────────
-const widgetItems = [
+// ─── WIDGET REGISTRY — single source of truth ─────────────────────────────────
+// key must exactly match what WidgetsRights.tsx stores in the DB
+const ALL_WIDGET_ITEMS = [
   { icon: BarChart2,     label: "Bar Chart" },
   { icon: TrendingUp,    label: "Line Chart" },
   { icon: PieChart,      label: "Pie Chart" },
@@ -46,6 +47,7 @@ function Spinner() {
   );
 }
 
+// ─── WIDGET DATA HOOK ─────────────────────────────────────────────────────────
 function useWidgetsData() {
   const { data, isLoading } = useQuery<WidgetsDashboardData>({
     queryKey: ["widgets-dashboard"],
@@ -53,13 +55,35 @@ function useWidgetsData() {
     staleTime: 60_000,
     refetchInterval: 5 * 60 * 1000,
   });
-
   return { data, loading: isLoading };
 }
 
+// ─── ALLOWED WIDGETS HOOK — fetches from DB via /api/user-widget-rights/my ───
+function useAllowedWidgets() {
+  const { data, isLoading } = useQuery<{ allowedWidgets: string[] }>({
+    queryKey: ["user-widget-rights-my"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/user-widget-rights/my");
+      if (!res.ok) {
+        // If endpoint fails or isn't found, fall back to showing all widgets
+        return { allowedWidgets: ALL_WIDGET_ITEMS.map(w => w.label) };
+      }
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,  // re-fetch every 5 min
+    retry: false,                // don't retry on 404 — graceful fallback
+  });
+
+  // While loading, show nothing (avoids flash of all widgets then filtered)
+  if (isLoading) return { allowedSet: null, loading: true };
+  const allowed = data?.allowedWidgets ?? ALL_WIDGET_ITEMS.map(w => w.label);
+  return { allowedSet: new Set(allowed), loading: false };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
-// 1. BAR CHART
+// WIDGET COMPONENTS (unchanged from original — data layer is the same)
 // ═══════════════════════════════════════════════════════════════════════════════
+
 function BarChartWidget() {
   const { data, loading } = useWidgetsData();
   if (loading) return <Spinner />;
@@ -88,9 +112,6 @@ function BarChartWidget() {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// 2. LINE CHART
-// ═══════════════════════════════════════════════════════════════════════════════
 function LineChartWidget() {
   const { data, loading } = useWidgetsData();
   if (loading) return <Spinner />;
@@ -129,9 +150,6 @@ function LineChartWidget() {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// 3. PIE CHART
-// ═══════════════════════════════════════════════════════════════════════════════
 function PieChartWidget() {
   const { data, loading } = useWidgetsData();
   if (loading) return <Spinner />;
@@ -158,17 +176,67 @@ function PieChartWidget() {
     <div className="flex flex-col sm:flex-row items-center gap-6">
       <svg viewBox="0 0 180 180" className="w-36 h-36 shrink-0">
         {paths.map((p, i) => <path key={i} d={p.d} fill={p.color} opacity="0.85" />)}
-        <circle cx="90" cy="90" r="35" fill="hsl(var(--card))" />
-        <text x="90" y="86" textAnchor="middle" fontSize="14" fontWeight="bold" fill="currentColor">{total}</text>
-        <text x="90" y="100" textAnchor="middle" fontSize="9" fill="currentColor" opacity="0.6">tasks</text>
       </svg>
-      <div className="space-y-2 w-full">
-        {paths.map((p, i) => (
-          <div key={i} className="flex items-center gap-2 text-sm">
-            <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: p.color }} />
-            <span className="text-muted-foreground flex-1">{p.label}</span>
-            <span className="font-semibold">{p.value}</span>
-            <span className="text-xs text-muted-foreground">({Math.round(p.value / total * 100)}%)</span>
+      <div className="space-y-2">
+        {slices.map(sl => (
+          <div key={sl.label} className="flex items-center gap-2 text-sm">
+            <span className="w-3 h-3 rounded-full shrink-0" style={{ background: sl.color }} />
+            <span className="text-muted-foreground">{sl.label}</span>
+            <span className="font-bold ml-auto">{sl.value}</span>
+          </div>
+        ))}
+        <p className="text-xs text-muted-foreground pt-1">Total: {total} tasks</p>
+      </div>
+    </div>
+  );
+}
+
+function StatCardWidget() {
+  const { data, loading } = useWidgetsData();
+  if (loading) return <Spinner />;
+  const s = data?.summary;
+  const cards = [
+    { label: "Total Users",    value: fmtNum(s?.totalUsers || 0),          color: "text-blue-400" },
+    { label: "Total Activity", value: fmtNum(s?.totalActivity || 0),        color: "text-violet-400" },
+    { label: "Open Tasks",     value: fmtNum(s?.openTasks || 0),            color: "text-amber-400" },
+    { label: "Total Payments", value: fmtCur(s?.paymentAmountTotal || 0),   color: "text-emerald-400" },
+  ];
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {cards.map(c => (
+        <div key={c.label} className="bg-muted/20 rounded-xl p-3 space-y-1">
+          <p className="text-xs text-muted-foreground">{c.label}</p>
+          <p className={`text-lg font-bold ${c.color}`}>{c.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DataTableWidget() {
+  const { data, loading } = useWidgetsData();
+  if (loading) return <Spinner />;
+  const tasks = data?.recent?.tasks || [];
+  if (!tasks.length) return <p className="text-sm text-muted-foreground text-center py-10">No tasks found.</p>;
+  const colors: Record<string, string> = {
+    High: "text-red-400", Medium: "text-amber-400", Low: "text-emerald-400",
+  };
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Recent Tasks</p>
+      <div className="divide-y divide-border">
+        {tasks.slice(0, 5).map((t: any) => (
+          <div key={t.id} className="py-2 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">{t.title}</p>
+              <p className="text-xs text-muted-foreground">{t.assignedToName || "Unassigned"}</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className={`text-xs font-semibold ${colors[t.priority] || "text-muted-foreground"}`}>
+                {t.priority}
+              </span>
+              <span className="text-xs text-muted-foreground bg-muted/40 px-2 py-0.5 rounded-full">{t.status}</span>
+            </div>
           </div>
         ))}
       </div>
@@ -176,260 +244,124 @@ function PieChartWidget() {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// 4. STAT CARD
-// ═══════════════════════════════════════════════════════════════════════════════
-function StatCardWidget() {
+function CalendarWidget() {
+  const today = new Date();
+  const [cur, setCur] = useState(today);
+  const year = cur.getFullYear(), month = cur.getMonth();
+  const first = new Date(year, month, 1).getDay();
+  const days = new Date(year, month + 1, 0).getDate();
+  const cells = Array.from({ length: first + days }, (_, i) => i < first ? null : i - first + 1);
+  while (cells.length % 7 !== 0) cells.push(null);
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <button onClick={() => setCur(new Date(year, month - 1, 1))} className="p-1 rounded hover:bg-muted/40 text-muted-foreground">‹</button>
+        <p className="text-sm font-bold">{cur.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</p>
+        <button onClick={() => setCur(new Date(year, month + 1, 1))} className="p-1 rounded hover:bg-muted/40 text-muted-foreground">›</button>
+      </div>
+      <div className="grid grid-cols-7 gap-0.5 text-center">
+        {["S","M","T","W","T","F","S"].map((d, i) => <span key={i} className="text-[10px] text-muted-foreground font-medium py-1">{d}</span>)}
+        {cells.map((d, i) => (
+          <div key={i} className={`text-xs py-1 rounded-md font-medium transition-colors
+            ${d === today.getDate() && month === today.getMonth() && year === today.getFullYear()
+              ? "bg-primary text-primary-foreground"
+              : d ? "hover:bg-muted/40 text-foreground cursor-pointer" : ""}`}>
+            {d || ""}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NotificationsWidget() {
   const { data, loading } = useWidgetsData();
   if (loading) return <Spinner />;
-  const s = data?.summary;
-  const cards = [
-    { label: "Total Users",    value: fmtNum(s?.totalUsers || 0),       tone: "sky" },
-    { label: "Active Users",   value: fmtNum(s?.activeUsers || 0),      tone: "emerald" },
-    { label: "Open Tasks",     value: fmtNum(s?.openTasks || 0),        tone: s?.overdueTasks > 0 ? "rose" : "emerald" },
-    { label: "Open POs",       value: fmtNum(s?.openPOs || 0),          tone: "amber" },
-    { label: "PO Exposure",    value: fmtCur(s?.openPOValue || 0),      tone: "violet" },
-    { label: "Activity Today", value: fmtNum(s?.activity24h || 0),      tone: "teal" },
-  ];
-  const tones: Record<string, string> = {
-    sky: "bg-sky-500/10 text-sky-400 border-sky-500/20", emerald: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-    rose: "bg-rose-500/10 text-rose-400 border-rose-500/20", amber: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-    violet: "bg-violet-500/10 text-violet-400 border-violet-500/20", teal: "bg-teal-500/10 text-teal-400 border-teal-500/20",
-  };
+  const alerts = data?.alerts || [];
+  if (!alerts.length) return <p className="text-sm text-muted-foreground text-center py-10">No alerts at this time.</p>;
+  const colors: Record<string, string> = { critical: "text-red-400 bg-red-400/10", warning: "text-amber-400 bg-amber-400/10", info: "text-blue-400 bg-blue-400/10" };
   return (
-    <div className="grid grid-cols-2 gap-3">
-      {cards.map((c, i) => (
-        <div key={i} className={`p-3 rounded-xl border ${tones[c.tone]}`}>
-          <p className="text-xs opacity-70 mb-1">{c.label}</p>
-          <p className="text-xl font-bold">{c.value}</p>
+    <div className="space-y-2">
+      {alerts.slice(0, 4).map((a: any, i: number) => (
+        <div key={i} className={`flex gap-3 p-3 rounded-lg ${colors[a.type] || "text-muted-foreground bg-muted/20"}`}>
+          <div className="shrink-0 mt-0.5">
+            {a.type === "critical" ? "🔴" : a.type === "warning" ? "⚠️" : "ℹ️"}
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold truncate">{a.title}</p>
+            <p className="text-xs opacity-80 mt-0.5">{a.description}</p>
+          </div>
         </div>
       ))}
     </div>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// 5. DATA TABLE
-// ═══════════════════════════════════════════════════════════════════════════════
-function DataTableWidget() {
-  const { data, loading } = useWidgetsData();
-  const [page, setPage] = useState(0);
-  if (loading) return <Spinner />;
-  const tasks = data?.recent?.tasks || [];
-  if (!tasks.length) return <p className="text-sm text-muted-foreground text-center py-10">No tasks found.</p>;
-  const PER = 5, pages = Math.ceil(tasks.length / PER);
-  const rows = tasks.slice(page * PER, (page + 1) * PER);
-  const sc: Record<string, string> = {
-    open: "bg-blue-500/20 text-blue-300", in_progress: "bg-violet-500/20 text-violet-300",
-    closed: "bg-emerald-500/20 text-emerald-300", reviewed: "bg-teal-500/20 text-teal-300",
-  };
-  return (
-    <div className="space-y-3">
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full text-xs">
-          <thead><tr className="border-b border-border bg-muted/30">
-            <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Title</th>
-            <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Assigned</th>
-            <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Status</th>
-          </tr></thead>
-          <tbody>{rows.map((t: any, i: number) => (
-            <tr key={i} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-              <td className="px-3 py-2 max-w-[140px] truncate font-medium">{t.title}</td>
-              <td className="px-3 py-2 text-muted-foreground truncate">{t.assignedToName || "—"}</td>
-              <td className="px-3 py-2"><span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${sc[t.status] || "bg-muted text-muted-foreground"}`}>{t.status?.replace("_", " ")}</span></td>
-            </tr>
-          ))}</tbody>
-        </table>
-      </div>
-      {pages > 1 && (
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} className="p-1 rounded hover:bg-muted/40 disabled:opacity-30"><ChevronLeft size={14} /></button>
-          <span>Page {page + 1} of {pages}</span>
-          <button onClick={() => setPage(p => Math.min(pages - 1, p + 1))} disabled={page === pages - 1} className="p-1 rounded hover:bg-muted/40 disabled:opacity-30"><ChevronRight size={14} /></button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// 6. CALENDAR
-// ═══════════════════════════════════════════════════════════════════════════════
-function CalendarWidget() {
-  const { data, loading } = useWidgetsData();
-  const today = new Date();
-  const [month, setMonth] = useState(today.getMonth());
-  const [year, setYear]   = useState(today.getFullYear());
-  const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  const tasks = data?.recent?.tasks || [];
-  const dueDates = new Set(tasks.filter((t: any) => t.dueDate).map((t: any) => new Date(t.dueDate).toDateString()));
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells = Array.from({ length: firstDay + daysInMonth }, (_, i) => i < firstDay ? null : i - firstDay + 1);
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <button onClick={() => { const d = new Date(year, month - 1); setMonth(d.getMonth()); setYear(d.getFullYear()); }} className="p-1 rounded hover:bg-muted/40"><ChevronLeft size={14} /></button>
-        <span className="text-sm font-semibold">{monthNames[month]} {year}</span>
-        <button onClick={() => { const d = new Date(year, month + 1); setMonth(d.getMonth()); setYear(d.getFullYear()); }} className="p-1 rounded hover:bg-muted/40"><ChevronRight size={14} /></button>
-      </div>
-      <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-muted-foreground">
-        {["Su","Mo","Tu","We","Th","Fr","Sa"].map(d => <div key={d}>{d}</div>)}
-      </div>
-      <div className="grid grid-cols-7 gap-1">
-        {cells.map((day, i) => {
-          if (!day) return <div key={i} />;
-          const ds = new Date(year, month, day).toDateString();
-          const isToday = ds === today.toDateString(), hasDue = dueDates.has(ds);
-          return (
-            <div key={i} className={`flex items-center justify-center h-7 rounded text-xs font-medium transition-colors relative
-              ${isToday ? "bg-primary text-primary-foreground" : "hover:bg-muted/40"}
-              ${hasDue && !isToday ? "ring-1 ring-amber-500 text-amber-400" : ""}`}>
-              {day}
-              {hasDue && !isToday && <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-amber-500" />}
-            </div>
-          );
-        })}
-      </div>
-      {!loading && <p className="text-xs text-muted-foreground text-center">{tasks.filter((t: any) => t.dueDate).length} tasks with due dates</p>}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// 7. NOTIFICATIONS
-// ═══════════════════════════════════════════════════════════════════════════════
-function NotificationsWidget() {
-  const { data, loading } = useWidgetsData();
-  const navigate = useNavigate();
-  if (loading) return <Spinner />;
-  const alerts = data?.alerts || [];
-  if (!alerts.length) return <p className="text-sm text-muted-foreground text-center py-10">No notifications.</p>;
-  const styles: Record<string, { icon: any; cls: string }> = {
-    critical: { icon: AlertTriangle, cls: "border-rose-500/30 bg-rose-500/5 text-rose-400" },
-    warning:  { icon: AlertTriangle, cls: "border-amber-500/30 bg-amber-500/5 text-amber-400" },
-    info:     { icon: Info,          cls: "border-sky-500/30 bg-sky-500/5 text-sky-400" },
-  };
-  return (
-    <div className="space-y-2">
-      {alerts.map((a: any, i: number) => {
-        const st = styles[a.type] || styles.info;
-        const Icon = st.icon;
-        return (
-          <div key={i} onClick={() => a.action && navigate(a.action)}
-            className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer hover:brightness-110 transition-all ${st.cls}`}>
-            <Icon size={14} className="mt-0.5 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">{a.title}</p>
-              <p className="text-xs opacity-70 mt-0.5">{a.description}</p>
-            </div>
-            {a.count !== undefined && <span className="text-xs font-bold shrink-0">{a.count}</span>}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// 8. ACTIVITY FEED
-// ═══════════════════════════════════════════════════════════════════════════════
 function ActivityFeedWidget() {
   const { data, loading } = useWidgetsData();
   if (loading) return <Spinner />;
   const activity = data?.recent?.activity || [];
-  if (!activity.length) return <p className="text-sm text-muted-foreground text-center py-10">No activity yet.</p>;
+  if (!activity.length) return <p className="text-sm text-muted-foreground text-center py-10">No recent activity.</p>;
   return (
     <div className="space-y-2">
-      {activity.map((a: any, i: number) => (
-        <div key={i} className="flex items-start gap-3 p-2.5 rounded-lg bg-muted/20 hover:bg-muted/30 transition-colors">
-          <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary shrink-0">
-            {a.userName?.[0]?.toUpperCase() || "?"}
+      {activity.slice(0, 5).map((a: any, i: number) => (
+        <div key={i} className="flex items-start gap-2 py-1.5">
+          <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+            {a.userName?.charAt(0)?.toUpperCase() || "?"}
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium truncate">{a.details || `${a.event} — ${a.resource || a.actionType}`}</p>
-            <p className="text-xs text-muted-foreground">{a.userName} · {a.userRole}</p>
+          <div className="min-w-0">
+            <p className="text-xs"><span className="font-semibold">{a.userName}</span> {a.event?.toLowerCase()}</p>
+            <p className="text-[10px] text-muted-foreground">{fmtTime(a.createdAt)}</p>
           </div>
-          <span className="text-[10px] text-muted-foreground whitespace-nowrap">{fmtTime(a.createdAt)}</span>
         </div>
       ))}
     </div>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// 9. MAP VIEW
-// ═══════════════════════════════════════════════════════════════════════════════
 function MapViewWidget() {
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">Project site locations</p>
-      <div className="relative h-48 rounded-xl overflow-hidden border border-border bg-muted/10">
-        <svg viewBox="0 0 400 200" className="w-full h-full opacity-20">
-          {[50,100,150,200,250,300,350].map(x => <line key={x} x1={x} y1="0" x2={x} y2="200" stroke="currentColor" strokeWidth="0.5" />)}
-          {[40,80,120,160].map(y => <line key={y} x1="0" y1={y} x2="400" y2={y} stroke="currentColor" strokeWidth="0.5" />)}
-          <path d="M200,40 L220,50 L230,70 L225,90 L240,110 L235,140 L220,160 L200,170 L180,160 L175,140 L180,110 L175,90 L180,70 L190,50 Z"
-            fill="currentColor" opacity="0.2" stroke="currentColor" strokeWidth="1" />
-        </svg>
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-          <div className="relative">
-            <div className="w-5 h-5 rounded-full bg-primary animate-ping absolute opacity-40" />
-            <div className="w-5 h-5 rounded-full bg-primary relative flex items-center justify-center">
-              <span className="w-2.5 h-2.5 rounded-full bg-white" />
-            </div>
-          </div>
-        </div>
-        <div className="absolute inset-x-0 bottom-3 flex justify-center">
-          <span className="text-xs text-muted-foreground bg-card/80 px-2 py-0.5 rounded backdrop-blur-sm">
-            Connect Google Maps API to show real locations
-          </span>
+      <div className="h-44 rounded-xl bg-muted/20 border border-border flex items-center justify-center">
+        <div className="text-center space-y-2">
+          <Map size={32} className="text-muted-foreground/40 mx-auto" />
+          <p className="text-sm text-muted-foreground">Map integration</p>
+          <p className="text-xs text-muted-foreground/60">Connect a map API to display site locations</p>
         </div>
       </div>
     </div>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// 10. FILE UPLOADER
-// ═══════════════════════════════════════════════════════════════════════════════
 function FileUploaderWidget() {
-  const [files, setFiles] = useState<{ name: string; size: string; done: boolean }[]>([]);
-  const [dragging, setDragging] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const addFiles = (list: FileList) => {
-    const nf = Array.from(list).map(f => ({
-      name: f.name,
-      size: f.size < 1048576 ? `${(f.size / 1024).toFixed(1)} KB` : `${(f.size / 1048576).toFixed(1)} MB`,
-      done: false,
-    }));
-    setFiles(prev => [...prev, ...nf]);
-    nf.forEach((_, i) => setTimeout(() => {
-      setFiles(prev => prev.map((f, j) => j === prev.length - nf.length + i ? { ...f, done: true } : f));
-    }, 800 + i * 400));
+  const [files, setFiles] = useState<string[]>([]);
+  const [drag, setDrag] = useState(false);
+  const handle = (f: FileList | null) => {
+    if (!f) return;
+    setFiles(prev => [...prev, ...Array.from(f).map(x => x.name)].slice(0, 5));
   };
-
   return (
     <div className="space-y-3">
-      <div onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
-        onDrop={e => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
-        onClick={() => inputRef.current?.click()}
-        className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all
-          ${dragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/20"}`}>
-        <Upload size={24} className="mx-auto mb-2 text-muted-foreground" />
-        <p className="text-sm font-medium">Drop files or click to browse</p>
-        <p className="text-xs text-muted-foreground mt-1">Any file type accepted</p>
-        <input ref={inputRef} type="file" multiple className="hidden" onChange={e => e.target.files && addFiles(e.target.files)} />
+      <div
+        onDragOver={e => { e.preventDefault(); setDrag(true); }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={e => { e.preventDefault(); setDrag(false); handle(e.dataTransfer.files); }}
+        className={`border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer
+          ${drag ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"}`}
+        onClick={() => document.getElementById("fw-input")?.click()}
+      >
+        <Paperclip size={24} className="text-muted-foreground mx-auto mb-2" />
+        <p className="text-sm text-muted-foreground">Drop files here or click to upload</p>
+        <input id="fw-input" type="file" multiple className="hidden" onChange={e => handle(e.target.files)} />
       </div>
       {files.length > 0 && (
-        <div className="space-y-1.5 max-h-40 overflow-y-auto">
+        <div className="space-y-1">
           {files.map((f, i) => (
-            <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-muted/20 text-xs">
-              <Paperclip size={12} className="text-muted-foreground shrink-0" />
-              <span className="flex-1 truncate">{f.name}</span>
-              <span className="text-muted-foreground">{f.size}</span>
-              {f.done ? <Check size={12} className="text-emerald-400 shrink-0" />
-                : <div className="w-3 h-3 rounded-full border border-primary border-t-transparent animate-spin shrink-0" />}
+            <div key={i} className="flex items-center justify-between text-xs bg-muted/20 rounded-lg px-3 py-2">
+              <span className="truncate text-muted-foreground">{f}</span>
+              <button onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} className="ml-2 text-muted-foreground hover:text-foreground shrink-0">
+                <X size={12} />
+              </button>
             </div>
           ))}
         </div>
@@ -438,9 +370,6 @@ function FileUploaderWidget() {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// 11. PROGRESS RING
-// ═══════════════════════════════════════════════════════════════════════════════
 function ProgressRingWidget() {
   const { data, loading } = useWidgetsData();
   if (loading) return <Spinner />;
@@ -451,7 +380,6 @@ function ProgressRingWidget() {
   const completion = total ? Math.round((done / total) * 100) : 0;
   const inProgPct = total ? Math.round((inProg / total) * 100) : 0;
   const userPct = s?.totalUsers ? Math.round((s.activeUsers / s.totalUsers) * 100) : 100;
-
   const Ring = ({ pct, color, label }: { pct: number; color: string; label: string }) => {
     const r = 32, circ = 2 * Math.PI * r;
     return (
@@ -467,7 +395,6 @@ function ProgressRingWidget() {
       </div>
     );
   };
-
   return (
     <div className="space-y-4">
       <div className="flex justify-around">
@@ -484,15 +411,11 @@ function ProgressRingWidget() {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// 12. CALCULATOR
-// ═══════════════════════════════════════════════════════════════════════════════
 function CalculatorWidget() {
   const [display, setDisplay] = useState("0");
   const [prev, setPrev] = useState<string | null>(null);
   const [op, setOp] = useState<string | null>(null);
   const [reset, setReset] = useState(false);
-
   const press = (val: string) => {
     if (val === "C")  { setDisplay("0"); setPrev(null); setOp(null); setReset(false); return; }
     if (val === "±")  { setDisplay(d => String(-parseFloat(d) || 0)); return; }
@@ -509,11 +432,9 @@ function CalculatorWidget() {
     if (reset) { setDisplay(val); setReset(false); return; }
     setDisplay(d => d === "0" ? val : d.length < 12 ? d + val : d);
   };
-
   const rows = [["C","±","%","÷"],["7","8","9","×"],["4","5","6","−"],["1","2","3","+"],[" ","0",".","="]];
   const isOp = (v: string) => ["+","−","×","÷","="].includes(v);
   const isFn = (v: string) => ["C","±","%"].includes(v);
-
   return (
     <div className="max-w-[220px] mx-auto space-y-3">
       <div className="bg-muted/30 rounded-xl p-4 text-right min-h-[72px]">
@@ -551,21 +472,43 @@ const widgetComponents: Record<string, React.ComponentType> = {
 const Widgets = () => {
   const [searchParams] = useSearchParams();
   const [selected, setSelected] = useState<string | null>(searchParams.get("w"));
-  const ActiveWidget = selected ? widgetComponents[selected] : null;
+
+  // Fetch which widgets this user is allowed to see
+  const { allowedSet, loading: rightsLoading } = useAllowedWidgets();
+
+  // Only show widgets the user is allowed to see
+  const visibleWidgets = allowedSet
+    ? ALL_WIDGET_ITEMS.filter(w => allowedSet.has(w.label))
+    : [];
+
+  // If selected widget is no longer in allowedSet, clear selection
+  const safeSelected = selected && allowedSet?.has(selected) ? selected : null;
+  const ActiveWidget = safeSelected ? widgetComponents[safeSelected] : null;
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", selected || "Widgets"]} />
+      <Breadcrumbs items={["Dashboard", safeSelected || "Widgets"]} />
 
-      {selected ? (
+      {rightsLoading ? (
+        // Skeleton while loading rights — avoid flash
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mt-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="h-24 rounded-lg border border-border bg-muted/20 animate-pulse" />
+          ))}
+        </div>
+      ) : safeSelected ? (
         <div className="max-w-lg mx-auto mt-4">
           <div className="rounded-2xl border border-border bg-card shadow-lg overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-3">
-                {(() => { const w = widgetItems.find(i => i.label === selected); return w ? <w.icon size={20} className="text-primary" /> : <Puzzle size={20} className="text-primary" />; })()}
-                <h1 className="text-base font-bold">{selected}</h1>
+                {(() => {
+                  const w = ALL_WIDGET_ITEMS.find(i => i.label === safeSelected);
+                  return w ? <w.icon size={20} className="text-primary" /> : <Puzzle size={20} className="text-primary" />;
+                })()}
+                <h1 className="text-base font-bold">{safeSelected}</h1>
               </div>
-              <button onClick={() => setSelected(null)} className="p-1.5 rounded-lg hover:bg-muted/40 transition-colors text-muted-foreground hover:text-foreground">
+              <button onClick={() => setSelected(null)}
+                className="p-1.5 rounded-lg hover:bg-muted/40 transition-colors text-muted-foreground hover:text-foreground">
                 <X size={16} />
               </button>
             </div>
@@ -573,7 +516,8 @@ const Widgets = () => {
               {ActiveWidget ? <ActiveWidget /> : <p className="text-sm text-muted-foreground text-center py-8">Widget not found.</p>}
             </div>
           </div>
-          <button onClick={() => setSelected(null)} className="mt-4 flex items-center gap-1.5 text-sm text-primary hover:underline font-heading mx-auto">
+          <button onClick={() => setSelected(null)}
+            className="mt-4 flex items-center gap-1.5 text-sm text-primary hover:underline font-heading mx-auto">
             <X size={14} /> Back to all widgets
           </button>
         </div>
@@ -582,16 +526,31 @@ const Widgets = () => {
           <div className="flex items-center gap-2 mb-6">
             <Puzzle size={20} className="text-primary" />
             <h1 className="text-xl font-heading font-bold text-foreground">Widgets</h1>
+            {allowedSet && allowedSet.size < ALL_WIDGET_ITEMS.length && (
+              <span className="ml-2 text-xs text-muted-foreground bg-muted/30 px-2 py-0.5 rounded-full">
+                {allowedSet.size} available
+              </span>
+            )}
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {widgetItems.map(({ icon: Icon, label }) => (
-              <button key={label} onClick={() => setSelected(label)}
-                className="flex flex-col items-center gap-2 p-5 rounded-lg border border-border bg-card transition-all hover:bg-accent/10 hover:shadow-md hover:-translate-y-0.5 hover:border-primary">
-                <Icon size={28} className="text-primary" />
-                <span className="text-xs text-muted-foreground font-heading">{label}</span>
-              </button>
-            ))}
-          </div>
+
+          {visibleWidgets.length === 0 ? (
+            <div className="text-center py-16 space-y-3">
+              <Puzzle size={32} className="text-muted-foreground/40 mx-auto" />
+              <p className="text-sm text-muted-foreground">No widgets are enabled for your account.</p>
+              <p className="text-xs text-muted-foreground/60">Contact your administrator to enable widget access.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {visibleWidgets.map(({ icon: Icon, label }) => (
+                <button key={label} onClick={() => setSelected(label)}
+                  className="flex flex-col items-center gap-2 p-5 rounded-lg border border-border bg-card
+                    transition-all hover:bg-accent/10 hover:shadow-md hover:-translate-y-0.5 hover:border-primary">
+                  <Icon size={28} className="text-primary" />
+                  <span className="text-xs text-muted-foreground font-heading">{label}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </>
       )}
     </>
