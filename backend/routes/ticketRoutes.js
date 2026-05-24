@@ -338,10 +338,10 @@ router.get("/:id", async (req, res) => {
         `SELECT * FROM dbo.ticket_comments WHERE ticket_id = @tid ORDER BY created_at ASC`,
       );
 
-    const visibleComments =
-      isTicketAdmin(actor.role)
-        ? comments.recordset
-        : comments.recordset.filter((comment) => !Number(comment.is_internal));
+    // Non-admins must not see internal comments
+    const visibleComments = isTicketAdmin(actor.role)
+      ? comments.recordset
+      : comments.recordset.filter((comment) => !Number(comment.is_internal));
 
     // Coerce Pending → InProgress if the ticket already has replies
     const ticket = { ...access.ticket };
