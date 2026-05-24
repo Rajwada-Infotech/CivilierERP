@@ -23,7 +23,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import TaskFormModal from "./ticket/tasks/TaskFormModal";
+import TaskFormModal from "./tasks/TaskFormModal";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 

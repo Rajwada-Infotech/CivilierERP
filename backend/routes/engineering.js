@@ -5,6 +5,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition, guardEdit } = require("../services/approvalService");
 const {
   lockNextDocNumber,
@@ -13,6 +14,8 @@ const {
 
 const WORK_DONE_TABLE = "WorkDone";
 const WORK_DONE_CACHE = "engineering-work-done";
+
+router.use(checkPermissionForMethod("Engineering", "WorkDone"));
 
 const tableExists = {
   [WORK_DONE_TABLE]: null,

@@ -19,6 +19,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -416,6 +417,8 @@ async function deleteUpdate(id: number) {
 
 export function ConstructionUpdatesPage() {
   const qc = useQueryClient();
+  const { currentUser } = useAuth();
+  const canDeleteRecords = currentUser?.role !== "engineer";
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<CUStatus | "">("");
@@ -1186,15 +1189,17 @@ export function ConstructionUpdatesPage() {
                                   >
                                     <Pencil size={13} /> Edit
                                   </button>
-                                  <button
-                                    className="cu-menu-item danger"
-                                    onClick={() => {
-                                      setDeleteId(cu.Id);
-                                      setOpenMenuId(null);
-                                    }}
-                                  >
-                                    <Trash2 size={13} /> Delete
-                                  </button>
+                                  {canDeleteRecords && (
+                                    <button
+                                      className="cu-menu-item danger"
+                                      onClick={() => {
+                                        setDeleteId(cu.Id);
+                                        setOpenMenuId(null);
+                                      }}
+                                    >
+                                      <Trash2 size={13} /> Delete
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </div>

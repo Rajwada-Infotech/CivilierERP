@@ -25,6 +25,7 @@ import {
   Landmark,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -429,6 +430,8 @@ function Combobox({
 export function SalesDeedPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { currentUser } = useAuth();
+  const canDeleteRecords = currentUser?.role !== "engineer";
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<DeedStatus | "">("");
@@ -1229,15 +1232,17 @@ export function SalesDeedPage() {
                                   >
                                     <Pencil size={13} /> Edit
                                   </button>
-                                  <button
-                                    className="sd-menu-item danger"
-                                    onClick={() => {
-                                      setDeleteId(deed.Id);
-                                      setOpenMenuId(null);
-                                    }}
-                                  >
-                                    <Trash2 size={13} /> Delete
-                                  </button>
+                                  {canDeleteRecords && (
+                                    <button
+                                      className="sd-menu-item danger"
+                                      onClick={() => {
+                                        setDeleteId(deed.Id);
+                                        setOpenMenuId(null);
+                                      }}
+                                    >
+                                      <Trash2 size={13} /> Delete
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </div>

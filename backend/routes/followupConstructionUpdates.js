@@ -1,9 +1,11 @@
 const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 const router = express.Router();
 router.use(authMiddleware);
+router.use(checkPermissionForMethod("Followup", "ConstructionUpdates"));
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
