@@ -193,7 +193,7 @@ router.get(
         SELECT COUNT(*) AS Total
         FROM dbo.FollowupBookings fb
         JOIN dbo.FollowupApplications fa ON fa.Id = fb.ApplicantId
-        LEFT JOIN dbo.ProjectMaster  pm ON pm.Id = fb.ProjectId
+        LEFT JOIN dbo.enterprise     pm ON pm.id = fb.ProjectId
         LEFT JOIN dbo.CompanyMaster  cm ON cm.Id = fb.CompanyId
         LEFT JOIN dbo.users          u  ON u.id  = fb.AssignedTo
         WHERE ${WHERE}
@@ -209,7 +209,7 @@ router.get(
         SELECT ${LIST_COLUMNS}
         FROM dbo.FollowupBookings fb
         JOIN dbo.FollowupApplications fa ON fa.Id = fb.ApplicantId
-        LEFT JOIN dbo.ProjectMaster  pm ON pm.Id = fb.ProjectId
+        LEFT JOIN dbo.enterprise     pm ON pm.id = fb.ProjectId
         LEFT JOIN dbo.CompanyMaster  cm ON cm.Id = fb.CompanyId
         LEFT JOIN dbo.users          u  ON u.id  = fb.AssignedTo
         WHERE ${WHERE}
@@ -281,7 +281,7 @@ router.get(
         SELECT ${LIST_COLUMNS}
         FROM dbo.FollowupBookings fb
         JOIN dbo.FollowupApplications fa ON fa.Id = fb.ApplicantId
-        LEFT JOIN dbo.ProjectMaster  pm ON pm.Id = fb.ProjectId
+        LEFT JOIN dbo.enterprise     pm ON pm.id = fb.ProjectId
         LEFT JOIN dbo.CompanyMaster  cm ON cm.Id = fb.CompanyId
         LEFT JOIN dbo.users          u  ON u.id  = fb.AssignedTo
         WHERE fb.Id = @Id AND fb.IsDeleted = 0

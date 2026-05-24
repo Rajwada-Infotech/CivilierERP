@@ -5,13 +5,11 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import { useTask } from "@/contexts/TaskContext";
-import { getGRNs } from "@/api/grnApi";
 import {
   ArrowUpRight,
   ArrowDownRight,
   RefreshCw,
   AlertCircle,
-  Bell,
   CheckCircle2,
   Clock,
   Activity,
@@ -21,14 +19,14 @@ import {
   ListTodo,
   Users,
   BarChart3,
-  ShoppingCart,
-  Wrench,
   BookOpen,
-  Percent,
   ClipboardCheck,
   Home,
   Banknote,
   HandshakeIcon,
+  HardHat,
+  CalendarCheck,
+  PhoneCall,
 } from "lucide-react";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -43,15 +41,6 @@ const fmtDate = (d: string | null | undefined) =>
         year: "numeric",
       })
     : "—";
-
-function dateDiff(dateStr: string | null | undefined): number | null {
-  if (!dateStr) return null;
-  const due = new Date(dateStr);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  due.setHours(0, 0, 0, 0);
-  return Math.floor((due.getTime() - today.getTime()) / 86_400_000);
-}
 
 // ─── Task status badge colors ──────────────────────────────────────────────────
 
@@ -276,7 +265,7 @@ function PipelineFunnel({
   return (
     <div className="space-y-2.5">
       {isLoading
-        ? Array.from({ length: 5 }).map((_, i) => (
+        ? Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="h-7 bg-muted rounded-lg animate-pulse" />
           ))
         : stages.map((stage) => {
@@ -338,63 +327,76 @@ export default function FollowupDashboard() {
     ["open", "in_progress"].includes(t.status),
   );
 
-  // ── Sales pipeline queries ──────────────────────────────────────────────────
+  // ── Followup module queries ─────────────────────────────────────────────────
 
-  const { data: applicantsRes, isLoading: applicantsLoading } = useQuery({
-    queryKey: ["dashboard-applicants"],
+  const { data: applicationsRes, isLoading: applicationsLoading } = useQuery({
+    queryKey: ["dashboard-applications"],
     queryFn: () =>
-      fetchWithAuth("/api/followup-applicants?limit=500").then((r) => r.json()),
+      fetchWithAuth("/api/followup-applications?pageSize=500").then((r) =>
+        r.json(),
+      ),
     staleTime: 2 * 60 * 1000,
   });
+
+  const { data: bookingsRes, isLoading: bookingsLoading } = useQuery({
+    queryKey: ["dashboard-bookings"],
+    queryFn: () =>
+      fetchWithAuth("/api/followup-bookings?pageSize=500").then((r) =>
+        r.json(),
+      ),
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const { data: unitSelectionsRes, isLoading: unitSelectionsLoading } =
+    useQuery({
+      queryKey: ["dashboard-unit-selections"],
+      queryFn: () =>
+        fetchWithAuth("/api/followup-unit-selections?pageSize=500").then((r) =>
+          r.json(),
+        ),
+      staleTime: 2 * 60 * 1000,
+    });
 
   const { data: agreementsRes, isLoading: agreementsLoading } = useQuery({
     queryKey: ["dashboard-agreements"],
     queryFn: () =>
-      fetchWithAuth("/api/followup-agreements?limit=500").then((r) => r.json()),
+      fetchWithAuth("/api/followup-agreements?pageSize=500").then((r) =>
+        r.json(),
+      ),
     staleTime: 2 * 60 * 1000,
   });
 
   const { data: nocRes, isLoading: nocLoading } = useQuery({
     queryKey: ["dashboard-noc"],
     queryFn: () =>
-      fetchWithAuth("/api/followup-noc?limit=500").then((r) => r.json()),
+      fetchWithAuth("/api/followup-noc?pageSize=500").then((r) => r.json()),
     staleTime: 2 * 60 * 1000,
   });
 
   const { data: salesDeedRes, isLoading: salesDeedLoading } = useQuery({
     queryKey: ["dashboard-sales-deed"],
     queryFn: () =>
-      fetchWithAuth("/api/followup-sales-deed?limit=500").then((r) => r.json()),
+      fetchWithAuth("/api/followup-sales-deed?pageSize=500").then((r) =>
+        r.json(),
+      ),
     staleTime: 2 * 60 * 1000,
   });
 
   const { data: handoverRes, isLoading: handoverLoading } = useQuery({
     queryKey: ["dashboard-handover"],
     queryFn: () =>
-      fetchWithAuth("/api/followup-handover?limit=500").then((r) => r.json()),
-    staleTime: 2 * 60 * 1000,
-  });
-
-  // ── Reminder module queries ─────────────────────────────────────────────────
-
-  const { data: posRes } = useQuery({
-    queryKey: ["dashboard-pos"],
-    queryFn: () =>
-      fetchWithAuth("/api/purchase-orders?page=1&limit=200").then((r) =>
+      fetchWithAuth("/api/followup-handover?pageSize=500").then((r) =>
         r.json(),
       ),
     staleTime: 2 * 60 * 1000,
   });
 
-  const { data: wosRes } = useQuery({
-    queryKey: ["dashboard-wos"],
-    queryFn: () => fetchWithAuth("/api/work-orders").then((r) => r.json()),
-    staleTime: 2 * 60 * 1000,
-  });
-
-  const { data: grnsRes } = useQuery({
-    queryKey: ["dashboard-grns"],
-    queryFn: () => getGRNs({ page: 1, limit: 500 }),
+  const { data: constructionRes, isLoading: constructionLoading } = useQuery({
+    queryKey: ["dashboard-construction"],
+    queryFn: () =>
+      fetchWithAuth("/api/followup-construction-updates?pageSize=500").then(
+        (r) => r.json(),
+      ),
     staleTime: 2 * 60 * 1000,
   });
 
@@ -411,12 +413,24 @@ export default function FollowupDashboard() {
 
   // ── Normalise arrays ────────────────────────────────────────────────────────
 
-  const applicants: any[] = useMemo(
+  const applications: any[] = useMemo(
     () =>
-      Array.isArray(applicantsRes)
-        ? applicantsRes
-        : (applicantsRes?.data ?? []),
-    [applicantsRes],
+      Array.isArray(applicationsRes)
+        ? applicationsRes
+        : (applicationsRes?.data ?? []),
+    [applicationsRes],
+  );
+  const bookings: any[] = useMemo(
+    () =>
+      Array.isArray(bookingsRes) ? bookingsRes : (bookingsRes?.data ?? []),
+    [bookingsRes],
+  );
+  const unitSelections: any[] = useMemo(
+    () =>
+      Array.isArray(unitSelectionsRes)
+        ? unitSelectionsRes
+        : (unitSelectionsRes?.data ?? []),
+    [unitSelectionsRes],
   );
   const agreements: any[] = useMemo(
     () =>
@@ -439,15 +453,13 @@ export default function FollowupDashboard() {
       Array.isArray(handoverRes) ? handoverRes : (handoverRes?.data ?? []),
     [handoverRes],
   );
-  const pos: any[] = useMemo(
-    () => (Array.isArray(posRes) ? posRes : (posRes?.data ?? [])),
-    [posRes],
+  const constructions: any[] = useMemo(
+    () =>
+      Array.isArray(constructionRes)
+        ? constructionRes
+        : (constructionRes?.data ?? []),
+    [constructionRes],
   );
-  const wos: any[] = useMemo(
-    () => (Array.isArray(wosRes) ? wosRes : (wosRes?.data ?? [])),
-    [wosRes],
-  );
-  const grns: any[] = useMemo(() => grnsRes?.data ?? [], [grnsRes]);
   const logs: any[] = useMemo(
     () => (Array.isArray(logData) ? logData : (logData?.data ?? [])),
     [logData],
@@ -462,25 +474,16 @@ export default function FollowupDashboard() {
   const scheduledHandovers = handovers.filter(
     (h) => h.Status === "Scheduled",
   ).length;
-
-  const overduePos = pos.filter((p) => {
-    const d = dateDiff(p.ExpectedDeliveryDate || p.PODate);
-    return d !== null && d < 0;
-  }).length;
-  const overdueWos = wos.filter((w) => {
-    const d = dateDiff(w.DueDate || w.DocumentDate);
-    return d !== null && d < 0;
-  }).length;
-  const overdueGrns = grns.filter((g) => {
-    const d = dateDiff(g.GRNDate || g.CreatedDate);
-    return d !== null && d < 0;
-  }).length;
-  const totalOverdueReminders = overduePos + overdueWos + overdueGrns;
+  const confirmedBookings = bookings.filter(
+    (b) => b.Status === "Confirmed",
+  ).length;
 
   // ── Pipeline stages ─────────────────────────────────────────────────────────
 
   const pipelineLoading =
-    applicantsLoading ||
+    applicationsLoading ||
+    bookingsLoading ||
+    unitSelectionsLoading ||
     agreementsLoading ||
     nocLoading ||
     salesDeedLoading ||
@@ -488,11 +491,25 @@ export default function FollowupDashboard() {
 
   const pipelineStages = [
     {
-      label: "Applicants",
-      count: applicants.length,
+      label: "Applications",
+      count: applications.length,
       icon: Users,
       iconColor: "text-indigo-600",
       barColor: "bg-indigo-500/70",
+    },
+    {
+      label: "Bookings",
+      count: bookings.length,
+      icon: CalendarCheck,
+      iconColor: "text-sky-600",
+      barColor: "bg-sky-500/70",
+    },
+    {
+      label: "Unit Selections",
+      count: unitSelections.length,
+      icon: Home,
+      iconColor: "text-teal-600",
+      barColor: "bg-teal-500/70",
     },
     {
       label: "Agreements",
@@ -536,6 +553,13 @@ export default function FollowupDashboard() {
     count: agreements.filter((a) => a.Status === s).length,
   }));
 
+  const bookingStatusBreakdown = ["Draft", "Confirmed", "Cancelled"].map(
+    (s) => ({
+      status: s,
+      count: bookings.filter((b) => b.Status === s).length,
+    }),
+  );
+
   const nocStatusBreakdown = ["Pending", "Approved", "Issued", "Rejected"].map(
     (s) => ({
       status: s,
@@ -549,6 +573,17 @@ export default function FollowupDashboard() {
       count: followupTasks.filter((t) => t.status === s).length,
     }),
   );
+
+  const applicationStatusBreakdown = [
+    "New",
+    "Qualified",
+    "Shortlisted",
+    "Document Pending",
+    "Rejected",
+  ].map((s) => ({
+    status: s,
+    count: applications.filter((a) => a.Status === s).length,
+  }));
 
   return (
     <>
@@ -567,7 +602,8 @@ export default function FollowupDashboard() {
                   Follow-Up Dashboard
                 </h1>
                 <p className="text-xs text-muted-foreground">
-                  Sales pipeline, reminders and activity across all projects
+                  Sales pipeline, agreements, closures and construction across
+                  all projects
                 </p>
               </div>
             </div>
@@ -582,20 +618,39 @@ export default function FollowupDashboard() {
           </button>
         </div>
 
-        {/* ── KPI Row 1 — Sales Pipeline ── */}
+        {/* ── KPI Row — Sales Pipeline ── */}
         <div>
           <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">
             Sales Pipeline
           </p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <KPICard
-              label="Total Applicants"
-              value={fmtNum(applicants.length)}
-              sub={`${applicants.filter((a) => a.Status === "Active" || a.Status === "New").length} active`}
+              label="Applications"
+              value={fmtNum(applications.length)}
+              sub={`${applications.filter((a) => a.Status === "New" || a.Status === "Qualified").length} active`}
               icon={Users}
               iconColor="text-indigo-600"
               iconBg="bg-indigo-500/10"
               onClick={() => navigate("/followup/sales/applicants")}
+            />
+            <KPICard
+              label="Confirmed Bookings"
+              value={fmtNum(confirmedBookings)}
+              sub={`${bookings.length} total bookings`}
+              icon={CalendarCheck}
+              iconColor="text-sky-600"
+              iconBg="bg-sky-500/10"
+              trend={confirmedBookings > 0 ? "up" : "neutral"}
+              onClick={() => navigate("/followup/sales/bookings")}
+            />
+            <KPICard
+              label="Unit Selections"
+              value={fmtNum(unitSelections.length)}
+              sub={`${unitSelections.filter((u) => u.Status === "Reserved").length} reserved`}
+              icon={Home}
+              iconColor="text-teal-600"
+              iconBg="bg-teal-500/10"
+              onClick={() => navigate("/followup/sales/unit-selection")}
             />
             <KPICard
               label="Active Agreements"
@@ -619,19 +674,10 @@ export default function FollowupDashboard() {
               onClick={() => navigate("/followup/closure/noc")}
             />
             <KPICard
-              label="Sales Deeds"
-              value={fmtNum(salesDeeds.length)}
-              sub={`${salesDeeds.filter((s) => s.Status === "Registered").length} registered`}
-              icon={Banknote}
-              iconColor="text-emerald-600"
-              iconBg="bg-emerald-500/10"
-              onClick={() => navigate("/followup/closure/sales-deed")}
-            />
-            <KPICard
               label="Upcoming Handovers"
               value={fmtNum(scheduledHandovers)}
-              sub={`${handovers.length} total handovers`}
-              icon={Home}
+              sub={`${handovers.length} total`}
+              icon={Banknote}
               iconColor="text-cyan-600"
               iconBg="bg-cyan-500/10"
               trend={scheduledHandovers > 0 ? "up" : "neutral"}
@@ -640,12 +686,12 @@ export default function FollowupDashboard() {
           </div>
         </div>
 
-        {/* ── KPI Row 2 — Reminders & Tasks ── */}
+        {/* ── KPI Row 2 — Tasks ── */}
         <div>
           <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Reminders & Tasks
+            Tasks
           </p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <KPICard
               label="Overdue Tasks"
               value={fmtNum(overdueTasks.length)}
@@ -658,37 +704,14 @@ export default function FollowupDashboard() {
               onClick={() => navigate("/followup/follow-ups/tasks")}
             />
             <KPICard
-              label="PO Overdue"
-              value={fmtNum(overduePos)}
-              sub={`${pos.length} total POs`}
-              icon={ShoppingCart}
-              iconColor="text-orange-600"
-              iconBg="bg-orange-500/10"
-              trend={overduePos > 0 ? "down" : "neutral"}
-              urgent={overduePos > 0}
-              onClick={() => navigate("/followup/follow-ups/po-reminders")}
-            />
-            <KPICard
-              label="WO Overdue"
-              value={fmtNum(overdueWos)}
-              sub={`${wos.length} total WOs`}
-              icon={Wrench}
+              label="Due Soon"
+              value={fmtNum(dueSoonTasks.length)}
+              sub="Tasks due within 3 days"
+              icon={Clock}
               iconColor="text-amber-600"
               iconBg="bg-amber-500/10"
-              trend={overdueWos > 0 ? "down" : "neutral"}
-              urgent={overdueWos > 0}
-              onClick={() => navigate("/followup/follow-ups/wo-reminders")}
-            />
-            <KPICard
-              label="GRN Overdue"
-              value={fmtNum(overdueGrns)}
-              sub={`${grns.length} total GRNs`}
-              icon={ClipboardCheck}
-              iconColor="text-emerald-600"
-              iconBg="bg-emerald-500/10"
-              trend={overdueGrns > 0 ? "down" : "neutral"}
-              urgent={overdueGrns > 0}
-              onClick={() => navigate("/followup/follow-ups/grn-reminders")}
+              trend={dueSoonTasks.length > 0 ? "down" : "neutral"}
+              onClick={() => navigate("/followup/follow-ups/tasks")}
             />
             <KPICard
               label="Completed Tasks"
@@ -701,14 +724,13 @@ export default function FollowupDashboard() {
               onClick={() => navigate("/followup/follow-ups/tasks")}
             />
             <KPICard
-              label="Total Overdue"
-              value={fmtNum(totalOverdueReminders)}
-              sub="PO + WO + GRN"
-              icon={Bell}
-              iconColor="text-red-600"
-              iconBg="bg-red-500/10"
-              trend={totalOverdueReminders > 0 ? "down" : "neutral"}
-              urgent={totalOverdueReminders > 0}
+              label="Construction Updates"
+              value={fmtNum(constructions.length)}
+              sub="Site progress entries"
+              icon={HardHat}
+              iconColor="text-orange-600"
+              iconBg="bg-orange-500/10"
+              onClick={() => navigate("/followup/construction/updates")}
             />
           </div>
         </div>
@@ -721,7 +743,7 @@ export default function FollowupDashboard() {
               <SectionHeader
                 icon={BarChart3}
                 title="Sales Pipeline"
-                sub="Applicant → Handover"
+                sub="Application → Handover"
                 iconColor="text-indigo-600"
               />
             </div>
@@ -733,7 +755,54 @@ export default function FollowupDashboard() {
             </div>
           </div>
 
-          {/* Agreement status */}
+          {/* Application status */}
+          <div className="rounded-xl border border-border bg-card p-5">
+            <SectionHeader
+              icon={Users}
+              title="Application Status"
+              sub="By current status"
+              action="View all"
+              onAction={() => navigate("/followup/sales/applicants")}
+              iconColor="text-indigo-600"
+            />
+            {applicationsLoading ? (
+              <div className="space-y-2 mt-3 animate-pulse">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="h-5 bg-muted rounded" />
+                ))}
+              </div>
+            ) : (
+              <StatusBar
+                data={applicationStatusBreakdown}
+                barColor="bg-indigo-500"
+              />
+            )}
+          </div>
+
+          {/* Booking status */}
+          <div className="rounded-xl border border-border bg-card p-5">
+            <SectionHeader
+              icon={CalendarCheck}
+              title="Booking Status"
+              sub="By current status"
+              action="View all"
+              onAction={() => navigate("/followup/sales/bookings")}
+              iconColor="text-sky-600"
+            />
+            {bookingsLoading ? (
+              <div className="space-y-2 mt-3 animate-pulse">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="h-5 bg-muted rounded" />
+                ))}
+              </div>
+            ) : (
+              <StatusBar data={bookingStatusBreakdown} barColor="bg-sky-500" />
+            )}
+          </div>
+        </div>
+
+        {/* ── Agreement + NOC Status ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="rounded-xl border border-border bg-card p-5">
             <SectionHeader
               icon={HandshakeIcon}
@@ -757,7 +826,6 @@ export default function FollowupDashboard() {
             )}
           </div>
 
-          {/* NOC status */}
           <div className="rounded-xl border border-border bg-card p-5">
             <SectionHeader
               icon={ClipboardCheck}
@@ -779,27 +847,27 @@ export default function FollowupDashboard() {
           </div>
         </div>
 
-        {/* ── Recent Applicants + Recent Agreements ── */}
+        {/* ── Recent Applications + Recent Bookings ── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Recent Applicants */}
+          {/* Recent Applications */}
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border">
               <SectionHeader
                 icon={Users}
-                title="Recent Applicants"
+                title="Recent Applications"
                 sub="Latest entries"
                 action="View all"
                 onAction={() => navigate("/followup/sales/applicants")}
                 iconColor="text-indigo-600"
               />
             </div>
-            {applicantsLoading ? (
+            {applicationsLoading ? (
               <TableSkeleton rows={5} cols={3} />
-            ) : applicants.length === 0 ? (
-              <EmptyState label="No applicants yet" />
+            ) : applications.length === 0 ? (
+              <EmptyState label="No applications yet" />
             ) : (
               <div className="divide-y divide-border">
-                {applicants.slice(0, 6).map((a: any) => (
+                {applications.slice(0, 6).map((a: any) => (
                   <div
                     key={a.Id ?? a.ApplicantNo}
                     className="flex items-center gap-4 px-4 py-3 hover:bg-muted/40 transition-colors"
@@ -831,58 +899,59 @@ export default function FollowupDashboard() {
             )}
           </div>
 
-          {/* Recent Agreements */}
+          {/* Recent Bookings */}
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border">
               <SectionHeader
-                icon={HandshakeIcon}
-                title="Recent Agreements"
+                icon={CalendarCheck}
+                title="Recent Bookings"
                 sub="Latest entries"
                 action="View all"
-                onAction={() => navigate("/followup/agreement/agreements")}
-                iconColor="text-violet-600"
+                onAction={() => navigate("/followup/sales/bookings")}
+                iconColor="text-sky-600"
               />
             </div>
-            {agreementsLoading ? (
+            {bookingsLoading ? (
               <TableSkeleton rows={5} cols={3} />
-            ) : agreements.length === 0 ? (
-              <EmptyState label="No agreements yet" />
+            ) : bookings.length === 0 ? (
+              <EmptyState label="No bookings yet" />
             ) : (
               <div className="divide-y divide-border">
-                {agreements.slice(0, 6).map((ag: any) => (
+                {bookings.slice(0, 6).map((b: any) => (
                   <div
-                    key={ag.Id ?? ag.AgreementNo}
+                    key={b.Id ?? b.BookingNo}
                     className="flex items-center gap-4 px-4 py-3 hover:bg-muted/40 transition-colors"
                   >
-                    <div className="w-7 h-7 rounded-md bg-violet-500/10 flex items-center justify-center shrink-0">
-                      <HandshakeIcon size={12} className="text-violet-600" />
+                    <div className="w-7 h-7 rounded-md bg-sky-500/10 flex items-center justify-center shrink-0">
+                      <CalendarCheck size={12} className="text-sky-600" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium text-foreground truncate">
-                        {ag.ApplicantName || "—"}
+                        {b.ApplicantName || "—"}
                       </p>
                       <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                        {ag.ProjectName || ag.UnitNo || "—"}
-                        {ag.AgreementValue
-                          ? ` · ₹${Number(ag.AgreementValue).toLocaleString("en-IN")}`
+                        {b.ProjectName || "—"}
+                        {b.UnitNo ? ` · ${b.UnitNo}` : ""}
+                        {b.BookingAmount
+                          ? ` · ₹${Number(b.BookingAmount).toLocaleString("en-IN")}`
                           : ""}
                       </p>
                     </div>
                     <div className="flex flex-col items-end gap-1 shrink-0">
                       <span className="font-mono text-[10px] text-muted-foreground">
-                        {ag.AgreementNo || `#${ag.Id}`}
+                        {b.BookingNo || `#${b.Id}`}
                       </span>
-                      {ag.Status && (
+                      {b.Status && (
                         <span
                           className={`text-[9px] px-1.5 py-0.5 rounded-full border ${
-                            ag.Status === "Signed"
+                            b.Status === "Confirmed"
                               ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/20"
-                              : ag.Status === "Cancelled"
+                              : b.Status === "Cancelled"
                                 ? "bg-red-500/10 text-red-600 border-red-400/20"
-                                : "bg-violet-500/10 text-violet-600 border-violet-400/20"
+                                : "bg-sky-500/10 text-sky-600 border-sky-400/20"
                           }`}
                         >
-                          {ag.Status}
+                          {b.Status}
                         </span>
                       )}
                     </div>
@@ -1020,49 +1089,35 @@ export default function FollowupDashboard() {
             title="Quick Actions"
             iconColor="text-indigo-600"
           />
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mt-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 mt-3">
             {[
               {
-                label: "PO Reminders",
-                icon: ShoppingCart,
-                path: "/followup/follow-ups/po-reminders",
-                color: "text-orange-600",
-                bg: "bg-orange-500/10",
-              },
-              {
-                label: "WO Reminders",
-                icon: Wrench,
-                path: "/followup/follow-ups/wo-reminders",
-                color: "text-amber-600",
-                bg: "bg-amber-500/10",
-              },
-              {
-                label: "CHQ Reminders",
-                icon: BookOpen,
-                path: "/followup/follow-ups/chq-reminders",
-                color: "text-cyan-600",
-                bg: "bg-cyan-500/10",
-              },
-              {
-                label: "GRN Reminders",
-                icon: ClipboardCheck,
-                path: "/followup/follow-ups/grn-reminders",
-                color: "text-emerald-600",
-                bg: "bg-emerald-500/10",
-              },
-              {
-                label: "TDS Reminders",
-                icon: Percent,
-                path: "/followup/follow-ups/tds-reminders",
-                color: "text-violet-600",
-                bg: "bg-violet-500/10",
-              },
-              {
-                label: "Applicants",
+                label: "Applications",
                 icon: Users,
                 path: "/followup/sales/applicants",
                 color: "text-indigo-600",
                 bg: "bg-indigo-500/10",
+              },
+              {
+                label: "Bookings",
+                icon: CalendarCheck,
+                path: "/followup/sales/bookings",
+                color: "text-sky-600",
+                bg: "bg-sky-500/10",
+              },
+              {
+                label: "Unit Selection",
+                icon: Home,
+                path: "/followup/sales/unit-selection",
+                color: "text-teal-600",
+                bg: "bg-teal-500/10",
+              },
+              {
+                label: "Welcome Calls",
+                icon: PhoneCall,
+                path: "/followup/sales/welcome-calls",
+                color: "text-pink-600",
+                bg: "bg-pink-500/10",
               },
               {
                 label: "Agreements",
@@ -1070,6 +1125,48 @@ export default function FollowupDashboard() {
                 path: "/followup/agreement/agreements",
                 color: "text-violet-600",
                 bg: "bg-violet-500/10",
+              },
+              {
+                label: "NOC",
+                icon: ClipboardCheck,
+                path: "/followup/closure/noc",
+                color: "text-amber-600",
+                bg: "bg-amber-500/10",
+              },
+              {
+                label: "Sales Deed",
+                icon: Banknote,
+                path: "/followup/closure/sales-deed",
+                color: "text-emerald-600",
+                bg: "bg-emerald-500/10",
+              },
+              {
+                label: "Handover",
+                icon: Home,
+                path: "/followup/closure/handover",
+                color: "text-cyan-600",
+                bg: "bg-cyan-500/10",
+              },
+              {
+                label: "Construction",
+                icon: HardHat,
+                path: "/followup/construction/updates",
+                color: "text-orange-600",
+                bg: "bg-orange-500/10",
+              },
+              {
+                label: "Follow-Up Log",
+                icon: BookOpen,
+                path: "/followup/follow-ups/log",
+                color: "text-purple-600",
+                bg: "bg-purple-500/10",
+              },
+              {
+                label: "Tasks",
+                icon: ListTodo,
+                path: "/followup/follow-ups/tasks",
+                color: "text-rose-600",
+                bg: "bg-rose-500/10",
               },
             ].map(({ label, icon: Icon, path, color, bg }) => (
               <button
