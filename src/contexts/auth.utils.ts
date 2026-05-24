@@ -167,6 +167,19 @@ export const FULL_ACCESS: PagePermission[] = PAGE_DEFINITIONS.map((p) => ({
   actions: [...p.availableActions] as PageAction[],
 }));
 
+export const ENGINEER_ACCESS: PagePermission[] = [
+  { page: "dashboard", actions: ["view"] },
+  { page: "reports", actions: ["view", "print", "export"] },
+  { page: "widgets", actions: ["view"] },
+  { page: "tasks", actions: ["view", "create", "edit"] },
+  { page: "transactions", actions: ["view", "create"] },
+  { page: "payments", actions: ["view"] },
+  { page: "master_contractors", actions: ["view"] },
+  { page: "master_suppliers", actions: ["view"] },
+  { page: "master_items", actions: ["view"] },
+  { page: "master_item_groups", actions: ["view"] },
+];
+
 export const DEFAULT_USER_ACCESS: PagePermission[] = [
   { page: "dashboard", actions: ["view"] },
   { page: "reports", actions: ["view"] },
@@ -175,6 +188,7 @@ export const DEFAULT_USER_ACCESS: PagePermission[] = [
 // Updated to use centralized PRIVILEGED_ROLES
 export const getPermissionsByRole = (role: UserRole): PagePermission[] => {
   if (PRIVILEGED_ROLES.includes(role)) return FULL_ACCESS;
+  if (role === "engineer") return ENGINEER_ACCESS;
   return DEFAULT_USER_ACCESS;
 };
 
