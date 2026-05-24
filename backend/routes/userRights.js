@@ -25,6 +25,24 @@ router.get("/users", authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
+// GET own permissions -- any authenticated user can fetch their own
+router.get("/my", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user?.userId ?? req.user?.id;
+    if (!userId) return res.status(401).json({ error: "Not authenticated" });
+    const pool = getPool();
+    const result = await pool.request()
+      .input("UserId", sql.Int, parseInt(userId))
+      .query(`SELECT RightsJson FROM dbo.UserPageRightsJson WHERE UserId = @UserId AND IsActive = 1`);
+    const row = result.recordset[0];
+    let rightsJson = [];
+    try { rightsJson = row?.RightsJson ? JSON.parse(row.RightsJson) : []; } catch {}
+    res.json({ rightsJson });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch own permissions" });
+  }
+});
+
 // GET permissions
 router.get("/:userId", authMiddleware, adminOnly, async (req, res) => {
   try {
@@ -82,3 +100,4 @@ router.put("/:userId", authMiddleware, adminOnly, async (req, res) => {
 });
 
 module.exports = router;
+
