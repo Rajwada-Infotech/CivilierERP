@@ -32,7 +32,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import TicketChat from "@/components/tickets/TicketChat";
+import TicketChat from "@/pages/ticket/TicketChat";
 import {
   Select,
   SelectContent,
