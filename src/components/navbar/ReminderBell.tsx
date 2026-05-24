@@ -1,5 +1,5 @@
 import React from "react";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Bell,
@@ -34,50 +34,43 @@ const TYPE_META: Record<string, ReminderMeta> = {
   },
 };
 
-interface ReminderBellProps {
-  open?: boolean;
-  onToggle?: () => void;
-  onClose?: () => void;
-}
-
-export const ReminderBell = ({
-  open: openProp,
-  onToggle: onToggleProp,
-  onClose: onCloseProp,
-}: ReminderBellProps) => {
+export const ReminderBell = () => {
   const navigate = useNavigate();
-  const [internalOpen, setInternalOpen] = useState(false);
-  const open = openProp ?? internalOpen;
-  const fallbackToggle = React.useCallback(() => {
-    setInternalOpen((prev) => !prev);
-  }, []);
-  const fallbackClose = React.useCallback(() => {
-    setInternalOpen(false);
-  }, []);
-  const onToggle = onToggleProp ?? fallbackToggle;
-  const onClose = onCloseProp ?? fallbackClose;
+  const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("all");
   const { reminders, loading, badgeCount, refresh, isLocked } = useReminders({
     pollingInterval: 0,
   });
+
+  const bellButtonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Close when clicking outside
+  // Click-outside: close only when clicking outside BOTH the button and the panel
   useEffect(() => {
-    const clickOut = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        onClose();
+    if (!open) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        bellButtonRef.current?.contains(target) ||
+        panelRef.current?.contains(target)
+      ) {
+        return;
       }
+      setOpen(false);
     };
-    if (open) document.addEventListener("mousedown", clickOut);
-    return () => document.removeEventListener("mousedown", clickOut);
-  }, [open, onClose]);
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [open]);
+
+  const handleBellClick = useCallback(() => {
+    setOpen((prev) => !prev);
+  }, []);
 
   const filtered =
     filter === "all" ? reminders : reminders.filter((r) => r.type === filter);
 
   return (
-    <div className="relative" ref={panelRef}>
+    <div className="relative">
       <style
         dangerouslySetInnerHTML={{
           __html: `
@@ -104,7 +97,8 @@ export const ReminderBell = ({
       />
 
       <button
-        onClick={onToggle}
+        ref={bellButtonRef}
+        onClick={handleBellClick}
         className="relative p-2.5 hover:bg-muted rounded-full transition-all active:scale-95"
       >
         <Bell
@@ -126,14 +120,16 @@ export const ReminderBell = ({
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-3 w-80 bg-card border rounded-2xl shadow-2xl z-50 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right">
+        <div
+          ref={panelRef}
+          className="absolute right-0 mt-3 w-80 bg-card border rounded-2xl shadow-2xl z-50 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right"
+        >
           <div className="p-4 border-b flex justify-between items-center bg-muted/20">
             <span className="text-xs font-bold uppercase tracking-widest text-foreground/70">
               Reminders
             </span>
             <button
-              onClick={(e) => {
-                e.stopPropagation();
+              onClick={() => {
                 if (!isLocked) refresh(true);
               }}
               disabled={loading || isLocked}
@@ -166,10 +162,7 @@ export const ReminderBell = ({
             ].map((t) => (
               <button
                 key={t}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setFilter(t);
-                }}
+                onClick={() => setFilter(t)}
                 className={`px-3 py-1 text-[10px] font-bold rounded-full border transition-all ${filter === t ? "bg-primary text-white border-primary shadow-sm" : "bg-background text-muted-foreground hover:border-muted"}`}
               >
                 {t === "all" ? "All" : TYPE_META[t]?.label || t.toUpperCase()}
@@ -187,7 +180,7 @@ export const ReminderBell = ({
                 <div
                   key={r.id}
                   onClick={() => {
-                    onClose();
+                    setOpen(false);
                     navigate(r.path);
                   }}
                   className="p-4 hover:bg-muted/50 transition-colors cursor-pointer group"

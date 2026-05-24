@@ -178,22 +178,7 @@ router.get("/", async (req, res) => {
         ) c ON c.ticket_id = t.id
         ${whereClause}
         ORDER BY
-          CASE WHEN t.escalated_at IS NOT NULL AND t.status IN ('Pending', 'InProgress') THEN 0 ELSE 1 END,
-          CASE
-            WHEN t.status = 'Pending' AND t.assigned_to_id IS NULL THEN 0
-            WHEN t.status = 'InProgress' THEN 1
-            WHEN t.status = 'Resolved' THEN 2
-            ELSE 3
-          END,
-          CASE t.priority
-            WHEN 'Urgent' THEN 0
-            WHEN 'High' THEN 1
-            WHEN 'Medium' THEN 2
-            WHEN 'Low' THEN 3
-            ELSE 4
-          END,
-          t.created_at ASC,
-          t.id ASC
+          t.id DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
 
@@ -267,8 +252,7 @@ async function myTicketsHandler(req, res) {
         FROM dbo.tickets t
         WHERE t.created_by_id = @userId OR t.assigned_to_id = @userId
         ORDER BY
-          CASE t.status WHEN 'Pending' THEN 0 WHEN 'InProgress' THEN 1 ELSE 2 END,
-          t.created_at DESC
+          t.id DESC
       `);
 
     res.json(result.recordset);
