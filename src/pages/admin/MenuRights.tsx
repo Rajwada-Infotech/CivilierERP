@@ -1,5 +1,4 @@
-import React from "react";
-import { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   ShieldCheck,
   Search,
@@ -166,6 +165,19 @@ export default function MenuRights() {
       .finally(() => setLoadingPerms(false));
   }, [selectedUserId]);
 
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+        setUserSearch("");
+      }
+    };
+    if (dropdownOpen) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [dropdownOpen]);
+
   const filteredUsers = useMemo(
     () =>
       users.filter((u) =>
@@ -284,12 +296,12 @@ export default function MenuRights() {
       </div>
 
       {/* ── User Selector Card ───────────────────────────────────────────── */}
-      <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm p-5 mb-5">
+      <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm p-5 mb-5 relative" style={{ zIndex: 40 }}>
         <label className="flex items-center gap-2 text-xs font-heading font-semibold uppercase tracking-wide text-muted-foreground mb-3">
           <Users className="w-3.5 h-3.5" /> Select User
         </label>
 
-        <div className="relative w-full max-w-sm">
+        <div className="relative w-full max-w-sm" ref={dropdownRef}>
           {/* Trigger button */}
           <button
             onClick={() => setDropdownOpen(!dropdownOpen)}
@@ -323,7 +335,7 @@ export default function MenuRights() {
 
           {/* Dropdown panel */}
           {dropdownOpen && (
-            <div className="absolute z-30 mt-1.5 w-full rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
+            <div className="absolute z-50 mt-1.5 w-full rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
               <div className="p-2.5 border-b border-border bg-muted/40">
                 <div className="relative">
                   <Search
