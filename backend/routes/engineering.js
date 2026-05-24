@@ -132,12 +132,13 @@ router.get(
           ? pool.request().query(`
             SELECT
               COUNT(1) AS total,
-              SUM(CASE WHEN ISNULL(Status, 'Draft') IN ('Draft', 'Pending', 'Open', 'In Progress') THEN 1 ELSE 0 END) AS openCount,
-              SUM(CASE WHEN DocumentDate >= DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1) THEN 1 ELSE 0 END) AS thisMonth,
-              ISNULL(SUM(TotalAmount), 0) AS totalValue
-            FROM dbo.WorkOrderHeader
-            WHERE DocTypeId = 14
-               OR (DocTypeId IS NULL AND COALESCE(DocNo, DocumentNumber) LIKE 'WO-%')
+              SUM(CASE WHEN ISNULL(h.Status, 'Draft') IN ('Draft', 'Pending', 'Open', 'In Progress') THEN 1 ELSE 0 END) AS openCount,
+              SUM(CASE WHEN h.DocumentDate >= DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1) THEN 1 ELSE 0 END) AS thisMonth,
+              ISNULL(SUM(h.TotalAmount), 0) AS totalValue
+            FROM dbo.WorkOrderHeader h
+            LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = h.DocTypeId
+            WHERE td.ModuleTag = 'WO'
+               OR h.DocTypeId IS NULL
           `)
           : Promise.resolve({ recordset: [{}] }),
         hasWO
@@ -150,18 +151,20 @@ router.get(
               h.TotalAmount
             FROM dbo.WorkOrderHeader h
             LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
-            WHERE h.DocTypeId = 14
-               OR (h.DocTypeId IS NULL AND COALESCE(h.DocNo, h.DocumentNumber) LIKE 'WO-%')
+            LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = h.DocTypeId
+            WHERE td.ModuleTag = 'WO'
+               OR h.DocTypeId IS NULL
             ORDER BY ISNULL(h.UpdatedAt, h.CreatedAt) DESC
           `)
           : Promise.resolve({ recordset: [] }),
         hasWO
           ? pool.request().query(`
-            SELECT ISNULL(Status, 'Draft') AS Status, COUNT(1) AS Count, ISNULL(SUM(TotalAmount), 0) AS TotalValue
-            FROM dbo.WorkOrderHeader
-            WHERE DocTypeId = 14
-               OR (DocTypeId IS NULL AND COALESCE(DocNo, DocumentNumber) LIKE 'WO-%')
-            GROUP BY ISNULL(Status, 'Draft')
+            SELECT ISNULL(h.Status, 'Draft') AS Status, COUNT(1) AS Count, ISNULL(SUM(h.TotalAmount), 0) AS TotalValue
+            FROM dbo.WorkOrderHeader h
+            LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = h.DocTypeId
+            WHERE td.ModuleTag = 'WO'
+               OR h.DocTypeId IS NULL
+            GROUP BY ISNULL(h.Status, 'Draft')
           `)
           : Promise.resolve({ recordset: [] }),
         hasBOQ
