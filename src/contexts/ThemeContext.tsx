@@ -7,9 +7,9 @@ import React, {
   useMemo,
 } from "react";
 
-export type Theme = "dark" | "light" | "midnight" | "root";
+export type Theme = "dark" | "light" | "midnight" | "root" | "glas";
 
-const themes: Theme[] = ["dark", "light", "midnight", "root"];
+const themes: Theme[] = ["dark", "light", "midnight", "root", "glas"];
 
 // Dot colors that represent each theme visually
 export const THEME_DOTS: Record<Theme, { bg: string; label: string }> = {
@@ -17,6 +17,7 @@ export const THEME_DOTS: Record<Theme, { bg: string; label: string }> = {
   light: { bg: "#a78bfa", label: "Light" },
   midnight: { bg: "#2dd4bf", label: "Midnight" },
   root: { bg: "#f0a500", label: "Root" },
+  glas: { bg: "#a5b4fc", label: "Glas" },
 };
 
 interface ThemeContextType {
