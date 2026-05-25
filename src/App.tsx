@@ -40,7 +40,7 @@ import { TdsProvider } from "./contexts/TdsContext";
 import { DebitNoteProvider } from "./contexts/DebitNoteContext";
 import { BillingTermsProvider } from "./contexts/BillingTermsContext";
 import { useActivityBrowser } from "./contexts/ActivityBrowserContext";
-import { ActivityBrowserProvider } from "./contexts/ActivityBrowserProvider";
+import { ActivityBrowserProvider } from "./contexts/ActivityBrowserContext";
 
 // Query Client
 import { queryClient } from "./lib/queryClient";
@@ -171,8 +171,12 @@ const TicketResolution = lazy(() => import("./pages/ticket/TicketResolution"));
 const Users = lazy(() => import("./pages/Users"));
 const MenuRights = lazy(() => import("./pages/admin/MenuRights"));
 const WidgetRights = lazy(() => import("./pages/admin/WidgetsRights"));
-const WidgetCatalogAdmin = lazy(() => import("./pages/admin/WidgetCatalogAdmin"));
-const ContractorCategoryAdmin = lazy(() => import("./pages/admin/masters/ContractorCategoryAdmin"));
+const WidgetCatalogAdmin = lazy(
+  () => import("./pages/admin/WidgetCatalogAdmin"),
+);
+const ContractorCategoryAdmin = lazy(
+  () => import("./pages/admin/masters/ContractorCategoryAdmin"),
+);
 const PageDefinitionsAdmin = lazy(
   () => import("./pages/admin/masters/PageDefinitionsAdmin"),
 );
