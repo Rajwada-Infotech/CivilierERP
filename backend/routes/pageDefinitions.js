@@ -12,7 +12,14 @@
 const express = require("express");
 const router  = express.Router();
 const { getPool } = require("../db");
-const { authenticateToken, requireSuperAdmin } = require("../middleware/auth");
+const authMiddleware = require("../middleware/auth");
+const requireSuperAdmin = (req, res, next) => {
+  const role = req.user?.role;
+  if (role !== "superadmin" && role !== "super_admin" && role !== "SuperAdmin" && req.user?.isSuperAdmin !== true) {
+    return res.status(403).json({ error: "Super admin access required" });
+  }
+  next();
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -40,7 +47,7 @@ function validateBody(body) {
 
 // ── GET /api/page-definitions ─────────────────────────────────────────────────
 // Returns active rows only. Used by MenuRights.tsx at runtime.
-router.get("/", authenticateToken, async (req, res) => {
+router.get("/", authMiddleware, async (req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().query(`
@@ -71,7 +78,7 @@ router.get("/", authenticateToken, async (req, res) => {
 
 // ── GET /api/page-definitions/all ─────────────────────────────────────────────
 // Returns ALL rows (active + inactive). Admin UI only.
-router.get("/all", authenticateToken, requireSuperAdmin, async (req, res) => {
+router.get("/all", authMiddleware, requireSuperAdmin, async (req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().query(`
@@ -102,7 +109,7 @@ router.get("/all", authenticateToken, requireSuperAdmin, async (req, res) => {
 });
 
 // ── POST /api/page-definitions ────────────────────────────────────────────────
-router.post("/", authenticateToken, requireSuperAdmin, async (req, res) => {
+router.post("/", authMiddleware, requireSuperAdmin, async (req, res) => {
   const errors = validateBody(req.body);
   if (errors.length) return res.status(400).json({ error: errors.join("; ") });
 
@@ -143,7 +150,7 @@ router.post("/", authenticateToken, requireSuperAdmin, async (req, res) => {
 });
 
 // ── PUT /api/page-definitions/:id ─────────────────────────────────────────────
-router.put("/:id", authenticateToken, requireSuperAdmin, async (req, res) => {
+router.put("/:id", authMiddleware, requireSuperAdmin, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
@@ -208,7 +215,7 @@ router.put("/:id", authenticateToken, requireSuperAdmin, async (req, res) => {
 // ── DELETE /api/page-definitions/:id ─────────────────────────────────────────
 // Soft delete — sets IsActive = 0. This means permissions referencing this
 // page key still exist in the DB and are simply ignored at runtime.
-router.delete("/:id", authenticateToken, requireSuperAdmin, async (req, res) => {
+router.delete("/:id", authMiddleware, requireSuperAdmin, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
