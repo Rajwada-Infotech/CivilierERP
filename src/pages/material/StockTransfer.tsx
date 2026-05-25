@@ -87,13 +87,13 @@ function FilterSelect({
     color === "blue"
       ? {
           border: "border-blue-400/40 focus:border-blue-500/60",
-          bg: "bg-blue-500/10 dark:bg-blue-500/10",
+          bg: "bg-blue-500/5",
           icon: "text-blue-500",
           label: "text-blue-600",
         }
       : {
           border: "border-violet-400/40 focus:border-violet-500/60",
-          bg: "bg-violet-500/10 dark:bg-violet-500/10",
+          bg: "bg-violet-500/5",
           icon: "text-violet-500",
           label: "text-violet-600",
         };
@@ -112,17 +112,11 @@ function FilterSelect({
         <select
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className={`w-full pl-9 pr-8 py-2.5 rounded-xl border-2 text-sm text-foreground outline-none appearance-none transition-colors bg-background ${c.border} ${c.bg}`}
+          className={`w-full pl-9 pr-8 py-2.5 rounded-xl border-2 text-sm text-foreground outline-none appearance-none transition-colors ${c.border} ${c.bg}`}
         >
-          <option value="" className="bg-background text-foreground">
-            {placeholder}
-          </option>
+          <option value="">{placeholder}</option>
           {options.map((o) => (
-            <option
-              key={o.value}
-              value={o.value}
-              className="bg-background text-foreground"
-            >
+            <option key={o.value} value={o.value}>
               {o.label}
             </option>
           ))}
@@ -184,9 +178,7 @@ function GodownSelect({
               : "border-emerald-400/40 bg-emerald-500/5 focus:border-emerald-500/60"
           }`}
         >
-          <option value="" className="bg-background text-foreground">
-            {placeholder}
-          </option>
+          <option value="">{placeholder}</option>
           {godowns
             .filter((g) => g.GodownID !== exclude)
             .map((g) => (
@@ -698,12 +690,11 @@ export default function StockTransfer() {
     <>
       <Breadcrumbs items={["Dashboard", "Material Module", "Stock Transfer"]} />
 
-      <div className="p-6 space-y-5">
+      <div className="p-6 space-y-5 mt-6">
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-              <ArrowLeftRight size={20} className="text-emerald-600" />
+            <h1 className="text-xl font-heading font-bold text-foreground">
               Stock Transfer
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
@@ -756,7 +747,7 @@ export default function StockTransfer() {
               </div>
             )}
 
-            {/* ── Filters ─────────────────────────────────────────────────── */}
+            {/* ── Filters + Transfer Route ────────────────────────────────── */}
             <div className="rounded-xl border border-border bg-card p-5 space-y-4">
               <div className="flex items-center gap-2">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -781,7 +772,7 @@ export default function StockTransfer() {
                 )}
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <FilterSelect
                   icon={Building2}
                   label="Company"
@@ -812,6 +803,27 @@ export default function StockTransfer() {
                     filterCompanyId ? "All projects in company" : "All projects"
                   }
                   color="violet"
+                />
+                <GodownSelect
+                  label="From"
+                  value={fromGodownId}
+                  onChange={(v) => {
+                    setFromGodownId(v);
+                    setItems([emptyItem()]);
+                  }}
+                  godowns={filteredGodowns}
+                  exclude={toGodownId}
+                  variant="from"
+                  placeholder="Select source godown…"
+                />
+                <GodownSelect
+                  label="To"
+                  value={toGodownId}
+                  onChange={setToGodownId}
+                  godowns={filteredGodowns}
+                  exclude={fromGodownId}
+                  variant="to"
+                  placeholder="Select destination godown…"
                 />
               </div>
 
@@ -865,42 +877,6 @@ export default function StockTransfer() {
                   </span>
                 </div>
               )}
-            </div>
-
-            {/* ── Transfer Route ───────────────────────────────────────────── */}
-            <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Transfer Route
-              </p>
-
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
-                <GodownSelect
-                  label="From"
-                  value={fromGodownId}
-                  onChange={(v) => {
-                    setFromGodownId(v);
-                    setItems([emptyItem()]);
-                  }}
-                  godowns={filteredGodowns}
-                  exclude={toGodownId}
-                  variant="from"
-                  placeholder="Select source godown…"
-                />
-
-                <div className="flex items-center justify-center sm:pb-[36px]">
-                  <ArrowRight size={18} className="text-muted-foreground shrink-0" />
-                </div>
-
-                <GodownSelect
-                  label="To"
-                  value={toGodownId}
-                  onChange={setToGodownId}
-                  godowns={filteredGodowns}
-                  exclude={fromGodownId}
-                  variant="to"
-                  placeholder="Select destination godown…"
-                />
-              </div>
 
               {fromGodownId && toGodownId && fromGodownId === toGodownId && (
                 <p className="text-xs text-red-500 flex items-center gap-1">
