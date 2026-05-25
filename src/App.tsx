@@ -168,6 +168,7 @@ const TicketResolution = lazy(() => import("./pages/ticket/TicketResolution"));
 const Users = lazy(() => import("./pages/Users"));
 const MenuRights = lazy(() => import("./pages/admin/MenuRights"));
 const WidgetRights = lazy(() => import("./pages/admin/WidgetsRights"));
+const WidgetCatalogAdmin = lazy(() => import("./pages/admin/WidgetCatalogAdmin"));
 const FinYearRights = lazy(() => import("./pages/admin/FinYearRights"));
 const ApprovalSetup = lazy(() => import("./pages/admin/ApprovalSetup"));
 const PostApprovalRights = lazy(
@@ -1270,6 +1271,14 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <WidgetRights />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/widget-catalog"
+        element={
+          <AdminRoute>
+            <WidgetCatalogAdmin />
           </AdminRoute>
         }
       />
