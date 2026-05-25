@@ -13,6 +13,7 @@ import {
   type SessionEvent,
   getUserActivityLogs,
   logUserActivity,
+  deleteActivityHistory,
   subscribeToActivityStream,
 } from "@/api/userActivityApi";
 
@@ -120,20 +121,13 @@ const NOOP_CONTEXT: ActivityBrowserContextType = {
 };
 
 // ── HOOK ──────────────────────────────────────────────────────────────────────
-// Separated from ActivityBrowserProvider.tsx so each file only exports one
-// kind of thing (hook vs component). Vite Fast Refresh requires this.
 
 export const useActivityBrowser = (): ActivityBrowserContextType => {
   const ctx = useContext(ActivityBrowserContext);
   return ctx ?? NOOP_CONTEXT;
 };
 
-// ── HELPERS (module-private) ──────────────────────────────────────────────────
-
-// IP resolution is intentionally omitted on the client side: the backend
-// derives the real IP from X-Forwarded-For / socket.remoteAddress and ignores
-// any client-supplied value. Fetching from ipify.org added ~100-300 ms of
-// latency on every login/action for zero benefit.
+// ── HELPERS ──────────────────────────────────────────────────────────────────
 
 export function getStoredUser() {
   try {
@@ -186,6 +180,10 @@ export const ActivityBrowserProvider: React.FC<{
   const currentFiltersRef = useRef<ActivityFilters>({});
   const dateFiltersRef = useRef<DateFilters>(dateFilters);
   const fetchingRef = useRef(false);
+
+  // Per-session dedup: tracks which page paths have already been written to the
+  // DB this session so we only store each unique path once per session.
+  const sessionPagesSeen = useRef<Set<string>>(new Set());
 
   // Keep dateFiltersRef in sync
   useEffect(() => {
@@ -273,8 +271,17 @@ export const ActivityBrowserProvider: React.FC<{
     setDateFilters({ period: "this-week" });
   };
 
+  // Deletes all activity records from the DB (scoped to requesting user on the
+  // backend), clears local state, and resets the per-session dedup set so
+  // subsequent navigations are tracked fresh.
+  const clearHistory = async () => {
+    await deleteActivityHistory();
+    clearAll();
+    sessionPagesSeen.current.clear();
+  };
+
   // ── SOCKET.IO REAL-TIME ────────────────────────────────────────────────────
-  // Subscribe only when a token exists (backend socket requires JWT).
+
   useEffect(() => {
     let isMounted = true;
     let unsubscribe: (() => void) | undefined;
@@ -299,9 +306,7 @@ export const ActivityBrowserProvider: React.FC<{
     const trySubscribe = () => {
       const token = localStorage.getItem("token");
       if (!token) return;
-
-      // Avoid creating multiple subscriptions
-      if (unsubscribe) return;
+      if (unsubscribe) return; // already subscribed
 
       unsubscribe = subscribeToActivityStream(handleNewActivity);
     };
@@ -320,7 +325,6 @@ export const ActivityBrowserProvider: React.FC<{
       window.clearInterval(intervalId);
       if (unsubscribe) unsubscribe();
     };
-    // fetchActivityCore is stable — safe to omit from deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -331,8 +335,15 @@ export const ActivityBrowserProvider: React.FC<{
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
       const sessionId = crypto.randomUUID();
+      const loginTime = Date.now();
 
       localStorage.setItem("currentSessionId", sessionId);
+      // Persist login timestamp so recordLogout can compute sessionDuration
+      // precisely even across page refreshes.
+      localStorage.setItem("sessionLoginTime", String(loginTime));
+
+      // Reset per-session page dedup for the new session
+      sessionPagesSeen.current.clear();
 
       const entry: SessionEvent = {
         userId: user.id,
@@ -340,8 +351,7 @@ export const ActivityBrowserProvider: React.FC<{
         userEmail: user.email,
         userRole: user.role,
         event: "login",
-        timestamp: new Date().toISOString(),
-        ipAddress: "Unavailable",
+        timestamp: new Date(loginTime).toISOString(),
         deviceInfo,
         deviceFingerprint: fingerprint,
         sessionId,
@@ -365,6 +375,15 @@ export const ActivityBrowserProvider: React.FC<{
 
       const deviceInfo = getDeviceInfo();
 
+      // Compute session duration from the stored login timestamp.
+      // Falls back to null if sessionLoginTime is missing (e.g. pre-existing
+      // sessions that logged in before this fix was deployed) — the row is
+      // still written, just without a duration value.
+      const loginTimeRaw = localStorage.getItem("sessionLoginTime");
+      const sessionDurationSeconds = loginTimeRaw
+        ? Math.round((Date.now() - parseInt(loginTimeRaw, 10)) / 1000)
+        : null;
+
       const entry: SessionEvent = {
         userId: user.id,
         userName: user.name,
@@ -372,9 +391,10 @@ export const ActivityBrowserProvider: React.FC<{
         userRole: user.role,
         event: "logout",
         timestamp: new Date().toISOString(),
-        ipAddress: "Unavailable",
         deviceInfo,
         sessionId,
+        // Stored as INT (seconds) in UserActivityLog.SessionDuration
+        sessionDuration: sessionDurationSeconds ?? undefined,
       };
 
       setRawSessions((prev) => [normalizeEvent(entry, 0), ...prev]);
@@ -385,6 +405,7 @@ export const ActivityBrowserProvider: React.FC<{
         console.error("Logout log failed:", err);
       } finally {
         localStorage.removeItem("currentSessionId");
+        localStorage.removeItem("sessionLoginTime");
       }
     },
     [],
@@ -400,7 +421,23 @@ export const ActivityBrowserProvider: React.FC<{
     }) => {
       const sessionId = localStorage.getItem("currentSessionId");
       const user = getStoredUser();
-      if (!sessionId || !user.id) return;
+
+      if (!sessionId) {
+        console.warn("Skipping activity action log: missing currentSessionId", {
+          action,
+        });
+        return;
+      }
+      if (!user.id) return;
+
+      // Per-session page dedup: only write a page-view (GET read) to the DB
+      // once per unique path per session. Revisiting the same page does NOT
+      // create a duplicate row. Mutations (create/update/delete/export) are
+      // always written regardless.
+      if (action.actionType === "read" && action.method === "GET") {
+        if (sessionPagesSeen.current.has(action.url)) return;
+        sessionPagesSeen.current.add(action.url);
+      }
 
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
@@ -412,7 +449,6 @@ export const ActivityBrowserProvider: React.FC<{
         userRole: user.role || "",
         event: "action",
         timestamp: new Date().toISOString(),
-        ipAddress: "Unavailable",
         deviceInfo,
         deviceFingerprint: fingerprint,
         actionType: action.actionType,
@@ -474,9 +510,13 @@ export const ActivityBrowserProvider: React.FC<{
       } else if (event.event === "logout") {
         group.logoutTime = event.timestamp;
         group.logoutEvent = event;
+        // Prefer the DB-persisted sessionDuration (seconds) when available.
+        // Fall back to computing from timestamps for rows that predate this fix.
         group.durationMs =
-          new Date(event.timestamp).getTime() -
-          new Date(group.loginTime).getTime();
+          event.sessionDuration != null
+            ? event.sessionDuration * 1000
+            : new Date(event.timestamp).getTime() -
+              new Date(group.loginTime).getTime();
       } else {
         group.actions.push(event);
       }
@@ -503,6 +543,7 @@ export const ActivityBrowserProvider: React.FC<{
         recordLogout,
         recordAction,
         clearAll,
+        clearHistory,
         refresh,
       }}
     >
