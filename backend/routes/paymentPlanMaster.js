@@ -49,11 +49,11 @@ router.post("/", async (req, res) => {
   const { TermName, ValueType, TermValue } = req.body;
   if (!TermName?.trim())
     return res.status(400).json({ error: "TermName is required" });
-  const validTypes = ["percent", "fixed", "deduction"];
+  const validTypes = ["percent", "fixed"];
   if (!validTypes.includes(ValueType))
     return res
       .status(400)
-      .json({ error: "ValueType must be percent, fixed, or deduction" });
+      .json({ error: "ValueType must be percent or fixed" });
   const val = parseFloat(TermValue);
   if (isNaN(val) || val < 0)
     return res.status(400).json({ error: "TermValue must be >= 0" });
@@ -95,7 +95,7 @@ router.put("/:id", async (req, res) => {
     request.input("TermName", sql.NVarChar(200), TermName.trim());
   }
   if (ValueType !== undefined) {
-    const validTypes = ["percent", "fixed", "deduction"];
+    const validTypes = ["percent", "fixed"];
     if (!validTypes.includes(ValueType))
       return res.status(400).json({ error: "Invalid ValueType" });
     sets.push("ValueType = @ValueType");
