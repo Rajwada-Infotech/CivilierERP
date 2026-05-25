@@ -15,7 +15,7 @@ router.get("/", cache("godowns", 120), async (req, res) => {
         g.Description, g.Remarks, g.IsMain,
         g.EnterpriseID, g.ProjectID, g.Location,
         g.IsActive, g.IsDeleted, g.CreatedAt, g.UpdatedAt,
-        e.name AS EnterpriseName,
+        e.name AS EnterpriseName
       FROM dbo.Godowns g
       LEFT JOIN dbo.enterprise e ON e.id = g.EnterpriseID
       WHERE g.IsDeleted = 0
