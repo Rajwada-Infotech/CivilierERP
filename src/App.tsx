@@ -169,6 +169,8 @@ const Users = lazy(() => import("./pages/Users"));
 const MenuRights = lazy(() => import("./pages/admin/MenuRights"));
 const WidgetRights = lazy(() => import("./pages/admin/WidgetsRights"));
 const WidgetCatalogAdmin = lazy(() => import("./pages/admin/WidgetCatalogAdmin"));
+const ContractorCategoryAdmin = lazy(() => import("./pages/admin/masters/ContractorCategoryAdmin"));
+const GodownAdmin = lazy(() => import("./pages/admin/masters/GodownAdmin"));
 const FinYearRights = lazy(() => import("./pages/admin/FinYearRights"));
 const ApprovalSetup = lazy(() => import("./pages/admin/ApprovalSetup"));
 const PostApprovalRights = lazy(
@@ -1279,6 +1281,22 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <WidgetCatalogAdmin />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/masters/contractor-categories"
+        element={
+          <AdminRoute>
+            <ContractorCategoryAdmin />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/masters/godowns"
+        element={
+          <AdminRoute>
+            <GodownAdmin />
           </AdminRoute>
         }
       />
