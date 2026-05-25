@@ -248,7 +248,7 @@ export async function fetchHomeDashboard(
     safeFetch<{ data: TaskSummary[] }>(
       "/api/tasks?limit=5&sort=dueDate&order=asc",
     ),
-    safeFetch<unknown>("/api/tickets?limit=500"),
+    safeFetch<{ counts: Record<string, number | null> }>("/api/tickets/stats"),
     safeFetch<EngineeringSummaryData>("/api/engineering/dashboard"),
     safeFetch<unknown>("/api/followup-applications?pageSize=500"),
     safeFetch<unknown>("/api/followup-bookings?pageSize=500"),
@@ -289,37 +289,22 @@ export async function fetchHomeDashboard(
   if (engineeringRes.error) errors.engineering = engineeringRes.error;
   if (adminRes.error) errors.admin = adminRes.error;
 
-  // Unwrap ticket list (may be raw array or { data: [], pagination: {} })
   let tickets: TicketSummaryData | null = null;
-  if (!ticketsRes.error) {
-    const raw = ticketsRes.data;
-    const rawTickets: any[] = Array.isArray(raw)
-      ? raw
-      : Array.isArray((raw as any)?.data)
-        ? (raw as any).data
-        : [];
-    const total = rawTickets.length;
-    const pending = rawTickets.filter((t) => t.status === "Pending").length;
-    const inProgress = rawTickets.filter(
-      (t) => t.status === "InProgress",
-    ).length;
-    const resolved = rawTickets.filter((t) => t.status === "Resolved").length;
-    const closed = rawTickets.filter((t) => t.status === "Closed").length;
-    const openStatuses = ["Pending", "InProgress"];
-    const urgent = rawTickets.filter(
-      (t) => t.priority === "Urgent" && openStatuses.includes(t.status),
-    ).length;
-    const high = rawTickets.filter(
-      (t) => t.priority === "High" && openStatuses.includes(t.status),
-    ).length;
+  if (!ticketsRes.error && ticketsRes.data) {
+    const c = ticketsRes.data.counts ?? {};
+    const pending = c.pending ?? 0;
+    const inProgress = c.in_progress ?? 0;
+    const resolved = c.resolved ?? 0;
+    const closed = c.closed ?? 0;
+    const total = pending + inProgress + resolved + closed;
     tickets = {
       total,
       pending,
       inProgress,
       resolved,
       closed,
-      urgent,
-      high,
+      urgent: c.urgent_open ?? 0,
+      high: c.high_open ?? 0,
       resolvedPct: total > 0 ? Math.round((resolved / total) * 100) : 0,
     };
   }
