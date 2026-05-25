@@ -170,6 +170,7 @@ async function upsertBookingPaymentTerms(
   const termMap = await fetchTermsByIds(pool, termIds);
 
   let totalComputed = 0;
+  const termNames = [];
   for (let i = 0; i < termIds.length; i++) {
     const termId = termIds[i];
     const term = termMap.get(termId);
@@ -177,6 +178,7 @@ async function upsertBookingPaymentTerms(
 
     const computed = resolveTermAmount(term, totalValue || 0);
     totalComputed += computed;
+    termNames.push(term.TermName);
     const docRef = `PMT-${bookingNo}-${String(i + 1).padStart(3, "0")}`;
 
     await new sql.Request(transaction)
@@ -191,7 +193,7 @@ async function upsertBookingPaymentTerms(
           (@BookingID, @TermID, @ComputedAmount, @DocRef, @SortOrder)
       `);
   }
-  return totalComputed;
+  return { totalComputed, paymentPlanSummary: termNames.join(", ") || null };
 }
 
 const LIST_COLUMNS = `
@@ -231,7 +233,8 @@ const LIST_COLUMNS = `
   fb.CreatedBy,
   fb.CreatedAt,
   fb.UpdatedBy,
-  fb.UpdatedAt
+  fb.UpdatedAt,
+  fb.PaymentPlanSummary
 `;
 
 // ── GET / (list) ─────────────────────────────────────────────────────────────
@@ -492,21 +495,21 @@ router.post(
 
       // Insert payment terms and back-fill BookingAmount from their total
       if (payload.PaymentTermIds && payload.PaymentTermIds.length > 0) {
-        const scheduledAmount = await upsertBookingPaymentTerms(
-          transaction,
-          id,
-          bookingNo,
-          payload.PaymentTermIds,
-          payload.TotalValue,
-        );
-        if (scheduledAmount > 0) {
-          await new sql.Request(transaction)
-            .input("Id", sql.Int, id)
-            .input("BookingAmount", sql.Decimal(18, 2), scheduledAmount)
-            .query(
-              "UPDATE dbo.FollowupBookings SET BookingAmount = @BookingAmount WHERE Id = @Id",
-            );
-        }
+        const { totalComputed, paymentPlanSummary } =
+          await upsertBookingPaymentTerms(
+            transaction,
+            id,
+            bookingNo,
+            payload.PaymentTermIds,
+            payload.TotalValue,
+          );
+        await new sql.Request(transaction)
+          .input("Id", sql.Int, id)
+          .input("BookingAmount", sql.Decimal(18, 2), totalComputed)
+          .input("PaymentPlanSummary", sql.NVarChar(500), paymentPlanSummary)
+          .query(
+            "UPDATE dbo.FollowupBookings SET BookingAmount = @BookingAmount, PaymentPlanSummary = @PaymentPlanSummary WHERE Id = @Id",
+          );
       }
 
       await transaction.commit();
@@ -614,18 +617,20 @@ router.put(
         `);
 
       // Always sync payment terms and back-fill BookingAmount
-      const scheduledAmount = await upsertBookingPaymentTerms(
-        transaction,
-        id,
-        bookingNo,
-        payload.PaymentTermIds,
-        payload.TotalValue,
-      );
+      const { totalComputed, paymentPlanSummary } =
+        await upsertBookingPaymentTerms(
+          transaction,
+          id,
+          bookingNo,
+          payload.PaymentTermIds,
+          payload.TotalValue,
+        );
       await new sql.Request(transaction)
         .input("Id", sql.Int, id)
-        .input("BookingAmount", sql.Decimal(18, 2), scheduledAmount)
+        .input("BookingAmount", sql.Decimal(18, 2), totalComputed)
+        .input("PaymentPlanSummary", sql.NVarChar(500), paymentPlanSummary)
         .query(
-          "UPDATE dbo.FollowupBookings SET BookingAmount = @BookingAmount WHERE Id = @Id",
+          "UPDATE dbo.FollowupBookings SET BookingAmount = @BookingAmount, PaymentPlanSummary = @PaymentPlanSummary WHERE Id = @Id",
         );
 
       await transaction.commit();
