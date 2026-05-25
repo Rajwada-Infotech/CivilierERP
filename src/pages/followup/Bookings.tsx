@@ -42,6 +42,7 @@ import {
   Check,
 } from "lucide-react";
 import { DashboardBackground } from "@/components/DashboardBackground";
+import { useLookup } from "@/hooks/useLookup";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface PaymentTerm {
@@ -109,19 +110,6 @@ const API = "/api/followup-bookings";
 const TERMS_API = "/api/payment-plan-master";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const STATUS_OPTIONS = ["Confirmed", "Pending", "Cancelled"];
-const PAYMENT_MODES = ["Cheque", "NEFT", "RTGS", "DD", "Cash", "Online"];
-const UNIT_TYPES = [
-  "1BHK",
-  "2BHK",
-  "3BHK",
-  "4BHK",
-  "Studio",
-  "Duplex",
-  "Villa",
-  "Shop",
-  "Office",
-];
 
 const STATUS_CONFIG: Record<string, { dot: string; pill: string }> = {
   Confirmed: {
@@ -699,6 +687,9 @@ function BookingForm({
   onCancel,
   applicants,
   projects,
+  statusOptions,
+  paymentModes,
+  unitTypes,
   editBookingNo,
   editBookingId,
 }: {
@@ -707,6 +698,9 @@ function BookingForm({
   onCancel: () => void;
   applicants: Applicant[];
   projects: Project[];
+  statusOptions: string[];
+  paymentModes: string[];
+  unitTypes: string[];
   editBookingNo?: string | null;
   editBookingId?: number | null;
 }) {
@@ -823,7 +817,7 @@ function BookingForm({
               value={form.status}
               onChange={(e) => set("status")(e.target.value)}
             >
-              {STATUS_OPTIONS.map((s) => (
+              {statusOptions.map((s) => (
                 <option key={s}>{s}</option>
               ))}
             </select>
@@ -865,7 +859,7 @@ function BookingForm({
               onChange={(e) => set("unitType")(e.target.value)}
             >
               <option value="">Select type...</option>
-              {UNIT_TYPES.map((t) => (
+              {unitTypes.map((t) => (
                 <option key={t}>{t}</option>
               ))}
             </select>
@@ -970,7 +964,7 @@ function BookingForm({
               onChange={(e) => set("paymentMode")(e.target.value)}
             >
               <option value="">Select mode...</option>
-              {PAYMENT_MODES.map((m) => (
+              {paymentModes.map((m) => (
                 <option key={m}>{m}</option>
               ))}
             </select>
@@ -1654,6 +1648,10 @@ export default function BookingsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
 
+  const statusOptions = useLookup("BOOKING_STATUS", ["Confirmed", "Pending", "Cancelled"]);
+  const paymentModes = useLookup("PAYMENT_MODE", ["Cheque", "NEFT", "RTGS", "DD", "Cash", "Online"]);
+  const unitTypes = useLookup("UNIT_TYPE", ["1BHK", "2BHK", "3BHK", "4BHK", "Studio", "Duplex", "Villa", "Shop", "Office"]);
+
   useEffect(() => {
     const t = setTimeout(() => {
       setDebouncedSearch(search);
@@ -1917,9 +1915,9 @@ export default function BookingsPage() {
             >
               All <span className="font-mono ml-1">{total}</span>
             </button>
-            {STATUS_OPTIONS.map((s) => {
+            {statusOptions.map((s) => {
               const cfg = STATUS_CONFIG[s];
-              return (
+              return cfg ? (
                 <button
                   key={s}
                   onClick={() => {
@@ -1929,6 +1927,18 @@ export default function BookingsPage() {
                   className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-all ${statusFilter === s ? `${cfg.pill} border-current shadow-sm` : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
                 >
                   <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} /> {s}
+                </button>
+              ) : (
+                <button
+                  key={s}
+                  onClick={() => {
+                    setStatusFilter(statusFilter === s ? "" : s);
+                    setPage(1);
+                  }}
+                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-all
+                    ${statusFilter === s ? "bg-muted text-foreground border-current shadow-sm" : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
+                >
+                  {s}
                 </button>
               );
             })}
@@ -1994,69 +2004,16 @@ export default function BookingsPage() {
                 >
                   {mode === "table" ? (
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <rect
-                        x="1"
-                        y="1"
-                        width="12"
-                        height="2.5"
-                        rx="0.5"
-                        fill="currentColor"
-                        opacity="0.4"
-                      />
-                      <rect
-                        x="1"
-                        y="5.5"
-                        width="12"
-                        height="2.5"
-                        rx="0.5"
-                        fill="currentColor"
-                      />
-                      <rect
-                        x="1"
-                        y="10"
-                        width="12"
-                        height="2.5"
-                        rx="0.5"
-                        fill="currentColor"
-                        opacity="0.4"
-                      />
+                      <rect x="1" y="1" width="12" height="2.5" rx="0.5" fill="currentColor" opacity="0.4" />
+                      <rect x="1" y="5.5" width="12" height="2.5" rx="0.5" fill="currentColor" />
+                      <rect x="1" y="10" width="12" height="2.5" rx="0.5" fill="currentColor" opacity="0.4" />
                     </svg>
                   ) : (
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <rect
-                        x="1"
-                        y="1"
-                        width="5.5"
-                        height="5.5"
-                        rx="1"
-                        fill="currentColor"
-                      />
-                      <rect
-                        x="7.5"
-                        y="1"
-                        width="5.5"
-                        height="5.5"
-                        rx="1"
-                        fill="currentColor"
-                        opacity="0.4"
-                      />
-                      <rect
-                        x="1"
-                        y="7.5"
-                        width="5.5"
-                        height="5.5"
-                        rx="1"
-                        fill="currentColor"
-                        opacity="0.4"
-                      />
-                      <rect
-                        x="7.5"
-                        y="7.5"
-                        width="5.5"
-                        height="5.5"
-                        rx="1"
-                        fill="currentColor"
-                      />
+                      <rect x="1" y="1" width="5.5" height="5.5" rx="1" fill="currentColor" />
+                      <rect x="7.5" y="1" width="5.5" height="5.5" rx="1" fill="currentColor" opacity="0.4" />
+                      <rect x="1" y="7.5" width="5.5" height="5.5" rx="1" fill="currentColor" opacity="0.4" />
+                      <rect x="7.5" y="7.5" width="5.5" height="5.5" rx="1" fill="currentColor" />
                     </svg>
                   )}
                 </button>
@@ -2348,6 +2305,9 @@ export default function BookingsPage() {
                 onCancel={closeForm}
                 applicants={applicants}
                 projects={projects}
+                statusOptions={statusOptions}
+                paymentModes={paymentModes}
+                unitTypes={unitTypes}
                 editBookingNo={editBooking?.BookingNo}
                 editBookingId={editBooking?.Id ?? null}
               />

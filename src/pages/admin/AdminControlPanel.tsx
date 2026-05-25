@@ -160,8 +160,8 @@ export default function AdminControlPanel() {
       bg: "bg-purple-500/10",
     },
     {
-      label: "Activity today",
-      value: systemMetrics?.activityToday ?? "—",
+      label: "Server uptime",
+      value: systemMetrics?.server?.uptimeHours != null ? `${systemMetrics.server.uptimeHours}h` : "—",
       icon: Activity,
       color: "text-orange-500",
       bg: "bg-orange-500/10",
@@ -182,7 +182,7 @@ export default function AdminControlPanel() {
 
   const tables: any[] = systemMetrics?.tables ?? [];
   const filteredTables = tables.filter((t: any) =>
-    !dbSearch || t.table?.toLowerCase().includes(dbSearch.toLowerCase())
+    !dbSearch || t.name?.toLowerCase().includes(dbSearch.toLowerCase())
   );
 
   return (
@@ -381,41 +381,30 @@ export default function AdminControlPanel() {
                   <TableRow className="text-xs">
                     <TableHead>Table Name</TableHead>
                     <TableHead>Rows</TableHead>
-                    <TableHead>Size</TableHead>
-                    <TableHead>Last Write</TableHead>
-                    <TableHead>Health</TableHead>
+                    <TableHead>Total KB</TableHead>
+                    <TableHead>Used KB</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredTables.map((t) => (
-                    <TableRow key={t.table} className="text-xs">
+                    <TableRow key={t.name} className="text-xs">
                       <TableCell className="font-mono text-[11px]">
-                        {t.table}
+                        {t.name}
                       </TableCell>
                       <TableCell>{(t.rows ?? 0).toLocaleString()}</TableCell>
                       <TableCell className="text-muted-foreground">
-                        {t.size ?? "—"}
+                        {t.totalKB != null ? `${t.totalKB.toLocaleString()} KB` : "—"}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {t.lastWrite ?? "—"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          className={`text-[10px] ${t.status === "healthy" ? "bg-green-500/15 text-green-600 border-green-500/30" : "bg-orange-500/15 text-orange-600 border-orange-500/30"}`}
-                        >
-                          {t.status === "warning" && (
-                            <AlertCircle size={9} className="mr-1" />
-                          )}
-                          {t.status ?? "unknown"}
-                        </Badge>
+                        {t.usedKB != null ? `${t.usedKB.toLocaleString()} KB` : "—"}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-6 text-[10px] gap-1"
-                          onClick={() => toast.info(`Viewing ${t.table}`)}
+                          onClick={() => toast.info(`Viewing ${t.name}`)}
                         >
                           <FileText size={10} /> View
                         </Button>
