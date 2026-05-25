@@ -39,6 +39,7 @@ import {
   IndianRupee,
   Boxes,
   Settings2,
+  Warehouse,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -407,26 +408,33 @@ const ALL_REPORTS: ReportDef[] = [
     description: "Current stock levels across all items and godowns",
     icon: Layers,
     color: "#06b6d4",
-    apiPath: "/api/stock-ledger",
-    defaultParams: { view: "summary" },
-    // stockLedger returns { data: ledger rows, byItem: item-level summary, godowns: [] }.
-    // For the summary report we want the byItem array broken down per godown.
+    apiPath: "/api/inventory-master",
+
     filterConfig: {
       companyParam: null,
       finYearParam: null,
-      dataKey: "byItem",
+      singleDateParam: "date",
+      dateFromParam: null,
+      dateToParam: null,
+      dataKey: "data",
     },
     columns: [
       { header: "Item", accessor: "ItemName" },
       { header: "Group", accessor: "ItemGroupName" },
       {
-        header: "Godown",
-        accessor: (r) => (r.GodownName ?? "Main Godown") as string,
+        header: "Location",
+        accessor: (r) =>
+          ((r.GodownName ?? "Main Godown") +
+            (r.IsMainGodown ? " [MAIN]" : "")) as string,
       },
-      { header: "In", accessor: "stockIn" },
-      { header: "Out", accessor: "stockOut" },
-      { header: "Balance", accessor: "balance" },
-      { header: "UOM", accessor: (r) => (r.UOMName ?? r.UOM ?? "—") as string },
+      { header: "Opening", accessor: (r) => String(r.OpeningStock ?? "—") },
+      { header: "In", accessor: (r) => String(r.StockIn ?? "—") },
+      { header: "Out", accessor: (r) => String(r.StockOut ?? "—") },
+      { header: "Closing", accessor: (r) => String(r.ClosingStock ?? "—") },
+      {
+        header: "UOM",
+        accessor: (r) => (r.UOMName ?? r.UOMCode ?? "—") as string,
+      },
     ],
   },
   {
@@ -860,6 +868,26 @@ const ReportTable: React.FC<{
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
 
+  // ── Godown switcher (stock-summary only) ─────────────────────────────────
+  const isStockSummary = report.id === "stock-summary";
+  const [godownId, setGodownId] = useState<string>("");
+  const [godowns, setGodowns] = useState<
+    { GodownID: number; GodownName: string; IsMain: number }[]
+  >([]);
+  useEffect(() => {
+    if (!isStockSummary) return;
+    fetchWithAuth("/api/godowns")
+      .then((r) => r.json())
+      .then((j) => {
+        const list = Array.isArray(j) ? j : (j.data ?? []);
+        setGodowns(list);
+        // Default to the main godown
+        const main = list.find((g: { IsMain: number }) => g.IsMain);
+        if (main) setGodownId(String(main.GodownID));
+      })
+      .catch(() => {});
+  }, [isStockSummary]);
+
   const buildParams = (): Record<string, string> => {
     const fc = report.filterConfig ?? {};
     const f: Record<string, string> = {};
@@ -889,6 +917,9 @@ const ReportTable: React.FC<{
       if (dfParam) f[dfParam] = filters.rangeFrom;
       if (dtParam) f[dtParam] = filters.rangeTo;
     }
+
+    // Stock summary: pass selected godownId to inventory-master
+    if (isStockSummary && godownId) f["godownId"] = godownId;
 
     return f;
   };
@@ -925,6 +956,7 @@ const ReportTable: React.FC<{
     filters.singleDate,
     filters.rangeFrom,
     filters.rangeTo,
+    godownId,
   ]);
 
   useEffect(() => {
@@ -979,6 +1011,33 @@ const ReportTable: React.FC<{
             <RefreshCw size={11} className={loading ? "animate-spin" : ""} />{" "}
             Refresh
           </button>
+
+          {/* Godown switcher — stock-summary only */}
+          {isStockSummary && godowns.length > 0 && (
+            <div className="relative flex items-center">
+              <Warehouse
+                size={11}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <select
+                value={godownId}
+                onChange={(e) => setGodownId(e.target.value)}
+                className="appearance-none pl-7 pr-6 py-1.5 h-[30px] rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+              >
+                {godowns.map((g) => (
+                  <option key={g.GodownID} value={String(g.GodownID)}>
+                    {g.GodownName}
+                    {g.IsMain ? " ★" : ""}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={11}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+            </div>
+          )}
+
           <button
             onClick={() => exportToCsv(rows, report.columns, report.id)}
             disabled={loading || rows.length === 0}

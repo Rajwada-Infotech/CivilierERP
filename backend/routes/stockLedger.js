@@ -3,6 +3,7 @@ const router = express.Router();
 
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
+const { bumpCacheVersion } = require("../redis");
 
 async function hasColumn(pool, tableName, columnName) {
   const result = await pool
@@ -42,7 +43,9 @@ function bindFilters(request, filters) {
   }
 }
 
-function buildWhere(filters, ledgerDateExpr, hasGodownID) {
+// hasDocNo must be passed so the search clause never references sl.DocNo
+// when that column doesn't exist in this DB's StockLedger schema.
+function buildWhere(filters, ledgerDateExpr, hasGodownID, hasDocNo) {
   const clauses = ["1=1"];
 
   if (filters.itemId) {
@@ -67,13 +70,14 @@ function buildWhere(filters, ledgerDateExpr, hasGodownID) {
     clauses.push("sl.GodownID = @godownId");
   }
   if (filters.search) {
+    // Only include sl.DocNo in the search predicate when the column exists.
+    const docNoClause = hasDocNo ? "\n      OR sl.DocNo LIKE @search" : "";
     clauses.push(`(
       img.M_Name LIKE @search
       OR img.M_Description LIKE @search
       OR grn.GRNNo LIKE @search
       OR po.PurchaseOrderNo LIKE @search
-      OR CONVERT(NVARCHAR(50), sl.ItemID) LIKE @search
-      OR sl.DocNo LIKE @search
+      OR CONVERT(NVARCHAR(50), sl.ItemID) LIKE @search${docNoClause}
     )`);
   }
 
@@ -182,7 +186,7 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
         ON sl.RefType = 'ISS' AND iss.IssueId = sl.RefID
     `;
 
-    const where = buildWhere(filters, ledgerDateExpr, hasGodownID);
+    const where = buildWhere(filters, ledgerDateExpr, hasGodownID, hasDocNo);
 
     // ── Bind helper — includes godownId when present ──────────────────────────
     function bindAll(request) {
@@ -317,5 +321,9 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
     });
   }
 });
+
+// Evict any stale cached 500 responses that may have been written before this
+// fix was deployed. Fire-and-forget — never block the route from loading.
+bumpCacheVersion("stock-ledger").catch(() => {});
 
 module.exports = router;
