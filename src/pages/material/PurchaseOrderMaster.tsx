@@ -1283,13 +1283,12 @@ const PurchaseOrderMaster: React.FC = () => {
         />
 
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-start justify-between gap-4 mt-6 mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <ShoppingCart size={22} className="text-primary" />
+            <h1 className="text-xl font-heading font-bold text-foreground">
               Purchase Orders
             </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
+            <p className="text-xs text-muted-foreground mt-0.5">
               {totalRecords} orders total
             </p>
           </div>
