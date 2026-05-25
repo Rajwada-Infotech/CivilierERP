@@ -333,7 +333,7 @@ const ItemMaster: React.FC = () => {
   const { data: dbSuppliers = [] } = useQuery({
     queryKey: ["suppliers-for-item-master"],
     queryFn: async () => {
-      const res = await fetchWithAuth("/api/account-head?type=S");
+      const res = await fetchWithAuth("/api/account-head/options?type=S");
       if (!res.ok) return [];
       const data = await res.json();
       return Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
@@ -343,8 +343,8 @@ const ItemMaster: React.FC = () => {
 
   const supplierOptions = (Array.isArray(dbSuppliers) ? dbSuppliers : []).map(
     (s: any) => ({
-      value: String(s.LHeadId ?? s.id ?? ""),
-      label: s.LHeadName ?? s.name ?? "",
+      value: String(s.id ?? ""),
+      label: s.label ?? "",
     }),
   );
 
