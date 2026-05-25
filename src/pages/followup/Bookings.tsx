@@ -409,6 +409,9 @@ function BookingForm({
   onCancel,
   applicants,
   projects,
+  statusOptions,
+  paymentModes,
+  unitTypes,
 }: {
   initial?: Partial<FormData>;
   onSave: (data: FormData) => Promise<void>;
@@ -1180,9 +1183,6 @@ export default function BookingsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
 
-  const { data: statusOptions } = useLookup("BookingStatus", ["Confirmed", "Pending", "Cancelled"]);
-  const { data: paymentModes } = useLookup("PaymentMode", ["Cheque", "NEFT", "RTGS", "DD", "Cash", "Online"]);
-  const { data: unitTypes } = useLookup("UnitType", ["1BHK", "2BHK", "3BHK", "4BHK", "Studio", "Duplex", "Villa", "Shop", "Office"]);
   const statusOptions = useLookup("BOOKING_STATUS", ["Confirmed", "Pending", "Cancelled"]);
   const paymentModes = useLookup("PAYMENT_MODE", ["Cheque", "NEFT", "RTGS", "DD", "Cash", "Online"]);
   const unitTypes = useLookup("UNIT_TYPE", ["1BHK", "2BHK", "3BHK", "4BHK", "Studio", "Duplex", "Villa", "Shop", "Office"]);
