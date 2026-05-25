@@ -737,7 +737,7 @@ function BookingForm({
             value={form.notes}
             onChange={(e) => set("notes")(e.target.value)}
           />
-        </div>
+        </section>
       </div>
 
       <div className="flex-shrink-0 flex items-center justify-between gap-2 px-6 py-4 border-t border-border bg-muted/20">

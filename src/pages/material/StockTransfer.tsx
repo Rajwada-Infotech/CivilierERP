@@ -87,13 +87,13 @@ function FilterSelect({
     color === "blue"
       ? {
           border: "border-blue-400/40 focus:border-blue-500/60",
-          bg: "bg-blue-500/5",
+          bg: "bg-blue-500/10 dark:bg-blue-500/10",
           icon: "text-blue-500",
           label: "text-blue-600",
         }
       : {
           border: "border-violet-400/40 focus:border-violet-500/60",
-          bg: "bg-violet-500/5",
+          bg: "bg-violet-500/10 dark:bg-violet-500/10",
           icon: "text-violet-500",
           label: "text-violet-600",
         };
@@ -112,11 +112,17 @@ function FilterSelect({
         <select
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className={`w-full pl-9 pr-8 py-2.5 rounded-xl border-2 text-sm text-foreground outline-none appearance-none transition-colors ${c.border} ${c.bg}`}
+          className={`w-full pl-9 pr-8 py-2.5 rounded-xl border-2 text-sm text-foreground outline-none appearance-none transition-colors bg-background ${c.border} ${c.bg}`}
         >
-          <option value="">{placeholder}</option>
+          <option value="" className="bg-background text-foreground">
+            {placeholder}
+          </option>
           {options.map((o) => (
-            <option key={o.value} value={o.value}>
+            <option
+              key={o.value}
+              value={o.value}
+              className="bg-background text-foreground"
+            >
               {o.label}
             </option>
           ))}
@@ -178,7 +184,9 @@ function GodownSelect({
               : "border-emerald-400/40 bg-emerald-500/5 focus:border-emerald-500/60"
           }`}
         >
-          <option value="">{placeholder}</option>
+          <option value="" className="bg-background text-foreground">
+            {placeholder}
+          </option>
           {godowns
             .filter((g) => g.GodownID !== exclude)
             .map((g) => (

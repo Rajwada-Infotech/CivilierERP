@@ -137,6 +137,27 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
       request.input("godownId", sql.Int, godownId);
     }
 
+    // ── Godown name + IsMain ────────────────────────────────────────────────────
+    // Fetch once — the entire query is already scoped to a single godownId.
+    let godownName = "Main Godown";
+    let isMainGodown = true;
+    if (hasGodownCol && godownId) {
+      try {
+        const gdRes = await pool
+          .request()
+          .input("gid", sql.Int, godownId)
+          .query(
+            "SELECT TOP 1 GodownName, ISNULL(IsMain,0) AS IsMain FROM dbo.Godowns WHERE GodownID=@gid",
+          );
+        if (gdRes.recordset.length) {
+          godownName = gdRes.recordset[0].GodownName ?? "Main Godown";
+          isMainGodown = !!gdRes.recordset[0].IsMain;
+        }
+      } catch {
+        // non-fatal: defaults stay
+      }
+    }
+
     const result = await request.query(`
       SELECT
         CONVERT(NVARCHAR(50), img.M_Id)          AS ItemID,
@@ -170,11 +191,15 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
         Number(r.OpeningStock || 0) +
         Number(r.StockIn || 0) -
         Number(r.StockOut || 0),
+      GodownName: godownName,
+      IsMainGodown: isMainGodown,
     }));
 
     res.json({
       date: targetDate,
       godownId,
+      godownName,
+      isMainGodown,
       data: rows,
       total: rows.length,
     });
