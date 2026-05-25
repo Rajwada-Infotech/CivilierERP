@@ -631,26 +631,38 @@ export default function ReceivedPaymentPage() {
     {
       label: "Total Received",
       value: fmt(totalReceived),
+      sub: "total inbound",
       icon: IndianRupee,
-      color: "hsl(142,71%,45%)",
+      ring: "ring-emerald-500/20",
+      bg: "bg-emerald-500/10",
+      color: "text-emerald-500",
     },
     {
       label: "Total Entries",
       value: String(totalCount),
+      sub: "all records",
       icon: ArrowDownCircle,
-      color: "hsl(var(--primary))",
+      ring: "ring-primary/20",
+      bg: "bg-primary/10",
+      color: "text-primary",
     },
     {
       label: "Cleared",
       value: String(approved),
+      sub: "approved",
       icon: CheckCircle2,
-      color: "hsl(142,71%,45%)",
+      ring: "ring-emerald-500/20",
+      bg: "bg-emerald-500/10",
+      color: "text-emerald-500",
     },
     {
       label: "Pending",
       value: String(pending),
+      sub: "awaiting approval",
       icon: Clock,
-      color: "hsl(38,92%,50%)",
+      ring: "ring-amber-500/20",
+      bg: "bg-amber-500/10",
+      color: "text-amber-500",
     },
   ];
 
@@ -750,16 +762,16 @@ export default function ReceivedPaymentPage() {
 
   return (
     <>
-      <Breadcrumbs items={["Finance", "Received Payments"]} />
+      <Breadcrumbs items={["Dashboard", "Finance", "Received Payments"]} />
+      <div className="relative space-y-8 mt-6">
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5 gap-4">
+      {/* ── Page header ── */}
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-            <ArrowDownCircle size={20} className="text-emerald-500" />
+          <h1 className="text-xl font-heading font-bold text-foreground">
             Received Payments
           </h1>
-          <p className="text-xs text-muted-foreground mt-0.5 hidden sm:block">
+          <p className="text-xs text-muted-foreground mt-0.5">
             All inbound payments received from clients &amp; customers
           </p>
         </div>
@@ -769,26 +781,25 @@ export default function ReceivedPaymentPage() {
         </Button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+      {/* ── Stats ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {stats.map((s) => (
           <div
             key={s.label}
-            className="rounded-xl bg-card border border-border p-4 flex items-center gap-3"
-            style={{ borderLeftWidth: 3, borderLeftColor: s.color }}
+            className={`glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 ${s.ring}`}
           >
-            <div
-              className="p-2 rounded-lg shrink-0"
-              style={{ background: `${s.color}20` }}
-            >
-              <s.icon size={18} style={{ color: s.color }} />
+            <div className={`p-2 rounded-lg ${s.bg} ${s.color} shrink-0`}>
+              <s.icon size={16} />
             </div>
             <div className="min-w-0">
-              <p className="text-xs text-muted-foreground font-heading truncate">
+              <p className="text-lg font-bold font-heading text-foreground leading-none">
+                {s.value}
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
                 {s.label}
               </p>
-              <p className="text-base font-heading font-bold text-foreground truncate">
-                {s.value}
+              <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
+                {s.sub}
               </p>
             </div>
           </div>
@@ -1095,6 +1106,8 @@ export default function ReceivedPaymentPage() {
           </div>
         </div>
       )}
+
+      </div>{/* end p-6 space-y-8 */}
 
       {/* ── Add / Edit Dialog ────────────────────────────────────────────────── */}
       <Dialog
