@@ -9,6 +9,8 @@ import {
   TrendingUp,
   FileText,
   Ticket,
+  Plug,
+  Layers,
 } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
@@ -67,6 +69,16 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
       { label: "SMS Setup", path: "/admin/communicator/sms-setup" },
       { label: "Email Setup", path: "/admin/communicator/email-setup" },
       { label: "WhatsApp Setup", path: "/admin/communicator/whatsapp-setup" },
+      { label: "Integration Channels", path: "/admin/masters/integration-channels" },
+    ],
+  },
+  {
+    label: "Masters",
+    icon: Layers,
+    children: [
+      { label: "Contractor Categories", path: "/admin/masters/contractor-categories" },
+      { label: "Godowns", path: "/admin/masters/godowns" },
+      { label: "Page Definitions", path: "/admin/page-definitions" },
     ],
   },
   {

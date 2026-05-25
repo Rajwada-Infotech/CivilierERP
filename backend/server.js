@@ -165,6 +165,9 @@ const ALL_ROUTES = [
   { path: "/api/app-version", file: "./routes/appVersion" },
   { path: "/api/godowns", file: "./routes/godowns" },
   { path: "/api/stock-transfers", file: "./routes/stockTransfers" },
+  { path: "/api/widget-catalog", file: "./routes/widgetCatalogAdmin" },
+  { path: "/api/page-definitions", file: "./routes/pageDefinitions" },
+  { path: "/api/lookups",          file: "./routes/lookups" },
 ];
 
 // ─── createApp ──────────────────────────────────────────────────────────────

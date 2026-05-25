@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getUsers, addUser, updateUser, deleteUser } from "@/api/userApi";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,11 +28,9 @@ import {
   Users,
   Database,
   Activity,
-  Key,
   Edit2,
   Plus,
   Trash2,
-  Lock,
   Unlock,
   UserCheck,
   RefreshCw,
@@ -58,10 +57,33 @@ export default function AdminControlPanel() {
   });
   const [editForm, setEditForm] = useState<any>({});
   const [dbSearch, setDbSearch] = useState("");
+  const [activityPage, setActivityPage] = useState(1);
 
   const { data: users = [], isLoading: usersLoading } = useQuery({
     queryKey: ["admin-users"],
     queryFn: getUsers,
+  });
+
+  const { data: systemMetrics, isLoading: metricsLoading, refetch: refetchMetrics } = useQuery({
+    queryKey: ["system-metrics"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/system/metrics");
+      if (!res.ok) throw new Error("Failed to load system metrics");
+      return res.json();
+    },
+    enabled: activeTab === "database",
+    staleTime: 30_000,
+  });
+
+  const { data: activityData, isLoading: activityLoading } = useQuery({
+    queryKey: ["admin-activity", activityPage],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`/api/user-activity?page=${activityPage}&limit=20`);
+      if (!res.ok) throw new Error("Failed to load activity");
+      return res.json();
+    },
+    enabled: activeTab === "activity",
+    staleTime: 30_000,
   });
 
   const addMutation = useMutation({
@@ -132,14 +154,14 @@ export default function AdminControlPanel() {
     },
     {
       label: "DB Tables",
-      value: 0,
+      value: systemMetrics?.tables?.length ?? "—",
       icon: Database,
       color: "text-purple-500",
       bg: "bg-purple-500/10",
     },
     {
-      label: "Users Today",
-      value: 0,
+      label: "Server uptime",
+      value: systemMetrics?.server?.uptimeHours != null ? `${systemMetrics.server.uptimeHours}h` : "—",
       icon: Activity,
       color: "text-orange-500",
       bg: "bg-orange-500/10",
@@ -158,7 +180,10 @@ export default function AdminControlPanel() {
     setEditOpen(true);
   };
 
-  const filteredTables: any[] = [];
+  const tables: any[] = systemMetrics?.tables ?? [];
+  const filteredTables = tables.filter((t: any) =>
+    !dbSearch || t.name?.toLowerCase().includes(dbSearch.toLowerCase())
+  );
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -322,10 +347,7 @@ export default function AdminControlPanel() {
             <div className="flex items-center justify-between">
               <CardTitle className="text-base flex items-center gap-2">
                 <Database size={16} className="text-primary" />
-                Company Database ·{" "}
-                <span className="font-mono text-sm text-muted-foreground">
-                  civilier_prod
-                </span>
+                System metrics
               </CardTitle>
               <div className="flex gap-2">
                 <Input
@@ -338,7 +360,7 @@ export default function AdminControlPanel() {
                   variant="outline"
                   size="sm"
                   className="h-8 text-xs gap-1"
-                  onClick={() => toast.success("DB refreshed")}
+                  onClick={() => refetchMetrics()}
                 >
                   <RefreshCw size={12} /> Refresh
                 </Button>
@@ -346,47 +368,43 @@ export default function AdminControlPanel() {
             </div>
           </CardHeader>
           <CardContent className="p-0">
+            {metricsLoading ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">Loading metrics…</div>
+            ) : filteredTables.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">
+                {dbSearch ? "No tables match your search." : "No table metrics available."}
+              </div>
+            ) : (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow className="text-xs">
                     <TableHead>Table Name</TableHead>
                     <TableHead>Rows</TableHead>
-                    <TableHead>Size</TableHead>
-                    <TableHead>Last Write</TableHead>
-                    <TableHead>Health</TableHead>
+                    <TableHead>Total KB</TableHead>
+                    <TableHead>Used KB</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredTables.map((t) => (
-                    <TableRow key={t.table} className="text-xs">
+                    <TableRow key={t.name} className="text-xs">
                       <TableCell className="font-mono text-[11px]">
-                        {t.table}
+                        {t.name}
                       </TableCell>
-                      <TableCell>{t.rows.toLocaleString()}</TableCell>
+                      <TableCell>{(t.rows ?? 0).toLocaleString()}</TableCell>
                       <TableCell className="text-muted-foreground">
-                        {t.size}
+                        {t.totalKB != null ? `${t.totalKB.toLocaleString()} KB` : "—"}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {t.lastWrite}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          className={`text-[10px] ${t.status === "healthy" ? "bg-green-500/15 text-green-600 border-green-500/30" : "bg-orange-500/15 text-orange-600 border-orange-500/30"}`}
-                        >
-                          {t.status === "warning" && (
-                            <AlertCircle size={9} className="mr-1" />
-                          )}
-                          {t.status}
-                        </Badge>
+                        {t.usedKB != null ? `${t.usedKB.toLocaleString()} KB` : "—"}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-6 text-[10px] gap-1"
-                          onClick={() => toast.info(`Viewing ${t.table}`)}
+                          onClick={() => toast.info(`Viewing ${t.name}`)}
                         >
                           <FileText size={10} /> View
                         </Button>
@@ -396,6 +414,7 @@ export default function AdminControlPanel() {
                 </TableBody>
               </Table>
             </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -410,6 +429,9 @@ export default function AdminControlPanel() {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
+            {activityLoading ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">Loading activity…</div>
+            ) : (
             <Table>
               <TableHeader>
                 <TableRow className="text-xs">
@@ -420,23 +442,46 @@ export default function AdminControlPanel() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {/* Activity data comes from /api/user-activity — see UserProfile activity tab */}
-                {[].map((log: any, i: number) => (
-                  <TableRow key={i} className="text-xs">
-                    <TableCell className="font-mono text-muted-foreground">
-                      {log.time}
-                    </TableCell>
-                    <TableCell className="font-medium">{log.user}</TableCell>
-                    <TableCell>{log.action}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-[10px]">
-                        {log.module}
-                      </Badge>
+                {(activityData?.logs ?? activityData ?? []).length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-sm text-muted-foreground py-8">
+                      No activity records found.
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : (
+                  (activityData?.logs ?? activityData ?? []).map((log: any, i: number) => (
+                    <TableRow key={log.id ?? i} className="text-xs">
+                      <TableCell className="font-mono text-muted-foreground">
+                        {log.createdAt ? new Date(log.createdAt).toLocaleString("en-IN") : log.time ?? "—"}
+                      </TableCell>
+                      <TableCell className="font-medium">{log.userName ?? log.user ?? "—"}</TableCell>
+                      <TableCell>{log.eventType ?? log.event ?? log.action ?? "—"}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-[10px]">
+                          {log.resource ?? log.module ?? "—"}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
+            )}
+            {!activityLoading && (activityData?.logs ?? activityData ?? []).length > 0 && (
+              <div className="flex items-center justify-end gap-2 px-4 py-2 border-t border-border">
+                <Button
+                  variant="outline" size="sm" className="h-7 text-xs"
+                  disabled={activityPage === 1}
+                  onClick={() => setActivityPage(p => Math.max(1, p - 1))}
+                >Prev</Button>
+                <span className="text-xs text-muted-foreground">Page {activityPage}</span>
+                <Button
+                  variant="outline" size="sm" className="h-7 text-xs"
+                  disabled={(activityData?.logs ?? activityData ?? []).length < 20}
+                  onClick={() => setActivityPage(p => p + 1)}
+                >Next</Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

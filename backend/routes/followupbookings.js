@@ -13,7 +13,7 @@ const PAYMENT_MODES = ["Cheque", "NEFT", "RTGS", "DD", "Cash", "Online"];
 
 router.use(authMiddleware);
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function requireUserName(req, res) {
   const userName = req.user?.name || req.user?.email || null;
   if (!userName) {
@@ -45,6 +45,15 @@ function assertValidNumber(v, name) {
   return Number.isNaN(v) ? `${name} must be a valid number` : null;
 }
 
+/** Resolve a term's ₹ amount given the booking total value */
+function resolveTermAmount(term, totalValue) {
+  const tv = Number(totalValue) || 0;
+  const tv2 = Number(term.TermValue) || 0;
+  if (term.ValueType === "percent") return Math.round((tv2 / 100) * tv);
+  if (term.ValueType === "fixed") return Math.round(tv2);
+  return 0;
+}
+
 function getPayload(body) {
   const applicantId = normalizeNumber(body?.ApplicantId);
   const unitSelectionId = normalizeNumber(body?.UnitSelectionId);
@@ -52,7 +61,7 @@ function getPayload(body) {
   const companyId = normalizeNumber(body?.CompanyId);
   const assignedTo = normalizeNumber(body?.AssignedTo);
   const totalValue = normalizeNumber(body?.TotalValue);
-  const bookingAmount = normalizeNumber(body?.BookingAmount);
+  const bookingAmount = normalizeNumber(body?.BookingAmount) ?? 0;
   const ratePerSqFt = normalizeNumber(body?.RatePerSqFt);
   const areaSqFt = normalizeNumber(body?.AreaSqFt);
   const loanAmount = normalizeNumber(body?.LoanAmount);
@@ -71,18 +80,23 @@ function getPayload(body) {
   if (numericError) return { error: numericError };
 
   if (!applicantId) return { error: "ApplicantId is required" };
-
   const unitNo = normalizeText(body?.UnitNo);
   if (!unitNo) return { error: "UnitNo is required" };
-
   const bookingDate = normalizeText(body?.BookingDate);
   if (!bookingDate) return { error: "BookingDate is required" };
-
-  if (bookingAmount == null) return { error: "BookingAmount is required" };
-
   const status = normalizeText(body?.Status) || "Confirmed";
   if (!STATUS_OPTIONS.includes(status))
     return { error: `Status must be one of: ${STATUS_OPTIONS.join(", ")}` };
+
+  // Validate PaymentTermIds if provided
+  const rawTermIds = body?.PaymentTermIds;
+  let paymentTermIds = null;
+  if (Array.isArray(rawTermIds) && rawTermIds.length > 0) {
+    paymentTermIds = rawTermIds
+      .map((x) => parseInt(x, 10))
+      .filter((x) => Number.isFinite(x) && x > 0);
+    if (paymentTermIds.length === 0) paymentTermIds = null;
+  }
 
   return {
     ApplicantId: applicantId,
@@ -107,7 +121,79 @@ function getPayload(body) {
     AssignedTo: assignedTo,
     Status: status,
     Notes: normalizeText(body?.Notes),
+    PaymentTermIds: paymentTermIds,
   };
+}
+
+/**
+ * Fetch PaymentTermMaster rows for a list of TermIDs.
+ * Returns a Map<termId, termRow>.
+ */
+async function fetchTermsByIds(pool, termIds) {
+  if (!termIds || termIds.length === 0) return new Map();
+  // Build a safe IN clause using individual params
+  const req = pool.request();
+  const placeholders = termIds.map((id, i) => {
+    req.input(`tid${i}`, sql.Int, id);
+    return `@tid${i}`;
+  });
+  const result = await req.query(`
+    SELECT TermID, TermName, ValueType, TermValue, IsActive
+    FROM dbo.PaymentTermMaster
+    WHERE TermID IN (${placeholders.join(",")})
+  `);
+  const map = new Map();
+  for (const row of result.recordset) map.set(row.TermID, row);
+  return map;
+}
+
+/**
+ * Insert rows into BookingPaymentTerms.
+ * Clears existing rows first (for PUT).
+ */
+async function upsertBookingPaymentTerms(
+  transaction,
+  bookingId,
+  bookingNo,
+  termIds,
+  totalValue,
+) {
+  // Delete existing
+  await new sql.Request(transaction)
+    .input("BookingID", sql.Int, bookingId)
+    .query("DELETE FROM dbo.BookingPaymentTerms WHERE BookingID = @BookingID");
+
+  if (!termIds || termIds.length === 0) return 0;
+
+  // Fetch term details
+  const pool = getPool();
+  const termMap = await fetchTermsByIds(pool, termIds);
+
+  let totalComputed = 0;
+  const termNames = [];
+  for (let i = 0; i < termIds.length; i++) {
+    const termId = termIds[i];
+    const term = termMap.get(termId);
+    if (!term) continue; // skip invalid/inactive
+
+    const computed = resolveTermAmount(term, totalValue || 0);
+    totalComputed += computed;
+    termNames.push(term.TermName);
+    const docRef = `PMT-${bookingNo}-${String(i + 1).padStart(3, "0")}`;
+
+    await new sql.Request(transaction)
+      .input("BookingID", sql.Int, bookingId)
+      .input("TermID", sql.Int, termId)
+      .input("ComputedAmount", sql.Decimal(18, 2), computed)
+      .input("DocRef", sql.NVarChar(50), docRef)
+      .input("SortOrder", sql.Int, i + 1).query(`
+        INSERT INTO dbo.BookingPaymentTerms
+          (BookingID, TermID, ComputedAmount, DocRef, SortOrder)
+        VALUES
+          (@BookingID, @TermID, @ComputedAmount, @DocRef, @SortOrder)
+      `);
+  }
+  return { totalComputed, paymentPlanSummary: termNames.join(", ") || null };
 }
 
 const LIST_COLUMNS = `
@@ -121,7 +207,6 @@ const LIST_COLUMNS = `
   fb.ProjectId,
   pm.name AS ProjectName,
   fb.CompanyId,
-  cm.Name AS CompanyName,
   fb.UnitNo,
   fb.BlockName,
   fb.FloorName,
@@ -129,7 +214,11 @@ const LIST_COLUMNS = `
   fb.AreaSqFt,
   fb.RatePerSqFt,
   fb.TotalValue,
-  fb.BookingAmount,
+  ISNULL((
+    SELECT SUM(bpt.ComputedAmount)
+    FROM dbo.BookingPaymentTerms bpt
+    WHERE bpt.BookingID = fb.Id
+  ), fb.BookingAmount) AS BookingAmount,
   CONVERT(VARCHAR(10), fb.BookingDate, 120) AS BookingDate,
   fb.PaymentMode,
   fb.ChequeNo,
@@ -144,7 +233,8 @@ const LIST_COLUMNS = `
   fb.CreatedBy,
   fb.CreatedAt,
   fb.UpdatedBy,
-  fb.UpdatedAt
+  fb.UpdatedAt,
+  fb.PaymentPlanSummary
 `;
 
 // ── GET / (list) ─────────────────────────────────────────────────────────────
@@ -194,7 +284,6 @@ router.get(
         FROM dbo.FollowupBookings fb
         JOIN dbo.FollowupApplications fa ON fa.Id = fb.ApplicantId
         LEFT JOIN dbo.enterprise     pm ON pm.id = fb.ProjectId
-        LEFT JOIN dbo.CompanyMaster  cm ON cm.Id = fb.CompanyId
         LEFT JOIN dbo.users          u  ON u.id  = fb.AssignedTo
         WHERE ${WHERE}
       `);
@@ -210,7 +299,6 @@ router.get(
         FROM dbo.FollowupBookings fb
         JOIN dbo.FollowupApplications fa ON fa.Id = fb.ApplicantId
         LEFT JOIN dbo.enterprise     pm ON pm.id = fb.ProjectId
-        LEFT JOIN dbo.CompanyMaster  cm ON cm.Id = fb.CompanyId
         LEFT JOIN dbo.users          u  ON u.id  = fb.AssignedTo
         WHERE ${WHERE}
         ORDER BY fb.BookingDate DESC, fb.Id DESC
@@ -228,7 +316,7 @@ router.get(
   },
 );
 
-// ── GET /applicants (for combobox) ────────────────────────────────────────────
+// ── GET /applicants ───────────────────────────────────────────────────────────
 router.get(
   "/applicants",
   checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
@@ -268,6 +356,45 @@ router.get(
   },
 );
 
+// ── GET /:id/payment-terms ─────────────────────────────────────────────────────
+// Returns the payment schedule attached to a booking with full term details
+router.get(
+  "/:id/payment-terms",
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
+  async (req, res) => {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid booking id" });
+
+    try {
+      const result = await getPool().request().input("BookingID", sql.Int, id)
+        .query(`
+          SELECT
+            bpt.Id,
+            bpt.BookingID,
+            bpt.TermID,
+            ptm.TermName,
+            ptm.ValueType,
+            ptm.TermValue,
+            bpt.ComputedAmount,
+            bpt.DocRef,
+            bpt.SortOrder,
+            bpt.DueDate,
+            bpt.IsPaid,
+            bpt.PaidOn,
+            bpt.CreatedAt
+          FROM dbo.BookingPaymentTerms bpt
+          JOIN dbo.PaymentTermMaster   ptm ON ptm.TermID = bpt.TermID
+          WHERE bpt.BookingID = @BookingID
+          ORDER BY bpt.SortOrder, bpt.Id
+        `);
+      res.json(result.recordset);
+    } catch (err) {
+      console.error("followupBookings GET /:id/payment-terms error:", err);
+      res.status(500).json({ error: "Failed to fetch payment terms" });
+    }
+  },
+);
+
 // ── GET /:id (single) ─────────────────────────────────────────────────────────
 router.get(
   "/:id",
@@ -278,14 +405,13 @@ router.get(
 
     try {
       const result = await getPool().request().input("Id", sql.Int, id).query(`
-        SELECT ${LIST_COLUMNS}
-        FROM dbo.FollowupBookings fb
-        JOIN dbo.FollowupApplications fa ON fa.Id = fb.ApplicantId
-        LEFT JOIN dbo.enterprise     pm ON pm.id = fb.ProjectId
-        LEFT JOIN dbo.CompanyMaster  cm ON cm.Id = fb.CompanyId
-        LEFT JOIN dbo.users          u  ON u.id  = fb.AssignedTo
-        WHERE fb.Id = @Id AND fb.IsDeleted = 0
-      `);
+          SELECT ${LIST_COLUMNS}
+          FROM dbo.FollowupBookings fb
+          JOIN dbo.FollowupApplications fa ON fa.Id = fb.ApplicantId
+          LEFT JOIN dbo.enterprise     pm ON pm.id = fb.ProjectId
+          LEFT JOIN dbo.users          u  ON u.id  = fb.AssignedTo
+          WHERE fb.Id = @Id AND fb.IsDeleted = 0
+        `);
 
       if (!result.recordset[0])
         return res.status(404).json({ error: "Booking not found" });
@@ -367,6 +493,25 @@ router.post(
           `UPDATE dbo.FollowupBookings SET BookingNo = @BookingNo WHERE Id = @Id`,
         );
 
+      // Insert payment terms and back-fill BookingAmount from their total
+      if (payload.PaymentTermIds && payload.PaymentTermIds.length > 0) {
+        const { totalComputed, paymentPlanSummary } =
+          await upsertBookingPaymentTerms(
+            transaction,
+            id,
+            bookingNo,
+            payload.PaymentTermIds,
+            payload.TotalValue,
+          );
+        await new sql.Request(transaction)
+          .input("Id", sql.Int, id)
+          .input("BookingAmount", sql.Decimal(18, 2), totalComputed)
+          .input("PaymentPlanSummary", sql.NVarChar(500), paymentPlanSummary)
+          .query(
+            "UPDATE dbo.FollowupBookings SET BookingAmount = @BookingAmount, PaymentPlanSummary = @PaymentPlanSummary WHERE Id = @Id",
+          );
+      }
+
       await transaction.commit();
       res
         .status(201)
@@ -395,18 +540,30 @@ router.put(
     const payload = getPayload(req.body);
     if (payload.error) return res.status(400).json({ error: payload.error });
 
+    const pool = getPool();
+    const transaction = pool.transaction();
     try {
-      const existing = await getPool()
-        .request()
-        .input("Id", sql.Int, id)
-        .query(
-          `SELECT Id FROM dbo.FollowupBookings WHERE Id = @Id AND IsDeleted = 0`,
-        );
-      if (!existing.recordset[0])
-        return res.status(404).json({ error: "Booking not found" });
+      await transaction.begin();
 
-      await getPool()
-        .request()
+      // Fetch existing to get BookingNo
+      const existing = await new sql.Request(transaction).input(
+        "Id",
+        sql.Int,
+        id,
+      ).query(`
+          SELECT Id, BookingNo, TotalValue
+          FROM dbo.FollowupBookings
+          WHERE Id = @Id AND IsDeleted = 0
+        `);
+      if (!existing.recordset[0]) {
+        await transaction.rollback();
+        return res.status(404).json({ error: "Booking not found" });
+      }
+
+      const bookingNo =
+        existing.recordset[0].BookingNo || `BKG${String(id).padStart(6, "0")}`;
+
+      await new sql.Request(transaction)
         .input("Id", sql.Int, id)
         .input("ApplicantId", sql.Int, payload.ApplicantId)
         .input("UnitSelectionId", sql.Int, payload.UnitSelectionId)
@@ -459,8 +616,29 @@ router.put(
           WHERE Id = @Id AND IsDeleted = 0
         `);
 
+      // Always sync payment terms and back-fill BookingAmount
+      const { totalComputed, paymentPlanSummary } =
+        await upsertBookingPaymentTerms(
+          transaction,
+          id,
+          bookingNo,
+          payload.PaymentTermIds,
+          payload.TotalValue,
+        );
+      await new sql.Request(transaction)
+        .input("Id", sql.Int, id)
+        .input("BookingAmount", sql.Decimal(18, 2), totalComputed)
+        .input("PaymentPlanSummary", sql.NVarChar(500), paymentPlanSummary)
+        .query(
+          "UPDATE dbo.FollowupBookings SET BookingAmount = @BookingAmount, PaymentPlanSummary = @PaymentPlanSummary WHERE Id = @Id",
+        );
+
+      await transaction.commit();
       res.json({ success: true });
     } catch (err) {
+      try {
+        await transaction.rollback();
+      } catch {}
       console.error("followupBookings PUT error:", err);
       res.status(500).json({ error: "Failed to update booking" });
     }

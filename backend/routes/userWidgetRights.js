@@ -20,20 +20,15 @@ const allowRoles = require("../middleware/role");
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
 // ── All known widget keys — single source of truth ──────────────────────────
-const ALL_WIDGETS = [
-  "Bar Chart",
-  "Line Chart",
-  "Pie Chart",
-  "Stat Card",
-  "Data Table",
-  "Calendar",
-  "Notifications",
-  "Activity Feed",
-  "Map View",
-  "File Uploader",
-  "Progress Ring",
-  "Calculator",
-];
+async function getActiveWidgetKeys(pool) {
+  const result = await pool.request().query(`
+    SELECT WidgetKey
+    FROM dbo.WidgetCatalog
+    WHERE IsActive = 1
+    ORDER BY SortOrder ASC, Label ASC
+  `);
+  return result.recordset.map((row) => row.WidgetKey);
+}
 
 // ── GET /my — any authenticated user fetches their own allowed widgets ────────
 router.get("/my", authMiddleware, async (req, res) => {
@@ -42,6 +37,7 @@ router.get("/my", authMiddleware, async (req, res) => {
     if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
     const pool = getPool();
+    const allWidgets = await getActiveWidgetKeys(pool);
     const result = await pool
       .request()
       .input("UserId", sql.Int, parseInt(userId))
@@ -52,15 +48,17 @@ router.get("/my", authMiddleware, async (req, res) => {
 
     const row = result.recordset[0];
 
-    let allowedWidgets = ALL_WIDGETS; // default: all enabled
+    let allowedWidgets = allWidgets; // default: all enabled
     if (row?.WidgetsJson) {
       try {
         const parsed = JSON.parse(row.WidgetsJson);
-        if (Array.isArray(parsed)) allowedWidgets = parsed;
+        if (Array.isArray(parsed)) {
+          allowedWidgets = parsed.filter((w) => allWidgets.includes(w));
+        }
       } catch {}
     }
 
-    return res.json({ allowedWidgets, allWidgets: ALL_WIDGETS });
+    return res.json({ allowedWidgets, allWidgets });
   } catch (err) {
     console.error("[UserWidgetRights] GET /my error:", err.message);
     return res.status(500).json({ error: "Failed to fetch widget rights" });
@@ -96,6 +94,7 @@ router.get("/:userId", authMiddleware, adminOnly, async (req, res) => {
     }
 
     const pool = getPool();
+    const allWidgets = await getActiveWidgetKeys(pool);
     const result = await pool
       .request()
       .input("UserId", sql.Int, userId)
@@ -106,15 +105,17 @@ router.get("/:userId", authMiddleware, adminOnly, async (req, res) => {
 
     const row = result.recordset[0];
 
-    let allowedWidgets = ALL_WIDGETS; // default: all if no record exists
+    let allowedWidgets = allWidgets; // default: all if no record exists
     if (row?.WidgetsJson) {
       try {
         const parsed = JSON.parse(row.WidgetsJson);
-        if (Array.isArray(parsed)) allowedWidgets = parsed;
+        if (Array.isArray(parsed)) {
+          allowedWidgets = parsed.filter((w) => allWidgets.includes(w));
+        }
       } catch {}
     }
 
-    return res.json({ allowedWidgets, allWidgets: ALL_WIDGETS });
+    return res.json({ allowedWidgets, allWidgets });
   } catch (err) {
     console.error("[UserWidgetRights] GET /:userId error:", err.message);
     return res.status(500).json({ error: "Failed to fetch widget rights" });
@@ -134,11 +135,11 @@ router.put("/:userId", authMiddleware, adminOnly, async (req, res) => {
       return res.status(400).json({ error: "allowedWidgets must be an array" });
     }
 
-    // Validate: only accept known widget keys
-    const valid = allowedWidgets.filter((w) => ALL_WIDGETS.includes(w));
+    const pool = getPool();
+    const allWidgets = await getActiveWidgetKeys(pool);
+    const valid = allowedWidgets.filter((w) => allWidgets.includes(w));
     const jsonStr = JSON.stringify(valid);
 
-    const pool = getPool();
     await pool
       .request()
       .input("UserId", sql.Int, userId)
