@@ -12,6 +12,8 @@ import {
   Printer,
 } from "lucide-react";
 import { toast } from "sonner";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getItems,
@@ -327,19 +329,14 @@ const ItemMaster: React.FC = () => {
         }))
     : [];
 
-  // Fetch supplier list from GeneralLedger (supplier type = 'C' creditor / supplier)
+  // Fetch supplier list from AccountHeadMaster where LHeadType = 'S'
   const { data: dbSuppliers = [] } = useQuery({
     queryKey: ["suppliers-for-item-master"],
     queryFn: async () => {
-      const res = await fetch("/api/general-ledger?type=supplier", {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
-        },
-      });
+      const res = await fetchWithAuth("/api/account-head?type=S");
       if (!res.ok) return [];
       const data = await res.json();
-      return Array.isArray(data) ? data : [];
+      return Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
     },
     staleTime: 5 * 60 * 1000,
   });
