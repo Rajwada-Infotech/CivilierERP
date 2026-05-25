@@ -287,6 +287,26 @@ router.get(
   },
 );
 
+// DELETE all activity logs — admin/super_admin only
+router.delete(
+  "/",
+  checkPermission("UserActivity", "List", "CanView"),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      await pool.request().query(`DELETE FROM dbo.UserActivityLog`);
+
+      const { bumpCacheVersion } = require("../redis");
+      bumpCacheVersion("user-activity").catch(() => {});
+
+      res.json({ message: "Activity history cleared" });
+    } catch (err) {
+      console.error("DELETE activity error:", err.message);
+      res.status(500).json({ error: "Failed to clear activity history" });
+    }
+  },
+);
+
 // POST activity — logs to DB then broadcasts to activity-watchers room via socket.io
 router.post("/", async (req, res) => {
   const { userId, userName, userEmail, userRole, event, ...rest } =

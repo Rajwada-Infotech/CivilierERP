@@ -92,6 +92,7 @@ export interface ActivityBrowserContextType {
     details?: string;
   }) => Promise<void>;
   clearAll: () => void;
+  clearHistory: () => Promise<void>;
   refresh: () => void;
 }
 
@@ -114,6 +115,7 @@ const NOOP_CONTEXT: ActivityBrowserContextType = {
   recordLogout: async () => {},
   recordAction: async () => {},
   clearAll: () => {},
+  clearHistory: async () => {},
   refresh: () => {},
 };
 

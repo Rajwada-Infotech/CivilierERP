@@ -12,6 +12,7 @@ import {
   type SessionEvent,
   getUserActivityLogs,
   logUserActivity,
+  deleteActivityHistory,
   subscribeToActivityStream,
 } from "@/api/userActivityApi";
 
@@ -58,6 +59,8 @@ export const ActivityBrowserProvider: React.FC<{
   const currentFiltersRef = useRef<ActivityFilters>({});
   const dateFiltersRef = useRef<DateFilters>(dateFilters);
   const fetchingRef = useRef(false);
+  // Tracks which paths have already been logged for the current session (dedup)
+  const sessionPagesSeen = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     dateFiltersRef.current = dateFilters;
@@ -139,6 +142,17 @@ export const ActivityBrowserProvider: React.FC<{
     setActivity(EMPTY_ACTIVITY);
   };
 
+  const clearHistory = async () => {
+    try {
+      await deleteActivityHistory();
+    } catch (err) {
+      console.error("Failed to clear activity history:", err);
+      throw err;
+    }
+    clearAll();
+    sessionPagesSeen.current.clear();
+  };
+
   const clearDateFilters = () => {
     setDateFilters({ period: "this-week" });
   };
@@ -179,6 +193,8 @@ export const ActivityBrowserProvider: React.FC<{
       localStorage.setItem("currentSessionId", sessionId);
       // Store login timestamp so logout can compute sessionDuration precisely
       localStorage.setItem("sessionLoginTime", String(loginTime));
+      // Reset page dedup for the new session
+      sessionPagesSeen.current.clear();
 
       const entry: SessionEvent = {
         userId: user.id,
@@ -260,6 +276,12 @@ export const ActivityBrowserProvider: React.FC<{
         return;
       }
       if (!user.id) return;
+
+      // Page-view dedup: only write to DB once per unique path per session.
+      if (action.actionType === "read" && action.method === "GET") {
+        if (sessionPagesSeen.current.has(action.url)) return;
+        sessionPagesSeen.current.add(action.url);
+      }
 
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
@@ -364,6 +386,7 @@ export const ActivityBrowserProvider: React.FC<{
         recordLogout,
         recordAction,
         clearAll,
+        clearHistory,
         refresh,
       }}
     >
