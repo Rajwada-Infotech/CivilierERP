@@ -888,10 +888,7 @@ export default function StockTransfer() {
                 />
 
                 <div className="flex items-center justify-center sm:pb-[36px]">
-                  <ArrowRight
-                    size={18}
-                    className="text-muted-foreground shrink-0"
-                  />
+                  <ArrowRight size={18} className="text-muted-foreground shrink-0" />
                 </div>
 
                 <GodownSelect
