@@ -14,6 +14,8 @@ const LIST_COLUMNS = `
   fag.UnitSelectionId,
   fus.SelectionNo,
   fus.UnitNo,
+  fag.BookingId,
+  fb.BookingNo,
   fag.ProjectId,
   fag.CompanyId,
   CONVERT(VARCHAR(10), fag.AgreementDate, 23) AS AgreementDate,
@@ -89,6 +91,7 @@ async function getUnitSelectionSnapshot(unitSelectionId) {
 function getPayload(body) {
   const applicantId = normalizeNumber(body?.ApplicantId);
   const unitSelectionId = normalizeNumber(body?.UnitSelectionId);
+  const bookingId = normalizeNumber(body?.BookingId);
   const projectId = normalizeNumber(body?.ProjectId);
   const companyId = normalizeNumber(body?.CompanyId);
   const agreementValue = normalizeNumber(body?.AgreementValue);
@@ -97,6 +100,7 @@ function getPayload(body) {
   if (
     Number.isNaN(applicantId) ||
     Number.isNaN(unitSelectionId) ||
+    Number.isNaN(bookingId) ||
     Number.isNaN(projectId) ||
     Number.isNaN(companyId) ||
     Number.isNaN(agreementValue) ||
@@ -122,6 +126,7 @@ function getPayload(body) {
   return {
     ApplicantId: applicantId,
     UnitSelectionId: unitSelectionId,
+    BookingId: bookingId,
     ProjectId: projectId,
     CompanyId: companyId,
     AgreementDate: normalizeText(body?.AgreementDate),
@@ -139,6 +144,7 @@ async function buildOptions() {
   const [
     applicantsResult,
     unitSelectionsResult,
+    bookingsResult,
     projectsResult,
     companiesResult,
   ] = await Promise.all([
@@ -161,19 +167,35 @@ async function buildOptions() {
         ORDER BY fus.CreatedAt DESC, fus.Id DESC
       `),
     pool.request().query(`
-        SELECT Id, Name
-        FROM dbo.enterprise
-        WHERE ISNULL(IsDeleted, 0) = 0 AND ISNULL(IsActive, 1) = 1
-        ORDER BY Name
+        SELECT
+          fb.Id,
+          fb.BookingNo,
+          fb.UnitNo,
+          fb.ApplicantId,
+          fb.ProjectId,
+          fb.CompanyId
+        FROM dbo.FollowupBookings fb
+        WHERE fb.IsDeleted = 0
+        ORDER BY fb.CreatedAt DESC, fb.Id DESC
       `),
     pool.request().query(`
-        SELECT 0 AS Id, '' AS Name WHERE 1=0
+        SELECT id AS Id, name AS Name
+        FROM dbo.enterprise
+        WHERE business_type = 'P' AND (discontinue = 0 OR discontinue IS NULL)
+        ORDER BY name
+      `),
+    pool.request().query(`
+        SELECT id AS Id, name AS Name
+        FROM dbo.enterprise
+        WHERE business_type = 'C' AND (discontinue = 0 OR discontinue IS NULL)
+        ORDER BY name
       `),
   ]);
 
   return {
     applicants: applicantsResult.recordset,
     unitSelections: unitSelectionsResult.recordset,
+    bookings: bookingsResult.recordset,
     projects: projectsResult.recordset,
     companies: companiesResult.recordset,
     statusOptions: STATUS_OPTIONS,
@@ -237,6 +259,7 @@ router.get("/", async (req, res) => {
       FROM dbo.FollowupAgreements fag
       INNER JOIN dbo.FollowupApplications fa ON fa.Id = fag.ApplicantId
       LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = fag.UnitSelectionId
+      LEFT JOIN dbo.FollowupBookings fb ON fb.Id = fag.BookingId
       ${whereClause}
     `);
 
@@ -247,6 +270,7 @@ router.get("/", async (req, res) => {
         FROM dbo.FollowupAgreements fag
         INNER JOIN dbo.FollowupApplications fa ON fa.Id = fag.ApplicantId
         LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = fag.UnitSelectionId
+        LEFT JOIN dbo.FollowupBookings fb ON fb.Id = fag.BookingId
           ${whereClause}
         ORDER BY fag.CreatedAt DESC, fag.Id DESC
         OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
@@ -315,6 +339,7 @@ router.post("/", async (req, res) => {
     const insertResult = await new sql.Request(transaction)
       .input("ApplicantId", sql.Int, payload.ApplicantId)
       .input("UnitSelectionId", sql.Int, payload.UnitSelectionId)
+      .input("BookingId", sql.Int, payload.BookingId)
       .input("ProjectId", sql.Int, projectId)
       .input("CompanyId", sql.Int, companyId)
       .input("AgreementDate", sql.Date, payload.AgreementDate)
@@ -329,6 +354,7 @@ router.post("/", async (req, res) => {
           AgreementNo,
           ApplicantId,
           UnitSelectionId,
+          BookingId,
           ProjectId,
           CompanyId,
           AgreementDate,
@@ -346,6 +372,7 @@ router.post("/", async (req, res) => {
           NULL,
           @ApplicantId,
           @UnitSelectionId,
+          @BookingId,
           @ProjectId,
           @CompanyId,
           @AgreementDate,
@@ -432,6 +459,7 @@ router.put("/:id", async (req, res) => {
       .input("Id", sql.Int, id)
       .input("ApplicantId", sql.Int, payload.ApplicantId)
       .input("UnitSelectionId", sql.Int, payload.UnitSelectionId)
+      .input("BookingId", sql.Int, payload.BookingId)
       .input(
         "ProjectId",
         sql.Int,
@@ -460,6 +488,7 @@ router.put("/:id", async (req, res) => {
         SET
           ApplicantId = @ApplicantId,
           UnitSelectionId = @UnitSelectionId,
+          BookingId = @BookingId,
           ProjectId = @ProjectId,
           CompanyId = @CompanyId,
           AgreementDate = @AgreementDate,
