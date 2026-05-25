@@ -287,6 +287,73 @@ router.get(
   },
 );
 
+// DELETE activity logs.
+//
+// Behaviour depends on the caller's role:
+//   super_admin  → deletes ALL rows across all users (full wipe)
+//   admin        → deletes only their own rows (UserId = req.user.userId)
+//
+// The "CanDelete" permission gate ensures only authorised roles can reach
+// this route at all.  Within that gate, we apply the row-level scope above
+// so a regular admin cannot inadvertently (or maliciously) erase another
+// user's audit trail.
+router.delete(
+  "/",
+  checkPermission("UserActivity", "List", "CanDelete"),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+
+      const isSuperAdmin =
+        req.user?.role === "super_admin" || req.user?.isSuperAdmin === true;
+
+      const userId = normalizeNullableString(
+        req.user?.userId ?? req.user?.id,
+        50,
+      );
+
+      if (!isSuperAdmin && !userId) {
+        return res
+          .status(400)
+          .json({
+            error: "Cannot determine requesting user for scoped delete",
+          });
+      }
+
+      let deleteResult;
+
+      if (isSuperAdmin) {
+        // Full wipe — super_admin only
+        deleteResult = await pool
+          .request()
+          .query(`DELETE FROM dbo.UserActivityLog`);
+      } else {
+        // Row-level scope: only the requesting user's own records
+        deleteResult = await pool
+          .request()
+          .input("userId", sql.NVarChar(50), userId)
+          .query(`DELETE FROM dbo.UserActivityLog WHERE UserId = @userId`);
+      }
+
+      const deletedCount = deleteResult.rowsAffected?.[0] ?? 0;
+
+      const { bumpCacheVersion } = require("../redis");
+      bumpCacheVersion("user-activity").catch(() => {});
+
+      res.json({
+        message: "Activity history cleared",
+        deletedCount,
+        scope: isSuperAdmin ? "all" : "self",
+      });
+    } catch (err) {
+      if (process.env.NODE_ENV === "development") {
+        console.error("DELETE activity error:", err.message);
+      }
+      res.status(500).json({ error: "Failed to clear activity history" });
+    }
+  },
+);
+
 // POST activity — logs to DB then broadcasts to activity-watchers room via socket.io
 router.post("/", async (req, res) => {
   const { userId, userName, userEmail, userRole, event, ...rest } =

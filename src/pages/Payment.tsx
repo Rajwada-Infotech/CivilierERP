@@ -2253,9 +2253,9 @@ const Payment: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Payments"]} />
-      <div className="space-y-5">
+      <div className="relative space-y-8 mt-6">
         {/* ── Page header ── */}
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-xl font-heading font-bold text-foreground">
               Payment Management
@@ -2264,7 +2264,7 @@ const Payment: React.FC = () => {
               Record and track payments linked to expense bookings
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {view === "list" && (
               <ExportMenu
                 data={records as unknown as Record<string, unknown>[]}
@@ -2296,41 +2296,53 @@ const Payment: React.FC = () => {
         </div>
 
         {/* ── Summary stats ── */}
-        {view === "list" && !isLoading && dbItems.length > 0 && (
+        {view === "list" && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {[
               {
                 label: "Total Paid",
                 value: formatINR(totalAmount),
+                sub: "all payments",
                 icon: Banknote,
-                color: "text-primary bg-primary/10",
+                ring: "ring-primary/20",
+                bg: "bg-primary/10",
+                color: "text-primary",
               },
               {
                 label: "By Cheque",
-                value: chequeCount,
+                value: String(chequeCount),
+                sub: "cheque payments",
                 icon: Clock,
-                color: "text-amber-600 bg-amber-500/10",
+                ring: "ring-amber-500/20",
+                bg: "bg-amber-500/10",
+                color: "text-amber-500",
               },
               {
                 label: "By Cash",
-                value: cashCount,
+                value: String(cashCount),
+                sub: "cash payments",
                 icon: CheckCircle2,
-                color: "text-emerald-600 bg-emerald-500/10",
+                ring: "ring-emerald-500/20",
+                bg: "bg-emerald-500/10",
+                color: "text-emerald-500",
               },
-            ].map((s) => (
+            ].map(({ label, value, sub, icon: Icon, ring, bg, color }) => (
               <div
-                key={s.label}
-                className="rounded-xl bg-card border border-border p-4 flex items-center gap-3"
+                key={label}
+                className={`glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 ${ring}`}
               >
-                <div className={`p-2 rounded-lg shrink-0 ${s.color}`}>
-                  <s.icon size={15} />
+                <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
+                  <Icon size={16} />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[10px] text-muted-foreground font-heading uppercase tracking-wider truncate">
-                    {s.label}
+                  <p className="text-lg font-bold font-heading text-foreground leading-none">
+                    {value}
                   </p>
-                  <p className="text-base font-bold font-mono text-foreground mt-0.5">
-                    {s.value}
+                  <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+                    {label}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
+                    {sub}
                   </p>
                 </div>
               </div>

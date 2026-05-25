@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   BarChart3,
@@ -31,12 +31,24 @@ import {
   Wrench,
   Grip,
   Home,
+  Settings,
+  Layers,
+  Hash,
+  CreditCard,
+  BookOpen,
+  Tag,
+  FileType2,
+  LayoutGrid,
+  Ruler,
+  Activity,
 } from "lucide-react";
 
 import { useModule, MODULE_DASHBOARD_ROUTES } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";
+import { BillingIcon } from "@/components/icons/BillingIcon";
+import { ADMIN_PATHS } from "@/constants/pageDefinitions";
 
 interface NavItemChild {
   label: string;
@@ -54,7 +66,14 @@ interface NavItem {
   disabled?: boolean;
 }
 
-// ── Module colour system (matches TopNavbar CSS-var approach) ──────────────────
+interface SetupItem {
+  icon: React.ElementType<any>;
+  label: string;
+  path: string;
+  color: string;
+}
+
+// ── Module colour system ──────────────────────────────────────────────────────
 const MODULE_META: Record<
   string,
   {
@@ -117,19 +136,177 @@ const MODULE_META: Record<
   },
 };
 
-function modVars(id: string): React.CSSProperties {
-  const m = MODULE_META[id] ?? MODULE_META.finance;
-  return {
-    "--mod-h": m.h,
-    "--mod-s": `${m.s}%`,
-    "--mod-l": `${m.l}%`,
-  } as React.CSSProperties;
-}
+// ── Setup item lists (mirrors TopNavbar) ─────────────────────────────────────
+const financeSetupItems: SetupItem[] = [
+  {
+    icon: Layers,
+    label: "AC Group",
+    path: "/masters/account-group",
+    color: "text-indigo-500",
+  },
+  {
+    icon: Receipt,
+    label: "General Ledger",
+    path: "/masters/general-ledger",
+    color: "text-orange-400",
+  },
+  {
+    icon: HardHat,
+    label: "Suppliers",
+    path: "/masters/suppliers",
+    color: "text-blue-400",
+  },
+  {
+    icon: HardHat,
+    label: "Contractors",
+    path: "/masters/contractors",
+    color: "text-yellow-500",
+  },
+  {
+    icon: Landmark,
+    label: "Banks",
+    path: "/masters/banks",
+    color: "text-green-500",
+  },
+  {
+    icon: Calendar,
+    label: "Fin Year",
+    path: "/masters/financial-year",
+    color: "text-amber-500",
+  },
+  {
+    icon: BookOpen,
+    label: "Cheque",
+    path: "/masters/cheque",
+    color: "text-cyan-500",
+  },
+  {
+    icon: CreditCard,
+    label: "Card",
+    path: "/masters/card",
+    color: "text-rose-500",
+  },
+  {
+    icon: FileText,
+    label: "TDS",
+    path: "/masters/tds",
+    color: "text-emerald-500",
+  },
+];
+
+const materialSetupItems: SetupItem[] = [
+  {
+    icon: Package,
+    label: "Items",
+    path: "/masters/items",
+    color: "text-teal-500",
+  },
+  {
+    icon: Layers,
+    label: "Items Group",
+    path: "/masters/item-groups",
+    color: "text-indigo-400",
+  },
+  {
+    icon: Hash,
+    label: "Unit of Measurement",
+    path: "/masters/unit-measurement",
+    color: "text-orange-400",
+  },
+  { icon: Hash, label: "HSN", path: "/masters/hsn", color: "text-pink-400" },
+  {
+    icon: BillingIcon,
+    label: "Billing",
+    path: "/masters/billing-terms",
+    color: "text-lime-500",
+  },
+  {
+    icon: FileText,
+    label: "T&C",
+    path: "/material/t-c-master",
+    color: "text-purple-500",
+  },
+  {
+    icon: ClipboardList,
+    label: "Inventory",
+    path: "/material/inventory-master",
+    color: "text-teal-400",
+  },
+];
+
+const followupSetupItems: SetupItem[] = [
+  {
+    icon: Layers,
+    label: "Block",
+    path: "/followup/setup/block-master",
+    color: "text-cyan-500",
+  },
+  {
+    icon: Ruler,
+    label: "Unit",
+    path: "/followup/setup/unit-master",
+    color: "text-orange-500",
+  },
+  {
+    icon: Calendar,
+    label: "Reminders",
+    path: "/followup/follow-ups/reminders",
+    color: "text-indigo-500",
+  },
+  {
+    icon: Activity,
+    label: "Pending Tasks",
+    path: "/followup/setup/pending-tasks",
+    color: "text-purple-500",
+  },
+  {
+    icon: Users,
+    label: "Customers",
+    path: "/followup/setup/customer-master",
+    color: "text-violet-500",
+  },
+];
+
+const engineeringSetupItems: SetupItem[] = [
+  {
+    icon: Activity,
+    label: "Activity",
+    path: "/masters/activity",
+    color: "text-green-400",
+  },
+];
+
+const adminSetupItems: SetupItem[] = [
+  {
+    icon: Tag,
+    label: "Entry Type",
+    path: "/masters/named-entry-type",
+    color: "text-purple-400",
+  },
+  {
+    icon: FileType2,
+    label: "Type of Doc",
+    path: "/masters/type-of-doc",
+    color: "text-sky-500",
+  },
+  {
+    icon: Users,
+    label: "Role Master",
+    path: "/admin/masters/role-master",
+    color: "text-blue-400",
+  },
+  {
+    icon: LayoutGrid,
+    label: "Menu Types",
+    path: "/admin/masters/menu-types",
+    color: "text-emerald-500",
+  },
+];
 
 export const MobileNav: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"nav" | "theme">("nav");
+  const [activeTab, setActiveTab] = useState<"nav" | "setup" | "theme">("nav");
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -141,7 +318,8 @@ export const MobileNav: React.FC = () => {
   const isAdminPage =
     location.pathname.startsWith("/admin") ||
     location.pathname.startsWith("/users") ||
-    location.pathname.startsWith("/dba");
+    location.pathname.startsWith("/dba") ||
+    ADMIN_PATHS.some((p) => location.pathname.startsWith(p));
   const isSuperAdmin = currentUser?.role?.toLowerCase() === "super_admin";
   const isDba = currentUser?.role?.toLowerCase() === "dba";
   const isAdmin =
@@ -162,8 +340,26 @@ export const MobileNav: React.FC = () => {
     };
   }, [open]);
 
-  // ── Nav item definitions ────────────────────────────────────────────────────
+  // ── Setup items scoped to current module/page ────────────────────────────
+  const setupConfig = (() => {
+    if (isAdminPage)
+      return { items: adminSetupItems, label: "Admin", available: true };
+    if (activeModule === "material")
+      return { items: materialSetupItems, label: "Material", available: true };
+    if (activeModule === "followup")
+      return { items: followupSetupItems, label: "Follow-Up", available: true };
+    if (activeModule === "engineering")
+      return {
+        items: engineeringSetupItems,
+        label: "Engineering",
+        available: true,
+      };
+    if (activeModule === "finance")
+      return { items: financeSetupItems, label: "Finance", available: true };
+    return { items: [] as SetupItem[], label: "", available: false };
+  })();
 
+  // ── Nav item definitions ────────────────────────────────────────────────────
   const ADMIN_NAV_ITEMS: NavItem[] = [
     { label: "Dashboard", icon: BarChart3, path: "/admin" },
     {
@@ -388,25 +584,18 @@ export const MobileNav: React.FC = () => {
             ],
           },
         ];
-
       case "ticket":
         return [
-          {
-            label: "Dashboard",
-            icon: BarChart3,
-            path: "/ticket",
-          },
+          { label: "Dashboard", icon: BarChart3, path: "/ticket" },
           {
             label: "Ticket",
             icon: MessageSquare,
             children: [
-              // Create Ticket — visible to all
               {
                 label: "Create Ticket",
                 path: "/ticket/create",
                 icon: FileText,
               },
-              // My Tickets — only for normal users (not admin/super_admin)
               ...(!isAdmin
                 ? [
                     {
@@ -416,7 +605,6 @@ export const MobileNav: React.FC = () => {
                     },
                   ]
                 : []),
-              // Pending Tickets — only for admin/super_admin
               ...(isAdmin
                 ? [
                     {
@@ -426,7 +614,6 @@ export const MobileNav: React.FC = () => {
                     },
                   ]
                 : []),
-              // Resolved Tickets — visible to all
               {
                 label: "Resolved Tickets",
                 path: "/ticket/resolved",
@@ -435,7 +622,6 @@ export const MobileNav: React.FC = () => {
             ],
           },
         ];
-
       default:
         return [];
     }
@@ -455,7 +641,6 @@ export const MobileNav: React.FC = () => {
     return false;
   };
 
-  // Active module info — falls back to __none__ (neutral) on home page with no module
   const activeModKey = isAdminPage ? "admin" : (activeModule ?? "__none__");
   const activeMod = MODULE_META[activeModKey] ?? MODULE_META.__none__;
 
@@ -468,7 +653,6 @@ export const MobileNav: React.FC = () => {
     return true;
   });
 
-  // Theme checkmark colours
   const themeCheck: Record<Theme, string> = {
     dark: "#818cf8",
     light: "#7c3aed",
@@ -476,6 +660,15 @@ export const MobileNav: React.FC = () => {
     sepia: "#f59e0b",
     crimson: "#fb7185",
   };
+
+  const tabs: Array<{ id: "nav" | "setup" | "theme"; label: string }> = [
+    { id: "nav", label: "Navigation" },
+    {
+      id: "setup",
+      label: setupConfig.available ? `Setup · ${setupConfig.label}` : "Setup",
+    },
+    { id: "theme", label: "Appearance" },
+  ];
 
   return (
     <>
@@ -491,7 +684,6 @@ export const MobileNav: React.FC = () => {
           right: "max(1.25rem, env(safe-area-inset-right, 1.25rem))",
         }}
       >
-        {/* Outer glow ring — only when a module is active */}
         {activeModule && !isAdminPage && (
           <span
             className="absolute inset-0 rounded-2xl animate-pulse"
@@ -548,7 +740,7 @@ export const MobileNav: React.FC = () => {
             onClick={() => setOpen(false)}
           />
 
-          {/* Panel — slides up from bottom */}
+          {/* Panel */}
           <div
             className="absolute inset-x-0 bottom-0 flex flex-col rounded-t-[2rem] border-t border-border overflow-hidden"
             style={{
@@ -558,7 +750,7 @@ export const MobileNav: React.FC = () => {
               background: "hsl(var(--card))",
             }}
           >
-            {/* ── Colour accent bar at top ─── */}
+            {/* Colour accent bar */}
             <div
               className="h-1 w-full flex-shrink-0 rounded-full"
               style={{
@@ -660,7 +852,7 @@ export const MobileNav: React.FC = () => {
                 className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-none"
                 style={{ scrollbarWidth: "none" }}
               >
-                {moduleModules.map(([id, meta], i) => {
+                {moduleModules.map(([id, meta]) => {
                   const isActive = isAdminPage
                     ? id === "admin"
                     : activeModule === id;
@@ -710,16 +902,16 @@ export const MobileNav: React.FC = () => {
               </div>
             </div>
 
-            {/* ── Tab bar (Nav / Theme) ───────────────────────────────────────── */}
+            {/* ── Tab bar ─────────────────────────────────────────────────────── */}
             <div className="px-4 pb-2 flex-shrink-0">
               <div className="flex gap-1 p-1 rounded-xl bg-muted">
-                {(["nav", "theme"] as const).map((tab) => (
+                {tabs.map((tab) => (
                   <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className="flex-1 py-2 rounded-lg text-xs font-heading font-medium transition-all capitalize"
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className="flex-1 py-2 rounded-lg text-xs font-heading font-medium transition-all text-center"
                     style={
-                      activeTab === tab
+                      activeTab === tab.id
                         ? {
                             background: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.18)`,
                             color: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`,
@@ -727,7 +919,7 @@ export const MobileNav: React.FC = () => {
                         : { color: "hsl(var(--muted-foreground))" }
                     }
                   >
-                    {tab === "nav" ? "Navigation" : "Appearance"}
+                    {tab.label}
                   </button>
                 ))}
               </div>
@@ -735,6 +927,7 @@ export const MobileNav: React.FC = () => {
 
             {/* ── Scrollable content ───────────────────────────────────────────── */}
             <div className="flex-1 overflow-y-auto overscroll-contain pb-8">
+              {/* ── Navigation tab ──────────────────────────────────────────────── */}
               {activeTab === "nav" && (
                 <div className="px-4 space-y-1 pt-1">
                   {/* Quick links */}
@@ -774,7 +967,6 @@ export const MobileNav: React.FC = () => {
                     })}
                   </div>
 
-                  {/* Section label */}
                   {navItems.length > 0 ? (
                     <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-1 pb-1 pt-1">
                       {isAdminPage ? "Admin" : `${activeMod.label} Module`}
@@ -785,7 +977,6 @@ export const MobileNav: React.FC = () => {
                     </p>
                   ) : null}
 
-                  {/* Nav items */}
                   {navItems.map((item, idx) => {
                     const active = isItemActive(item);
                     const isExpanded = expandedGroup === item.label;
@@ -958,6 +1149,68 @@ export const MobileNav: React.FC = () => {
                       </button>
                     );
                   })}
+                </div>
+              )}
+
+              {/* ── Setup tab ───────────────────────────────────────────────────── */}
+              {activeTab === "setup" && (
+                <div className="px-4 pt-2">
+                  {setupConfig.available ? (
+                    <>
+                      <div className="flex items-center gap-2 mb-3 px-1">
+                        <Settings size={13} className="text-muted-foreground" />
+                        <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">
+                          {setupConfig.label} Setup
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {setupConfig.items.map(
+                          ({ icon: Icon, label, path, color }, i) => {
+                            const active = location.pathname === path;
+                            return (
+                              <button
+                                key={path}
+                                onClick={() => go(path)}
+                                className="nav-item-enter group flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all duration-150 active:scale-95"
+                                style={{
+                                  animationDelay: `${i * 30}ms`,
+                                  borderColor: active
+                                    ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.4)`
+                                    : "hsl(var(--border))",
+                                  background: active
+                                    ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.10)`
+                                    : "transparent",
+                                }}
+                              >
+                                <div
+                                  className="w-10 h-10 rounded-xl flex items-center justify-center transition-colors"
+                                  style={{
+                                    background: active
+                                      ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.18)`
+                                      : "hsl(var(--muted))",
+                                  }}
+                                >
+                                  <Icon size={18} className={color} />
+                                </div>
+                                <span className="text-[10px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2 w-full">
+                                  {label}
+                                </span>
+                              </button>
+                            );
+                          },
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center gap-3 py-10 text-center">
+                      <div className="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center">
+                        <Settings size={20} className="text-muted-foreground" />
+                      </div>
+                      <p className="text-sm font-heading text-muted-foreground">
+                        Select a module to access Setup
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 

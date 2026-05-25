@@ -1340,14 +1340,15 @@ export default function MaterialRequest() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "Material Request"]} />
+      <div className="relative space-y-8 mt-6">
 
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+      {/* ── Page header ── */}
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <ClipboardList size={22} className="text-primary" />
+          <h1 className="text-xl font-heading font-bold text-foreground">
             Material Requests
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p className="text-xs text-muted-foreground mt-0.5">
             Create and manage material requisitions for projects.
           </p>
         </div>
@@ -1364,6 +1365,7 @@ export default function MaterialRequest() {
       {viewMode === "list" && ListView()}
       {viewMode === "form" && FormView()}
       {viewMode === "view" && ViewMode()}
+      </div>{/* end space-y-8 */}
     </>
   );
 }
