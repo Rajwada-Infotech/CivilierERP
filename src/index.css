@@ -151,37 +151,37 @@
 
     /* GLAS THEME — Premium Glassmorphism */
     [data-theme="glas"] {
-        --background: 240 30% 8%;
-        --foreground: 220 20% 95%;
-        --card: 240 25% 98%;
-        --card-foreground: 220 20% 95%;
-        --popover: 240 25% 98%;
-        --popover-foreground: 220 20% 95%;
+        --background: 240 35% 7%;
+        --foreground: 220 20% 94%;
+        --card: 240 30% 12%;
+        --card-foreground: 220 20% 94%;
+        --popover: 240 30% 10%;
+        --popover-foreground: 220 20% 94%;
         --primary: 258 90% 66%;
         --primary-foreground: 0 0% 100%;
         --secondary: 217 91% 60%;
         --secondary-foreground: 0 0% 100%;
-        --muted: 240 20% 96%;
-        --muted-foreground: 220 15% 65%;
+        --muted: 240 25% 16%;
+        --muted-foreground: 220 15% 58%;
         --accent: 258 90% 66%;
         --accent-foreground: 0 0% 100%;
         --destructive: 0 72% 51%;
         --destructive-foreground: 0 0% 100%;
-        --border: 240 25% 100%;
-        --input: 240 25% 100%;
+        --border: 240 20% 22%;
+        --input: 240 25% 18%;
         --ring: 258 90% 66%;
         --radius: 0.75rem;
-        --surface: 240 25% 98%;
+        --surface: 240 28% 11%;
         --accent-1: 258 90% 66%;
         --accent-2: 217 91% 60%;
         --accent-3: 280 85% 65%;
-        --sidebar-background: 240 25% 98%;
-        --sidebar-foreground: 220 20% 95%;
+        --sidebar-background: 240 35% 8%;
+        --sidebar-foreground: 220 20% 88%;
         --sidebar-primary: 258 90% 66%;
         --sidebar-primary-foreground: 0 0% 100%;
-        --sidebar-accent: 240 20% 96%;
-        --sidebar-accent-foreground: 220 20% 95%;
-        --sidebar-border: 240 25% 100%;
+        --sidebar-accent: 240 28% 14%;
+        --sidebar-accent-foreground: 220 20% 94%;
+        --sidebar-border: 240 20% 18%;
         --sidebar-ring: 258 90% 66%;
     }
 }
@@ -248,81 +248,58 @@
     animation: slide-up 0.3s ease-out;
 }
 
-/* ── GLAS THEME — body gradient & global glass overrides ────────────────────── */
+/* ── GLAS THEME — glass effects ─────────────────────────────────────────────── */
+
+/* Page background: deep indigo-to-purple gradient */
 [data-theme="glas"] body {
     background: linear-gradient(
         135deg,
-        hsl(240 60% 8%) 0%,
-        hsl(260 55% 12%) 30%,
-        hsl(240 50% 10%) 60%,
-        hsl(220 55% 9%) 100%
-    );
-    background-attachment: fixed;
-    min-height: 100vh;
+        hsl(240 55% 5%) 0%,
+        hsl(258 60% 9%) 35%,
+        hsl(240 50% 7%) 65%,
+        hsl(220 55% 6%) 100%
+    ) !important;
+    background-attachment: fixed !important;
 }
 
-/* Frosted cards */
-[data-theme="glas"] .bg-card,
-[data-theme="glas"] [class*="bg-card"] {
-    background: rgba(255, 255, 255, 0.07) !important;
+/* The main layout wrapper uses bg-background — make it transparent so the body gradient shows */
+[data-theme="glas"] .bg-background {
+    background-color: transparent !important;
+}
+
+/* Cards: frosted glass */
+[data-theme="glas"] .bg-card {
+    background: rgba(255, 255, 255, 0.055) !important;
     backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border-color: rgba(255, 255, 255, 0.12) !important;
+    border-color: rgba(255, 255, 255, 0.09) !important;
 }
 
-/* Frosted sidebar */
-[data-theme="glas"] [class*="sidebar"],
-[data-theme="glas"] aside {
-    background: rgba(255, 255, 255, 0.05) !important;
-    backdrop-filter: blur(24px) saturate(160%);
-    -webkit-backdrop-filter: blur(24px) saturate(160%);
-    border-color: rgba(255, 255, 255, 0.08) !important;
-}
-
-/* Frosted popovers / dropdowns */
-[data-theme="glas"] .bg-popover,
-[data-theme="glas"] [class*="bg-popover"] {
-    background: rgba(20, 18, 40, 0.85) !important;
-    backdrop-filter: blur(28px) saturate(200%);
-    -webkit-backdrop-filter: blur(28px) saturate(200%);
-    border-color: rgba(255, 255, 255, 0.14) !important;
-}
-
-/* Frosted muted surfaces */
-[data-theme="glas"] .bg-muted,
-[data-theme="glas"] [class*="bg-muted"] {
-    background: rgba(255, 255, 255, 0.05) !important;
-}
-
-/* Frosted background surfaces */
-[data-theme="glas"] .bg-background,
-[data-theme="glas"] [class*="bg-background"] {
-    background: rgba(255, 255, 255, 0.06) !important;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-}
-
-/* Border shimmer */
-[data-theme="glas"] .border-border,
-[data-theme="glas"] [class*="border-border"] {
+/* Popovers / dropdowns: darker glass */
+[data-theme="glas"] .bg-popover {
+    background: rgba(12, 10, 28, 0.88) !important;
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
     border-color: rgba(255, 255, 255, 0.1) !important;
 }
 
-/* Inputs */
-[data-theme="glas"] input,
-[data-theme="glas"] select,
-[data-theme="glas"] textarea {
-    background: rgba(255, 255, 255, 0.08) !important;
-    border-color: rgba(255, 255, 255, 0.14) !important;
-    color: hsl(220 20% 95%) !important;
-    backdrop-filter: blur(8px);
+/* Muted surfaces */
+[data-theme="glas"] .bg-muted {
+    background: rgba(255, 255, 255, 0.045) !important;
 }
 
-/* Navbar top bar */
-[data-theme="glas"] header,
-[data-theme="glas"] nav {
-    background: rgba(10, 8, 30, 0.6) !important;
-    backdrop-filter: blur(20px) saturate(160%);
-    -webkit-backdrop-filter: blur(20px) saturate(160%);
-    border-color: rgba(255, 255, 255, 0.08) !important;
+/* Scrollbar */
+[data-theme="glas"] ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+}
+[data-theme="glas"] ::-webkit-scrollbar-track {
+    background: transparent;
+}
+[data-theme="glas"] ::-webkit-scrollbar-thumb {
+    background: rgba(139, 92, 246, 0.35);
+    border-radius: 3px;
+}
+[data-theme="glas"] ::-webkit-scrollbar-thumb:hover {
+    background: rgba(139, 92, 246, 0.6);
 }
