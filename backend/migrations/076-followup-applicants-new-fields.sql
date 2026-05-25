@@ -2,6 +2,8 @@
 -- Adds: CustomerId, PanNumber, ApplicantAddress, CoApplicantName,
 --       CoApplicantPhone, CorrespondenceAddress, ApplicationDate, UnitId
 
+IF OBJECT_ID('dbo.FollowupApplicants', 'U') IS NOT NULL
+BEGIN
 IF NOT EXISTS (
   SELECT 1 FROM sys.columns
   WHERE object_id = OBJECT_ID('dbo.FollowupApplicants') AND name = 'CustomerId'
@@ -62,3 +64,8 @@ IF NOT EXISTS (
   WHERE object_id = OBJECT_ID('dbo.FollowupApplicants') AND name = 'IX_FollowupApplicants_UnitId'
 )
   EXEC('CREATE INDEX IX_FollowupApplicants_UnitId ON dbo.FollowupApplicants(UnitId) WHERE UnitId IS NOT NULL');
+END
+ELSE
+BEGIN
+  PRINT 'FollowupApplicants not present; skipping legacy applicant field patch.';
+END;

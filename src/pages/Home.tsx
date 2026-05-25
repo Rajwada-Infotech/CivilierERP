@@ -714,7 +714,7 @@ export default function Home() {
       label: "Tickets",
       desc: `${(tickets?.pending ?? 0) + (tickets?.inProgress ?? 0)} open · ${tickets?.urgent ?? 0} urgent · ${tickets?.resolvedPct ?? 0}% resolved`,
       icon: Ticket,
-      href: "/tickets",
+      href: "/ticket",
       accent: "#f97316",
       badge: tickets?.urgent ? tickets.urgent : undefined,
     },
