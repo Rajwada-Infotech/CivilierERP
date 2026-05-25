@@ -309,6 +309,7 @@ const EMPTY_FORM = {
   projectId: "",
   unitId: "",
   status: "New",
+  budgetAmount: "",
   notes: "",
 };
 type FormData = typeof EMPTY_FORM;
@@ -533,6 +534,21 @@ function ApplicationForm({
               />
             </div>
           </div>
+        </section>
+
+        {/* Budget */}
+        <section>
+          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
+            <IndianRupee size={11} className="text-muted-foreground" /> Budget
+          </p>
+          <input
+            type="number"
+            min="0"
+            className={inputCls}
+            placeholder="Budget amount (₹)..."
+            value={form.budgetAmount}
+            onChange={(e) => set("budgetAmount")(e.target.value)}
+          />
         </section>
 
         {/* Notes */}
@@ -1061,6 +1077,7 @@ const Applications: React.FC = () => {
       ProjectId: form.projectId ? parseInt(form.projectId) : null,
       UnitId: form.unitId ? parseInt(form.unitId) : null,
       Status: form.status,
+      BudgetAmount: form.budgetAmount ? parseFloat(form.budgetAmount) : null,
       Notes: form.notes || null,
     };
     if (editApp) {
@@ -1385,6 +1402,10 @@ const Applications: React.FC = () => {
                         projectId: String(editApp.ProjectId ?? ""),
                         unitId: String(editApp.UnitId ?? ""),
                         status: editApp.Status,
+                        budgetAmount:
+                          editApp.BudgetAmount != null
+                            ? String(editApp.BudgetAmount)
+                            : "",
                         notes: editApp.Notes ?? "",
                       }
                     : undefined

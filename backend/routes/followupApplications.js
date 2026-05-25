@@ -21,6 +21,7 @@ const LIST_COLUMNS = `
   fa.City,
   fa.Source,
   fa.ProjectId,
+  pm.name AS ProjectName,
   fa.UnitId,
   um.UnitName AS UnitName,
   bm.BlockName,
