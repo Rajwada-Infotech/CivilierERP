@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getItems,
