@@ -35,6 +35,7 @@ import {
   MoreVertical,
 } from "lucide-react";
 import { DashboardBackground } from "@/components/DashboardBackground";
+import { useLookup } from "@/hooks/useLookup";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Application {
@@ -90,13 +91,6 @@ interface Unit {
 
 const API = "/api/followup-applications";
 
-const STATUS_OPTIONS = [
-  "New",
-  "Qualified",
-  "Shortlisted",
-  "Document Pending",
-  "Rejected",
-];
 
 const STATUS_CONFIG: Record<string, { dot: string; text: string; bg: string }> =
   {
@@ -327,6 +321,7 @@ function ApplicationForm({
   customers: Customer[];
   projects: Project[];
   units: Unit[];
+  statusOptions: string[];
 }) {
   const [form, setForm] = useState<FormData>({ ...EMPTY_FORM, ...initial });
   const [saving, setSaving] = useState(false);
@@ -410,7 +405,7 @@ function ApplicationForm({
                 value={form.status}
                 onChange={(e) => set("status")(e.target.value)}
               >
-                {STATUS_OPTIONS.map((s) => (
+                {statusOptions.map((s) => (
                   <option key={s}>{s}</option>
                 ))}
               </select>
@@ -959,6 +954,8 @@ const Applications: React.FC = () => {
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
+  const statusOptions = useLookup("APPLICATION_STATUS", ["New", "Qualified", "Shortlisted", "Document Pending", "Rejected"]);
+
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useEffect(() => {
     const t = setTimeout(() => {
@@ -1169,17 +1166,29 @@ const Applications: React.FC = () => {
           >
             All <span className="font-mono">{total}</span>
           </button>
-          {Object.entries(STATUS_CONFIG).map(([s, cfg]) => (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(statusFilter === s ? "" : s)}
-              className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors
-                ${statusFilter === s ? `${cfg.bg} ${cfg.text} border-current` : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"}`}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-              {s}
-            </button>
-          ))}
+          {statusOptions.map((s) => {
+            const cfg = STATUS_CONFIG[s];
+            return cfg ? (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(statusFilter === s ? "" : s)}
+                className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors
+                  ${statusFilter === s ? `${cfg.bg} ${cfg.text} border-current` : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"}`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+                {s}
+              </button>
+            ) : (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(statusFilter === s ? "" : s)}
+                className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors
+                  ${statusFilter === s ? "bg-muted text-foreground border-current" : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"}`}
+              >
+                {s}
+              </button>
+            );
+          })}
         </div>
 
         {/* ── Search + filters bar ── */}
@@ -1394,6 +1403,7 @@ const Applications: React.FC = () => {
                 customers={customers}
                 projects={projects}
                 units={units}
+                statusOptions={statusOptions}
               />
             </div>
           </div>
