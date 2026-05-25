@@ -404,13 +404,13 @@ const ALL_REPORTS: ReportDef[] = [
   {
     id: "stock-summary",
     label: "Stock Summary",
-    description: "Current stock levels across all items",
+    description: "Current stock levels across all items and godowns",
     icon: Layers,
     color: "#06b6d4",
     apiPath: "/api/stock-ledger",
     defaultParams: { view: "summary" },
-    // stockLedger returns { data: ledger rows, byItem: item-level summary }.
-    // For the summary report we want the byItem array. Date params match defaults.
+    // stockLedger returns { data: ledger rows, byItem: item-level summary, godowns: [] }.
+    // For the summary report we want the byItem array broken down per godown.
     filterConfig: {
       companyParam: null,
       finYearParam: null,
@@ -419,6 +419,10 @@ const ALL_REPORTS: ReportDef[] = [
     columns: [
       { header: "Item", accessor: "ItemName" },
       { header: "Group", accessor: "ItemGroupName" },
+      {
+        header: "Godown",
+        accessor: (r) => (r.GodownName ?? "Main Godown") as string,
+      },
       { header: "In", accessor: "stockIn" },
       { header: "Out", accessor: "stockOut" },
       { header: "Balance", accessor: "balance" },
