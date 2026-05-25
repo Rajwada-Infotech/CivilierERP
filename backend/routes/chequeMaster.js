@@ -15,15 +15,19 @@ async function getChequeColumnMeta() {
   if (!chequeColumnMetaPromise) {
     chequeColumnMetaPromise = getPool()
       .request()
-      .query(`
+      .query(
+        `
         SELECT COLUMN_NAME
         FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_SCHEMA = 'dbo'
           AND TABLE_NAME = 'ChequeMaster'
-      `)
+      `,
+      )
       .then((result) => {
         const meta = new Set();
-        result.recordset.forEach((row) => meta.add(row.COLUMN_NAME.toLowerCase()));
+        result.recordset.forEach((row) =>
+          meta.add(row.COLUMN_NAME.toLowerCase()),
+        );
         return meta;
       })
       .catch(() => new Set());
@@ -70,11 +74,9 @@ router.get("/", cache("cheque-master", 300), async (req, res) => {
         cm.ApprovedAt,
         bm.BName        AS BankName,
         bm.BBranch      AS BankBranch,
-        bm.BAccountType AS BankAccountType,
-        co.Name         AS CompanyName
+        bm.BAccountType AS BankAccountType
       FROM dbo.ChequeMaster cm
-      LEFT JOIN dbo.BankMaster     bm ON cm.BankId    = bm.BId
-      LEFT JOIN dbo.CompanyMaster  co ON cm.CompanyId = co.Id
+      LEFT JOIN dbo.BankMaster bm ON cm.BankId = bm.BId
     `);
 
     res.json(result.recordset);
@@ -107,20 +109,26 @@ router.post("/", validateBody(chequeMasterCreateSchema), async (req, res) => {
 
     const request = pool
       .request()
-      .input("CompanyId",         sql.Int,      CompanyId || null)
-      .input("BankId",            sql.Int,      BankId || null)
-      .input("AccountNumber",     sql.NVarChar, AccountNumber || null)
-      .input("IFSCCode",          sql.NVarChar, IFSCCode || null)
-      .input("ChequeLotNumber",   sql.NVarChar, ChequeLotNumber || null)
-      .input("ChequeStartNumber", sql.BigInt,   ChequeStartNumber || null)
-      .input("ChequeEndNumber",   sql.BigInt,   ChequeEndNumber || null)
-      .input("Remarks",           sql.NVarChar, Remarks || null)
-      .input("Status",            sql.Bit,      Status ? 1 : 0);
+      .input("CompanyId", sql.Int, CompanyId || null)
+      .input("BankId", sql.Int, BankId || null)
+      .input("AccountNumber", sql.NVarChar, AccountNumber || null)
+      .input("IFSCCode", sql.NVarChar, IFSCCode || null)
+      .input("ChequeLotNumber", sql.NVarChar, ChequeLotNumber || null)
+      .input("ChequeStartNumber", sql.BigInt, ChequeStartNumber || null)
+      .input("ChequeEndNumber", sql.BigInt, ChequeEndNumber || null)
+      .input("Remarks", sql.NVarChar, Remarks || null)
+      .input("Status", sql.Bit, Status ? 1 : 0);
 
     const insertColumns = [
-      "CompanyId", "BankId", "AccountNumber", "IFSCCode",
-      "ChequeLotNumber", "ChequeStartNumber", "ChequeEndNumber",
-      "Remarks", "Status",
+      "CompanyId",
+      "BankId",
+      "AccountNumber",
+      "IFSCCode",
+      "ChequeLotNumber",
+      "ChequeStartNumber",
+      "ChequeEndNumber",
+      "Remarks",
+      "Status",
     ];
     const insertValues = insertColumns.map((col) => `@${col}`);
 
@@ -178,16 +186,16 @@ router.put("/:id", validateBody(chequeMasterUpdateSchema), async (req, res) => {
 
     const request = pool
       .request()
-      .input("CId",               sql.Int,      req.params.id)
-      .input("CompanyId",         sql.Int,      CompanyId || null)
-      .input("BankId",            sql.Int,      BankId || null)
-      .input("AccountNumber",     sql.NVarChar, AccountNumber || null)
-      .input("IFSCCode",          sql.NVarChar, IFSCCode || null)
-      .input("ChequeLotNumber",   sql.NVarChar, ChequeLotNumber || null)
-      .input("ChequeStartNumber", sql.BigInt,   ChequeStartNumber || null)
-      .input("ChequeEndNumber",   sql.BigInt,   ChequeEndNumber || null)
-      .input("Remarks",           sql.NVarChar, Remarks || null)
-      .input("Status",            sql.Bit,      Status ? 1 : 0);
+      .input("CId", sql.Int, req.params.id)
+      .input("CompanyId", sql.Int, CompanyId || null)
+      .input("BankId", sql.Int, BankId || null)
+      .input("AccountNumber", sql.NVarChar, AccountNumber || null)
+      .input("IFSCCode", sql.NVarChar, IFSCCode || null)
+      .input("ChequeLotNumber", sql.NVarChar, ChequeLotNumber || null)
+      .input("ChequeStartNumber", sql.BigInt, ChequeStartNumber || null)
+      .input("ChequeEndNumber", sql.BigInt, ChequeEndNumber || null)
+      .input("Remarks", sql.NVarChar, Remarks || null)
+      .input("Status", sql.Bit, Status ? 1 : 0);
 
     const updates = [
       "CompanyId=@CompanyId",
