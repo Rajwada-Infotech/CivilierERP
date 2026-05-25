@@ -1,8 +1,14 @@
+import type React from "react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { getWidgetsDashboard, type WidgetsDashboardData } from "@/api/widgetsApi";
+import {
+  getWidgetCatalog,
+  getWidgetsDashboard,
+  type WidgetCatalogItem,
+  type WidgetsDashboardData,
+} from "@/api/widgetsApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Puzzle, BarChart2, TrendingUp, PieChart, Hash, Table2,
@@ -12,20 +18,20 @@ import {
 
 // ─── WIDGET REGISTRY — single source of truth ─────────────────────────────────
 // key must exactly match what WidgetsRights.tsx stores in the DB
-const ALL_WIDGET_ITEMS = [
-  { icon: BarChart2,     label: "Bar Chart" },
-  { icon: TrendingUp,    label: "Line Chart" },
-  { icon: PieChart,      label: "Pie Chart" },
-  { icon: Hash,          label: "Stat Card" },
-  { icon: Table2,        label: "Data Table" },
-  { icon: Calendar,      label: "Calendar" },
-  { icon: Bell,          label: "Notifications" },
-  { icon: MessageSquare, label: "Activity Feed" },
-  { icon: Map,           label: "Map View" },
-  { icon: Paperclip,     label: "File Uploader" },
-  { icon: RefreshCw,     label: "Progress Ring" },
-  { icon: Calculator,    label: "Calculator" },
-];
+const widgetIcons: Record<string, React.ElementType> = {
+  "bar-chart-2": BarChart2,
+  "trending-up": TrendingUp,
+  "pie-chart": PieChart,
+  hash: Hash,
+  "table-2": Table2,
+  calendar: Calendar,
+  bell: Bell,
+  "message-square": MessageSquare,
+  map: Map,
+  paperclip: Paperclip,
+  "refresh-cw": RefreshCw,
+  calculator: Calculator,
+};
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 const fmtCur = (n: number) =>
@@ -58,16 +64,23 @@ function useWidgetsData() {
   return { data, loading: isLoading };
 }
 
+function useWidgetCatalog() {
+  const { data = [], isLoading, isError } = useQuery<WidgetCatalogItem[]>({
+    queryKey: ["widget-catalog"],
+    queryFn: getWidgetCatalog,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  return { catalog: data, loading: isLoading, error: isError };
+}
+
 // ─── ALLOWED WIDGETS HOOK — fetches from DB via /api/user-widget-rights/my ───
 function useAllowedWidgets() {
-  const { data, isLoading } = useQuery<{ allowedWidgets: string[] }>({
+  const { data, isLoading, isError } = useQuery<{ allowedWidgets: string[] }>({
     queryKey: ["user-widget-rights-my"],
     queryFn: async () => {
       const res = await fetchWithAuth("/api/user-widget-rights/my");
-      if (!res.ok) {
-        // If endpoint fails or isn't found, fall back to showing all widgets
-        return { allowedWidgets: ALL_WIDGET_ITEMS.map(w => w.label) };
-      }
+      if (!res.ok) throw new Error("Failed to load widget rights");
       return res.json();
     },
     staleTime: 5 * 60 * 1000,  // re-fetch every 5 min
@@ -76,8 +89,9 @@ function useAllowedWidgets() {
 
   // While loading, show nothing (avoids flash of all widgets then filtered)
   if (isLoading) return { allowedSet: null, loading: true };
-  const allowed = data?.allowedWidgets ?? ALL_WIDGET_ITEMS.map(w => w.label);
-  return { allowedSet: new Set(allowed), loading: false };
+  if (isError) return { allowedSet: new Set<string>(), loading: false, error: true };
+  const allowed = data?.allowedWidgets ?? [];
+  return { allowedSet: new Set(allowed), loading: false, error: false };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -473,23 +487,25 @@ const Widgets = () => {
   const [searchParams] = useSearchParams();
   const [selected, setSelected] = useState<string | null>(searchParams.get("w"));
 
-  // Fetch which widgets this user is allowed to see
-  const { allowedSet, loading: rightsLoading } = useAllowedWidgets();
+  const { catalog, loading: catalogLoading, error: catalogError } = useWidgetCatalog();
+  const { allowedSet, loading: rightsLoading, error: rightsError } = useAllowedWidgets();
 
-  // Only show widgets the user is allowed to see
   const visibleWidgets = allowedSet
-    ? ALL_WIDGET_ITEMS.filter(w => allowedSet.has(w.label))
+    ? catalog.filter(w => allowedSet.has(w.key) && widgetComponents[w.key])
     : [];
 
-  // If selected widget is no longer in allowedSet, clear selection
   const safeSelected = selected && allowedSet?.has(selected) ? selected : null;
   const ActiveWidget = safeSelected ? widgetComponents[safeSelected] : null;
+  const selectedWidget = safeSelected ? catalog.find((w) => w.key === safeSelected) : null;
+  const SelectedIcon = selectedWidget ? widgetIcons[selectedWidget.iconKey] || Puzzle : Puzzle;
+  const loading = rightsLoading || catalogLoading;
+  const hasAccessError = rightsError || catalogError;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", safeSelected || "Widgets"]} />
 
-      {rightsLoading ? (
+      {loading ? (
         // Skeleton while loading rights — avoid flash
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mt-4">
           {Array.from({ length: 8 }).map((_, i) => (
@@ -502,10 +518,9 @@ const Widgets = () => {
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-3">
                 {(() => {
-                  const w = ALL_WIDGET_ITEMS.find(i => i.label === safeSelected);
-                  return w ? <w.icon size={20} className="text-primary" /> : <Puzzle size={20} className="text-primary" />;
+                  return <SelectedIcon size={20} className="text-primary" />;
                 })()}
-                <h1 className="text-base font-bold">{safeSelected}</h1>
+                <h1 className="text-base font-bold">{selectedWidget?.label || safeSelected}</h1>
               </div>
               <button onClick={() => setSelected(null)}
                 className="p-1.5 rounded-lg hover:bg-muted/40 transition-colors text-muted-foreground hover:text-foreground">
@@ -526,14 +541,20 @@ const Widgets = () => {
           <div className="flex items-center gap-2 mb-6">
             <Puzzle size={20} className="text-primary" />
             <h1 className="text-xl font-heading font-bold text-foreground">Widgets</h1>
-            {allowedSet && allowedSet.size < ALL_WIDGET_ITEMS.length && (
+            {allowedSet && allowedSet.size < catalog.length && (
               <span className="ml-2 text-xs text-muted-foreground bg-muted/30 px-2 py-0.5 rounded-full">
                 {allowedSet.size} available
               </span>
             )}
           </div>
 
-          {visibleWidgets.length === 0 ? (
+          {hasAccessError ? (
+            <div className="text-center py-16 space-y-3">
+              <Puzzle size={32} className="text-muted-foreground/40 mx-auto" />
+              <p className="text-sm text-muted-foreground">Widget access could not be loaded.</p>
+              <p className="text-xs text-muted-foreground/60">Please refresh or contact your administrator.</p>
+            </div>
+          ) : visibleWidgets.length === 0 ? (
             <div className="text-center py-16 space-y-3">
               <Puzzle size={32} className="text-muted-foreground/40 mx-auto" />
               <p className="text-sm text-muted-foreground">No widgets are enabled for your account.</p>
@@ -541,14 +562,16 @@ const Widgets = () => {
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-              {visibleWidgets.map(({ icon: Icon, label }) => (
-                <button key={label} onClick={() => setSelected(label)}
+              {visibleWidgets.map(({ iconKey, key, label }) => {
+                const Icon = widgetIcons[iconKey] || Puzzle;
+                return (
+                <button key={key} onClick={() => setSelected(key)}
                   className="flex flex-col items-center gap-2 p-5 rounded-lg border border-border bg-card
                     transition-all hover:bg-accent/10 hover:shadow-md hover:-translate-y-0.5 hover:border-primary">
                   <Icon size={28} className="text-primary" />
                   <span className="text-xs text-muted-foreground font-heading">{label}</span>
                 </button>
-              ))}
+              );})}
             </div>
           )}
         </>

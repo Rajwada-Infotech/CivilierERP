@@ -140,6 +140,16 @@ export interface WidgetModule {
   action?: string;
 }
 
+export interface WidgetCatalogItem {
+  key: string;
+  label: string;
+  iconKey: string;
+  category: string;
+  description: string;
+  sortOrder: number;
+  isActive: boolean;
+}
+
 export interface WidgetsDashboardData {
   generatedAt: string;
   experience: WidgetsExperience;
@@ -174,6 +184,16 @@ export async function getWidgetsDashboard(): Promise<WidgetsDashboardData> {
 
   if (!response.ok) {
     throw new Error("Failed to load widgets dashboard");
+  }
+
+  return response.json();
+}
+
+export async function getWidgetCatalog(): Promise<WidgetCatalogItem[]> {
+  const response = await fetchWithAuth("/api/widgets/catalog");
+
+  if (!response.ok) {
+    throw new Error("Failed to load widget catalog");
   }
 
   return response.json();
