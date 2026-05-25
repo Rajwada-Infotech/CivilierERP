@@ -32,7 +32,9 @@ function normalizeRole(role) {
 }
 
 function isTicketAdmin(role) {
-  return ["admin", "super_admin", "dba"].includes(normalizeRole(role));
+  return ["admin", "super_admin", "dba", "engineer"].includes(
+    normalizeRole(role),
+  );
 }
 
 async function canAccessTicket(ticketId, user) {
@@ -103,8 +105,8 @@ function initSocket(httpServer) {
       "Socket connected"
     );
 
-    // Only admins/super_admins watch the activity feed
-    if (role === "admin" || role === "super_admin" || role === "dba") {
+    // Ticket admins watch ticket/activity broadcasts.
+    if (isTicketAdmin(role)) {
       socket.join("activity-watchers");
     }
 
