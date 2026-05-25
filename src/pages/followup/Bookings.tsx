@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { toast } from "sonner";
@@ -33,12 +33,30 @@ import {
   Banknote,
   Trash2,
   Layers,
-  SlidersHorizontal,
   ArrowUpRight,
+  Percent,
+  Minus,
+  ReceiptText,
+  Tag,
+  Info,
+  Check,
 } from "lucide-react";
 import { DashboardBackground } from "@/components/DashboardBackground";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────────
+interface PaymentTerm {
+  TermID: number;
+  TermName: string;
+  ValueType: "percent" | "fixed" | "deduction";
+  TermValue: number;
+  IsActive: boolean;
+}
+
+interface SelectedTerm extends PaymentTerm {
+  computedAmount: number; // resolved ₹ amount for this booking
+  docRef: string; // e.g. PMT-BKG000042-001
+}
+
 interface Booking {
   Id: number;
   BookingNo: string | null;
@@ -75,6 +93,7 @@ interface Booking {
   UpdatedBy: string | null;
   UpdatedAt: string | null;
 }
+
 interface Applicant {
   Id: number;
   Name: string;
@@ -87,6 +106,7 @@ interface Project {
 }
 
 const API = "/api/followup-bookings";
+const TERMS_API = "/api/payment-plan-master";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const STATUS_OPTIONS = ["Confirmed", "Pending", "Cancelled"];
@@ -103,27 +123,42 @@ const UNIT_TYPES = [
   "Office",
 ];
 
-const STATUS_CONFIG: Record<
-  string,
-  { dot: string; text: string; bg: string; pill: string }
-> = {
+const STATUS_CONFIG: Record<string, { dot: string; pill: string }> = {
   Confirmed: {
     dot: "bg-emerald-500",
-    text: "text-emerald-700 dark:text-emerald-400",
-    bg: "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20",
     pill: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/25",
   },
   Pending: {
     dot: "bg-amber-500",
-    text: "text-amber-700 dark:text-amber-400",
-    bg: "bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20",
     pill: "bg-amber-500/12 text-amber-700 dark:text-amber-300 ring-1 ring-amber-500/25",
   },
   Cancelled: {
     dot: "bg-red-500",
-    text: "text-red-700 dark:text-red-400",
-    bg: "bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/20",
     pill: "bg-red-500/12 text-red-700 dark:text-red-300 ring-1 ring-red-500/25",
+  },
+};
+
+const TYPE_CONFIG: Record<
+  PaymentTerm["ValueType"],
+  { label: string; icon: React.ReactNode; color: string; pill: string }
+> = {
+  percent: {
+    label: "Percent",
+    icon: <Percent size={10} />,
+    color: "text-blue-600 dark:text-blue-400",
+    pill: "bg-blue-500/10 text-blue-700 dark:text-blue-300 ring-1 ring-blue-500/20",
+  },
+  fixed: {
+    label: "Fixed",
+    icon: <IndianRupee size={10} />,
+    color: "text-violet-600 dark:text-violet-400",
+    pill: "bg-violet-500/10 text-violet-700 dark:text-violet-300 ring-1 ring-violet-500/20",
+  },
+  deduction: {
+    label: "Deduction",
+    icon: <Minus size={10} />,
+    color: "text-red-600 dark:text-red-400",
+    pill: "bg-red-500/10 text-red-700 dark:text-red-300 ring-1 ring-red-500/20",
   },
 };
 
@@ -187,13 +222,37 @@ function fmtDate(d: string | null) {
   });
 }
 
-function fmtCurrency(v: number | null) {
+function fmtCurrency(v: number | null | undefined) {
   if (v == null) return null;
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0,
   }).format(v);
+}
+
+function fmtCurrencyCompact(v: number) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(v);
+}
+
+/** Resolve a term's ₹ amount given the booking total value */
+function resolveTermAmount(term: PaymentTerm, totalValue: number): number {
+  if (term.ValueType === "percent")
+    return Math.round((term.TermValue / 100) * totalValue);
+  if (term.ValueType === "fixed") return Math.round(term.TermValue);
+  if (term.ValueType === "deduction")
+    return -Math.round((term.TermValue / 100) * totalValue);
+  return 0;
+}
+
+/** Generate a doc reference: PMT-{BookingNo}-{seqIndex} */
+function makeDocRef(bookingNo: string | null, index: number): string {
+  const base = bookingNo ?? `BKG${String(Date.now()).slice(-6)}`;
+  return `PMT-${base}-${String(index + 1).padStart(3, "0")}`;
 }
 
 // ── Status Badge ──────────────────────────────────────────────────────────────
@@ -347,30 +406,222 @@ function Combobox({
   );
 }
 
-// ── Booking Form ──────────────────────────────────────────────────────────────
-const EMPTY_FORM = {
-  applicantId: "",
-  unitNo: "",
-  blockName: "",
-  floorName: "",
-  unitType: "",
-  areaSqFt: "",
-  ratePerSqFt: "",
-  totalValue: "",
-  bookingAmount: "",
-  bookingDate: "",
-  paymentMode: "",
-  chequeNo: "",
-  bankName: "",
-  loanApproved: false,
-  loanBank: "",
-  loanAmount: "",
-  projectId: "",
-  status: "Confirmed",
-  notes: "",
-};
-type FormData = typeof EMPTY_FORM;
+// ── Payment Term Selector ─────────────────────────────────────────────────────
+function PaymentTermSelector({
+  terms,
+  selectedIds,
+  totalValue,
+  bookingNo,
+  onChange,
+}: {
+  terms: PaymentTerm[];
+  selectedIds: number[];
+  totalValue: number;
+  bookingNo: string | null;
+  onChange: (ids: number[]) => void;
+}) {
+  const activeTerms = terms.filter((t) => t.IsActive);
 
+  const toggle = (id: number) => {
+    if (selectedIds.includes(id)) onChange(selectedIds.filter((x) => x !== id));
+    else onChange([...selectedIds, id]);
+  };
+
+  const selectedTerms: SelectedTerm[] = useMemo(() => {
+    return selectedIds
+      .map((id, idx) => {
+        const t = terms.find((x) => x.TermID === id);
+        if (!t) return null;
+        return {
+          ...t,
+          computedAmount: resolveTermAmount(t, totalValue),
+          docRef: makeDocRef(bookingNo, idx),
+        };
+      })
+      .filter(Boolean) as SelectedTerm[];
+  }, [selectedIds, terms, totalValue, bookingNo]);
+
+  const totalCharged = selectedTerms
+    .filter((t) => t.ValueType !== "deduction")
+    .reduce((s, t) => s + t.computedAmount, 0);
+  const totalDeducted = selectedTerms
+    .filter((t) => t.ValueType === "deduction")
+    .reduce((s, t) => s + Math.abs(t.computedAmount), 0);
+  const netPayable = totalValue - totalDeducted;
+  const balance = totalValue - totalCharged + totalDeducted;
+
+  return (
+    <div className="space-y-4">
+      {/* Term picker */}
+      <div className="space-y-2">
+        {activeTerms.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-4 bg-muted/30 rounded-xl border border-dashed border-border">
+            No active payment terms — add them in Payment Plan Master
+          </p>
+        ) : (
+          <div className="grid gap-1.5">
+            {activeTerms.map((term) => {
+              const isSelected = selectedIds.includes(term.TermID);
+              const tc = TYPE_CONFIG[term.ValueType];
+              const amount = resolveTermAmount(term, totalValue);
+              return (
+                <button
+                  key={term.TermID}
+                  type="button"
+                  onClick={() => toggle(term.TermID)}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-left transition-all group
+                    ${
+                      isSelected
+                        ? "border-primary/40 bg-primary/5 ring-1 ring-primary/15"
+                        : "border-border bg-background hover:border-border/80 hover:bg-muted/30"
+                    }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div
+                      className={`w-4 h-4 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all
+                      ${isSelected ? "border-primary bg-primary" : "border-border group-hover:border-primary/40"}`}
+                    >
+                      {isSelected && (
+                        <Check
+                          size={10}
+                          className="text-primary-foreground"
+                          strokeWidth={3}
+                        />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[12px] font-semibold text-foreground truncate">
+                        {term.TermName}
+                      </p>
+                      <span
+                        className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md ${tc.pill}`}
+                      >
+                        {tc.icon}
+                        {term.ValueType === "percent" ||
+                        term.ValueType === "deduction"
+                          ? `${term.TermValue}%`
+                          : fmtCurrencyCompact(term.TermValue)}
+                        {term.ValueType === "deduction" && " off"}
+                      </span>
+                    </div>
+                  </div>
+                  {totalValue > 0 && (
+                    <p
+                      className={`text-[12px] font-bold flex-shrink-0 ml-3 ${term.ValueType === "deduction" ? "text-red-600 dark:text-red-400" : "text-foreground"}`}
+                    >
+                      {term.ValueType === "deduction" ? "−" : ""}
+                      {fmtCurrencyCompact(Math.abs(amount))}
+                    </p>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Breakdown panel — only show when terms selected and totalValue known */}
+      {selectedTerms.length > 0 && totalValue > 0 && (
+        <div className="rounded-xl border border-border bg-muted/20 overflow-hidden">
+          {/* Header */}
+          <div className="px-4 py-2.5 bg-muted/40 border-b border-border flex items-center gap-2">
+            <ReceiptText size={12} className="text-muted-foreground" />
+            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+              Payment Breakdown
+            </p>
+          </div>
+
+          {/* Line items */}
+          <div className="px-4 divide-y divide-border/50">
+            {/* Base */}
+            <div className="flex items-center justify-between py-2.5">
+              <span className="text-[11px] text-muted-foreground">
+                Total Property Value
+              </span>
+              <span className="text-[12px] font-semibold text-foreground">
+                {fmtCurrencyCompact(totalValue)}
+              </span>
+            </div>
+
+            {/* Each selected term */}
+            {selectedTerms.map((t) => (
+              <div key={t.TermID} className="py-2.5 space-y-1">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-medium text-foreground truncate">
+                      {t.TermName}
+                    </p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <code className="text-[9px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground border border-border/60">
+                        {t.docRef}
+                      </code>
+                      <span
+                        className={`inline-flex items-center gap-0.5 text-[9px] font-medium px-1 py-0.5 rounded ${TYPE_CONFIG[t.ValueType].pill}`}
+                      >
+                        {TYPE_CONFIG[t.ValueType].icon}
+                        {t.ValueType === "percent" ||
+                        t.ValueType === "deduction"
+                          ? `${t.TermValue}%`
+                          : fmtCurrencyCompact(t.TermValue)}
+                      </span>
+                    </div>
+                  </div>
+                  <p
+                    className={`text-[12px] font-bold flex-shrink-0 ${t.ValueType === "deduction" ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}
+                  >
+                    {t.ValueType === "deduction" ? "−" : "+"}
+                    {fmtCurrencyCompact(Math.abs(t.computedAmount))}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Summary footer */}
+          <div className="border-t border-border bg-muted/40 px-4 py-3 space-y-2">
+            {totalDeducted > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-muted-foreground">
+                  After Deductions
+                </span>
+                <span className="text-[12px] font-semibold text-foreground">
+                  {fmtCurrencyCompact(netPayable)}
+                </span>
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-muted-foreground">
+                Total Charged (this schedule)
+              </span>
+              <span className="text-[13px] font-bold text-emerald-600 dark:text-emerald-400">
+                {fmtCurrencyCompact(totalCharged)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between pt-2 border-t border-border/60">
+              <span className="text-[11px] font-bold text-foreground">
+                Balance Remaining
+              </span>
+              <span
+                className={`text-[14px] font-extrabold ${balance > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}
+              >
+                {fmtCurrencyCompact(Math.max(0, balance))}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedTerms.length > 0 && totalValue === 0 && (
+        <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 text-[11px]">
+          <Info size={12} className="flex-shrink-0" />
+          Enter Total Value above to see ₹ breakdown
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Form helpers ──────────────────────────────────────────────────────────────
 function FormField({
   label,
   required,
@@ -396,24 +647,54 @@ function FormSection({
   label,
   color,
   children,
+  fullWidth,
 }: {
   icon: React.ReactNode;
   label: string;
   color: string;
   children: React.ReactNode;
+  fullWidth?: boolean;
 }) {
   return (
     <div className="space-y-3">
-      <div className={`flex items-center gap-2 pb-2 border-b border-border/60`}>
+      <div className="flex items-center gap-2 pb-2 border-b border-border/60">
         <div className={`p-1.5 rounded-lg ${color}`}>{icon}</div>
         <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
           {label}
         </p>
       </div>
-      <div className="grid grid-cols-2 gap-3">{children}</div>
+      <div
+        className={`grid ${fullWidth ? "grid-cols-1" : "grid-cols-2"} gap-3`}
+      >
+        {children}
+      </div>
     </div>
   );
 }
+
+// ── Booking Form ──────────────────────────────────────────────────────────────
+const EMPTY_FORM = {
+  applicantId: "",
+  unitNo: "",
+  blockName: "",
+  floorName: "",
+  unitType: "",
+  areaSqFt: "",
+  ratePerSqFt: "",
+  totalValue: "",
+  bookingAmount: "",
+  bookingDate: "",
+  paymentMode: "",
+  chequeNo: "",
+  bankName: "",
+  loanApproved: false,
+  loanBank: "",
+  loanAmount: "",
+  projectId: "",
+  status: "Confirmed",
+  notes: "",
+};
+type FormData = typeof EMPTY_FORM;
 
 function BookingForm({
   initial,
@@ -421,24 +702,42 @@ function BookingForm({
   onCancel,
   applicants,
   projects,
+  editBookingNo,
 }: {
   initial?: Partial<FormData>;
-  onSave: (data: FormData) => Promise<void>;
+  onSave: (data: FormData, selectedTermIds: number[]) => Promise<void>;
   onCancel: () => void;
   applicants: Applicant[];
   projects: Project[];
+  editBookingNo?: string | null;
 }) {
   const [form, setForm] = useState<FormData>({ ...EMPTY_FORM, ...initial });
   const [saving, setSaving] = useState(false);
+  const [selectedTermIds, setSelectedTermIds] = useState<number[]>([]);
+
   const set = (k: keyof FormData) => (v: string | boolean) =>
     setForm((prev) => ({ ...prev, [k]: v }));
 
+  // Auto-compute total value
   useEffect(() => {
     const area = parseFloat(form.areaSqFt);
     const rate = parseFloat(form.ratePerSqFt);
     if (area > 0 && rate > 0)
       set("totalValue")(String(Math.round(area * rate)));
   }, [form.areaSqFt, form.ratePerSqFt]);
+
+  // Fetch payment terms
+  const { data: paymentTerms = [] } = useQuery<PaymentTerm[]>({
+    queryKey: ["payment-terms"],
+    queryFn: async () => {
+      const res = await fetchWithAuth(TERMS_API);
+      if (!res.ok) throw new Error("Failed to load payment terms");
+      return res.json();
+    },
+    staleTime: 300_000,
+  });
+
+  const totalValue = parseFloat(form.totalValue) || 0;
 
   const applicantOpts = applicants.map((a) => ({
     value: String(a.Id),
@@ -469,7 +768,7 @@ function BookingForm({
     }
     setSaving(true);
     try {
-      await onSave(form);
+      await onSave(form, selectedTermIds);
     } finally {
       setSaving(false);
     }
@@ -481,6 +780,7 @@ function BookingForm({
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-6 space-y-7">
+        {/* Applicant */}
         <FormSection
           icon={<User size={12} className="text-blue-600 dark:text-blue-400" />}
           label="Applicant"
@@ -517,6 +817,7 @@ function BookingForm({
           </FormField>
         </FormSection>
 
+        {/* Property */}
         <FormSection
           icon={
             <Building2
@@ -596,7 +897,7 @@ function BookingForm({
                 <input
                   type="number"
                   className={`${inputCls} bg-muted/40 font-medium`}
-                  placeholder="Auto-computed"
+                  placeholder="Auto-computed from area × rate"
                   value={form.totalValue}
                   onChange={(e) => set("totalValue")(e.target.value)}
                 />
@@ -610,15 +911,44 @@ function BookingForm({
           </div>
         </FormSection>
 
+        {/* Payment Terms */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 pb-2 border-b border-border/60">
+            <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/30">
+              <Tag
+                size={12}
+                className="text-emerald-600 dark:text-emerald-400"
+              />
+            </div>
+            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+              Payment Schedule
+            </p>
+            {selectedTermIds.length > 0 && (
+              <span className="ml-auto text-[10px] font-semibold bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                {selectedTermIds.length} term
+                {selectedTermIds.length !== 1 ? "s" : ""} selected
+              </span>
+            )}
+          </div>
+          <PaymentTermSelector
+            terms={paymentTerms}
+            selectedIds={selectedTermIds}
+            totalValue={totalValue}
+            bookingNo={editBookingNo ?? null}
+            onChange={setSelectedTermIds}
+          />
+        </div>
+
+        {/* Payment */}
         <FormSection
           icon={
             <CreditCard
               size={12}
-              className="text-emerald-600 dark:text-emerald-400"
+              className="text-cyan-600 dark:text-cyan-400"
             />
           }
-          label="Payment"
-          color="bg-emerald-50 dark:bg-emerald-900/30"
+          label="Booking Payment"
+          color="bg-cyan-50 dark:bg-cyan-900/30"
         >
           <FormField label="Booking Amount (₹)" required>
             <input
@@ -663,6 +993,7 @@ function BookingForm({
           )}
         </FormSection>
 
+        {/* Loan */}
         <FormSection
           icon={
             <Banknote
@@ -714,6 +1045,7 @@ function BookingForm({
           )}
         </FormSection>
 
+        {/* Notes */}
         <div className="space-y-3">
           <div className="flex items-center gap-2 pb-2 border-b border-border/60">
             <div className="p-1.5 rounded-lg bg-muted">
@@ -829,7 +1161,6 @@ function BookingDrawer({
         onClick={onClose}
       />
       <div className="fixed right-0 top-0 bottom-0 z-50 w-[520px] max-w-[95vw] bg-card border-l border-border shadow-2xl flex flex-col">
-        {/* Header */}
         <div className="flex-shrink-0 px-6 pt-6 pb-4 border-b border-border">
           <div className="flex items-start justify-between mb-4">
             <div className="flex items-center gap-3">
@@ -860,7 +1191,6 @@ function BookingDrawer({
               </button>
             </div>
           </div>
-
           <div className="flex items-center flex-wrap gap-2">
             <StatusBadge status={booking.Status} />
             <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground bg-muted/60 rounded-full px-2.5 py-1 border border-border/60">
@@ -872,7 +1202,6 @@ function BookingDrawer({
               </span>
             )}
           </div>
-
           {(booking.PrimaryMobile || booking.Email) && (
             <div className="flex flex-wrap gap-3 mt-3">
               {booking.PrimaryMobile && (
@@ -937,7 +1266,6 @@ function BookingDrawer({
               />
             )}
           </InfoSection>
-
           <InfoSection title="Property" icon={<Home size={11} />}>
             <InfoRow
               label="Project"
@@ -978,7 +1306,6 @@ function BookingDrawer({
               icon={<IndianRupee size={11} />}
             />
           </InfoSection>
-
           {booking.LoanApproved && (
             <InfoSection title="Home Loan" icon={<Banknote size={11} />}>
               <InfoRow
@@ -1002,7 +1329,6 @@ function BookingDrawer({
               />
             </InfoSection>
           )}
-
           {(booking.AssignedToName || booking.Notes) && (
             <InfoSection title="Other" icon={<FileText size={11} />}>
               <InfoRow
@@ -1017,7 +1343,6 @@ function BookingDrawer({
               />
             </InfoSection>
           )}
-
           <InfoSection title="Audit" icon={<Clock size={11} />}>
             <InfoRow
               label="Created"
@@ -1057,14 +1382,9 @@ function BookingCard({
     <div
       onClick={onClick}
       className={`group relative rounded-2xl border cursor-pointer transition-all duration-200
-        ${
-          isSelected
-            ? "border-primary/40 bg-primary/3 shadow-sm shadow-primary/10"
-            : "border-border bg-card hover:border-border/80 hover:shadow-md hover:shadow-black/5 hover:-translate-y-0.5"
-        }`}
+        ${isSelected ? "border-primary/40 bg-primary/3 shadow-sm shadow-primary/10" : "border-border bg-card hover:border-border/80 hover:shadow-md hover:shadow-black/5 hover:-translate-y-0.5"}`}
     >
       <div className="p-4">
-        {/* Top row */}
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <div
@@ -1083,8 +1403,6 @@ function BookingCard({
           </div>
           <StatusBadge status={booking.Status} />
         </div>
-
-        {/* Property line */}
         <div className="flex items-center gap-1.5 mb-3">
           <div className="p-1 rounded-md bg-muted/60">
             <Building2 size={10} className="text-muted-foreground" />
@@ -1100,8 +1418,6 @@ function BookingCard({
             )}
           </span>
         </div>
-
-        {/* Values */}
         <div className="grid grid-cols-2 gap-2">
           <div className="rounded-lg bg-muted/40 px-2.5 py-2">
             <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
@@ -1121,8 +1437,6 @@ function BookingCard({
           </div>
         </div>
       </div>
-
-      {/* Footer */}
       <div className="px-4 pb-3 flex items-center justify-between">
         <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
           <Calendar size={10} /> {fmtDate(booking.BookingDate)}
@@ -1133,7 +1447,6 @@ function BookingCard({
           </span>
         )}
       </div>
-
       <div
         className={`absolute right-4 top-4 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? "opacity-100" : ""}`}
       >
@@ -1259,7 +1572,7 @@ export default function BookingsPage() {
     .filter((b) => b.Status === "Confirmed")
     .reduce((s, b) => s + (b.TotalValue ?? 0), 0);
 
-  const handleSave = async (form: FormData) => {
+  const handleSave = async (form: FormData, selectedTermIds: number[]) => {
     const payload = {
       ApplicantId: form.applicantId ? parseInt(form.applicantId) : null,
       ProjectId: form.projectId ? parseInt(form.projectId) : null,
@@ -1280,6 +1593,7 @@ export default function BookingsPage() {
       LoanAmount: form.loanAmount ? parseFloat(form.loanAmount) : null,
       Status: form.status,
       Notes: form.notes || null,
+      PaymentTermIds: selectedTermIds.length > 0 ? selectedTermIds : undefined,
     };
 
     if (editBooking) {
@@ -1329,7 +1643,6 @@ export default function BookingsPage() {
     setEditBooking(null);
   };
 
-  // Empty state
   const EmptyState = () => (
     <div className="flex flex-col items-center gap-4 py-24">
       <div className="p-5 rounded-2xl bg-muted/60 border border-border">
@@ -1360,7 +1673,7 @@ export default function BookingsPage() {
     <>
       <DashboardBackground />
       <div className="relative z-10 p-6 max-w-[1400px] mx-auto space-y-5">
-        {/* ── Header ─────────────────────────────────────────────── */}
+        {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
             <Breadcrumbs
@@ -1408,7 +1721,7 @@ export default function BookingsPage() {
           </div>
         </div>
 
-        {/* ── KPI Strip ──────────────────────────────────────────── */}
+        {/* KPI Strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <KpiCard
             label="Total Bookings"
@@ -1440,17 +1753,15 @@ export default function BookingsPage() {
           />
         </div>
 
-        {/* ── Filters row ────────────────────────────────────────── */}
+        {/* Filters */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Status pills */}
           <div className="flex items-center gap-1.5 flex-wrap">
             <button
               onClick={() => {
                 setStatusFilter("");
                 setPage(1);
               }}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-all
-                ${!statusFilter ? "bg-foreground text-background border-foreground shadow-sm" : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-all ${!statusFilter ? "bg-foreground text-background border-foreground shadow-sm" : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
             >
               All <span className="font-mono ml-1">{total}</span>
             </button>
@@ -1463,17 +1774,14 @@ export default function BookingsPage() {
                     setStatusFilter(statusFilter === s ? "" : s);
                     setPage(1);
                   }}
-                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-all
-                    ${statusFilter === s ? `${cfg.pill} border-current shadow-sm` : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
+                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-all ${statusFilter === s ? `${cfg.pill} border-current shadow-sm` : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
                 >
                   <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} /> {s}
                 </button>
               );
             })}
           </div>
-
           <div className="flex items-center gap-2 ml-auto">
-            {/* Search */}
             <div className="relative">
               <Search
                 size={13}
@@ -1500,8 +1808,6 @@ export default function BookingsPage() {
                 </button>
               )}
             </div>
-
-            {/* Project filter */}
             <select
               className="px-3 py-2 border border-border rounded-xl text-sm bg-card text-muted-foreground outline-none cursor-pointer focus:border-primary/60 min-w-[130px]"
               value={projectFilter}
@@ -1514,7 +1820,6 @@ export default function BookingsPage() {
                 </option>
               ))}
             </select>
-
             {hasFilters && (
               <button
                 onClick={() => {
@@ -1528,8 +1833,6 @@ export default function BookingsPage() {
                 <X size={11} /> Clear
               </button>
             )}
-
-            {/* View mode toggle */}
             <div className="flex items-center border border-border rounded-xl overflow-hidden">
               {(["table", "grid"] as const).map((mode) => (
                 <button
@@ -1610,7 +1913,7 @@ export default function BookingsPage() {
           </div>
         </div>
 
-        {/* ── Content ────────────────────────────────────────────── */}
+        {/* Content */}
         {viewMode === "grid" ? (
           <div>
             {isLoading ? (
@@ -1793,8 +2096,6 @@ export default function BookingsPage() {
                 </tbody>
               </table>
             </div>
-
-            {/* Pagination */}
             {(totalPages > 1 || total > 0) && (
               <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-muted/10">
                 <p className="text-xs text-muted-foreground">
@@ -1832,14 +2133,14 @@ export default function BookingsPage() {
         )}
       </div>
 
-      {/* ── Slide-over form ───────────────────────────────────────── */}
+      {/* Slide-over form */}
       {showForm && (
         <>
           <div
             className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[3px]"
             onClick={closeForm}
           />
-          <div className="fixed right-0 top-0 bottom-0 z-50 w-[580px] max-w-[95vw] bg-card border-l border-border shadow-2xl flex flex-col">
+          <div className="fixed right-0 top-0 bottom-0 z-50 w-[620px] max-w-[95vw] bg-card border-l border-border shadow-2xl flex flex-col">
             <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-border">
               <div className="flex items-center gap-2.5">
                 <div className="p-1.5 rounded-lg bg-primary/10">
@@ -1895,13 +2196,14 @@ export default function BookingsPage() {
                 onCancel={closeForm}
                 applicants={applicants}
                 projects={projects}
+                editBookingNo={editBooking?.BookingNo}
               />
             </div>
           </div>
         </>
       )}
 
-      {/* ── Detail drawer ─────────────────────────────────────────── */}
+      {/* Detail drawer */}
       {selectedBooking && !showForm && (
         <BookingDrawer
           booking={selectedBooking}
