@@ -17,6 +17,7 @@ import {
   saveUserPermissions,
   PagePermission,
 } from "@/api/userApi";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 type PageAction = "view" | "create" | "edit" | "delete" | "print" | "export";
@@ -39,78 +40,6 @@ const ALL_ACTIONS: { key: PageAction; label: string }[] = [
   { key: "export", label: "Export" },
 ];
 
-// ─── COMPLETE PAGE DEFINITIONS (all modules) ─────────────────────────────────
-const PAGE_DEFINITIONS: PageDef[] = [
-  // ── Dashboard ──────────────────────────────────────────────────────────────
-  { key: "dashboard",            label: "Dashboard",             module: "General",      group: "Dashboard",         actions: ["view", "export"] },
-
-  // ── Finance & Accounts ─────────────────────────────────────────────────────
-  { key: "finance-dashboard",    label: "Finance Dashboard",     module: "Finance",      group: "Finance & Accounts", actions: ["view", "print", "export"] },
-  { key: "bank-master",          label: "Bank Master",           module: "Finance",      group: "Finance & Accounts", actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "account-head",         label: "Account Head Master",   module: "Finance",      group: "Finance & Accounts", actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "account-group",        label: "Account Group",         module: "Finance",      group: "Finance & Accounts", actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "general-ledger",       label: "General Ledger",        module: "Finance",      group: "Finance & Accounts", actions: ["view", "print", "export"] },
-  { key: "expense-booking",      label: "Expense Booking",       module: "Finance",      group: "Finance & Accounts", actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "new-payment",          label: "Payments",              module: "Finance",      group: "Finance & Accounts", actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "received-payment",     label: "Received Payment",      module: "Finance",      group: "Finance & Accounts", actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "cheque-master",        label: "Cheque Master",         module: "Finance",      group: "Finance & Accounts", actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "brs",                  label: "Bank Reconciliation",   module: "Finance",      group: "Finance & Accounts", actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "debit-note",           label: "Debit Note",            module: "Finance",      group: "Finance & Accounts", actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "amendments",           label: "Amendments",            module: "Finance",      group: "Finance & Accounts", actions: ALL_ACTIONS.map(a => a.key) },
-
-  // ── Material ───────────────────────────────────────────────────────────────
-  { key: "material-dashboard",   label: "Material Dashboard",    module: "Material",     group: "Material",           actions: ["view", "print", "export"] },
-  { key: "purchase-orders",      label: "Purchase Orders",       module: "Material",     group: "Material",           actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "grn-master",           label: "GRN Master",            module: "Material",     group: "Material",           actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "work-order",           label: "Work Order",            module: "Material",     group: "Material",           actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "material-request",     label: "Material Request",      module: "Material",     group: "Material",           actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "material-issues",      label: "Material Issues",       module: "Material",     group: "Material",           actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "stock-ledger",         label: "Stock Ledger",          module: "Material",     group: "Material",           actions: ["view", "print", "export"] },
-  { key: "stock-transfers",      label: "Stock Transfers",       module: "Material",     group: "Material",           actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "inventory-master",     label: "Inventory Master",      module: "Material",     group: "Material",           actions: ALL_ACTIONS.map(a => a.key) },
-
-  // ── Engineering ────────────────────────────────────────────────────────────
-  { key: "engineering-dashboard",label: "Engineering Dashboard", module: "Engineering",  group: "Engineering",        actions: ["view", "print", "export"] },
-  { key: "boq",                  label: "BOQ",                   module: "Engineering",  group: "Engineering",        actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "engineering-work-order",label: "Work Order (Eng)",     module: "Engineering",  group: "Engineering",        actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "work-done",            label: "Work Done",             module: "Engineering",  group: "Engineering",        actions: ALL_ACTIONS.map(a => a.key) },
-
-  // ── Follow-Up ──────────────────────────────────────────────────────────────
-  { key: "followup-dashboard",   label: "Follow-Up Dashboard",   module: "Follow-Up",    group: "Follow-Up",          actions: ["view", "print", "export"] },
-  { key: "followup-applicants",  label: "Applicants",            module: "Follow-Up",    group: "Follow-Up",          actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "followup-bookings",    label: "Bookings",              module: "Follow-Up",    group: "Follow-Up",          actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "followup-agreements",  label: "Agreements",            module: "Follow-Up",    group: "Follow-Up",          actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "followup-unit-selection", label: "Unit Selection",     module: "Follow-Up",    group: "Follow-Up",          actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "followup-noc",         label: "NOC",                   module: "Follow-Up",    group: "Follow-Up",          actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "followup-sales-deed",  label: "Sales Deed",            module: "Follow-Up",    group: "Follow-Up",          actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "followup-handover",    label: "Handover",              module: "Follow-Up",    group: "Follow-Up",          actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "followup-construction",label: "Construction Updates",  module: "Follow-Up",    group: "Follow-Up",          actions: ALL_ACTIONS.map(a => a.key) },
-
-  // ── Tickets ────────────────────────────────────────────────────────────────
-  { key: "tickets",              label: "Tickets",               module: "Ticket",       group: "Tickets",            actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "ticket-resolution",    label: "Ticket Resolution",     module: "Ticket",       group: "Tickets",            actions: ["view", "edit"] },
-
-  // ── Masters ────────────────────────────────────────────────────────────────
-  { key: "item-master",          label: "Item Master",           module: "Masters",      group: "Masters",            actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "item-group",           label: "Item Group",            module: "Masters",      group: "Masters",            actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "hsn-master",           label: "HSN Master",            module: "Masters",      group: "Masters",            actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "enterprise-master",    label: "Enterprise / Company",  module: "Masters",      group: "Masters",            actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "project-master",       label: "Project Master",        module: "Masters",      group: "Masters",            actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "contractor-master",    label: "Contractor Master",     module: "Masters",      group: "Masters",            actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "supplier-master",      label: "Supplier Master",       module: "Masters",      group: "Masters",            actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "customer-master",      label: "Customer Master",       module: "Masters",      group: "Masters",            actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "uom-master",           label: "UOM Master",            module: "Masters",      group: "Masters",            actions: ALL_ACTIONS.map(a => a.key) },
-  { key: "activity-master",      label: "Activity Master",       module: "Masters",      group: "Masters",            actions: ALL_ACTIONS.map(a => a.key) },
-
-  // ── Reports ────────────────────────────────────────────────────────────────
-  { key: "reports",              label: "Reports",               module: "General",      group: "Reports",            actions: ["view", "print", "export"] },
-
-  // ── Tasks & Widgets ────────────────────────────────────────────────────────
-  { key: "tasks",                label: "Tasks",                 module: "General",      group: "Tasks & Widgets",    actions: ["view", "create", "edit", "delete"] },
-  { key: "widgets",              label: "Widgets",               module: "General",      group: "Tasks & Widgets",    actions: ["view"] },
-  { key: "approval-inbox",       label: "Approval Inbox",        module: "General",      group: "Tasks & Widgets",    actions: ["view", "edit"] },
-];
-
 // ─── MODULE COLORS ────────────────────────────────────────────────────────────
 const MODULE_COLORS: Record<string, string> = {
   "General":      "bg-slate-500/10 text-slate-400 border-slate-500/20",
@@ -124,6 +53,7 @@ const MODULE_COLORS: Record<string, string> = {
 };
 
 // ─── PRESET TEMPLATES ─────────────────────────────────────────────────────────
+// Presets reference page keys — these are stable identifiers so hardcoding is fine.
 const ROLE_PRESETS: Record<string, { label: string; pages: string[]; actions: PageAction[] }> = {
   engineer: {
     label: "Engineer",
@@ -148,13 +78,26 @@ const ROLE_PRESETS: Record<string, { label: string; pages: string[]; actions: Pa
   },
   viewer: {
     label: "View Only",
-    pages: PAGE_DEFINITIONS.map(p => p.key),
+    // "All pages" preset — resolved at runtime against the live DB list
+    pages: [],
     actions: ["view"],
   },
 };
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 export default function MenuRights() {
+  // ── Page definitions — now fetched from DB ──────────────────────────────────
+  const [pageDefs,       setPageDefs]       = useState<PageDef[]>([]);
+  const [loadingDefs,    setLoadingDefs]    = useState(true);
+
+  useEffect(() => {
+    fetchWithAuth("/api/page-definitions")
+      .then(res => { if (!res.ok) throw new Error("fetch failed"); return res.json(); })
+      .then(json => setPageDefs(json.data ?? []))
+      .catch(() => toast.error("Failed to load page definitions"))
+      .finally(() => setLoadingDefs(false));
+  }, []);
+
   const [users, setUsers]               = useState<{ id: number; name: string; role: string }[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -202,16 +145,16 @@ export default function MenuRights() {
   }, [dropdownOpen]);
 
   // ── Filtering ──────────────────────────────────────────────────────────────
-  const modules = useMemo(() => ["All", ...Array.from(new Set(PAGE_DEFINITIONS.map(p => p.module)))], []);
+  const modules = useMemo(() => ["All", ...Array.from(new Set(pageDefs.map(p => p.module)))], [pageDefs]);
 
   const filteredPages = useMemo(() =>
-    PAGE_DEFINITIONS.filter(p => {
+    pageDefs.filter(p => {
       const matchModule = moduleFilter === "All" || p.module === moduleFilter;
       const matchSearch = !pageSearch ||
         p.label.toLowerCase().includes(pageSearch.toLowerCase()) ||
         p.group.toLowerCase().includes(pageSearch.toLowerCase());
       return matchModule && matchSearch;
-    }), [moduleFilter, pageSearch]);
+    }), [pageDefs, moduleFilter, pageSearch]);
 
   const groupedPages = useMemo(() => {
     const groups: Record<string, PageDef[]> = {};
@@ -267,15 +210,19 @@ export default function MenuRights() {
     const preset = ROLE_PRESETS[presetKey];
     if (!preset) return;
     setDirty(true);
-    const newPerms: PagePermission[] = preset.pages.map(pageKey => {
-      const pageDef = PAGE_DEFINITIONS.find(p => p.key === pageKey);
+    // "viewer" preset uses all currently-loaded page defs
+    const targetPages = preset.pages.length > 0
+      ? preset.pages
+      : pageDefs.map(p => p.key);
+    const newPerms: PagePermission[] = targetPages.map(pageKey => {
+      const pageDef = pageDefs.find(p => p.key === pageKey);
       if (!pageDef) return null;
       const allowedActions = preset.actions.filter(a => pageDef.actions.includes(a));
       return { page: pageKey as any, actions: allowedActions };
     }).filter(Boolean) as PagePermission[];
     setPermissions(newPerms);
     toast.success(`Applied ${preset.label} preset`);
-  }, []);
+  }, [pageDefs]);
 
   // ── Toggle entire group ─────────────────────────────────────────────────────
   const toggleGroup = useCallback((groupPages: PageDef[]) => {
@@ -313,9 +260,9 @@ export default function MenuRights() {
   // ── Stats ──────────────────────────────────────────────────────────────────
   const stats = useMemo(() => ({
     pagesGranted: permissions.filter(p => p.actions.length > 0).length,
-    total: PAGE_DEFINITIONS.length,
+    total: pageDefs.length,
     actionsGranted: permissions.reduce((acc, p) => acc + p.actions.length, 0),
-  }), [permissions]);
+  }), [permissions, pageDefs]);
 
   // ─── RENDER ─────────────────────────────────────────────────────────────────
   return (
@@ -431,6 +378,13 @@ export default function MenuRights() {
           )}
         </div>
       </div>
+
+      {/* Loading page definitions */}
+      {loadingDefs && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4">
+          <Loader2 size={12} className="animate-spin" /> Loading page definitions…
+        </div>
+      )}
 
       {/* Main panel */}
       {!selectedUser ? (

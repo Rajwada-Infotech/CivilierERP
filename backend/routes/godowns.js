@@ -16,10 +16,9 @@ router.get("/", cache("godowns", 120), async (req, res) => {
         g.EnterpriseID, g.ProjectID, g.Location,
         g.IsActive, g.IsDeleted, g.CreatedAt, g.UpdatedAt,
         e.name AS EnterpriseName,
-        p.Name AS ProjectName
+        NULL AS ProjectName
       FROM dbo.Godowns g
       LEFT JOIN dbo.enterprise e ON e.id = g.EnterpriseID
-      LEFT JOIN dbo.ProjectMaster p ON p.Id = g.ProjectID
       WHERE g.IsDeleted = 0
       ORDER BY g.IsMain DESC, g.GodownName
     `);
@@ -40,11 +39,11 @@ router.get("/:id", async (req, res) => {
     const pool = getPool();
     const result = await pool
       .request()
-      .input("id", sql.Int, id).query(`
-        SELECT g.*, e.name AS EnterpriseName, p.Name AS ProjectName
+      .input("id", sql.Int, id)
+      .query(`
+        SELECT g.*, e.name AS EnterpriseName, NULL AS ProjectName
         FROM dbo.Godowns g
         LEFT JOIN dbo.enterprise e ON e.id = g.EnterpriseID
-        LEFT JOIN dbo.ProjectMaster p ON p.Id = g.ProjectID
         WHERE g.GodownID = @id AND g.IsDeleted = 0
       `);
     if (!result.recordset.length)
@@ -95,12 +94,10 @@ router.post("/", async (req, res) => {
       `);
 
     await bumpCacheVersion("godowns");
-    res
-      .status(201)
-      .json({
-        GodownID: result.recordset[0].GodownID,
-        message: "Godown created",
-      });
+    res.status(201).json({
+      GodownID: result.recordset[0].GodownID,
+      message: "Godown created",
+    });
   } catch (err) {
     console.error("[godowns] POST /:", err.message);
     res

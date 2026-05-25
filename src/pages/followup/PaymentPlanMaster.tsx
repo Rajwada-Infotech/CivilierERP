@@ -1,731 +1,808 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
+  Landmark,
   Plus,
   Trash2,
   Pencil,
   Check,
   X,
-  GripVertical,
-  Percent,
-  DollarSign,
-  ChevronDown,
-  ChevronUp,
+  Loader2,
   ToggleLeft,
   ToggleRight,
-  Milestone,
-  AlertCircle,
+  Search,
+  IndianRupee,
+  Percent,
 } from "lucide-react";
 
+// Same mount path — no server.js change needed
 const API = "/api/payment-plan-master";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
+type ValueType = "percent" | "fixed";
 
-interface MilestoneRow {
-  id?: number;
-  paymentTerm: string;
-  valueType: "P" | "A";
-  value: string;
-}
-
-interface Plan {
-  _id: string;
-  planName: string;
-  isActive: boolean;
-  milestoneCount: number;
-  totalPercentage: number | null;
-}
-
-interface PlanDetail {
-  Id: number;
-  PlanName: string;
+interface PaymentTerm {
+  TermID: number;
+  TermName: string;
+  ValueType: ValueType;
+  TermValue: number;
   IsActive: boolean;
-  milestones: {
-    Id: number;
-    MilestoneNo: number;
-    PaymentTerm: string;
-    ValueType: "P" | "A";
-    Value: number;
-  }[];
+  CreatedAt: string;
+  UpdatedAt: string | null;
 }
 
-// ── API helpers ───────────────────────────────────────────────────────────────
+interface DraftRow {
+  TermName: string;
+  ValueType: ValueType;
+  TermValue: string;
+}
 
-async function fetchPlans(): Promise<Plan[]> {
+const EMPTY_DRAFT: DraftRow = {
+  TermName: "",
+  ValueType: "percent",
+  TermValue: "",
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+async function fetchTerms(): Promise<PaymentTerm[]> {
   const res = await fetchWithAuth(API);
-  if (!res.ok) throw new Error("Failed to fetch payment plans");
-  const data = await res.json();
-  return data.map((r: any) => ({
-    _id: String(r.Id),
-    planName: r.PlanName,
-    isActive: Boolean(r.IsActive),
-    milestoneCount: r.MilestoneCount ?? 0,
-    totalPercentage: r.TotalPercentage ?? null,
-  }));
-}
-
-async function fetchPlanDetail(id: string): Promise<PlanDetail> {
-  const res = await fetchWithAuth(`${API}/${id}`);
-  if (!res.ok) throw new Error("Failed to fetch plan details");
+  if (!res.ok) throw new Error("Failed to fetch payment terms");
   return res.json();
 }
 
-// ── Milestone Row Editor ──────────────────────────────────────────────────────
-
-const MilestoneEditor: React.FC<{
-  milestones: MilestoneRow[];
-  onChange: (rows: MilestoneRow[]) => void;
-}> = ({ milestones, onChange }) => {
-  const add = () =>
-    onChange([...milestones, { paymentTerm: "", valueType: "P", value: "" }]);
-
-  const remove = (i: number) =>
-    onChange(milestones.filter((_, idx) => idx !== i));
-
-  const update = (i: number, patch: Partial<MilestoneRow>) =>
-    onChange(milestones.map((m, idx) => (idx === i ? { ...m, ...patch } : m)));
-
-  const totalPct = milestones
-    .filter((m) => m.valueType === "P")
-    .reduce((sum, m) => sum + (parseFloat(m.value) || 0), 0);
-
-  const pctOver = totalPct > 100;
-
-  return (
-    <div className="space-y-2">
-      {/* Header */}
-      <div className="grid grid-cols-[24px_1fr_130px_100px_32px] gap-2 px-1 pb-1 border-b border-border">
-        <span />
-        <span className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
-          Payment Term
-        </span>
-        <span className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground text-center">
-          Type
-        </span>
-        <span className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground text-right">
-          Value
-        </span>
-        <span />
-      </div>
-
-      {/* Rows */}
-      {milestones.length === 0 && (
-        <div className="py-6 flex flex-col items-center gap-2 text-muted-foreground/60">
-          <Milestone size={28} strokeWidth={1.2} />
-          <p className="text-xs font-heading">No milestones yet</p>
-        </div>
-      )}
-
-      {milestones.map((m, i) => (
-        <div
-          key={i}
-          className="grid grid-cols-[24px_1fr_130px_100px_32px] gap-2 items-center group"
-        >
-          {/* Drag handle (visual only) */}
-          <div className="flex items-center justify-center text-muted-foreground/30 group-hover:text-muted-foreground/60 cursor-grab">
-            <GripVertical size={14} />
-          </div>
-
-          {/* Payment Term */}
-          <input
-            type="text"
-            value={m.paymentTerm}
-            onChange={(e) => update(i, { paymentTerm: e.target.value })}
-            placeholder={`Milestone ${i + 1} — e.g. On Booking`}
-            className="h-8 px-2.5 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-violet-500/50 focus:border-violet-500/60 transition-colors"
-          />
-
-          {/* Type toggler */}
-          <div className="flex items-center gap-1 justify-center">
-            <button
-              type="button"
-              onClick={() => update(i, { valueType: "P" })}
-              className={`flex items-center gap-1 px-2.5 h-8 rounded-l-lg border text-xs font-heading transition-colors ${
-                m.valueType === "P"
-                  ? "bg-violet-500/15 border-violet-500/50 text-violet-500"
-                  : "border-border text-muted-foreground hover:bg-muted"
-              }`}
-            >
-              <Percent size={11} />
-              <span>%</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => update(i, { valueType: "A" })}
-              className={`flex items-center gap-1 px-2.5 h-8 rounded-r-lg border-t border-b border-r text-xs font-heading transition-colors ${
-                m.valueType === "A"
-                  ? "bg-emerald-500/15 border-emerald-500/50 text-emerald-500"
-                  : "border-border text-muted-foreground hover:bg-muted"
-              }`}
-            >
-              <DollarSign size={11} />
-              <span>Amt</span>
-            </button>
-          </div>
-
-          {/* Value */}
-          <div className="relative">
-            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60 text-xs pointer-events-none">
-              {m.valueType === "P" ? "%" : "₹"}
-            </span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={m.value}
-              onChange={(e) => update(i, { value: e.target.value })}
-              placeholder="0"
-              className="h-8 w-full pl-6 pr-2 text-sm text-right rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-violet-500/50 focus:border-violet-500/60 transition-colors"
-            />
-          </div>
-
-          {/* Remove */}
-          <button
-            type="button"
-            onClick={() => remove(i)}
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-muted-foreground/40 hover:text-red-500 hover:bg-red-500/10 transition-colors"
-          >
-            <Trash2 size={13} />
-          </button>
-        </div>
-      ))}
-
-      {/* Add milestone button */}
-      <button
-        type="button"
-        onClick={add}
-        className="mt-1 flex items-center gap-1.5 text-xs font-heading text-violet-500 hover:text-violet-400 transition-colors px-1 py-1"
-      >
-        <Plus size={13} />
-        Add Milestone
-      </button>
-
-      {/* Percentage summary */}
-      {milestones.some((m) => m.valueType === "P") && (
-        <div
-          className={`flex items-center justify-between px-3 py-2 rounded-lg text-xs font-heading border mt-2 ${
-            pctOver
-              ? "border-red-500/40 bg-red-500/8 text-red-500"
-              : totalPct === 100
-                ? "border-emerald-500/40 bg-emerald-500/8 text-emerald-500"
-                : "border-border bg-muted/40 text-muted-foreground"
-          }`}
-        >
-          <span className="flex items-center gap-1.5">
-            {pctOver && <AlertCircle size={12} />}
-            Percentage total
-          </span>
-          <span className="font-bold tabular-nums">{totalPct.toFixed(2)}%</span>
-        </div>
-      )}
-    </div>
-  );
+const TYPE_META: Record<
+  ValueType,
+  { label: string; icon: React.ReactNode; badge: string }
+> = {
+  percent: {
+    label: "%",
+    icon: <Percent size={10} />,
+    badge: "bg-violet-500/10 text-violet-400 border-violet-500/20",
+  },
+  fixed: {
+    label: "Fixed",
+    icon: <IndianRupee size={10} />,
+    badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+  },
 };
 
-// ── Plan Form (create / edit) ─────────────────────────────────────────────────
-
-const PlanForm: React.FC<{
-  initial?: { planName: string; isActive: boolean; milestones: MilestoneRow[] };
-  onSave: (data: {
-    planName: string;
-    isActive: boolean;
-    milestones: MilestoneRow[];
-  }) => Promise<void>;
-  onCancel: () => void;
-  saving: boolean;
-}> = ({ initial, onSave, onCancel, saving }) => {
-  const [planName, setPlanName] = useState(initial?.planName ?? "");
-  const [isActive, setIsActive] = useState(initial?.isActive ?? true);
-  const [milestones, setMilestones] = useState<MilestoneRow[]>(
-    initial?.milestones ?? [],
-  );
-
-  const handleSubmit = async () => {
-    if (!planName.trim()) {
-      toast.error("Plan name is required");
-      return;
-    }
-    await onSave({ planName, isActive, milestones });
-  };
-
-  return (
-    <div className="space-y-4">
-      {/* Plan name + active toggle */}
-      <div className="flex items-center gap-3">
-        <div className="flex-1">
-          <label className="text-xs font-heading text-muted-foreground mb-1 block">
-            Plan Name <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            value={planName}
-            onChange={(e) => setPlanName(e.target.value)}
-            placeholder="e.g. Standard Construction Plan"
-            className="w-full h-9 px-3 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-violet-500/50 focus:border-violet-500/60 transition-colors"
-          />
-        </div>
-        <div className="flex flex-col items-center gap-0.5 pt-4">
-          <button
-            type="button"
-            onClick={() => setIsActive((p) => !p)}
-            className="text-muted-foreground hover:text-foreground transition-colors"
-          >
-            {isActive ? (
-              <ToggleRight size={28} className="text-violet-500" />
-            ) : (
-              <ToggleLeft size={28} />
-            )}
-          </button>
-          <span className="text-[10px] font-heading text-muted-foreground">
-            {isActive ? "Active" : "Inactive"}
-          </span>
-        </div>
-      </div>
-
-      {/* Milestone builder */}
-      <div>
-        <label className="text-xs font-heading text-muted-foreground mb-2 block">
-          Milestones
-        </label>
-        <div className="rounded-xl border border-border bg-card/50 p-3">
-          <MilestoneEditor milestones={milestones} onChange={setMilestones} />
-        </div>
-      </div>
-
-      {/* Actions */}
-      <div className="flex items-center justify-end gap-2 pt-1">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="flex items-center gap-1.5 px-4 h-8 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:bg-muted transition-colors"
-        >
-          <X size={13} /> Cancel
-        </button>
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={saving}
-          className="flex items-center gap-1.5 px-4 h-8 rounded-lg text-sm font-heading bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-50 transition-colors"
-        >
-          <Check size={13} />
-          {saving ? "Saving…" : "Save Plan"}
-        </button>
-      </div>
-    </div>
-  );
+const formatValue = (t: PaymentTerm) => {
+  if (t.ValueType === "percent") return `${t.TermValue}%`;
+  return `₹${Number(t.TermValue).toLocaleString("en-IN")}`;
 };
 
-// ── Plan Row (collapsed list item) ───────────────────────────────────────────
-
-const PlanRow: React.FC<{
-  plan: Plan;
-  onEdit: () => void;
-  onDelete: () => void;
-  expanded: boolean;
-  onToggle: () => void;
-  detail: PlanDetail | undefined;
-  loadingDetail: boolean;
-}> = ({
-  plan,
-  onEdit,
-  onDelete,
-  expanded,
-  onToggle,
-  detail,
-  loadingDetail,
-}) => (
-  <div
-    className={`rounded-xl border transition-all duration-200 ${
-      expanded ? "border-violet-500/30 shadow-sm" : "border-border"
-    } bg-card overflow-hidden`}
-  >
-    {/* Row header */}
-    <div className="flex items-center gap-3 px-4 py-3">
+const TypeToggle: React.FC<{
+  value: ValueType;
+  onChange: (v: ValueType) => void;
+}> = ({ value, onChange }) => (
+  <div className="flex items-center gap-1 justify-center flex-wrap">
+    {(Object.keys(TYPE_META) as ValueType[]).map((vt) => (
       <button
-        onClick={onToggle}
-        className="text-muted-foreground hover:text-foreground transition-colors"
+        key={vt}
+        onClick={() => onChange(vt)}
+        className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] transition-colors ${
+          value === vt
+            ? "bg-primary text-primary-foreground border-primary"
+            : "border-border bg-muted text-muted-foreground hover:bg-muted/80"
+        }`}
       >
-        {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+        {TYPE_META[vt].icon}
+        {TYPE_META[vt].label}
       </button>
-
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-heading font-semibold text-foreground truncate">
-            {plan.planName}
-          </span>
-          {!plan.isActive && (
-            <span className="text-[10px] font-heading px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
-              Inactive
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3 mt-0.5">
-          <span className="text-[11px] text-muted-foreground font-heading">
-            {plan.milestoneCount} milestone
-            {plan.milestoneCount !== 1 ? "s" : ""}
-          </span>
-          {plan.totalPercentage != null && plan.totalPercentage > 0 && (
-            <span
-              className={`text-[11px] font-heading tabular-nums ${
-                plan.totalPercentage === 100
-                  ? "text-emerald-500"
-                  : plan.totalPercentage > 100
-                    ? "text-red-500"
-                    : "text-amber-500"
-              }`}
-            >
-              {plan.totalPercentage.toFixed(1)}% total
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div className="flex items-center gap-1">
-        <button
-          onClick={onEdit}
-          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-        >
-          <Pencil size={13} />
-        </button>
-        <button
-          onClick={onDelete}
-          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors"
-        >
-          <Trash2 size={13} />
-        </button>
-      </div>
-    </div>
-
-    {/* Expanded milestone view */}
-    {expanded && (
-      <div className="border-t border-border px-4 py-3 bg-muted/20">
-        {loadingDetail ? (
-          <p className="text-xs text-muted-foreground py-2">Loading…</p>
-        ) : !detail ? (
-          <p className="text-xs text-muted-foreground py-2">
-            Could not load milestones.
-          </p>
-        ) : detail.milestones.length === 0 ? (
-          <p className="text-xs text-muted-foreground py-2 flex items-center gap-1.5">
-            <Milestone size={13} /> No milestones defined.
-          </p>
-        ) : (
-          <div className="space-y-1.5">
-            {detail.milestones.map((m) => (
-              <div
-                key={m.Id}
-                className="flex items-center gap-3 py-1.5 px-2 rounded-lg hover:bg-muted/50 transition-colors"
-              >
-                {/* Milestone number pip */}
-                <div className="w-5 h-5 rounded-full bg-violet-500/15 border border-violet-500/30 flex items-center justify-center flex-shrink-0">
-                  <span className="text-[9px] font-heading text-violet-500 font-bold">
-                    {m.MilestoneNo}
-                  </span>
-                </div>
-
-                <span className="flex-1 text-sm text-foreground font-heading">
-                  {m.PaymentTerm}
-                </span>
-
-                <div
-                  className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading font-semibold tabular-nums ${
-                    m.ValueType === "P"
-                      ? "bg-violet-500/12 text-violet-500"
-                      : "bg-emerald-500/12 text-emerald-500"
-                  }`}
-                >
-                  {m.ValueType === "P" ? (
-                    <Percent size={10} />
-                  ) : (
-                    <span className="text-[10px]">₹</span>
-                  )}
-                  {m.ValueType === "P"
-                    ? `${m.Value}%`
-                    : `₹${Number(m.Value).toLocaleString("en-IN")}`}
-                </div>
-              </div>
-            ))}
-
-            {/* Total bar for percentage-type plans */}
-            {detail.milestones.some((m) => m.ValueType === "P") &&
-              (() => {
-                const total = detail.milestones
-                  .filter((m) => m.ValueType === "P")
-                  .reduce((s, m) => s + Number(m.Value), 0);
-                const pct = Math.min(total, 100);
-                return (
-                  <div className="mt-3 pt-2 border-t border-border">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] font-heading text-muted-foreground uppercase tracking-wider">
-                        Percentage Coverage
-                      </span>
-                      <span
-                        className={`text-[11px] font-heading font-bold tabular-nums ${
-                          total === 100
-                            ? "text-emerald-500"
-                            : total > 100
-                              ? "text-red-500"
-                              : "text-amber-500"
-                        }`}
-                      >
-                        {total.toFixed(1)}%
-                      </span>
-                    </div>
-                    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          total === 100
-                            ? "bg-emerald-500"
-                            : total > 100
-                              ? "bg-red-500"
-                              : "bg-violet-500"
-                        }`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })()}
-          </div>
-        )}
-      </div>
-    )}
+    ))}
   </div>
 );
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
-
+// ─── Component ────────────────────────────────────────────────────────────────
 const PaymentPlanMaster: React.FC = () => {
   const queryClient = useQueryClient();
-  const [mode, setMode] = useState<"list" | "create" | "edit">("list");
-  const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
-  const [editDetail, setEditDetail] = useState<PlanDetail | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const [showAddRow, setShowAddRow] = useState(false);
+  const [draft, setDraft] = useState<DraftRow>(EMPTY_DRAFT);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState<DraftRow>(EMPTY_DRAFT);
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
+  const [filterType, setFilterType] = useState<"all" | ValueType>("all");
 
   const {
-    data: plans = [],
+    data: terms = [],
     isLoading,
     error,
-  } = useQuery({
-    queryKey: ["payment-plan-master"],
-    queryFn: fetchPlans,
+  } = useQuery<PaymentTerm[]>({
+    queryKey: ["payment-term-master"],
+    queryFn: fetchTerms,
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: expandedDetail, isLoading: loadingDetail } = useQuery({
-    queryKey: ["payment-plan-detail", expandedId],
-    queryFn: () => fetchPlanDetail(expandedId!),
-    enabled: !!expandedId,
-    staleTime: 2 * 60 * 1000,
-  });
-
-  const handleToggleExpand = (id: string) =>
-    setExpandedId((prev) => (prev === id ? null : id));
-
-  const handleCreate = useCallback(
-    async (data: {
-      planName: string;
-      isActive: boolean;
-      milestones: MilestoneRow[];
-    }) => {
-      setSaving(true);
-      try {
-        const res = await fetchWithAuth(API, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            PlanName: data.planName,
-            IsActive: data.isActive,
-            milestones: data.milestones.map((m) => ({
-              PaymentTerm: m.paymentTerm,
-              ValueType: m.valueType,
-              Value: parseFloat(m.value) || 0,
-            })),
-          }),
-        });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed");
-        toast.success("Payment plan created!");
-        await queryClient.invalidateQueries({
-          queryKey: ["payment-plan-master"],
-        });
-        setMode("list");
-      } catch (err: any) {
-        toast.error(err.message || "Operation failed");
-      } finally {
-        setSaving(false);
-      }
-    },
+  const invalidate = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: ["payment-term-master"] }),
     [queryClient],
   );
 
-  const handleUpdate = useCallback(
-    async (data: {
-      planName: string;
-      isActive: boolean;
-      milestones: MilestoneRow[];
-    }) => {
-      if (!editingPlan) return;
-      setSaving(true);
-      try {
-        const res = await fetchWithAuth(`${API}/${editingPlan._id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            PlanName: data.planName,
-            IsActive: data.isActive,
-            milestones: data.milestones.map((m) => ({
-              PaymentTerm: m.paymentTerm,
-              ValueType: m.valueType,
-              Value: parseFloat(m.value) || 0,
-            })),
-          }),
-        });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed");
-        toast.success("Payment plan updated!");
-        await queryClient.invalidateQueries({
-          queryKey: ["payment-plan-master"],
-        });
-        await queryClient.invalidateQueries({
-          queryKey: ["payment-plan-detail", editingPlan._id],
-        });
-        setMode("list");
-        setEditingPlan(null);
-        setEditDetail(null);
-      } catch (err: any) {
-        toast.error(err.message || "Operation failed");
-      } finally {
-        setSaving(false);
-      }
-    },
-    [editingPlan, queryClient],
+  const filtered = useMemo(
+    () =>
+      terms.filter((t) => {
+        const matchSearch =
+          !search || t.TermName.toLowerCase().includes(search.toLowerCase());
+        const matchType = filterType === "all" || t.ValueType === filterType;
+        return matchSearch && matchType;
+      }),
+    [terms, search, filterType],
   );
 
-  const handleDelete = useCallback(
-    async (plan: Plan) => {
-      if (!confirm(`Delete payment plan "${plan.planName}"?`)) return;
+  const totalPercent = useMemo(
+    () =>
+      terms
+        .filter((t) => t.ValueType === "percent" && t.IsActive)
+        .reduce((acc, t) => acc + t.TermValue, 0),
+    [terms],
+  );
+
+  const activeCount = useMemo(
+    () => terms.filter((t) => t.IsActive).length,
+    [terms],
+  );
+
+  const validate = (d: DraftRow): string | null => {
+    if (!d.TermName.trim()) return "Term name is required";
+    const v = parseFloat(d.TermValue);
+    if (isNaN(v) || v < 0) return "Value must be a positive number";
+    if (d.ValueType === "percent" && v > 100)
+      return "Percent cannot exceed 100";
+    return null;
+  };
+
+  // ── Add ────────────────────────────────────────────────────────────────────
+  const handleAdd = useCallback(async () => {
+    const err = validate(draft);
+    if (err) {
+      toast.error(err);
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetchWithAuth(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          TermName: draft.TermName.trim(),
+          ValueType: draft.ValueType,
+          TermValue: parseFloat(draft.TermValue),
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed");
+      toast.success("Payment term added");
+      await invalidate();
+      setDraft(EMPTY_DRAFT);
+      setShowAddRow(false);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to add term");
+    } finally {
+      setSaving(false);
+    }
+  }, [draft, invalidate]);
+
+  // ── Edit ───────────────────────────────────────────────────────────────────
+  const startEdit = useCallback((t: PaymentTerm) => {
+    setEditId(t.TermID);
+    setEditDraft({
+      TermName: t.TermName,
+      ValueType: t.ValueType,
+      TermValue: String(t.TermValue),
+    });
+    setShowAddRow(false);
+  }, []);
+
+  const handleEdit = useCallback(async () => {
+    const err = validate(editDraft);
+    if (err) {
+      toast.error(err);
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${editId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          TermName: editDraft.TermName.trim(),
+          ValueType: editDraft.ValueType,
+          TermValue: parseFloat(editDraft.TermValue),
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed");
+      toast.success("Term updated");
+      await invalidate();
+      setEditId(null);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to update term");
+    } finally {
+      setSaving(false);
+    }
+  }, [editId, editDraft, invalidate]);
+
+  // ── Toggle active ──────────────────────────────────────────────────────────
+  const handleToggle = useCallback(
+    async (term: PaymentTerm) => {
       try {
-        const res = await fetchWithAuth(`${API}/${plan._id}`, {
+        const res = await fetchWithAuth(`${API}/${term.TermID}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ IsActive: !term.IsActive }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || "Failed");
+        await invalidate();
+        toast.success(term.IsActive ? "Term deactivated" : "Term activated");
+      } catch (e: any) {
+        toast.error(e.message || "Failed");
+      }
+    },
+    [invalidate],
+  );
+
+  // ── Delete ─────────────────────────────────────────────────────────────────
+  const handleDelete = useCallback(
+    async (term: PaymentTerm) => {
+      if (!confirm(`Delete "${term.TermName}"?`)) return;
+      try {
+        const res = await fetchWithAuth(`${API}/${term.TermID}`, {
           method: "DELETE",
         });
         if (!res.ok) throw new Error((await res.json()).error || "Failed");
-        toast.success("Payment plan deleted");
-        if (expandedId === plan._id) setExpandedId(null);
-        await queryClient.invalidateQueries({
-          queryKey: ["payment-plan-master"],
-        });
-      } catch (err: any) {
-        toast.error(err.message || "Delete failed");
+        const data = await res.json();
+        await invalidate();
+        if (data.softDeleted)
+          toast.info("Term is in use — deactivated instead of deleted");
+        else toast.success("Term deleted");
+      } catch (e: any) {
+        toast.error(e.message || "Delete failed");
       }
     },
-    [queryClient, expandedId],
+    [invalidate],
   );
 
-  const startEdit = async (plan: Plan) => {
-    try {
-      const detail = await fetchPlanDetail(plan._id);
-      setEditingPlan(plan);
-      setEditDetail(detail);
-      setMode("edit");
-    } catch {
-      toast.error("Could not load plan details");
-    }
-  };
-
-  if (isLoading)
-    return (
-      <div className="p-6 text-muted-foreground">Loading payment plans…</div>
-    );
   if (error)
     return (
-      <div className="p-6 text-red-500">Failed to load payment plans.</div>
+      <div className="p-6 text-red-500 text-sm">
+        Failed to load payment terms.
+      </div>
     );
 
   return (
     <>
       <Breadcrumbs
-        items={["Dashboard", "Follow-Up", "Setup", "Payment Plan Master"]}
+        items={[
+          { label: "Dashboard" },
+          { label: "Follow-Up" },
+          { label: "Setup" },
+          { label: "Payment Plan Master" },
+        ]}
       />
 
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-heading font-bold text-foreground">
-          Payment Plan Master
-        </h1>
-        {mode === "list" && (
-          <button
-            onClick={() => setMode("create")}
-            className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-sm font-heading bg-violet-600 text-white hover:bg-violet-500 transition-colors"
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+        <div>
+          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+            <Landmark className="w-5 h-5 text-primary" />
+            Payment Plan Master
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Define reusable payment milestone terms for bookings &amp; units
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            setShowAddRow(true);
+            setEditId(null);
+          }}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-all shadow-sm self-start sm:self-auto"
+        >
+          <Plus className="w-4 h-4" />
+          Add Milestone
+        </button>
+      </div>
+
+      {/* ── Summary chips ──────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 mb-5 flex-wrap">
+        <span className="px-3 py-1 rounded-full text-xs font-heading bg-primary/10 text-primary border border-primary/20">
+          {activeCount} active
+        </span>
+        {totalPercent > 0 && (
+          <span
+            className={`px-3 py-1 rounded-full text-xs font-heading border ${
+              totalPercent === 100
+                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                : totalPercent > 100
+                  ? "bg-red-500/10 text-red-400 border-red-500/20"
+                  : "bg-yellow-500/10 text-yellow-400 border-yellow-500/20"
+            }`}
           >
-            <Plus size={14} />
-            New Plan
-          </button>
+            % total: {totalPercent.toFixed(2)}%
+            {totalPercent === 100 ? " ✓" : totalPercent > 100 ? " !" : ""}
+          </span>
         )}
       </div>
 
-      {/* Create / Edit form */}
-      {(mode === "create" || mode === "edit") && (
-        <div className="mb-6 rounded-xl border border-violet-500/25 bg-card p-5 shadow-sm">
-          <h2 className="text-sm font-heading font-semibold text-foreground mb-4 flex items-center gap-2">
-            <Milestone size={15} className="text-violet-500" />
-            {mode === "create" ? "New Payment Plan" : "Edit Payment Plan"}
-          </h2>
-          <PlanForm
-            initial={
-              mode === "edit" && editDetail
-                ? {
-                    planName: editDetail.PlanName,
-                    isActive: editDetail.IsActive,
-                    milestones: editDetail.milestones.map((m) => ({
-                      id: m.Id,
-                      paymentTerm: m.PaymentTerm,
-                      valueType: m.ValueType,
-                      value: String(m.Value),
-                    })),
-                  }
-                : undefined
-            }
-            onSave={mode === "create" ? handleCreate : handleUpdate}
-            onCancel={() => {
-              setMode("list");
-              setEditingPlan(null);
-              setEditDetail(null);
-            }}
-            saving={saving}
-          />
-        </div>
-      )}
-
-      {/* Plans list */}
-      {plans.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground/50">
-          <Milestone size={40} strokeWidth={1} />
-          <p className="text-sm font-heading">No payment plans yet</p>
-          <button
-            onClick={() => setMode("create")}
-            className="text-xs font-heading text-violet-500 hover:text-violet-400 transition-colors"
-          >
-            Create your first plan →
-          </button>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {plans.map((plan) => (
-            <PlanRow
-              key={plan._id}
-              plan={plan}
-              expanded={expandedId === plan._id}
-              onToggle={() => handleToggleExpand(plan._id)}
-              detail={expandedId === plan._id ? expandedDetail : undefined}
-              loadingDetail={loadingDetail && expandedId === plan._id}
-              onEdit={() => startEdit(plan)}
-              onDelete={() => handleDelete(plan)}
+      {/* ── Table card ─────────────────────────────────────────────────────── */}
+      <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">
+        {/* Toolbar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-b border-border bg-card/60">
+          <div className="relative w-full sm:w-52">
+            <Search
+              size={12}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
             />
-          ))}
+            <input
+              placeholder="Search term…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-8 pr-3 py-1.5 rounded-lg text-xs bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+          <div className="flex items-center gap-1 flex-wrap">
+            {(["all", "percent", "fixed"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilterType(f)}
+                className={`px-2.5 py-1 text-[11px] rounded-lg border whitespace-nowrap transition-colors ${
+                  filterType === f
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border bg-muted text-muted-foreground hover:bg-muted/80"
+                }`}
+              >
+                {f === "all"
+                  ? "All"
+                  : f === "percent"
+                    ? "% Percent"
+                    : "₹ Fixed"}
+              </button>
+            ))}
+          </div>
         </div>
-      )}
+
+        {/* ── Mobile cards (< sm) ────────────────────────────────────────────── */}
+        <div className="sm:hidden divide-y divide-border/40">
+          {/* Add row — mobile */}
+          {showAddRow && (
+            <div className="p-4 bg-primary/5 border-b border-primary/30 space-y-3">
+              <input
+                autoFocus
+                placeholder="Payment term name"
+                value={draft.TermName}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, TermName: e.target.value }))
+                }
+                className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <TypeToggle
+                value={draft.ValueType}
+                onChange={(vt) => setDraft((d) => ({ ...d, ValueType: vt }))}
+              />
+              <input
+                type="number"
+                min={0}
+                placeholder="0"
+                value={draft.TermValue}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, TermValue: e.target.value }))
+                }
+                className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground text-right focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={handleAdd}
+                  disabled={saving}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50"
+                >
+                  {saving ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Check size={14} />
+                  )}{" "}
+                  Save
+                </button>
+                <button
+                  onClick={() => {
+                    setShowAddRow(false);
+                    setDraft(EMPTY_DRAFT);
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border border-border bg-muted text-muted-foreground text-sm"
+                >
+                  <X size={14} /> Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isLoading ? (
+            <div className="py-16 flex justify-center">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="py-16 text-center text-muted-foreground">
+              <Landmark className="w-10 h-10 opacity-20 mx-auto mb-2" />
+              <p className="text-sm font-heading">
+                {terms.length === 0 ? "No payment terms yet" : "No results"}
+              </p>
+            </div>
+          ) : (
+            filtered.map((term) => {
+              const isEditing = editId === term.TermID;
+              const meta = TYPE_META[term.ValueType];
+              return (
+                <div
+                  key={term.TermID}
+                  className={`p-4 space-y-3 ${!term.IsActive ? "opacity-50" : ""} ${isEditing ? "bg-primary/5" : ""}`}
+                >
+                  {isEditing ? (
+                    <>
+                      <input
+                        autoFocus
+                        value={editDraft.TermName}
+                        onChange={(e) =>
+                          setEditDraft((d) => ({
+                            ...d,
+                            TermName: e.target.value,
+                          }))
+                        }
+                        className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                      <TypeToggle
+                        value={editDraft.ValueType}
+                        onChange={(vt) =>
+                          setEditDraft((d) => ({ ...d, ValueType: vt }))
+                        }
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        value={editDraft.TermValue}
+                        onChange={(e) =>
+                          setEditDraft((d) => ({
+                            ...d,
+                            TermValue: e.target.value,
+                          }))
+                        }
+                        className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground text-right focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleEdit}
+                          disabled={saving}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50"
+                        >
+                          {saving ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Check size={14} />
+                          )}{" "}
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setEditId(null)}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border border-border bg-muted text-muted-foreground text-sm"
+                        >
+                          <X size={14} /> Cancel
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-body text-foreground truncate">
+                          {term.TermName}
+                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-heading ${meta.badge}`}
+                          >
+                            {meta.icon} {meta.label}
+                          </span>
+                          <span className="font-mono font-semibold text-sm text-foreground">
+                            {formatValue(term)}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => handleToggle(term)}
+                          className="text-muted-foreground hover:text-primary transition-colors"
+                        >
+                          {term.IsActive ? (
+                            <ToggleRight size={22} className="text-primary" />
+                          ) : (
+                            <ToggleLeft size={22} />
+                          )}
+                        </button>
+                        <button
+                          onClick={() => startEdit(term)}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground hover:text-primary hover:border-primary/40 transition-all"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(term)}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground hover:text-red-400 hover:border-red-400/40 transition-all"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* ── Desktop table (>= sm) ─────────────────────────────────────────── */}
+        <div className="hidden sm:block overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="bg-muted/30 border-b border-border text-xs uppercase tracking-wide">
+                <th className="text-left px-5 py-3 font-heading font-semibold text-muted-foreground">
+                  Payment Term Name
+                </th>
+                <th className="px-4 py-3 font-heading font-semibold text-muted-foreground text-center w-44">
+                  Type
+                </th>
+                <th className="px-4 py-3 font-heading font-semibold text-muted-foreground text-right w-36">
+                  Value
+                </th>
+                <th className="px-4 py-3 font-heading font-semibold text-muted-foreground text-center w-20">
+                  Active
+                </th>
+                <th className="px-4 py-3 font-heading font-semibold text-muted-foreground text-center w-24">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {/* Add row */}
+              {showAddRow && (
+                <tr className="border-b border-primary/30 bg-primary/5">
+                  <td className="px-5 py-2.5">
+                    <input
+                      autoFocus
+                      placeholder="e.g. On Foundation"
+                      value={draft.TermName}
+                      onChange={(e) =>
+                        setDraft((d) => ({ ...d, TermName: e.target.value }))
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleAdd();
+                        if (e.key === "Escape") {
+                          setShowAddRow(false);
+                          setDraft(EMPTY_DRAFT);
+                        }
+                      }}
+                      className="w-full px-3 py-1.5 rounded-lg text-sm bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <TypeToggle
+                      value={draft.ValueType}
+                      onChange={(vt) =>
+                        setDraft((d) => ({ ...d, ValueType: vt }))
+                      }
+                    />
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <input
+                      type="number"
+                      min={0}
+                      placeholder="0"
+                      value={draft.TermValue}
+                      onChange={(e) =>
+                        setDraft((d) => ({ ...d, TermValue: e.target.value }))
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleAdd();
+                      }}
+                      className="w-full px-3 py-1.5 rounded-lg text-sm text-right bg-muted border border-border text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </td>
+                  <td />
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center justify-center gap-1.5">
+                      <button
+                        onClick={handleAdd}
+                        disabled={saving}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-all"
+                      >
+                        {saving ? (
+                          <Loader2 size={13} className="animate-spin" />
+                        ) : (
+                          <Check size={13} />
+                        )}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowAddRow(false);
+                          setDraft(EMPTY_DRAFT);
+                        }}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground hover:bg-muted/80 transition-all"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )}
+
+              {/* Data rows */}
+              {isLoading ? (
+                <tr>
+                  <td colSpan={5} className="py-16 text-center">
+                    <Loader2 className="w-6 h-6 animate-spin text-muted-foreground mx-auto" />
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="py-16 text-center text-muted-foreground"
+                  >
+                    <Landmark className="w-10 h-10 opacity-20 mx-auto mb-2" />
+                    <p className="text-sm font-heading">
+                      {terms.length === 0
+                        ? "No payment terms yet — add your first milestone"
+                        : "No results match your filter"}
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((term) => {
+                  const isEditing = editId === term.TermID;
+                  const meta = TYPE_META[term.ValueType];
+                  return (
+                    <tr
+                      key={term.TermID}
+                      className={`border-b border-border/40 transition-colors ${isEditing ? "bg-primary/5 border-primary/20" : "hover:bg-muted/20"} ${!term.IsActive ? "opacity-50" : ""}`}
+                    >
+                      {/* Name */}
+                      <td className="px-5 py-2.5">
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            value={editDraft.TermName}
+                            onChange={(e) =>
+                              setEditDraft((d) => ({
+                                ...d,
+                                TermName: e.target.value,
+                              }))
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleEdit();
+                              if (e.key === "Escape") setEditId(null);
+                            }}
+                            className="w-full px-3 py-1.5 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        ) : (
+                          <span className="font-body text-foreground">
+                            {term.TermName}
+                          </span>
+                        )}
+                      </td>
+                      {/* Type */}
+                      <td className="px-4 py-2.5 text-center">
+                        {isEditing ? (
+                          <TypeToggle
+                            value={editDraft.ValueType}
+                            onChange={(vt) =>
+                              setEditDraft((d) => ({ ...d, ValueType: vt }))
+                            }
+                          />
+                        ) : (
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-heading ${meta.badge}`}
+                          >
+                            {meta.icon} {meta.label}
+                          </span>
+                        )}
+                      </td>
+                      {/* Value */}
+                      <td className="px-4 py-2.5 text-right">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            min={0}
+                            value={editDraft.TermValue}
+                            onChange={(e) =>
+                              setEditDraft((d) => ({
+                                ...d,
+                                TermValue: e.target.value,
+                              }))
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleEdit();
+                            }}
+                            className="w-full px-3 py-1.5 rounded-lg text-sm text-right bg-muted border border-border text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        ) : (
+                          <span className="font-mono font-semibold text-foreground">
+                            {formatValue(term)}
+                          </span>
+                        )}
+                      </td>
+                      {/* Active */}
+                      <td className="px-4 py-2.5 text-center">
+                        {!isEditing && (
+                          <button
+                            onClick={() => handleToggle(term)}
+                            className="text-muted-foreground hover:text-primary transition-colors"
+                          >
+                            {term.IsActive ? (
+                              <ToggleRight size={22} className="text-primary" />
+                            ) : (
+                              <ToggleLeft size={22} />
+                            )}
+                          </button>
+                        )}
+                      </td>
+                      {/* Actions */}
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center justify-center gap-1.5">
+                          {isEditing ? (
+                            <>
+                              <button
+                                onClick={handleEdit}
+                                disabled={saving}
+                                className="w-7 h-7 flex items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-all"
+                              >
+                                {saving ? (
+                                  <Loader2 size={13} className="animate-spin" />
+                                ) : (
+                                  <Check size={13} />
+                                )}
+                              </button>
+                              <button
+                                onClick={() => setEditId(null)}
+                                className="w-7 h-7 flex items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground hover:bg-muted/80 transition-all"
+                              >
+                                <X size={13} />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => startEdit(term)}
+                                className="w-7 h-7 flex items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground hover:text-primary hover:border-primary/40 transition-all"
+                              >
+                                <Pencil size={13} />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(term)}
+                                className="w-7 h-7 flex items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground hover:text-red-400 hover:border-red-400/40 transition-all"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Footer */}
+        {!isLoading && terms.length > 0 && (
+          <div className="px-5 py-3 border-t border-border bg-muted/20">
+            <p className="text-xs text-muted-foreground font-body">
+              {filtered.length} of {terms.length} terms shown
+              {filterType !== "all" || search ? " (filtered)" : ""}
+            </p>
+          </div>
+        )}
+      </div>
     </>
   );
 };

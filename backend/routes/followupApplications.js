@@ -26,7 +26,6 @@ const LIST_COLUMNS = `
   um.UnitName AS UnitName,
   bm.BlockName,
   fa.CompanyId,
-  cm.Name AS CompanyName,
   fa.PreferredUnitType,
   fa.BudgetAmount,
   fa.Status,
@@ -146,7 +145,7 @@ async function buildCommonOptions() {
     `),
     pool.request().query(`
       SELECT Id, Name
-      FROM dbo.CompanyMaster
+      FROM (SELECT 0 AS Id, '' AS Name WHERE 1=0) AS _empty
       WHERE ISNULL(IsDeleted, 0) = 0 AND ISNULL(IsActive, 1) = 1
       ORDER BY Name
     `),
@@ -279,7 +278,6 @@ router.get(
           OR fa.Email LIKE @Search
           OR fa.PanNumber LIKE @Search
           OR pm.name LIKE @Search
-          OR cm.Name LIKE @Search
         )
       `);
       }
@@ -300,7 +298,6 @@ router.get(
       SELECT COUNT(*) AS Total
       FROM dbo.FollowupApplications fa
       LEFT JOIN dbo.enterprise pm ON pm.id = fa.ProjectId
-      LEFT JOIN dbo.CompanyMaster cm ON cm.Id = fa.CompanyId
       LEFT JOIN dbo.UnitMaster    um ON um.Id = fa.UnitId
       LEFT JOIN dbo.BlockMaster   bm ON bm.Id = um.BlockId
       ${whereClause}
@@ -312,8 +309,7 @@ router.get(
         SELECT ${LIST_COLUMNS}
         FROM dbo.FollowupApplications fa
         LEFT JOIN dbo.enterprise pm ON pm.id = fa.ProjectId
-        LEFT JOIN dbo.CompanyMaster cm ON cm.Id = fa.CompanyId
-        LEFT JOIN dbo.users u ON u.id = fa.AssignedTo
+          LEFT JOIN dbo.users u ON u.id = fa.AssignedTo
         LEFT JOIN dbo.UnitMaster    um ON um.Id = fa.UnitId
         LEFT JOIN dbo.BlockMaster   bm ON bm.Id = um.BlockId
         ${whereClause}
@@ -352,8 +348,7 @@ router.get(
         SELECT TOP 1 ${LIST_COLUMNS}
         FROM dbo.FollowupApplications fa
         LEFT JOIN dbo.enterprise pm ON pm.id = fa.ProjectId
-        LEFT JOIN dbo.CompanyMaster cm ON cm.Id = fa.CompanyId
-        LEFT JOIN dbo.users u ON u.id = fa.AssignedTo
+          LEFT JOIN dbo.users u ON u.id = fa.AssignedTo
         LEFT JOIN dbo.UnitMaster    um ON um.Id = fa.UnitId
         LEFT JOIN dbo.BlockMaster   bm ON bm.Id = um.BlockId
         WHERE fa.Id = @Id AND fa.IsDeleted = 0

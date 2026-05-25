@@ -91,6 +91,9 @@ const MetricsDashboard = () => {
       try {
         let data: SystemMetrics;
         if (demo) {
+          if (!import.meta.env.DEV) {
+            throw new Error("Demo mode is available only in development");
+          }
           data = getDemoMetrics();
         } else {
           data = await fetchMetrics(baseURL, token);
@@ -251,13 +254,15 @@ const MetricsDashboard = () => {
                 )}
                 {live ? "Stop live" : "Start live"}
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => fetchData(true)}
-                disabled={loading}
-              >
-                Demo
-              </Button>
+              {import.meta.env.DEV && (
+                <Button
+                  variant="outline"
+                  onClick={() => fetchData(true)}
+                  disabled={loading}
+                >
+                  Demo
+                </Button>
+              )}
             </div>
             {error && (
               <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-md">
@@ -482,7 +487,9 @@ const MetricsDashboard = () => {
             <p className="text-muted-foreground mb-6">
               Connect to your backend and watch your metrics live
             </p>
-            <Button onClick={() => fetchData(true)}>Try Demo Mode</Button>
+            {import.meta.env.DEV && (
+              <Button onClick={() => fetchData(true)}>Try Demo Mode</Button>
+            )}
           </Card>
         )}
       </div>

@@ -125,6 +125,55 @@ const OUTCOME_CONFIG: Record<
   },
 };
 
+// Maps the UI outcome (rich) → backend LogType (email|call|sms|note|payment)
+const OUTCOME_TO_LOG_TYPE: Record<CallOutcome, string> = {
+  connected: "call",
+  no_answer: "call",
+  callback: "call",
+  voicemail: "call",
+  note: "note",
+};
+
+// Outcome tag embedded at the start of notes so we can recover it on read-back
+// Format: "[outcome_key] user notes here"
+const OUTCOME_TAG_RE = /^\[([a-z_]+)\] ?/;
+
+function buildNotes(outcome: CallOutcome, userNotes: string): string {
+  const body = userNotes.trim();
+  return body ? `[${outcome}] ${body}` : `[${outcome}]`;
+}
+
+function parseNotes(rawNotes: string): { outcome: CallOutcome; notes: string } {
+  const match = rawNotes?.match(OUTCOME_TAG_RE);
+  if (match && match[1] in OUTCOME_CONFIG) {
+    return {
+      outcome: match[1] as CallOutcome,
+      notes: rawNotes.replace(OUTCOME_TAG_RE, "").trim(),
+    };
+  }
+  // Legacy entries that used human label prefix ("Connected — ...")
+  for (const [key, cfg] of Object.entries(OUTCOME_CONFIG) as [
+    CallOutcome,
+    (typeof OUTCOME_CONFIG)[CallOutcome],
+  ][]) {
+    const legacyPrefix = cfg.label + " — ";
+    if (rawNotes?.startsWith(legacyPrefix)) {
+      return {
+        outcome: key,
+        notes: rawNotes.slice(legacyPrefix.length).trim(),
+      };
+    }
+  }
+  // Fallback: derive from DB type
+  return { outcome: "note", notes: rawNotes ?? "" };
+}
+
+// Normalise a stored DB type back to a display CallOutcome (used as last-resort fallback)
+function toDisplayOutcome(type: string): CallOutcome {
+  if (type in OUTCOME_CONFIG) return type as CallOutcome;
+  return "connected"; // "call" stored type default
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function initials(name: string) {
@@ -239,7 +288,10 @@ function CallCard({
   entry: CallEntry;
   onDelete: () => void;
 }) {
-  const cfg = OUTCOME_CONFIG[entry.type] ?? OUTCOME_CONFIG.note;
+  const { outcome: displayOutcome, notes: cleanNotes } = parseNotes(
+    entry.notes,
+  );
+  const cfg = OUTCOME_CONFIG[displayOutcome];
   const color = avatarColor(entry.customer);
 
   return (
@@ -295,7 +347,7 @@ function CallCard({
         </div>
 
         {/* Notes */}
-        {entry.notes && <p className="wc-notes">{entry.notes}</p>}
+        {cleanNotes && <p className="wc-notes">{cleanNotes}</p>}
 
         {/* Delete (hover reveal) */}
         <button
@@ -369,16 +421,24 @@ export function WelcomeCallsPage() {
 
   const stats = useMemo(() => {
     const total = entries.length;
-    const connected = entries.filter((e) => e.type === "connected").length;
-    const noAnswer = entries.filter((e) => e.type === "no_answer").length;
-    const callback = entries.filter((e) => e.type === "callback").length;
+    const connected = entries.filter(
+      (e) => parseNotes(e.notes).outcome === "connected",
+    ).length;
+    const noAnswer = entries.filter(
+      (e) => parseNotes(e.notes).outcome === "no_answer",
+    ).length;
+    const callback = entries.filter(
+      (e) => parseNotes(e.notes).outcome === "callback",
+    ).length;
     const rate = total > 0 ? Math.round((connected / total) * 100) : 0;
     return { total, connected, noAnswer, callback, rate };
   }, [entries]);
 
   const filtered = useMemo(() => {
     return entries.filter((e) => {
-      const matchOutcome = outcomeFilter === "all" || e.type === outcomeFilter;
+      const matchOutcome =
+        outcomeFilter === "all" ||
+        parseNotes(e.notes).outcome === outcomeFilter;
       const q = search.toLowerCase();
       const matchSearch =
         !q || [e.customer, e.notes, e.user].join(" ").toLowerCase().includes(q);
@@ -704,6 +764,7 @@ export function WelcomeCallsPage() {
           align-items: flex-end;
           gap: 4px;
           flex-shrink: 0;
+          padding-right: 2px;
         }
 
         /* Outcome chip */
@@ -747,7 +808,7 @@ export function WelcomeCallsPage() {
         /* Delete btn */
         .wc-delete-btn {
           position: absolute;
-          top: 10px; right: 10px;
+          bottom: 10px; right: 10px;
           background: none;
           border: none;
           cursor: pointer;
@@ -1317,11 +1378,11 @@ export function WelcomeCallsPage() {
               onClick={() =>
                 createMutation.mutate({
                   date: form.date || undefined,
-                  type: form.outcome,
+                  type: OUTCOME_TO_LOG_TYPE[form.outcome],
                   module: "welcome_call",
                   customer: form.customer.trim(),
                   amount: form.duration ? Number(form.duration) : undefined,
-                  notes: form.notes.trim() || undefined,
+                  notes: buildNotes(form.outcome, form.notes),
                 })
               }
               className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-[9px] gap-2"

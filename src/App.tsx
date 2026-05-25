@@ -171,6 +171,15 @@ const TicketResolution = lazy(() => import("./pages/ticket/TicketResolution"));
 const Users = lazy(() => import("./pages/Users"));
 const MenuRights = lazy(() => import("./pages/admin/MenuRights"));
 const WidgetRights = lazy(() => import("./pages/admin/WidgetsRights"));
+const WidgetCatalogAdmin = lazy(() => import("./pages/admin/WidgetCatalogAdmin"));
+const ContractorCategoryAdmin = lazy(() => import("./pages/admin/masters/ContractorCategoryAdmin"));
+const PageDefinitionsAdmin = lazy(
+  () => import("./pages/admin/masters/PageDefinitionsAdmin"),
+);
+const IntegrationChannelsAdmin = lazy(
+  () => import("./pages/admin/masters/IntegrationChannelsAdmin"),
+);
+const GodownAdmin = lazy(() => import("./pages/admin/masters/GodownAdmin"));
 const FinYearRights = lazy(() => import("./pages/admin/FinYearRights"));
 const ApprovalSetup = lazy(() => import("./pages/admin/ApprovalSetup"));
 const PostApprovalRights = lazy(
@@ -1281,6 +1290,46 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <WidgetRights />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/widget-catalog"
+        element={
+          <AdminRoute>
+            <WidgetCatalogAdmin />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/page-definitions"
+        element={
+          <AdminRoute>
+            <PageDefinitionsAdmin />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/masters/integration-channels"
+        element={
+          <AdminRoute>
+            <IntegrationChannelsAdmin />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/masters/contractor-categories"
+        element={
+          <AdminRoute>
+            <ContractorCategoryAdmin />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/masters/godowns"
+        element={
+          <AdminRoute>
+            <GodownAdmin />
           </AdminRoute>
         }
       />

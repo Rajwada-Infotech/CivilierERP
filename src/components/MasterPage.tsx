@@ -216,17 +216,20 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
   // keep internal data in sync when initialData changes (e.g. after DB refetch)
   const prevInitialRef = React.useRef<Record<string, unknown>[]>([]);
+  // tracks whether we have ever received a non-empty initialData — once true,
+  // an empty array arriving later is a real "clear" event, not the mount default
+  const hasSeenDataRef = React.useRef(false);
   React.useEffect(() => {
     const prev = prevInitialRef.current;
-    // Guard: never replace existing rows with a transient empty array that
-    // arrives while invalidateQueries is mid-flight. Without this the list
-    // blanks out briefly every time a record is unlocked or updated.
-    if (initialData.length === 0 && prev.length > 0) return;
+    if (initialData.length > 0) hasSeenDataRef.current = true;
     const same =
-      prev.length === initialData.length &&
-      initialData.every(
-        (row, i) => JSON.stringify(row) === JSON.stringify(prev[i]),
-      );
+      // if both are empty AND we have never seen real data, skip (mount default)
+      prev.length === 0 && initialData.length === 0 && !hasSeenDataRef.current
+        ? true
+        : prev.length === initialData.length &&
+          initialData.every(
+            (row, i) => JSON.stringify(row) === JSON.stringify(prev[i]),
+          );
     if (!same) {
       prevInitialRef.current = initialData;
       setData(seedWithIds(initialData));
