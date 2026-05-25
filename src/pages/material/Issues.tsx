@@ -1504,14 +1504,15 @@ export default function Issues() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "Issues"]} />
+      <div className="relative space-y-8 mt-6">
 
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+      {/* ── Page header ── */}
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <PackageMinus size={22} className="text-primary" />
+          <h1 className="text-xl font-heading font-bold text-foreground">
             Material Issues
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p className="text-xs text-muted-foreground mt-0.5">
             Issue stock items to projects with real-time availability tracking.
           </p>
         </div>
@@ -1528,6 +1529,7 @@ export default function Issues() {
       {viewMode === "list" && IssueList()}
       {viewMode === "form" && IssueForm()}
       {viewMode === "view" && IssueView()}
+      </div>{/* end space-y-8 */}
     </>
   );
 }

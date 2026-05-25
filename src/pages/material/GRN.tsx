@@ -557,15 +557,25 @@ export default function GRN() {
   };
 
   if (loadingGrns) {
-    return <div className="p-6 text-muted-foreground">Loading GRNs...</div>;
+    return <div className="text-muted-foreground mt-6">Loading GRNs...</div>;
   }
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "GRN"]} />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-6">
-        Goods Receipt Note (GRN)
-      </h1>
+      <div className="relative space-y-8 mt-6">
+
+      {/* ── Page header ── */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-heading font-bold text-foreground">
+            Goods Receipt Note
+          </h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Record and manage goods received against purchase orders.
+          </p>
+        </div>
+      </div>
 
       <div className="space-y-6">
         {/* Form Card */}
@@ -1259,6 +1269,7 @@ export default function GRN() {
             </div>
           );
         })()}
+      </div>{/* end space-y-8 */}
     </>
   );
 }
