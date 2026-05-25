@@ -62,6 +62,8 @@ interface Agreement {
   UnitSelectionId: number | null;
   SelectionNo: string | null;
   UnitNo: string | null;
+  BookingId: number | null;
+  BookingNo: string | null;
   ProjectId: number | null;
   ProjectName: string | null;
   CompanyId: number | null;
@@ -94,6 +96,15 @@ interface OptionUnitSelection {
   CompanyId: number | null;
 }
 
+interface OptionBooking {
+  Id: number;
+  BookingNo: string;
+  UnitNo: string;
+  ApplicantId: number;
+  ProjectId: number | null;
+  CompanyId: number | null;
+}
+
 interface OptionProject {
   Id: number;
   Name: string;
@@ -106,6 +117,7 @@ interface OptionCompany {
 interface MetaOptions {
   applicants: OptionApplicant[];
   unitSelections: OptionUnitSelection[];
+  bookings: OptionBooking[];
   projects: OptionProject[];
   companies: OptionCompany[];
   statusOptions: AgreementStatus[];
@@ -114,6 +126,7 @@ interface MetaOptions {
 interface FormState {
   ApplicantId: string;
   UnitSelectionId: string;
+  BookingId: string;
   ProjectId: string;
   CompanyId: string;
   AgreementDate: string;
@@ -127,6 +140,7 @@ interface FormState {
 const EMPTY_FORM: FormState = {
   ApplicantId: "",
   UnitSelectionId: "",
+  BookingId: "",
   ProjectId: "",
   CompanyId: "",
   AgreementDate: "",
@@ -451,6 +465,18 @@ export function AgreementsPage() {
     }));
   }, [meta, form.ApplicantId]);
 
+  const bookingItems: ComboItem[] = useMemo(() => {
+    const all = meta?.bookings ?? [];
+    const filtered = form.ApplicantId
+      ? all.filter((b) => String(b.ApplicantId) === form.ApplicantId)
+      : all;
+    return filtered.map((b) => ({
+      value: String(b.Id),
+      label: b.BookingNo,
+      sub: b.UnitNo,
+    }));
+  }, [meta, form.ApplicantId]);
+
   const projectItems: ComboItem[] = useMemo(
     () =>
       (meta?.projects ?? []).map((p) => ({
@@ -480,6 +506,7 @@ export function AgreementsPage() {
           if (appl.CompanyId) next.CompanyId = String(appl.CompanyId);
         }
         next.UnitSelectionId = "";
+        next.BookingId = "";
       }
       // auto-fill project/company from unit selection
       if (k === "UnitSelectionId") {
@@ -504,6 +531,7 @@ export function AgreementsPage() {
     setForm({
       ApplicantId: String(ag.ApplicantId),
       UnitSelectionId: ag.UnitSelectionId ? String(ag.UnitSelectionId) : "",
+      BookingId: ag.BookingId ? String(ag.BookingId) : "",
       ProjectId: ag.ProjectId ? String(ag.ProjectId) : "",
       CompanyId: ag.CompanyId ? String(ag.CompanyId) : "",
       AgreementDate: ag.AgreementDate ?? "",
@@ -521,6 +549,7 @@ export function AgreementsPage() {
     return {
       ApplicantId: form.ApplicantId || null,
       UnitSelectionId: form.UnitSelectionId || null,
+      BookingId: form.BookingId || null,
       ProjectId: form.ProjectId || null,
       CompanyId: form.CompanyId || null,
       AgreementDate: form.AgreementDate || null,
@@ -1327,6 +1356,21 @@ export function AgreementsPage() {
                 items={unitItems}
                 placeholder={
                   form.ApplicantId ? "Select unit…" : "Select applicant first"
+                }
+                disabled={!form.ApplicantId}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Booking</Label>
+              <Combobox
+                value={form.BookingId}
+                onChange={(v) => set("BookingId", v)}
+                items={bookingItems}
+                placeholder={
+                  form.ApplicantId
+                    ? "Select booking…"
+                    : "Select applicant first"
                 }
                 disabled={!form.ApplicantId}
               />
