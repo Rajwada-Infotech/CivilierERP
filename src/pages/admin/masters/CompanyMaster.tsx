@@ -19,33 +19,9 @@ import {
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
+import { useLookup } from "@/hooks/useLookup";
 
-const GST_STATUSES = ["Registered", "Unregistered"];
-const GSTIN_REGEX =
-  /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
-
-const CO_TYPES = [
-  "Private Limited",
-  "Public Limited",
-  "LLP",
-  "Partnership",
-  "Proprietorship",
-  "Section 8",
-  "OPC",
-];
-const INDUSTRIES = [
-  "Manufacturing",
-  "IT & Technology",
-  "Infrastructure",
-  "Retail",
-  "Finance",
-  "Healthcare",
-  "Education",
-  "Logistics",
-  "Real Estate",
-  "Other",
-];
-const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED"];
+const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
 interface Company {
   Id?: number;
@@ -544,6 +520,12 @@ export default function CompanyMaster() {
   const [logoPreview, setLogoPreview] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const coTypes = useLookup("CO_TYPE", ["Private Limited", "Public Limited", "LLP", "Partnership", "Proprietorship", "Section 8", "OPC"]);
+  const industries = useLookup("INDUSTRY", ["Manufacturing", "IT & Technology", "Infrastructure", "Retail", "Finance", "Healthcare", "Education", "Logistics", "Real Estate", "Other"]);
+  const currencies = useLookup("CURRENCY", ["INR", "USD", "EUR", "GBP", "AED"]);
+  const gstStatuses = useLookup("GST_STATUS", ["Registered", "Unregistered"]);
+  const fiscalYearStarts = useLookup("FISCAL_YEAR_START", ["January", "April", "July", "October"]);
+
   const { data: companies = [], isLoading } = useQuery({
     queryKey: ["company-master"],
     queryFn: async () => {
@@ -900,8 +882,8 @@ export default function CompanyMaster() {
                   {fi("Company Name *", "name")}
                   {fi("Legal Name", "legalName")}
                   {fi("Short Name", "shortName")}
-                  {se("Company Type", "type", CO_TYPES)}
-                  {se("Industry", "industry", INDUSTRIES)}
+                  {se("Company Type", "type", coTypes)}
+                  {se("Industry", "industry", industries)}
 
                   {/* Enterprise dropdown */}
                   <div>
@@ -932,13 +914,8 @@ export default function CompanyMaster() {
                     </select>
                   </div>
                   {fi("Incorporation Date", "incorporationDate", "date")}
-                  {se("Currency", "currency", CURRENCIES)}
-                  {se("Fiscal Year Start", "fiscalYearStart", [
-                    "January",
-                    "April",
-                    "July",
-                    "October",
-                  ])}
+                  {se("Currency", "currency", currencies)}
+                  {se("Fiscal Year Start", "fiscalYearStart", fiscalYearStarts)}
                   <div className="flex items-center gap-3 pt-5">
                     <button
                       onClick={() =>
@@ -1010,7 +987,7 @@ export default function CompanyMaster() {
                       onChange={(e) => setGstStatus(e.target.value)}
                       className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                     >
-                      {GST_STATUSES.map((o) => (
+                      {gstStatuses.map((o) => (
                         <option key={o}>{o}</option>
                       ))}
                     </select>

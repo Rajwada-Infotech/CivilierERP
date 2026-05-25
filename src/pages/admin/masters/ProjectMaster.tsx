@@ -29,6 +29,7 @@ import {
 } from "@/api/projectMasterApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
+import { useLookup } from "@/hooks/useLookup";
 
 interface Project {
   Id?: number;
@@ -96,19 +97,6 @@ function ProjectAvatar({
     </div>
   );
 }
-
-const PROJECT_TYPES = [
-  "Construction",
-  "IT",
-  "Infrastructure",
-  "Manufacturing",
-  "Consulting",
-  "Research",
-  "Maintenance",
-];
-const STATUSES = ["Planning", "Active", "On Hold", "Completed", "Cancelled"];
-const PRIORITIES = ["Low", "Medium", "High", "Critical"];
-const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED"];
 
 const emptyProject: Project = {
   code: "",
@@ -561,6 +549,11 @@ export default function ProjectMaster() {
   const [complianceLoading, setComplianceLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const projectTypes = useLookup("PROJECT_TYPE", ["Construction", "IT", "Infrastructure", "Manufacturing", "Consulting", "Research", "Maintenance"]);
+  const statuses = useLookup("PROJECT_STATUS", ["Planning", "Active", "On Hold", "Completed", "Cancelled"]);
+  const priorities = useLookup("PROJECT_PRIORITY", ["Low", "Medium", "High", "Critical"]);
+  const currencies = useLookup("CURRENCY", ["INR", "USD", "EUR", "GBP", "AED"]);
+
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ["project-master"],
     queryFn: getProjects,
@@ -987,7 +980,7 @@ export default function ProjectMaster() {
                   {fi("Project Code *", "code", "text", "e.g. PRJ-001")}
                   {fi("Project Name *", "name")}
                   {fi("Short Name", "shortName")}
-                  {se("Type", "type", PROJECT_TYPES)}
+                  {se("Type", "type", projectTypes)}
 
                   {/* Enterprise Dropdown */}
                   <div>
@@ -1254,8 +1247,8 @@ export default function ProjectMaster() {
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {fi("Start Date", "startDate", "date")}
                   {fi("End Date", "endDate", "date")}
-                  {se("Status", "status", STATUSES)}
-                  {se("Priority", "priority", PRIORITIES)}
+                  {se("Status", "status", statuses)}
+                  {se("Priority", "priority", priorities)}
                   {fi("Team Size", "teamSize", "number")}
                 </div>
               )}
@@ -1263,7 +1256,7 @@ export default function ProjectMaster() {
               {/* ── Financial ── */}
               {activeTab === "financial" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {se("Currency", "currency", CURRENCIES)}
+                  {se("Currency", "currency", currencies)}
                 </div>
               )}
             </div>

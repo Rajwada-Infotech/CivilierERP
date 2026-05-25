@@ -37,6 +37,7 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { DashboardBackground } from "@/components/DashboardBackground";
+import { useLookup } from "@/hooks/useLookup";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Booking {
@@ -89,19 +90,6 @@ interface Project {
 const API = "/api/followup-bookings";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const STATUS_OPTIONS = ["Confirmed", "Pending", "Cancelled"];
-const PAYMENT_MODES = ["Cheque", "NEFT", "RTGS", "DD", "Cash", "Online"];
-const UNIT_TYPES = [
-  "1BHK",
-  "2BHK",
-  "3BHK",
-  "4BHK",
-  "Studio",
-  "Duplex",
-  "Villa",
-  "Shop",
-  "Office",
-];
 
 const STATUS_CONFIG: Record<
   string,
@@ -427,6 +415,9 @@ function BookingForm({
   onCancel: () => void;
   applicants: Applicant[];
   projects: Project[];
+  statusOptions: string[];
+  paymentModes: string[];
+  unitTypes: string[];
 }) {
   const [form, setForm] = useState<FormData>({ ...EMPTY_FORM, ...initial });
   const [saving, setSaving] = useState(false);
@@ -510,7 +501,7 @@ function BookingForm({
               value={form.status}
               onChange={(e) => set("status")(e.target.value)}
             >
-              {STATUS_OPTIONS.map((s) => (
+              {statusOptions.map((s) => (
                 <option key={s}>{s}</option>
               ))}
             </select>
@@ -551,7 +542,7 @@ function BookingForm({
               onChange={(e) => set("unitType")(e.target.value)}
             >
               <option value="">Select type...</option>
-              {UNIT_TYPES.map((t) => (
+              {unitTypes.map((t) => (
                 <option key={t}>{t}</option>
               ))}
             </select>
@@ -636,7 +627,7 @@ function BookingForm({
               onChange={(e) => set("paymentMode")(e.target.value)}
             >
               <option value="">Select mode...</option>
-              {PAYMENT_MODES.map((m) => (
+              {paymentModes.map((m) => (
                 <option key={m}>{m}</option>
               ))}
             </select>
@@ -1189,6 +1180,13 @@ export default function BookingsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
 
+  const { data: statusOptions } = useLookup("BookingStatus", ["Confirmed", "Pending", "Cancelled"]);
+  const { data: paymentModes } = useLookup("PaymentMode", ["Cheque", "NEFT", "RTGS", "DD", "Cash", "Online"]);
+  const { data: unitTypes } = useLookup("UnitType", ["1BHK", "2BHK", "3BHK", "4BHK", "Studio", "Duplex", "Villa", "Shop", "Office"]);
+  const statusOptions = useLookup("BOOKING_STATUS", ["Confirmed", "Pending", "Cancelled"]);
+  const paymentModes = useLookup("PAYMENT_MODE", ["Cheque", "NEFT", "RTGS", "DD", "Cash", "Online"]);
+  const unitTypes = useLookup("UNIT_TYPE", ["1BHK", "2BHK", "3BHK", "4BHK", "Studio", "Duplex", "Villa", "Shop", "Office"]);
+
   useEffect(() => {
     const t = setTimeout(() => {
       setDebouncedSearch(search);
@@ -1454,9 +1452,9 @@ export default function BookingsPage() {
             >
               All <span className="font-mono ml-1">{total}</span>
             </button>
-            {STATUS_OPTIONS.map((s) => {
+            {statusOptions.map((s) => {
               const cfg = STATUS_CONFIG[s];
-              return (
+              return cfg ? (
                 <button
                   key={s}
                   onClick={() => {
@@ -1467,6 +1465,18 @@ export default function BookingsPage() {
                     ${statusFilter === s ? `${cfg.pill} border-current shadow-sm` : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
                 >
                   <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} /> {s}
+                </button>
+              ) : (
+                <button
+                  key={s}
+                  onClick={() => {
+                    setStatusFilter(statusFilter === s ? "" : s);
+                    setPage(1);
+                  }}
+                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-all
+                    ${statusFilter === s ? "bg-muted text-foreground border-current shadow-sm" : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
+                >
+                  {s}
                 </button>
               );
             })}
@@ -1895,6 +1905,9 @@ export default function BookingsPage() {
                 onCancel={closeForm}
                 applicants={applicants}
                 projects={projects}
+                statusOptions={statusOptions}
+                paymentModes={paymentModes}
+                unitTypes={unitTypes}
               />
             </div>
           </div>
