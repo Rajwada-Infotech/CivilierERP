@@ -9,12 +9,7 @@ import {
   type Godown,
   type CreateGodownPayload,
 } from "@/api/godownsApi";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -103,7 +99,11 @@ export default function GodownAdmin() {
   const [formError, setFormError] = useState<string | null>(null);
 
   // ── Query ──────────────────────────────────────────────────────────────────
-  const { data: raw, isLoading, refetch } = useQuery({
+  const {
+    data: raw,
+    isLoading,
+    refetch,
+  } = useQuery({
     queryKey: ["godowns"],
     queryFn: getGodowns,
   });
@@ -125,8 +125,7 @@ export default function GodownAdmin() {
   const activeCount = godowns.filter((g) => g.IsActive && !g.IsDeleted).length;
 
   // ── Invalidate ─────────────────────────────────────────────────────────────
-  const invalidate = () =>
-    qc.invalidateQueries({ queryKey: ["godowns"] });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["godowns"] });
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const createMutation = useMutation({
@@ -419,9 +418,12 @@ export default function GodownAdmin() {
       <Dialog open={dialogOpen} onOpenChange={(o) => !o && closeDialog()}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>
-              {editing ? "Edit Godown" : "Add Godown"}
-            </DialogTitle>
+            <DialogTitle>{editing ? "Edit Godown" : "Add Godown"}</DialogTitle>
+            <DialogDescription className="sr-only">
+              {editing
+                ? "Edit the details of this godown."
+                : "Fill in the details to add a new godown."}
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
