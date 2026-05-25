@@ -11,6 +11,7 @@ password.md
 
 # Dependency directori
 node_modules
+.vite/
 dist
 dist-ssr
 
