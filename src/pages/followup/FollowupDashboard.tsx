@@ -12,7 +12,6 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock,
-  Activity,
   FileText,
   Mail,
   Phone,
@@ -587,13 +586,14 @@ export default function FollowupDashboard() {
 
   return (
     <>
-      <DashboardBackground />
+      <Breadcrumbs items={["Dashboard", "Follow-Up"]} />
       <div className="relative p-6 space-y-8">
-        {/* ── Header ── */}
+        <DashboardBackground />
+
+        {/* Header */}
         <div className="flex items-start justify-between gap-2">
           <div>
-            <Breadcrumbs items={[{ label: "Follow-Up", path: "/followup" }]} />
-            <h1 className="text-xl font-heading font-bold text-foreground mt-1">
+            <h1 className="text-xl font-heading font-bold text-foreground">
               Follow-Up Dashboard
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">

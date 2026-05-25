@@ -155,10 +155,11 @@ export default function AdminDashboard() {
 
   return (
     <>
+      <Breadcrumbs items={["Admin", "Dashboard"]} />
       <div className="relative p-6 space-y-8">
         <DashboardBackground />
-        <Breadcrumbs items={["Admin", "Dashboard"]} />
 
+        {/* Header */}
         <div className="flex items-start justify-between gap-2">
           <div>
             <h1 className="text-xl font-heading font-bold text-foreground">
@@ -171,8 +172,7 @@ export default function AdminDashboard() {
           <div className="flex items-center gap-2">
             {dataUpdatedAt > 0 && (
               <span className="text-xs text-muted-foreground hidden sm:block">
-                Updated:{" "}
-                {new Date(dataUpdatedAt).toLocaleTimeString("en-IN")}
+                Updated: {new Date(dataUpdatedAt).toLocaleTimeString("en-IN")}
               </span>
             )}
             <button

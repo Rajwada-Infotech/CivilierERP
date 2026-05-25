@@ -395,15 +395,14 @@ export default function EngineeringDashboard() {
 
   return (
     <>
-      <DashboardBackground />
+      <Breadcrumbs items={["Dashboard", "Engineering"]} />
       <div className="relative p-6 space-y-8">
+        <DashboardBackground />
+
         {/* Header */}
         <div className="flex items-start justify-between gap-2">
           <div>
-            <Breadcrumbs
-              items={[{ label: "Engineering", path: "/engineering" }]}
-            />
-            <h1 className="text-xl font-heading font-bold text-foreground mt-1">
+            <h1 className="text-xl font-heading font-bold text-foreground">
               Engineering Dashboard
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
