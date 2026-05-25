@@ -149,6 +149,23 @@ export const logUserActivity = async (
   return response.json();
 };
 
+// ==================== DELETE / CLEAR ====================
+
+export const deleteActivityHistory = async (): Promise<{ message: string }> => {
+  const response = await fetchWithAuth("/api/user-activity", {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    const errorText = await response
+      .text()
+      .catch(() => "Failed to clear activity history");
+    throw new Error(errorText);
+  }
+
+  return response.json();
+};
+
 // ==================== SOCKET.IO REAL-TIME =====================
 //
 // Replaces the old SSE subscribeToActivityStream.
@@ -187,7 +204,6 @@ export function subscribeToActivityStream(
   socket.on("activity:new", onEvent);
   if (onConnect) socket.on("connect", onConnect);
   if (onDisconnect) socket.on("disconnect", onDisconnect);
-
 
   // Capture the exact socket instance so the cleanup always targets the right
   // object — even if connectSocket() later returns a different instance after
