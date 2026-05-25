@@ -104,7 +104,7 @@ export default function GodownAdmin() {
 
   // ── Query ──────────────────────────────────────────────────────────────────
   const { data: raw, isLoading, refetch } = useQuery({
-    queryKey: ["godowns-admin"],
+    queryKey: ["godowns"],
     queryFn: getGodowns,
   });
 
@@ -126,7 +126,7 @@ export default function GodownAdmin() {
 
   // ── Invalidate ─────────────────────────────────────────────────────────────
   const invalidate = () =>
-    qc.invalidateQueries({ queryKey: ["godowns-admin"] });
+    qc.invalidateQueries({ queryKey: ["godowns"] });
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const createMutation = useMutation({
