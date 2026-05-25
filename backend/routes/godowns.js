@@ -15,7 +15,8 @@ router.get("/", cache("godowns", 120), async (req, res) => {
         g.Description, g.Remarks, g.IsMain,
         g.EnterpriseID, g.ProjectID, g.Location,
         g.IsActive, g.IsDeleted, g.CreatedAt, g.UpdatedAt,
-        e.name AS EnterpriseName
+        e.name AS EnterpriseName,
+        NULL AS ProjectName
       FROM dbo.Godowns g
       LEFT JOIN dbo.enterprise e ON e.id = g.EnterpriseID
       WHERE g.IsDeleted = 0
@@ -36,11 +37,14 @@ router.get("/:id", async (req, res) => {
     const id = requireValidId(req, res);
     if (!id) return;
     const pool = getPool();
-    const result = await pool.request().input("id", sql.Int, id).query(`
-        SELECT g.*, e.name AS EnterpriseName
+    const result = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query(`
+        SELECT g.*, e.name AS EnterpriseName, NULL AS ProjectName
         FROM dbo.Godowns g
         LEFT JOIN dbo.enterprise e ON e.id = g.EnterpriseID
-          WHERE g.GodownID = @id AND g.IsDeleted = 0
+        WHERE g.GodownID = @id AND g.IsDeleted = 0
       `);
     if (!result.recordset.length)
       return res.status(404).json({ error: "Godown not found" });
