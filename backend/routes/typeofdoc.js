@@ -31,8 +31,6 @@ router.get(
         t.UpdatedAt
       FROM dbo.TypeOfDoc t
       LEFT JOIN dbo.Entry_Type et ON t.EntryTypeId = et.E_Id
-      LEFT JOIN dbo.CompanyMaster c ON t.CompanyId = c.CompanyId
-      LEFT JOIN dbo.ProjectMaster p ON t.ProjectId = p.ProjectId
       WHERE t.IsActive = 1
       ORDER BY et.EntryType, t.Prefix;
     `);

@@ -395,32 +395,24 @@ export default function EngineeringDashboard() {
 
   return (
     <>
-      <DashboardBackground />
-      <div className="relative z-10 p-6 space-y-6 max-w-[1600px] mx-auto">
+      <Breadcrumbs items={["Dashboard", "Engineering"]} />
+      <div className="relative p-6 space-y-8">
+        <DashboardBackground />
+
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between gap-2">
           <div>
-            <Breadcrumbs
-              items={[{ label: "Engineering", path: "/engineering" }]}
-            />
-            <div className="flex items-center gap-3 mt-1">
-              <div className="p-2 rounded-lg bg-orange-500/10">
-                <Wrench size={20} className="text-orange-600" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-heading font-bold text-foreground">
-                  Engineering Dashboard
-                </h1>
-                <p className="text-xs text-muted-foreground">
-                  Work orders, BOQ, site activity and work done
-                </p>
-              </div>
-            </div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Engineering Dashboard
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Work orders, BOQ, site activity and work done
+            </p>
           </div>
           <button
             onClick={() => refetch()}
             disabled={isFetching}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
           >
             <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
             Refresh

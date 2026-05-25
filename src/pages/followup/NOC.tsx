@@ -33,6 +33,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -1281,6 +1282,11 @@ export function NOCPage() {
               </div>
               {editId ? "Edit NOC" : "New NOC"}
             </DialogTitle>
+            <DialogDescription>
+              {editId
+                ? "Update the NOC details below."
+                : "Fill in the details to create a new NOC."}
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-1">

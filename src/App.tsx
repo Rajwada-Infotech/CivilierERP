@@ -110,6 +110,9 @@ const SupplierMaster = lazy(() => import("./pages/masters/SupplierMaster"));
 const CustomerMaster = lazy(() => import("./pages/masters/CustomerMaster"));
 const UnitMaster = lazy(() => import("./pages/followup/UnitMaster"));
 const BlockMaster = lazy(() => import("./pages/followup/BlockMaster"));
+const PaymentPlanMaster = lazy(
+  () => import("./pages/followup/PaymentPlanMaster"),
+);
 const BankMaster = lazy(() => import("./pages/masters/BankMaster"));
 const ExpensesMaster = lazy(() => import("./pages/masters/ExpensesMaster"));
 const ItemMaster = lazy(() => import("./pages/masters/ItemMaster"));
@@ -663,6 +666,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <BlockMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/setup/payment-plan-master"
+        element={
+          <ProtectedRoute>
+            <PaymentPlanMaster />
           </ProtectedRoute>
         }
       />

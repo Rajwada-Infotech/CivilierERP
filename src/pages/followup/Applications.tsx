@@ -354,7 +354,9 @@ const EMPTY_FORM = {
   loanBank: "",
   loanAmount: "",
   projectId: "",
-  status: "Confirmed",
+  unitId: "",
+  status: "New",
+  budgetAmount: "",
   notes: "",
 };
 type FormData = typeof EMPTY_FORM;
@@ -708,15 +710,26 @@ function BookingForm({
           )}
         </FormSection>
 
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 pb-2 border-b border-border/60">
-            <div className="p-1.5 rounded-lg bg-muted">
-              <FileText size={12} className="text-muted-foreground" />
-            </div>
-            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-              Notes
-            </p>
-          </div>
+        {/* Budget */}
+        <section>
+          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
+            <IndianRupee size={11} className="text-muted-foreground" /> Budget
+          </p>
+          <input
+            type="number"
+            min="0"
+            className={inputCls}
+            placeholder="Budget amount (₹)..."
+            value={form.budgetAmount}
+            onChange={(e) => set("budgetAmount")(e.target.value)}
+          />
+        </section>
+
+        {/* Notes */}
+        <section>
+          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
+            <FileText size={11} className="text-muted-foreground" /> Notes
+          </p>
           <textarea
             rows={3}
             className={inputCls}
@@ -1277,6 +1290,7 @@ export default function BookingsPage() {
       LoanBank: form.loanBank || null,
       LoanAmount: form.loanAmount ? parseFloat(form.loanAmount) : null,
       Status: form.status,
+      BudgetAmount: form.budgetAmount ? parseFloat(form.budgetAmount) : null,
       Notes: form.notes || null,
     };
 
