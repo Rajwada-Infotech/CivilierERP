@@ -39,7 +39,8 @@ router.get("/:id", async (req, res) => {
     const pool = getPool();
     const result = await pool
       .request()
-      .input("id", sql.Int, id).query(`
+      .input("id", sql.Int, id)
+      .query(`
         SELECT g.*, e.name AS EnterpriseName, NULL AS ProjectName
         FROM dbo.Godowns g
         LEFT JOIN dbo.enterprise e ON e.id = g.EnterpriseID
@@ -93,12 +94,10 @@ router.post("/", async (req, res) => {
       `);
 
     await bumpCacheVersion("godowns");
-    res
-      .status(201)
-      .json({
-        GodownID: result.recordset[0].GodownID,
-        message: "Godown created",
-      });
+    res.status(201).json({
+      GodownID: result.recordset[0].GodownID,
+      message: "Godown created",
+    });
   } catch (err) {
     console.error("[godowns] POST /:", err.message);
     res

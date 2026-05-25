@@ -155,33 +155,34 @@ export default function AdminDashboard() {
 
   return (
     <>
-      <div className="relative max-w-7xl mx-auto px-2 sm:px-4 md:px-6 lg:px-8 py-6">
+      <Breadcrumbs items={["Admin", "Dashboard"]} />
+      <div className="relative p-6 space-y-8">
         <DashboardBackground />
-        <Breadcrumbs items={["Admin", "Dashboard"]} />
 
-        <div className="flex items-center justify-between mb-6">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-2">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">
+            <h1 className="text-xl font-heading font-bold text-foreground">
               Admin Dashboard
             </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
+            <p className="text-xs text-muted-foreground mt-0.5">
               Live data from your database
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {dataUpdatedAt > 0 && (
               <span className="text-xs text-muted-foreground hidden sm:block">
-                Last refreshed:{" "}
-                {new Date(dataUpdatedAt).toLocaleTimeString("en-IN")}
+                Updated: {new Date(dataUpdatedAt).toLocaleTimeString("en-IN")}
               </span>
             )}
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-accent transition disabled:opacity-50"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
               <RefreshCw
-                className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`}
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
               />
               Refresh
             </button>
@@ -189,12 +190,12 @@ export default function AdminDashboard() {
         </div>
 
         {dashError && (
-          <div className="mb-6 px-4 py-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
+          <div className="px-4 py-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
             Failed to load dashboard data — please try refreshing.
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8 bg-gradient-to-r from-primary/5 to-secondary/5 rounded-xl p-3 sm:p-4 md:p-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {statCards.map((stat) => (
             <Card
               className="hover:shadow-xl transition-all border-primary/20"
@@ -220,7 +221,7 @@ export default function AdminDashboard() {
           ))}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm sm:text-base">
