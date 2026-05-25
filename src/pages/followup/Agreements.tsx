@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -1321,6 +1322,11 @@ export function AgreementsPage() {
             <DialogTitle>
               {editId ? "Edit Agreement" : "New Agreement"}
             </DialogTitle>
+            <DialogDescription>
+              {editId
+                ? "Update the agreement details below."
+                : "Fill in the details to create a new agreement."}
+            </DialogDescription>
           </DialogHeader>
 
           <div
