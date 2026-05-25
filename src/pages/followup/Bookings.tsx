@@ -566,11 +566,8 @@ function PaymentTermSelector({
                       </span>
                     </div>
                   </div>
-                  <p
-                    className={`text-[12px] font-bold flex-shrink-0 ${t.ValueType === "deduction" ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}
-                  >
-                    {t.ValueType === "deduction" ? "−" : "+"}
-                    {fmtCurrencyCompact(Math.abs(t.computedAmount))}
+                  <p className="text-[12px] font-bold flex-shrink-0 text-foreground">
+                    −{fmtCurrencyCompact(Math.abs(t.computedAmount))}
                   </p>
                 </div>
               </div>
@@ -703,6 +700,7 @@ function BookingForm({
   applicants,
   projects,
   editBookingNo,
+  editBookingId,
 }: {
   initial?: Partial<FormData>;
   onSave: (data: FormData, selectedTermIds: number[]) => Promise<void>;
@@ -710,10 +708,29 @@ function BookingForm({
   applicants: Applicant[];
   projects: Project[];
   editBookingNo?: string | null;
+  editBookingId?: number | null;
 }) {
   const [form, setForm] = useState<FormData>({ ...EMPTY_FORM, ...initial });
   const [saving, setSaving] = useState(false);
   const [selectedTermIds, setSelectedTermIds] = useState<number[]>([]);
+
+  // When editing an existing booking, pre-load its saved payment term IDs
+  const { data: existingTerms } = useQuery({
+    queryKey: ["booking-payment-terms", editBookingId],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`${API}/${editBookingId}/payment-terms`);
+      if (!res.ok) return [];
+      return res.json() as Promise<{ TermID: number }[]>;
+    },
+    enabled: !!editBookingId,
+    staleTime: 0,
+  });
+
+  useEffect(() => {
+    if (existingTerms && existingTerms.length > 0) {
+      setSelectedTermIds(existingTerms.map((t) => t.TermID));
+    }
+  }, [existingTerms]);
 
   const set = (k: keyof FormData) => (v: string | boolean) =>
     setForm((prev) => ({ ...prev, [k]: v }));
@@ -760,10 +777,6 @@ function BookingForm({
     }
     if (!form.bookingDate) {
       toast.error("Booking date is required");
-      return;
-    }
-    if (!form.bookingAmount) {
-      toast.error("Booking amount is required");
       return;
     }
     setSaving(true);
@@ -950,15 +963,6 @@ function BookingForm({
           label="Booking Payment"
           color="bg-cyan-50 dark:bg-cyan-900/30"
         >
-          <FormField label="Booking Amount (₹)" required>
-            <input
-              type="number"
-              className={inputCls}
-              placeholder="0"
-              value={form.bookingAmount}
-              onChange={(e) => set("bookingAmount")(e.target.value)}
-            />
-          </FormField>
           <FormField label="Payment Mode">
             <select
               className={inputCls}
@@ -1145,6 +1149,19 @@ function InfoSection({
   );
 }
 
+interface BookingPaymentTerm {
+  Id: number;
+  TermID: number;
+  TermName: string;
+  ValueType: "percent" | "fixed" | "deduction";
+  TermValue: number;
+  ComputedAmount: number;
+  DocRef: string | null;
+  SortOrder: number;
+  DueDate: string | null;
+  IsPaid: boolean;
+}
+
 function BookingDrawer({
   booking,
   onClose,
@@ -1154,6 +1171,18 @@ function BookingDrawer({
   onClose: () => void;
   onEdit: () => void;
 }) {
+  const { data: paymentSchedule = [], isLoading: scheduleLoading } = useQuery<
+    BookingPaymentTerm[]
+  >({
+    queryKey: ["booking-payment-terms", booking.Id],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`${API}/${booking.Id}/payment-terms`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
+
   return (
     <>
       <div
@@ -1343,6 +1372,129 @@ function BookingDrawer({
               />
             </InfoSection>
           )}
+          {/* Payment Schedule */}
+          <div className="space-y-3 pt-1">
+            <div className="flex items-center gap-2 pb-2 border-b border-border/60">
+              <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/30">
+                <Tag
+                  size={12}
+                  className="text-emerald-600 dark:text-emerald-400"
+                />
+              </div>
+              <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                Payment Schedule
+              </p>
+              {paymentSchedule.length > 0 && (
+                <span className="ml-auto text-[10px] font-semibold bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                  {paymentSchedule.length} term
+                  {paymentSchedule.length !== 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
+            {scheduleLoading ? (
+              <div className="flex items-center gap-2 py-3 text-[12px] text-muted-foreground">
+                <Loader2 size={12} className="animate-spin" /> Loading schedule…
+              </div>
+            ) : paymentSchedule.length === 0 ? (
+              <p className="text-[12px] text-muted-foreground text-center py-4 bg-muted/30 rounded-xl border border-dashed border-border">
+                No payment schedule — attach terms while editing this booking.
+              </p>
+            ) : (
+              <div className="rounded-xl border border-border bg-muted/20 overflow-hidden">
+                <div className="px-4 divide-y divide-border/50">
+                  {paymentSchedule.map((t) => {
+                    const tc = TYPE_CONFIG[t.ValueType] ?? TYPE_CONFIG["fixed"];
+                    return (
+                      <div
+                        key={t.Id}
+                        className="py-3 flex items-start justify-between gap-3"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[12px] font-semibold text-foreground truncate">
+                            {t.TermName}
+                          </p>
+                          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                            {t.DocRef && (
+                              <code className="text-[9px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground border border-border/60">
+                                {t.DocRef}
+                              </code>
+                            )}
+                            <span
+                              className={`inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-md ${tc.pill}`}
+                            >
+                              {tc.icon}
+                              {t.ValueType === "percent" ||
+                              t.ValueType === "deduction"
+                                ? `${t.TermValue}%`
+                                : fmtCurrencyCompact(t.TermValue)}
+                            </span>
+                            {t.DueDate && (
+                              <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                <Calendar size={9} /> Due {fmtDate(t.DueDate)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex-shrink-0 text-right">
+                          <p
+                            className={`text-[13px] font-bold ${t.ValueType === "deduction" ? "text-red-600 dark:text-red-400" : "text-foreground"}`}
+                          >
+                            {t.ValueType === "deduction" ? "−" : ""}
+                            {fmtCurrencyCompact(Math.abs(t.ComputedAmount))}
+                          </p>
+                          {t.IsPaid ? (
+                            <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 justify-end mt-0.5">
+                              <CheckCircle size={9} /> Paid
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 flex items-center gap-0.5 justify-end mt-0.5">
+                              <Clock size={9} /> Pending
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* Total footer */}
+                {(() => {
+                  const totalCharged = paymentSchedule
+                    .filter((t) => t.ValueType !== "deduction")
+                    .reduce((s, t) => s + t.ComputedAmount, 0);
+                  const totalDeducted = paymentSchedule
+                    .filter((t) => t.ValueType === "deduction")
+                    .reduce((s, t) => s + Math.abs(t.ComputedAmount), 0);
+                  const balance =
+                    (booking.TotalValue ?? 0) - totalCharged + totalDeducted;
+                  return (
+                    <div className="border-t border-border bg-muted/40 px-4 py-3 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-muted-foreground">
+                          Total Scheduled
+                        </span>
+                        <span className="text-[13px] font-bold text-emerald-600 dark:text-emerald-400">
+                          {fmtCurrencyCompact(totalCharged)}
+                        </span>
+                      </div>
+                      {booking.TotalValue != null && (
+                        <div className="flex items-center justify-between pt-1.5 border-t border-border/60">
+                          <span className="text-[11px] font-bold text-foreground">
+                            Balance Remaining
+                          </span>
+                          <span
+                            className={`text-[14px] font-extrabold ${balance > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}
+                          >
+                            {fmtCurrencyCompact(Math.max(0, balance))}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+
           <InfoSection title="Audit" icon={<Clock size={11} />}>
             <InfoRow
               label="Created"
@@ -2197,6 +2349,7 @@ export default function BookingsPage() {
                 applicants={applicants}
                 projects={projects}
                 editBookingNo={editBooking?.BookingNo}
+                editBookingId={editBooking?.Id ?? null}
               />
             </div>
           </div>
