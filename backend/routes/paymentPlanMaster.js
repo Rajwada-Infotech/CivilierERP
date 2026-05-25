@@ -152,68 +152,12 @@ router.delete("/:id", async (req, res) => {
     if (!existing.recordset.length)
       return res.status(404).json({ error: "Not found" });
 
-    const inUse = await pool.request().input("TermID", sql.Int, id).query(`
-      SELECT TOP 1 1 AS Used FROM dbo.BookingPaymentTerms WHERE TermID = @TermID
-      UNION ALL
-      SELECT TOP 1 1 FROM dbo.UnitPaymentTerms WHERE TermID = @TermID
-    `);
-
-    if (inUse.recordset.length) {
-      await pool
-        .request()
-        .input("TermID", sql.Int, id)
-        .query(
-          "UPDATE dbo.PaymentTermMaster SET IsActive = 0 WHERE TermID = @TermID",
-        );
-      await bumpCacheVersion(CACHE_KEY);
-      return res.json({
-        message: "Term is in use — deactivated",
-        softDeleted: true,
-      });
-    }
-
     await pool
       .request()
       .input("TermID", sql.Int, id)
       .query("DELETE FROM dbo.PaymentTermMaster WHERE TermID = @TermID");
     await bumpCacheVersion(CACHE_KEY);
     res.json({ message: "Term deleted", softDeleted: false });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── Booking / Unit term lookups (for future use) ─────────────────────────────
-router.get("/booking/:bookingId", async (req, res) => {
-  try {
-    const pool = getPool();
-    const r = await pool
-      .request()
-      .input("BookingID", sql.Int, parseInt(req.params.bookingId, 10)).query(`
-        SELECT b.Id, b.DueDate, b.IsPaid, b.PaidOn,
-               t.TermID, t.TermName, t.ValueType, t.TermValue
-        FROM dbo.BookingPaymentTerms b
-        JOIN dbo.PaymentTermMaster t ON t.TermID = b.TermID
-        WHERE b.BookingID = @BookingID
-      `);
-    res.json(r.recordset);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get("/unit/:unitId", async (req, res) => {
-  try {
-    const pool = getPool();
-    const r = await pool
-      .request()
-      .input("UnitID", sql.Int, parseInt(req.params.unitId, 10)).query(`
-        SELECT u.Id, t.TermID, t.TermName, t.ValueType, t.TermValue
-        FROM dbo.UnitPaymentTerms u
-        JOIN dbo.PaymentTermMaster t ON t.TermID = u.TermID
-        WHERE u.UnitID = @UnitID
-      `);
-    res.json(r.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

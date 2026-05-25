@@ -121,7 +121,6 @@ const LIST_COLUMNS = `
   fb.ProjectId,
   pm.name AS ProjectName,
   fb.CompanyId,
-  cm.Name AS CompanyName,
   fb.UnitNo,
   fb.BlockName,
   fb.FloorName,
@@ -194,7 +193,6 @@ router.get(
         FROM dbo.FollowupBookings fb
         JOIN dbo.FollowupApplications fa ON fa.Id = fb.ApplicantId
         LEFT JOIN dbo.enterprise     pm ON pm.id = fb.ProjectId
-        LEFT JOIN dbo.CompanyMaster  cm ON cm.Id = fb.CompanyId
         LEFT JOIN dbo.users          u  ON u.id  = fb.AssignedTo
         WHERE ${WHERE}
       `);
@@ -210,7 +208,6 @@ router.get(
         FROM dbo.FollowupBookings fb
         JOIN dbo.FollowupApplications fa ON fa.Id = fb.ApplicantId
         LEFT JOIN dbo.enterprise     pm ON pm.id = fb.ProjectId
-        LEFT JOIN dbo.CompanyMaster  cm ON cm.Id = fb.CompanyId
         LEFT JOIN dbo.users          u  ON u.id  = fb.AssignedTo
         WHERE ${WHERE}
         ORDER BY fb.BookingDate DESC, fb.Id DESC
@@ -282,7 +279,6 @@ router.get(
         FROM dbo.FollowupBookings fb
         JOIN dbo.FollowupApplications fa ON fa.Id = fb.ApplicantId
         LEFT JOIN dbo.enterprise     pm ON pm.id = fb.ProjectId
-        LEFT JOIN dbo.CompanyMaster  cm ON cm.Id = fb.CompanyId
         LEFT JOIN dbo.users          u  ON u.id  = fb.AssignedTo
         WHERE fb.Id = @Id AND fb.IsDeleted = 0
       `);

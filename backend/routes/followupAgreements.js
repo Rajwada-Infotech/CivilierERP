@@ -15,9 +15,7 @@ const LIST_COLUMNS = `
   fus.SelectionNo,
   fus.UnitNo,
   fag.ProjectId,
-  pm.Name AS ProjectName,
   fag.CompanyId,
-  cm.Name AS CompanyName,
   CONVERT(VARCHAR(10), fag.AgreementDate, 23) AS AgreementDate,
   fag.AgreementValue,
   fag.AdvanceAmount,
@@ -164,15 +162,12 @@ async function buildOptions() {
       `),
     pool.request().query(`
         SELECT Id, Name
-        FROM dbo.ProjectMaster
+        FROM dbo.enterprise
         WHERE ISNULL(IsDeleted, 0) = 0 AND ISNULL(IsActive, 1) = 1
         ORDER BY Name
       `),
     pool.request().query(`
-        SELECT Id, Name
-        FROM dbo.CompanyMaster
-        WHERE ISNULL(IsDeleted, 0) = 0 AND ISNULL(IsActive, 1) = 1
-        ORDER BY Name
+        SELECT 0 AS Id, '' AS Name WHERE 1=0
       `),
   ]);
 
@@ -221,7 +216,6 @@ router.get("/", async (req, res) => {
           OR fa.ApplicantName LIKE @Search
           OR fus.SelectionNo LIKE @Search
           OR fus.UnitNo LIKE @Search
-          OR pm.Name LIKE @Search
         )
       `);
     }
@@ -243,7 +237,6 @@ router.get("/", async (req, res) => {
       FROM dbo.FollowupAgreements fag
       INNER JOIN dbo.FollowupApplications fa ON fa.Id = fag.ApplicantId
       LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = fag.UnitSelectionId
-      LEFT JOIN dbo.ProjectMaster pm ON pm.Id = fag.ProjectId
       ${whereClause}
     `);
 
@@ -254,9 +247,7 @@ router.get("/", async (req, res) => {
         FROM dbo.FollowupAgreements fag
         INNER JOIN dbo.FollowupApplications fa ON fa.Id = fag.ApplicantId
         LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = fag.UnitSelectionId
-        LEFT JOIN dbo.ProjectMaster pm ON pm.Id = fag.ProjectId
-        LEFT JOIN dbo.CompanyMaster cm ON cm.Id = fag.CompanyId
-        ${whereClause}
+          ${whereClause}
         ORDER BY fag.CreatedAt DESC, fag.Id DESC
         OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
       `);
