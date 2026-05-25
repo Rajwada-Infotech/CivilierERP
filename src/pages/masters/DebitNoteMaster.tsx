@@ -696,19 +696,24 @@ const DebitNoteMaster: React.FC = () => {
       <Breadcrumbs
         items={["Dashboard", "Finance Module", "Debit Note Master"]}
       />
+      <div className="p-6 space-y-5">
+      {/* Header */}
+      <div>
+        <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+          <FileWarning size={20} className="text-orange-500" />
+          Debit Note Master
+        </h1>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Manage debit notes against expense bookings.
+        </p>
+      </div>
       {expenseError && (
-        <div className="mb-3 px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-sm">
+        <div className="px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-sm">
           ⚠️ Could not load expense documents: {(expenseError as Error).message}
           . Bill dropdown will be empty.
         </div>
       )}
-      <div className="flex items-center gap-3 mb-4">
-        <FileWarning className="w-5 h-5 text-orange-500" />
-        <h1 className="text-xl font-heading font-bold text-foreground">
-          Debit Note Master
-        </h1>
-      </div>
-      <div className="mb-4 rounded-xl bg-card border border-border p-4">
+      <div className="rounded-xl bg-card border border-border p-4">
         <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-2">
           Financial Year
         </label>
@@ -797,6 +802,7 @@ const DebitNoteMaster: React.FC = () => {
           win.print();
         }}
       />
+      </div>
     </>
   );
 };
