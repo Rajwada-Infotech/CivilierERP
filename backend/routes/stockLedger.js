@@ -42,7 +42,7 @@ function bindFilters(request, filters) {
   }
 }
 
-function buildWhere(filters, ledgerDateExpr) {
+function buildWhere(filters, ledgerDateExpr, hasGodownID) {
   const clauses = ["1=1"];
 
   if (filters.itemId) {
@@ -62,6 +62,9 @@ function buildWhere(filters, ledgerDateExpr) {
   }
   if (filters.dateTo) {
     clauses.push(`${ledgerDateExpr} < DATEADD(day, 1, @dateTo)`);
+  }
+  if (hasGodownID && filters.godownId != null) {
+    clauses.push("sl.GodownID = @godownId");
   }
   if (filters.search) {
     clauses.push(`(
@@ -83,9 +86,11 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
     const pool = getPool();
 
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    // Allow up to 2000 rows so the Stock Summary report (which sends limit=500)
+    // gets a complete picture. The internal ledger view still defaults to 10.
     const limit = Math.min(
       Math.max(parseInt(req.query.limit, 10) || 10, 1),
-      100,
+      2000,
     );
     const offset = (page - 1) * limit;
 
@@ -97,6 +102,8 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
       dateFrom: req.query.dateFrom,
       dateTo: req.query.dateTo,
       search: req.query.search ? String(req.query.search).trim() : "",
+      // Godown filter: optional — omit to get all godowns
+      godownId: req.query.godownId ? parseInt(req.query.godownId, 10) : null,
     };
 
     if (
@@ -108,15 +115,19 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
     if (filters.refId && !Number.isFinite(parseInt(filters.refId, 10))) {
       return res.status(400).json({ error: "refId must be a number" });
     }
+    if (req.query.godownId && !Number.isFinite(filters.godownId)) {
+      return res.status(400).json({ error: "godownId must be a number" });
+    }
 
-    const hasCreatedDate = await hasColumn(
-      pool,
-      "dbo.StockLedger",
-      "CreatedDate",
-    );
-    const hasEntryDate = await hasColumn(pool, "dbo.StockLedger", "EntryDate");
-    const hasUom = await hasColumn(pool, "dbo.StockLedger", "UOM");
-    const hasDocNo = await hasColumn(pool, "dbo.StockLedger", "DocNo");
+    // ── Schema probing (parallel) ─────────────────────────────────────────────
+    const [hasCreatedDate, hasEntryDate, hasUom, hasDocNo, hasGodownID] =
+      await Promise.all([
+        hasColumn(pool, "dbo.StockLedger", "CreatedDate"),
+        hasColumn(pool, "dbo.StockLedger", "EntryDate"),
+        hasColumn(pool, "dbo.StockLedger", "UOM"),
+        hasColumn(pool, "dbo.StockLedger", "DocNo"),
+        hasColumn(pool, "dbo.StockLedger", "GodownID"),
+      ]);
 
     const ledgerDateExpr =
       hasCreatedDate && hasEntryDate
@@ -139,13 +150,30 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
       ? "LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = sl.UOM"
       : "";
 
+    // Godown join — only when the column exists in the schema
+    const godownJoin = hasGodownID
+      ? "LEFT JOIN dbo.Godowns gd ON gd.GodownID = sl.GodownID"
+      : "";
+    const godownIdSelect = hasGodownID ? "sl.GodownID" : "NULL";
+    const godownNameSelect = hasGodownID
+      ? "ISNULL(gd.GodownName, 'Main Godown')"
+      : "'Main Godown'";
+    // Include GodownID in GROUP BY only when the column exists
+    const godownGroupBy = hasGodownID ? ", sl.GodownID, gd.GodownName" : "";
+
+    // StockLedger.ItemID is NVarChar storing a GUID string that matches
+    // Item_Master_Group.M_Id (uniqueidentifier).
+    // TRY_CAST to UNIQUEIDENTIFIER is the correct cast — never INT.
+    // Non-GUID rows yield NULL and the LEFT JOIN produces no match; the SELECT
+    // falls back to COALESCE(img.M_Name, CONVERT(NVARCHAR(50), sl.ItemID)).
     const fromJoin = `
       FROM dbo.StockLedger sl
       LEFT JOIN dbo.Item_Master_Group img
-        ON img.M_Id = TRY_CAST(sl.ItemID AS INT)
+        ON img.M_Id = TRY_CAST(sl.ItemID AS UNIQUEIDENTIFIER)
       LEFT JOIN dbo.Item_Master_Group parent
         ON parent.M_Id = img.Parent_Id
       ${uomJoin}
+      ${godownJoin}
       LEFT JOIN dbo.GoodsReceiptNotes grn
         ON sl.RefType = 'GRN' AND grn.GRNID = sl.RefID
       LEFT JOIN dbo.PurchaseOrders po
@@ -153,19 +181,28 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
       LEFT JOIN dbo.MaterialIssues iss
         ON sl.RefType = 'ISS' AND iss.IssueId = sl.RefID
     `;
-    const where = buildWhere(filters, ledgerDateExpr);
 
-    const countReq = pool.request();
-    bindFilters(countReq, filters);
-    const countResult = await countReq.query(`
+    const where = buildWhere(filters, ledgerDateExpr, hasGodownID);
+
+    // ── Bind helper — includes godownId when present ──────────────────────────
+    function bindAll(request) {
+      bindFilters(request, filters);
+      if (hasGodownID && filters.godownId != null) {
+        request.input("godownId", sql.Int, filters.godownId);
+      }
+      return request;
+    }
+
+    // ── COUNT ─────────────────────────────────────────────────────────────────
+    const countResult = await bindAll(pool.request()).query(`
       SELECT COUNT(*) AS total
       ${fromJoin}
       ${where}
     `);
     const total = Number(countResult.recordset[0].total || 0);
 
-    const dataReq = pool.request();
-    bindFilters(dataReq, filters);
+    // ── PAGINATED DETAIL ROWS ─────────────────────────────────────────────────
+    const dataReq = bindAll(pool.request());
     dataReq.input("offset", sql.Int, offset);
     dataReq.input("limit", sql.Int, limit);
     const dataResult = await dataReq.query(`
@@ -180,6 +217,8 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
         ${uomSelect} AS UOM,
         ${uomNameSelect} AS UOMName,
         ${uomSymbolSelect} AS UOMSymbol,
+        ${godownIdSelect} AS GodownID,
+        ${godownNameSelect} AS GodownName,
         sl.RefType,
         sl.RefID,
         ${hasDocNo ? "sl.DocNo" : "COALESCE(grn.DocNo, iss.DocNo)"} AS DocNo,
@@ -195,9 +234,8 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
       FETCH NEXT @limit ROWS ONLY
     `);
 
-    const summaryReq = pool.request();
-    bindFilters(summaryReq, filters);
-    const summaryResult = await summaryReq.query(`
+    // ── OVERALL SUMMARY ───────────────────────────────────────────────────────
+    const summaryResult = await bindAll(pool.request()).query(`
       SELECT
         ISNULL(SUM(CASE WHEN sl.Type = 'IN' THEN sl.Qty ELSE 0 END), 0) AS stockIn,
         ISNULL(SUM(CASE WHEN sl.Type = 'OUT' THEN sl.Qty ELSE 0 END), 0) AS stockOut,
@@ -213,16 +251,19 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
       transactionCount: 0,
     };
 
-    const itemReq = pool.request();
-    bindFilters(itemReq, filters);
-    const itemResult = await itemReq.query(`
+    // ── BY-ITEM SUMMARY (one row per item × godown) ───────────────────────────
+    // GodownID is included in GROUP BY so the Report page sees per-godown
+    // balances rather than a collapsed total that hides where stock actually is.
+    const itemResult = await bindAll(pool.request()).query(`
       SELECT
         CONVERT(NVARCHAR(50), sl.ItemID) AS ItemID,
-        img.M_Name AS ItemName,
+        COALESCE(img.M_Name, CONVERT(NVARCHAR(50), sl.ItemID)) AS ItemName,
         parent.M_Name AS ItemGroupName,
         ${uomSelect} AS UOM,
         ${uomNameSelect} AS UOMName,
         ${uomSymbolSelect} AS UOMSymbol,
+        ${godownIdSelect} AS GodownID,
+        ${godownNameSelect} AS GodownName,
         ISNULL(SUM(CASE WHEN sl.Type = 'IN' THEN sl.Qty ELSE 0 END), 0) AS stockIn,
         ISNULL(SUM(CASE WHEN sl.Type = 'OUT' THEN sl.Qty ELSE 0 END), 0) AS stockOut,
         ISNULL(SUM(CASE WHEN sl.Type = 'IN' THEN sl.Qty ELSE -sl.Qty END), 0) AS balance
@@ -233,13 +274,34 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
         img.M_Name,
         parent.M_Name
         ${uomGroupBy}
+        ${godownGroupBy}
       ORDER BY img.M_Name, CONVERT(NVARCHAR(50), sl.ItemID)
     `);
+
+    // ── GODOWN LIST (for filter dropdowns) ────────────────────────────────────
+    // Return every godown that has at least one ledger entry so the UI can
+    // offer a "filter by godown" control without a separate API call.
+    let godowns = [];
+    if (hasGodownID) {
+      const godownListResult = await pool.request().query(`
+        SELECT DISTINCT
+          gd.GodownID,
+          ISNULL(gd.GodownName, 'Main Godown') AS GodownName,
+          gd.GodownCode,
+          ISNULL(gd.IsMain, 0) AS IsMain
+        FROM dbo.StockLedger sl
+        INNER JOIN dbo.Godowns gd ON gd.GodownID = sl.GodownID
+        WHERE gd.IsDeleted = 0 OR gd.IsDeleted IS NULL
+        ORDER BY gd.IsMain DESC, gd.GodownName ASC
+      `);
+      godowns = godownListResult.recordset;
+    }
 
     res.json({
       data: dataResult.recordset,
       summary,
       byItem: itemResult.recordset,
+      godowns,
       balance: Number(summary.balance || 0),
       page,
       limit,
