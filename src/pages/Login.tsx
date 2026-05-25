@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-const ROLE_HINTS = [
+const ROLE_HINTS = import.meta.env.DEV ? [
   {
     role: "Super Admin",
     email: "superadmin@civilier.com",
@@ -29,7 +29,7 @@ const ROLE_HINTS = [
     password: "engineer123",
     color: "#14b8a6",
   },
-];
+] : [];
 
 // ── SVG Scene: crane + buildings + blueprint grid ─────────────────────────────
 function CivilScene() {
@@ -1120,7 +1120,7 @@ export default function Login() {
             </motion.button>
           </motion.form>
 
-          {/* Demo credentials */}
+          {import.meta.env.DEV && (
           <div className="mt-5">
             <button
               type="button"
@@ -1170,6 +1170,7 @@ export default function Login() {
               )}
             </AnimatePresence>
           </div>
+          )}
         </div>
       </motion.div>
     </div>
