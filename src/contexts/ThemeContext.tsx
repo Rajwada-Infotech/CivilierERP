@@ -7,9 +7,22 @@ import React, {
   useMemo,
 } from "react";
 
-export type Theme = "dark" | "light" | "midnight" | "sepia" | "crimson";
+export type Theme =
+  | "dark"
+  | "light"
+  | "midnight"
+  | "sepia"
+  | "crimson"
+  | "root";
 
-const themes: Theme[] = ["dark", "light", "midnight", "sepia", "crimson"];
+const themes: Theme[] = [
+  "dark",
+  "light",
+  "midnight",
+  "sepia",
+  "crimson",
+  "root",
+];
 
 // Dot colors that represent each theme visually
 export const THEME_DOTS: Record<Theme, { bg: string; label: string }> = {
@@ -18,6 +31,7 @@ export const THEME_DOTS: Record<Theme, { bg: string; label: string }> = {
   midnight: { bg: "#2dd4bf", label: "Midnight" },
   sepia: { bg: "#b45309", label: "Sepia" },
   crimson: { bg: "#be123c", label: "Crimson" },
+  root: { bg: "#f0a500", label: "Root" },
 };
 
 interface ThemeContextType {
