@@ -321,10 +321,7 @@ const FinanceDashboard = () => {
             disabled={isFetching}
             className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
           >
-            <RefreshCw
-              size={13}
-              className={isFetching ? "animate-spin" : ""}
-            />
+            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
             Refresh
           </button>
         </div>
