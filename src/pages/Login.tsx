@@ -1079,11 +1079,7 @@ export default function Login() {
       if (result.success) {
         setLoginSuccess(true);
         setTimeout(() => {
-          const role = result.role;
-          if (role === "dba") navigate("/dba", { replace: true });
-          else if (role === "super_admin" || role === "admin")
-            navigate("/admin/dashboard", { replace: true });
-          else navigate("/home", { replace: true });
+          navigate("/home", { replace: true });
         }, 700);
       } else {
         setError(result.error || "Invalid email or password.");
