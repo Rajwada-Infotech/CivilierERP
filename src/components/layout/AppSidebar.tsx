@@ -88,7 +88,8 @@ type ModuleKey =
   | "super_admin"
   | "dba"
   | "user"
-  | "ticket";
+  | "ticket"
+  | "customer";
 
 const MODULE_META: Record<
   ModuleKey,
@@ -178,10 +179,15 @@ export const AppSidebar = () => {
       ADMIN_SETUP_PATHS.some((p) => location.pathname.startsWith(p)));
   const isUserProfilePage = location.pathname.startsWith("/user/profile");
   const isHomePage = location.pathname === "/home" || location.pathname === "/";
+  const isCustomerPage = role === "customer";
 
   // ── Pick nav items ──────────────────────────────────────────────────────────
   const getNavItems = (): NavItem[] => {
-    if (isHomePage) return [];
+    if (isHomePage && !isCustomerPage) return [];
+    if (isCustomerPage) return [
+      { label: "My Tickets", icon: MessageSquare, path: "/customer-portal" },
+      { label: "My Profile", icon: User, path: "/user/profile" },
+    ];
     if (isSuperAdminPage) return superAdminNavItems;
     if (isDbaPage) return dbaNavItems;
     if (isUserProfilePage) return userNavItems;

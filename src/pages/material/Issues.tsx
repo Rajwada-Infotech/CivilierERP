@@ -1505,31 +1505,32 @@ export default function Issues() {
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "Issues"]} />
       <div className="relative space-y-8 mt-6">
-
-      {/* ── Page header ── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
-            Material Issues
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Issue stock items to projects with real-time availability tracking.
-          </p>
+        {/* ── Page header ── */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Material Issues
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Issue stock items to projects with real-time availability
+              tracking.
+            </p>
+          </div>
+          {viewMode === "list" && (
+            <Button
+              onClick={() => setViewMode("form")}
+              className="gradient-accent gap-1.5 shrink-0"
+            >
+              <Plus size={15} /> New Issue
+            </Button>
+          )}
         </div>
-        {viewMode === "list" && (
-          <Button
-            onClick={() => setViewMode("form")}
-            className="gradient-accent gap-1.5 shrink-0"
-          >
-            <Plus size={15} /> New Issue
-          </Button>
-        )}
-      </div>
 
-      {viewMode === "list" && IssueList()}
-      {viewMode === "form" && IssueForm()}
-      {viewMode === "view" && IssueView()}
-      </div>{/* end space-y-8 */}
+        {viewMode === "list" && IssueList()}
+        {viewMode === "form" && IssueForm()}
+        {viewMode === "view" && IssueView()}
+      </div>
+      {/* end space-y-8 */}
     </>
   );
 }
