@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { unwrapTicketList } from "@/lib/ticketListResponse";
+import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
 import { useTicketSync } from "@/hooks/useTicketSync";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -848,7 +849,7 @@ function TicketDetailView({
       }
       refetch();
       onTicketUpdated();
-      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      invalidateTicketQueries(queryClient);
     } catch {
       toast.error("Failed to send reply");
       setCommentText(text);
@@ -871,7 +872,7 @@ function TicketDetailView({
       setShowReviewSection(true);
       refetch();
       onTicketUpdated();
-      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      invalidateTicketQueries(queryClient);
     },
     onError: () => toast.error("Failed to resolve ticket"),
   });
@@ -889,7 +890,7 @@ function TicketDetailView({
       setShowReviewSection(false);
       refetch();
       onTicketUpdated();
-      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      invalidateTicketQueries(queryClient);
     },
     onError: () => toast.error("Failed to reopen ticket"),
   });
@@ -907,7 +908,7 @@ function TicketDetailView({
       setShowReviewSection(false);
       refetch();
       onTicketUpdated();
-      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      invalidateTicketQueries(queryClient);
     },
     onError: () => toast.error("Failed to close ticket"),
   });
@@ -936,7 +937,7 @@ function TicketDetailView({
       setShowReviewSection(false);
       refetch();
       onTicketUpdated();
-      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      invalidateTicketQueries(queryClient);
     } catch {
       toast.error("Failed to submit review");
     } finally {
@@ -1643,7 +1644,7 @@ const MyTickets: React.FC = () => {
             currentUserName={currentUserName}
             onTicketUpdated={() => {
               refetch();
-              queryClient.invalidateQueries({ queryKey: ["tickets"] });
+              invalidateTicketQueries(queryClient);
             }}
           />
         </div>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { Navigate, useNavigate } from "react-router-dom";
 import { motion, useInView, useAnimation } from "framer-motion";
-import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -535,6 +535,10 @@ export default function Home() {
 
   const firstName = currentUser?.name?.split(" ")[0] ?? "User";
   const role = currentUser?.role;
+  if (role === "customer") {
+    return <Navigate to="/customer-portal" replace />;
+  }
+
   const isSuperAdmin = role === "super_admin";
   const isDba = role === "dba";
   const isAdmin = role === "admin" || isSuperAdmin || isDba;
@@ -546,6 +550,11 @@ export default function Home() {
         ? "Admin"
         : "Site Engineer";
 
+  // Customers have their own portal — redirect immediately, don't fetch ERP data
+  if (role === "customer") {
+    return <Navigate to="/ticket/my-tickets" replace />;
+  }
+
   const hour = new Date().getHours();
   const greeting =
     hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
@@ -554,7 +563,7 @@ export default function Home() {
   const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } =
     useQuery<HomeDashboardData>({
       queryKey: ["home-dashboard", isAdmin],
-      queryFn: () => fetchHomeDashboard(isAdmin),
+      queryFn: () => fetchHomeDashboard(isAdmin, role),
       staleTime: 2 * 60 * 1000, // 2 min
       refetchInterval: 5 * 60 * 1000, // auto-refresh every 5 min
       retry: 2,
@@ -714,7 +723,7 @@ export default function Home() {
       label: "Tickets",
       desc: `${(tickets?.pending ?? 0) + (tickets?.inProgress ?? 0)} open · ${tickets?.urgent ?? 0} urgent · ${tickets?.resolvedPct ?? 0}% resolved`,
       icon: Ticket,
-      href: "/tickets",
+      href: "/ticket",
       accent: "#f97316",
       badge: tickets?.urgent ? tickets.urgent : undefined,
     },

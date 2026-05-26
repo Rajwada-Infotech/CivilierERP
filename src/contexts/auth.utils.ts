@@ -185,10 +185,16 @@ export const DEFAULT_USER_ACCESS: PagePermission[] = [
   { page: "reports", actions: ["view"] },
 ];
 
+// Customer portal: can only access the ticket system
+export const CUSTOMER_ACCESS: PagePermission[] = [
+  { page: "dashboard", actions: ["view"] },
+];
+
 // Updated to use centralized PRIVILEGED_ROLES
 export const getPermissionsByRole = (role: UserRole): PagePermission[] => {
   if (PRIVILEGED_ROLES.includes(role)) return FULL_ACCESS;
   if (role === "engineer") return ENGINEER_ACCESS;
+  if (role === "customer") return CUSTOMER_ACCESS;
   return DEFAULT_USER_ACCESS;
 };
 

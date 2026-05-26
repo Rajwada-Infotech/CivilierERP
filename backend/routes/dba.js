@@ -78,18 +78,47 @@ router.post("/query", async (req, res) => {
     });
   }
 
+  const executedBy = req.user?.name || req.user?.email || "dba";
+  const tenantId = req.user?.tenant_id || null;
+  let status = "success";
+  let errorMessage = null;
+  let rowCount = 0;
+
   try {
     const pool = getPool();
     const result = await pool.request().query(query);
+    rowCount = result.recordset.length;
 
     res.json({
       rows: result.recordset,
-      rowCount: result.recordset.length,
+      rowCount,
       message: "Query executed successfully",
     });
   } catch (err) {
     console.error("Query execution error:", err);
+    status = "error";
+    errorMessage = err.message;
     res.status(500).json({ error: "Query execution failed" });
+  } finally {
+    // Persist to audit log regardless of success/failure
+    try {
+      const pool = getPool();
+      await pool
+        .request()
+        .input("executed_by", sql.NVarChar, executedBy)
+        .input("tenant_id", sql.NVarChar, tenantId)
+        .input("query_text", sql.NVarChar(sql.MAX), query.substring(0, 4000))
+        .input("rows_affected", sql.Int, rowCount)
+        .input("status", sql.NVarChar, status)
+        .input("error_message", sql.NVarChar, errorMessage).query(`
+          INSERT INTO dbo.dba_query_log
+            (executed_at, executed_by, tenant_id, query_text, rows_affected, status, error_message)
+          VALUES
+            (GETDATE(), @executed_by, @tenant_id, @query_text, @rows_affected, @status, @error_message)
+        `);
+    } catch (_logErr) {
+      // Audit log failure is non-fatal
+    }
   }
 });
 
@@ -156,7 +185,28 @@ router.get("/query-history", async (req, res) => {
   }
 });
 
-// GET basic database health stats
+// GET list of all online databases on this server
+router.get("/databases", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT
+        name,
+        database_id,
+        state_desc,
+        DB_NAME() AS current_db
+      FROM sys.databases
+      WHERE state_desc = 'ONLINE'
+        AND name NOT IN ('master','tempdb','model','msdb')
+      ORDER BY name
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("Error fetching databases:", err);
+    res.status(500).json({ error: "Failed to fetch database list" });
+  }
+});
+
 router.get("/health", async (req, res) => {
   try {
     const pool = getPool();
