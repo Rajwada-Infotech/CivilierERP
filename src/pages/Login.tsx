@@ -1078,8 +1078,10 @@ export default function Login() {
       const result = await login(email, password);
       if (result.success) {
         setLoginSuccess(true);
+        const destination =
+          result.role === "customer" ? "/ticket/my-tickets" : "/home";
         setTimeout(() => {
-          navigate("/home", { replace: true });
+          navigate(destination, { replace: true });
         }, 700);
       } else {
         setError(result.error || "Invalid email or password.");
