@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { motion, useInView, useAnimation } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -536,6 +536,10 @@ export default function Home() {
 
   const firstName = currentUser?.name?.split(" ")[0] ?? "User";
   const role = currentUser?.role;
+  if (role === "customer") {
+    return <Navigate to="/customer-portal" replace />;
+  }
+
   const isSuperAdmin = role === "super_admin";
   const isDba = role === "dba";
   const isAdmin = role === "admin" || isSuperAdmin || isDba;
@@ -560,7 +564,7 @@ export default function Home() {
   const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } =
     useQuery<HomeDashboardData>({
       queryKey: ["home-dashboard", isAdmin],
-      queryFn: () => fetchHomeDashboard(isAdmin),
+      queryFn: () => fetchHomeDashboard(isAdmin, role),
       staleTime: 2 * 60 * 1000, // 2 min
       refetchInterval: 5 * 60 * 1000, // auto-refresh every 5 min
       retry: 2,

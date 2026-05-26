@@ -71,6 +71,11 @@ const normalizeRole = (role) => {
     "standard user": "user",
     employee: "user",
     staff: "user",
+    // customer variants
+    customer: "customer",
+    "customer demo": "customer",
+    client: "customer",
+    "end user": "customer",
   };
 
   const mapped = roleMap[r];
