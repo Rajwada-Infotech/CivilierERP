@@ -841,6 +841,7 @@ export default function StockTransfer() {
                 </div>
               )}
 
+
               {fromGodownId && toGodownId && fromGodownId === toGodownId && (
                 <p className="text-xs text-red-500 flex items-center gap-1">
                   <AlertCircle size={11} /> Source and destination must be different.
