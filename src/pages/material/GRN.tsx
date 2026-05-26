@@ -5,7 +5,6 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   Truck,
   Package,
-  Plus,
   Trash2,
   Edit3,
   Save,
@@ -45,7 +44,6 @@ const parseJsonArray = <T,>(val: unknown): T[] => {
   if (typeof val !== "string" || !val.trim()) return [];
   try {
     let parsed = JSON.parse(val);
-    // Handle double-encoded: stored as JSON string of a JSON string
     if (typeof parsed === "string") parsed = JSON.parse(parsed);
     return Array.isArray(parsed) ? (parsed as T[]) : [];
   } catch {
@@ -76,7 +74,7 @@ function GRNChainBadge({ grnId }: { grnId: number }) {
   if (!chain || chain.expenseCount === 0) return null;
 
   return (
-    <div className="flex items-center gap-1 mt-1 flex-wrap">
+    <>
       <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800">
         ✓ Exp. Booked
       </span>
@@ -85,7 +83,7 @@ function GRNChainBadge({ grnId }: { grnId: number }) {
           ✓ Paid
         </span>
       )}
-    </div>
+    </>
   );
 }
 
@@ -100,21 +98,19 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
     accessorKey: "DocNo",
     header: "Doc No",
     cell: ({ row, getValue }) => {
-      const v = (getValue() as string) || row.original.GRNNo;
+      const docNo = (getValue() as string) || row.original.GRNNo;
+      const grnNo = row.original.GRNNo as string;
       return (
-        <span className="font-mono text-xs font-semibold">{v || "—"}</span>
-      );
-    },
-  },
-  {
-    accessorKey: "GRNNo",
-    header: "GRN No",
-    cell: ({ getValue }) => {
-      const v = getValue() as string;
-      return (
-        <span className="font-medium">
-          {v ? (v.startsWith("GRN-") ? v : `GRN-${v}`) : "—"}
-        </span>
+        <div className="flex flex-col gap-0.5">
+          <span className="font-mono text-xs font-semibold">
+            {docNo || "—"}
+          </span>
+          {grnNo && grnNo !== docNo && (
+            <span className="font-mono text-[10px] text-muted-foreground/60">
+              {grnNo}
+            </span>
+          )}
+        </div>
       );
     },
   },
@@ -131,11 +127,11 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
             ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800"
             : "bg-muted text-muted-foreground border-border";
       return (
-        <div className="flex flex-col gap-0.5">
-          <span>{(grn.PONumber as string) || "—"}</span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs">{(grn.PONumber as string) || "—"}</span>
           {poType && (
             <span
-              className={`inline-flex w-fit items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${typeColor}`}
+              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${typeColor}`}
             >
               {poType}
             </span>
@@ -147,14 +143,22 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "SupplierName",
     header: "Supplier",
-    cell: ({ getValue }) => <span>{(getValue() as string) || "—"}</span>,
+    cell: ({ getValue }) => (
+      <span className="text-xs hidden sm:inline">
+        {(getValue() as string) || "—"}
+      </span>
+    ),
   },
   {
     accessorKey: "GRNDate",
     header: "Date",
     cell: ({ getValue }) => {
       const v = getValue() as string;
-      return <span>{v ? new Date(v).toLocaleDateString("en-IN") : "—"}</span>;
+      return (
+        <span className="text-xs text-muted-foreground">
+          {v ? new Date(v).toLocaleDateString("en-IN") : "—"}
+        </span>
+      );
     },
   },
   {
@@ -163,8 +167,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
     cell: ({ row }) => {
       const grn = row.original;
       return (
-        <div>
-          <StatusBadge status={(grn.Status as string) || "Draft"} />
+        <div className="flex items-center gap-1.5 flex-wrap">
           <GRNChainBadge grnId={Number(grn.GRNID)} />
         </div>
       );
@@ -177,27 +180,27 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
     cell: ({ row }) => {
       const grn = row.original;
       return (
-        <div className="flex items-center justify-end gap-1.5">
+        <div className="flex items-center justify-end gap-0.5">
           <button
             onClick={() => onView(grn)}
-            className="text-muted-foreground hover:bg-muted p-2 rounded transition-colors"
+            className="text-muted-foreground hover:bg-muted p-1.5 rounded transition-colors"
             title="View GRN"
           >
-            <Eye size={18} />
+            <Eye size={15} />
           </button>
           <button
             onClick={() => onEdit(grn)}
-            className="text-primary hover:bg-primary/10 p-2 rounded transition-colors"
+            className="text-primary hover:bg-primary/10 p-1.5 rounded transition-colors"
             title="Edit GRN"
           >
-            <Edit3 size={18} />
+            <Edit3 size={15} />
           </button>
           <button
             onClick={() => deleteMutation.mutate(String(grn.GRNID))}
-            className="text-destructive hover:bg-destructive/10 p-2 rounded transition-colors"
+            className="text-destructive hover:bg-destructive/10 p-1.5 rounded transition-colors"
             title="Delete GRN"
           >
-            <Trash2 size={18} />
+            <Trash2 size={15} />
           </button>
         </div>
       );
@@ -239,14 +242,14 @@ export default function GRN() {
   const [formData, setFormData] = useState(buildEmptyForm());
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  const didAutoSelectFinYear = React.useRef(false);
   useEffect(() => {
-    if (!formData.finYear && activeFinYear) {
+    if (activeFinYear && !didAutoSelectFinYear.current) {
+      didAutoSelectFinYear.current = true;
+      setSelectedFinYear(activeFinYear);
       setFormData((prev) => ({ ...prev, finYear: activeFinYear }));
     }
-    if (!selectedFinYear && activeFinYear) {
-      setSelectedFinYear(activeFinYear);
-    }
-  }, [activeFinYear, formData.finYear, selectedFinYear]);
+  }, [activeFinYear]);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
   const { data: grnsPage, isLoading: loadingGrns } = useQuery({
@@ -276,8 +279,13 @@ export default function GRN() {
 
   const pos = posData
     .filter((po: PurchaseOrder) => {
-      // When editing, show all POs so the linked PO is always visible
-      if (editingId) return true;
+      // When editing, always include the GRN's linked PO regardless of fin-year filter
+      if (
+        editingId &&
+        formData.poId &&
+        String(po.PurchaseOrderID) === formData.poId
+      )
+        return true;
       if (!selectedFinYear) return true;
       const docNo = po.PurchaseOrderNo || "";
       return docNo.includes(selectedFinYear);
@@ -376,7 +384,6 @@ export default function GRN() {
       if (!res.ok) throw new Error("Failed to fetch PO details");
       const po = await res.json();
 
-      // Map PO line items → GRN item lines
       const lineItems: GRNItemLine[] = (po.LineItems ?? []).map((li: any) => {
         const rate = Number(li.Rate ?? 0);
         const quantity = Number(li.Quantity ?? 0);
@@ -404,7 +411,6 @@ export default function GRN() {
         parentDocNo: po.DocNo || po.PurchaseOrderNo || "",
         rootExBDocNo: po.RootExBDocNo || "",
         finYear: prev.finYear || activeFinYear || "",
-        // grnNo will be assigned by backend on save
         grnNo: "",
         docNo: "",
       }));
@@ -451,7 +457,7 @@ export default function GRN() {
     }
 
     const payload: GRNFormDataPayload = {
-      grnNo: formData.grnNo || "", // empty = backend auto-generates
+      grnNo: formData.grnNo || "",
       grnDate: formData.grnDate,
       supplierId: Number(formData.supplierId),
       poId: Number(formData.poId) || 0,
@@ -482,10 +488,8 @@ export default function GRN() {
     setFormData((prev) => {
       const nextItems = [...prev.items];
       const current = { ...nextItems[index], [field]: value };
-      // Keep receivedQty and quantity in sync when user edits receivedQty
       if (field === "receivedQty") {
         current.remainingQty = current.orderedQty - value;
-        // Only auto-sync quantity if user hasn't manually set it yet
         if (nextItems[index].quantity === nextItems[index].receivedQty) {
           current.quantity = value;
         }
@@ -497,14 +501,11 @@ export default function GRN() {
     });
   };
 
-  // Legacy alias kept so existing call-sites compile without change
   const updateReceivedQty = (index: number, value: number) =>
     updateItemField(index, "receivedQty", value);
 
-  // ── Edit ─────────────────────────────────────────────────────────────────────
+  // ── View ─────────────────────────────────────────────────────────────────────
   onView = async (grn: any) => {
-    // The list row no longer carries GRNItems (removed for perf).
-    // Fetch the full record so the view modal has item data.
     try {
       const token = localStorage.getItem("token") ?? "";
       const res = await fetch(`/api/grns/${grn.GRNID}`, {
@@ -517,12 +518,13 @@ export default function GRN() {
     }
   };
 
+  // ── Edit ─────────────────────────────────────────────────────────────────────
   onEdit = async (grn: any) => {
     // Sync fin year filter so the PO appears in the dropdown
     const grnFinYear = grn.FinYear || activeFinYear || "";
     if (grnFinYear) setSelectedFinYear(grnFinYear);
 
-    // Fetch full GRN record so GRNItems (item names) are available
+    // Always fetch the full GRN record — list rows strip GRNItems for performance
     let fullGrn = grn;
     try {
       const token = localStorage.getItem("token") ?? "";
@@ -530,7 +532,9 @@ export default function GRN() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) fullGrn = await res.json();
-    } catch { /* fall back to list row data */ }
+    } catch {
+      // fall back to list-row data
+    }
 
     const parsedItems = parseJsonArray<GRNItemLine>(fullGrn.GRNItems).map(
       (item) => ({
@@ -981,7 +985,7 @@ export default function GRN() {
               >
                 <X size={15} /> Cancel
               </button>
-            </div>
+</div>
           </div>
         </div>
 
@@ -1284,7 +1288,7 @@ export default function GRN() {
             </div>
           );
         })()}
-      </div>{/* end space-y-8 */}
+      </div>
     </>
   );
 }
