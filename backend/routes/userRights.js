@@ -3,6 +3,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
+const { userPermissionCache } = require("../middleware/permissions");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
@@ -91,6 +92,8 @@ router.put("/:userId", authMiddleware, adminOnly, async (req, res) => {
           INSERT (UserId, RightsJson, IsActive, CreatedAt, UpdatedAt)
           VALUES (source.UserId, source.RightsJson, 1, GETDATE(), GETDATE());
       `);
+
+    userPermissionCache.invalidateUser(req.params.userId);
 
     res.json({ success: true, message: "Permissions saved successfully" });
   } catch (err) {

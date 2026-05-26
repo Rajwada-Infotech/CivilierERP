@@ -74,6 +74,11 @@ interface Props {
   preview: string;
   /** Increment to force a preview refresh without changing the selected type. */
   refreshTrigger?: number;
+  /**
+   * When true (edit mode), suppresses the auto-fetch of a new doc number.
+   * The parent's existing preview/docNo is displayed as-is.
+   */
+  readOnly?: boolean;
 }
 
 // ── Standalone fetch helpers (exported for direct use in pages) ───────────────
@@ -135,6 +140,7 @@ export function DocNumberPreview({
   onSelect,
   preview,
   refreshTrigger = 0,
+  readOnly = false,
 }: Props) {
   const [docTypes, setDocTypes] = useState<DocType[]>([]);
   const [docTypesLoading, setDocTypesLoading] = useState(true);
@@ -149,9 +155,24 @@ export function DocNumberPreview({
       .finally(() => setDocTypesLoading(false));
   }, [module]);
 
-  // Refresh the preview whenever selectedDocTypeId, finYear, or refreshTrigger changes
+  // In readOnly (edit) mode: if the saved docTypeId is not in the module-filtered list
+  // (e.g. doc type was created before links_to tagging), fetch all types and inject it.
   useEffect(() => {
-    if (!selectedDocTypeId) return;
+    if (!readOnly || !selectedDocTypeId || docTypesLoading) return;
+    const found = docTypes.find((d) => d.TypeOfDocId === selectedDocTypeId);
+    if (found) return; // already present — no action needed
+    fetchDocTypes() // no module filter → all types
+      .then((all) => {
+        const match = all.find((d) => d.TypeOfDocId === selectedDocTypeId);
+        if (match) setDocTypes((prev) => [match, ...prev]);
+      })
+      .catch(() => {});
+  }, [readOnly, selectedDocTypeId, docTypes, docTypesLoading]);
+
+  // Refresh the preview whenever selectedDocTypeId, finYear, or refreshTrigger changes.
+  // In readOnly (edit) mode we skip this — the parent already has the saved doc number.
+  useEffect(() => {
+    if (!selectedDocTypeId || readOnly) return;
     let active = true;
     setRefreshing(true);
     fetchNextDocNumber(selectedDocTypeId, finYear)
@@ -164,7 +185,7 @@ export function DocNumberPreview({
     return () => {
       active = false;
     };
-  }, [selectedDocTypeId, finYear, refreshTrigger]);
+  }, [selectedDocTypeId, finYear, refreshTrigger, readOnly]);
 
   const handleSelect = async (value: string) => {
     if (!value) {
@@ -199,7 +220,7 @@ export function DocNumberPreview({
           <Select
             value={selectedDocTypeId ? String(selectedDocTypeId) : ""}
             onValueChange={handleSelect}
-            disabled={docTypesLoading}
+            disabled={docTypesLoading || readOnly}
           >
             <SelectTrigger>
               <div className="flex items-center gap-2 min-w-0">

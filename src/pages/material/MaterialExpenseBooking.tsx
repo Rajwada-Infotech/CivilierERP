@@ -1051,6 +1051,8 @@ function DocSelectorPanel({
                         date: g.GRNDate,
                         nameLabel: g.Remarks,
                         grnItems: parsedItems,
+                        projectId: g.ProjectId,
+                        companyId: g.CompanyId,
                         gst:
                           typeof g.ParentGST === "string"
                             ? (() => {
@@ -1566,6 +1568,8 @@ export default function MaterialExpenseBooking() {
   };
 
   const openEdit = (rec: ExpenseRecord) => {
+    // Reset stale form/doc state before populating with the new record
+    resetForm();
     if (!rec.id) {
       toast.error("Cannot edit this booking because its record id is missing.");
       return;
@@ -1619,6 +1623,11 @@ export default function MaterialExpenseBooking() {
               amount: parseFloat(r.TotalAmount) || 0,
               gst: parsedParentGST,
             });
+            setForm((prev) => ({
+              ...prev,
+              supplier: r.SupplierName ?? prev.supplier,
+              projectSite: r.ProjectId ? String(r.ProjectId) : prev.projectSite,
+            }));
           })
           .catch(() => {})
           .finally(() => setGrnItemsLoading(false));
@@ -1639,6 +1648,13 @@ export default function MaterialExpenseBooking() {
               date: po.PODate,
               gst: po.GST ?? null,
             });
+            setForm((prev) => ({
+              ...prev,
+              supplier: po.SupplierName ?? prev.supplier,
+              projectSite: po.ProjectId
+                ? String(po.ProjectId)
+                : prev.projectSite,
+            }));
           }
         };
         if (_mastersCache.po) {
@@ -1668,6 +1684,13 @@ export default function MaterialExpenseBooking() {
               date: wd.DocDate,
               gst: wd.GST ?? null,
             });
+            setForm((prev) => ({
+              ...prev,
+              supplier: wd.ContractorName ?? prev.supplier,
+              projectSite: wd.ProjectId
+                ? String(wd.ProjectId)
+                : prev.projectSite,
+            }));
           }
         };
         if (_mastersCache.workDone) {
@@ -1700,6 +1723,13 @@ export default function MaterialExpenseBooking() {
               date: po.PODate,
               gst: po.GST ?? null,
             });
+            setForm((prev) => ({
+              ...prev,
+              supplier: po.SupplierName ?? prev.supplier,
+              projectSite: po.ProjectId
+                ? String(po.ProjectId)
+                : prev.projectSite,
+            }));
           }
         };
         if (_mastersCache.woPO) {
@@ -2124,11 +2154,26 @@ export default function MaterialExpenseBooking() {
                         </div>
                       </SelectTrigger>
                       <SelectContent>
-                        {projectOptions.length === 0 && (
+                        {projectOptions.length === 0 && !form.projectSite && (
                           <SelectItem value="__none__" disabled>
                             No projects found
                           </SelectItem>
                         )}
+                        {/* Inject synthetic option when editing a booking whose project
+                            enterprise has a different business_type than 'P' — ensures
+                            the Select can display the saved value even if it's absent
+                            from projectOptions */}
+                        {form.projectSite &&
+                          !projectOptions.some(
+                            (p) => String(p.id) === form.projectSite,
+                          ) && (
+                            <SelectItem
+                              key="__current__"
+                              value={form.projectSite}
+                            >
+                              {form.projectName || form.projectSite}
+                            </SelectItem>
+                          )}
                         {projectOptions.map((p) => (
                           <SelectItem key={p.id} value={String(p.id)}>
                             {p.label}

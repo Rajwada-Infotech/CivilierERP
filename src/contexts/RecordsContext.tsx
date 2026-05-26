@@ -6,6 +6,7 @@ import React, {
   useCallback,
 } from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { useAuth } from "@/contexts/AuthContext";
 
 export type RecordFileAttachment = {
   name: string;
@@ -90,12 +91,24 @@ function mapExpense(e: Record<string, unknown>): UnifiedRecord {
 }
 
 export function RecordsProvider({ children }: { children: React.ReactNode }) {
+  const { currentUser } = useAuth();
+  // Only fetch for roles that have Finance module access.
+  // Others (customer, engineer, site_engineer, etc.) get 403 on these endpoints.
+  const FINANCE_ROLES = ["admin", "super_admin", "dba", "finance_manager", "branch_manager"];
+  const isCustomer = !currentUser || !FINANCE_ROLES.includes(currentUser.role);
   const [records, setRecords] = useState<UnifiedRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
+    if (isCustomer) {
+      setRecords([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const controller = new AbortController();
     setLoading(true);
     setError(null);
@@ -132,7 +145,7 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
       });
 
     return () => controller.abort();
-  }, [tick]);
+  }, [tick, isCustomer]);
 
   const refreshRecords = useCallback(() => setTick((t) => t + 1), []);
 
