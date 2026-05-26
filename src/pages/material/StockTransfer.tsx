@@ -13,7 +13,6 @@ import {
   ClipboardList,
   Send,
   ArrowLeftRight,
-  ChevronDown,
   Search,
   Building2,
   FolderKanban,
@@ -27,6 +26,13 @@ import {
   type StockTransfer,
 } from "@/api/stockTransferApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(n ?? 0);
@@ -86,16 +92,15 @@ function FilterSelect({
   const c =
     color === "blue"
       ? {
-          border: "border-blue-400/40 focus:border-blue-500/60",
-          bg: "bg-blue-500/5",
           icon: "text-blue-500",
-          label: "text-blue-600",
+          label: "text-blue-600 dark:text-blue-400",
+          trigger: "border-blue-400/40 bg-blue-500/5 focus:ring-blue-500/30",
         }
       : {
-          border: "border-violet-400/40 focus:border-violet-500/60",
-          bg: "bg-violet-500/5",
           icon: "text-violet-500",
-          label: "text-violet-600",
+          label: "text-violet-600 dark:text-violet-400",
+          trigger:
+            "border-violet-400/40 bg-violet-500/5 focus:ring-violet-500/30",
         };
 
   return (
@@ -106,25 +111,27 @@ function FilterSelect({
         {label}
       </p>
       <div className="relative">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none z-10">
           <Icon size={14} className={c.icon} />
         </span>
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className={`w-full pl-9 pr-8 py-2.5 rounded-xl border-2 text-sm text-foreground outline-none appearance-none transition-colors ${c.border} ${c.bg}`}
+        <Select
+          value={value || "__all__"}
+          onValueChange={(v) => onChange(v === "__all__" ? "" : v)}
         >
-          <option value="">{placeholder}</option>
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <ChevronDown
-          size={13}
-          className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground"
-        />
+          <SelectTrigger
+            className={`w-full pl-9 rounded-xl border-2 text-sm h-10 ${c.trigger}`}
+          >
+            <SelectValue placeholder={placeholder} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">{placeholder}</SelectItem>
+            {options.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
     </div>
   );
@@ -155,43 +162,45 @@ function GodownSelect({
     <div className="flex-1 space-y-2">
       <p
         className={`text-xs font-semibold uppercase tracking-wider ${
-          isFrom ? "text-orange-600" : "text-emerald-600"
+          isFrom
+            ? "text-orange-600 dark:text-orange-400"
+            : "text-emerald-600 dark:text-emerald-400"
         }`}
       >
         {label}
       </p>
       <div className="relative">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none z-10">
           <Warehouse
             size={14}
             className={isFrom ? "text-orange-500" : "text-emerald-600"}
           />
         </span>
-        <select
-          value={value ?? ""}
-          onChange={(e) =>
-            onChange(e.target.value ? Number(e.target.value) : null)
-          }
-          className={`w-full pl-9 pr-8 py-2.5 rounded-xl border-2 text-sm text-foreground outline-none appearance-none transition-colors ${
-            isFrom
-              ? "border-orange-400/40 bg-orange-500/5 focus:border-orange-500/60"
-              : "border-emerald-400/40 bg-emerald-500/5 focus:border-emerald-500/60"
-          }`}
+        <Select
+          value={value != null ? String(value) : "__none__"}
+          onValueChange={(v) => onChange(v === "__none__" ? null : Number(v))}
         >
-          <option value="">{placeholder}</option>
-          {godowns
-            .filter((g) => g.GodownID !== exclude)
-            .map((g) => (
-              <option key={g.GodownID} value={g.GodownID}>
-                {g.GodownName}
-                {g.IsMain ? " [Main]" : ""}
-              </option>
-            ))}
-        </select>
-        <ChevronDown
-          size={13}
-          className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground"
-        />
+          <SelectTrigger
+            className={`w-full pl-9 rounded-xl border-2 text-sm h-10 ${
+              isFrom
+                ? "border-orange-400/40 bg-orange-500/5 focus:ring-orange-500/30"
+                : "border-emerald-400/40 bg-emerald-500/5 focus:ring-emerald-500/30"
+            }`}
+          >
+            <SelectValue placeholder={placeholder} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">{placeholder}</SelectItem>
+            {godowns
+              .filter((g) => g.GodownID !== exclude)
+              .map((g) => (
+                <SelectItem key={g.GodownID} value={String(g.GodownID)}>
+                  {g.GodownName}
+                  {g.IsMain ? " [Main]" : ""}
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
       </div>
       {selected && (
         <div
