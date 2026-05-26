@@ -1033,6 +1033,7 @@ const PurchaseOrderMaster: React.FC = () => {
         itemDescription: li.itemName,
         description: li.itemDescription || null,
         unit: li.unit,
+        uomId: li.uomId ?? null,
         quantity: li.quantity,
         rate: li.rate,
         tax: li.gstRate,
@@ -1242,15 +1243,36 @@ const PurchaseOrderMaster: React.FC = () => {
           const rate = Number(pi.rate ?? pi.Rate ?? 0);
           const gstRate = Number(pi.tax ?? pi.Tax ?? 0);
           const taxAmount = (qty * rate * gstRate) / 100;
+          // Resolve UOM: 1) stored uomId, 2) unit name/code match, 3) item master fallback
+          const storedUomId = pi.uomId ? Number(pi.uomId) : null;
+          const directMatch = storedUomId
+            ? uoms.find((u) => u.id === storedUomId)
+            : null;
           const unitStr = (pi.unit ?? pi.UomName ?? "").trim().toLowerCase();
-          const uomMatch = uoms.find(
-            (u) =>
-              u.code.toLowerCase() === unitStr ||
-              u.name.toLowerCase() === unitStr,
-          );
+          const nameMatch = unitStr
+            ? uoms.find(
+                (u) =>
+                  u.code.toLowerCase() === unitStr ||
+                  u.name.toLowerCase() === unitStr,
+              )
+            : null;
+          // Fallback: look up the item master's default UOM when unit string is empty
+          const piItemId = pi.itemId ?? pi.ItemId ?? "";
+          const masterItem = piItemId
+            ? items.find((i) => String(i.id) === String(piItemId))
+            : null;
+          const masterUomStr = masterItem?.uom?.trim().toLowerCase() ?? "";
+          const masterMatch = masterUomStr
+            ? uoms.find(
+                (u) =>
+                  u.code.toLowerCase() === masterUomStr ||
+                  u.name.toLowerCase() === masterUomStr,
+              )
+            : null;
+          const uomMatch = directMatch ?? nameMatch ?? masterMatch;
           return {
             id: uid(),
-            itemId: pi.itemId ?? pi.ItemId ?? "",
+            itemId: piItemId,
             itemName: pi.itemDescription ?? pi.ItemName ?? pi.Description ?? "",
             itemDescription: pi.description ?? pi.ItemDescription ?? "",
             quantity: qty,

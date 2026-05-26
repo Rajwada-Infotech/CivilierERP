@@ -155,6 +155,20 @@ export function DocNumberPreview({
       .finally(() => setDocTypesLoading(false));
   }, [module]);
 
+  // In readOnly (edit) mode: if the saved docTypeId is not in the module-filtered list
+  // (e.g. doc type was created before links_to tagging), fetch all types and inject it.
+  useEffect(() => {
+    if (!readOnly || !selectedDocTypeId || docTypesLoading) return;
+    const found = docTypes.find((d) => d.TypeOfDocId === selectedDocTypeId);
+    if (found) return; // already present — no action needed
+    fetchDocTypes() // no module filter → all types
+      .then((all) => {
+        const match = all.find((d) => d.TypeOfDocId === selectedDocTypeId);
+        if (match) setDocTypes((prev) => [match, ...prev]);
+      })
+      .catch(() => {});
+  }, [readOnly, selectedDocTypeId, docTypes, docTypesLoading]);
+
   // Refresh the preview whenever selectedDocTypeId, finYear, or refreshTrigger changes.
   // In readOnly (edit) mode we skip this — the parent already has the saved doc number.
   useEffect(() => {
