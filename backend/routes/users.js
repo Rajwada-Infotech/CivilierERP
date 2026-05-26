@@ -458,7 +458,7 @@ router.delete(
 // ======================
 // PATCH USER PAGE PERMISSIONS
 // Called by AuthContext.updateUserPagePermissions()
-// Stores the permissions JSON in dbo.users.page_permissions
+// Stores the permissions JSON in dbo.UserPageRightsJson
 // ======================
 router.patch(
   "/:id/permissions",
@@ -482,7 +482,21 @@ router.patch(
         .request()
         .input("id", sql.Int, id)
         .input("perms", sql.NVarChar(sql.MAX), jsonStr)
-        .query("UPDATE dbo.users SET page_permissions = @perms WHERE id = @id").catch(() => null); // column may not exist
+        .query(`
+          MERGE dbo.UserPageRightsJson AS target
+          USING (VALUES (@id, @perms)) AS source (UserId, RightsJson)
+          ON target.UserId = source.UserId
+          WHEN MATCHED THEN
+            UPDATE SET RightsJson = source.RightsJson, UpdatedAt = GETDATE(), IsActive = 1
+          WHEN NOT MATCHED THEN
+            INSERT (UserId, RightsJson, IsActive, CreatedAt, UpdatedAt)
+            VALUES (source.UserId, source.RightsJson, 1, GETDATE(), GETDATE());
+        `);
+
+      try {
+        const { userPermissionCache } = require("../middleware/permissions");
+        userPermissionCache.invalidateUser(id);
+      } catch {}
 
       res.json({ message: "Permissions updated" });
     } catch (err) {

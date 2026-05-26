@@ -36,6 +36,12 @@ const ROLE_HINTS = import.meta.env.DEV
         password: "engineer123",
         color: "#14b8a6",
       },
+      {
+        role: "Customer",
+        email: "customer@civilier.com",
+        password: "customer123",
+        color: "#f59e0b",
+      },
     ]
   : [];
 
