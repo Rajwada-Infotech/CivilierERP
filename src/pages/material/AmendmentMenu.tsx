@@ -432,17 +432,18 @@ export default function Amendments() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material", "Amendments"]} />
-      <div className="p-6 space-y-5">
+      <div className="relative space-y-6 mt-6">
         {/* Header */}
-        <div>
-          <h1 className="text-lg sm:text-xl font-heading font-bold text-foreground flex items-center gap-2">
-            <FileEdit size={20} className="text-primary" />
-            Amendments
-          </h1>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-            Centralized amendment workflow for GRN, PO, WO &amp; Expense Booking
-            — with full audit trail.
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Amendments
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Centralized amendment workflow for GRN, PO, WO &amp; Expense Booking
+              — with full audit trail.
+            </p>
+          </div>
         </div>
 
         {/* Doc Type Tabs */}
