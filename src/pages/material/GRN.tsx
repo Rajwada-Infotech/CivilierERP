@@ -74,7 +74,7 @@ function GRNChainBadge({ grnId }: { grnId: number }) {
   if (!chain || chain.expenseCount === 0) return null;
 
   return (
-    <div className="flex items-center gap-1 mt-1 flex-wrap">
+    <>
       <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800">
         ✓ Exp. Booked
       </span>
@@ -83,7 +83,7 @@ function GRNChainBadge({ grnId }: { grnId: number }) {
           ✓ Paid
         </span>
       )}
-    </div>
+    </>
   );
 }
 
@@ -98,21 +98,19 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
     accessorKey: "DocNo",
     header: "Doc No",
     cell: ({ row, getValue }) => {
-      const v = (getValue() as string) || row.original.GRNNo;
+      const docNo = (getValue() as string) || row.original.GRNNo;
+      const grnNo = row.original.GRNNo as string;
       return (
-        <span className="font-mono text-xs font-semibold">{v || "—"}</span>
-      );
-    },
-  },
-  {
-    accessorKey: "GRNNo",
-    header: "GRN No",
-    cell: ({ getValue }) => {
-      const v = getValue() as string;
-      return (
-        <span className="font-medium">
-          {v ? (v.startsWith("GRN-") ? v : `GRN-${v}`) : "—"}
-        </span>
+        <div className="flex flex-col gap-0.5">
+          <span className="font-mono text-xs font-semibold">
+            {docNo || "—"}
+          </span>
+          {grnNo && grnNo !== docNo && (
+            <span className="font-mono text-[10px] text-muted-foreground/60">
+              {grnNo}
+            </span>
+          )}
+        </div>
       );
     },
   },
@@ -129,11 +127,11 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
             ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800"
             : "bg-muted text-muted-foreground border-border";
       return (
-        <div className="flex flex-col gap-0.5">
-          <span>{(grn.PONumber as string) || "—"}</span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs">{(grn.PONumber as string) || "—"}</span>
           {poType && (
             <span
-              className={`inline-flex w-fit items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${typeColor}`}
+              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${typeColor}`}
             >
               {poType}
             </span>
@@ -145,14 +143,22 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "SupplierName",
     header: "Supplier",
-    cell: ({ getValue }) => <span>{(getValue() as string) || "—"}</span>,
+    cell: ({ getValue }) => (
+      <span className="text-xs hidden sm:inline">
+        {(getValue() as string) || "—"}
+      </span>
+    ),
   },
   {
     accessorKey: "GRNDate",
     header: "Date",
     cell: ({ getValue }) => {
       const v = getValue() as string;
-      return <span>{v ? new Date(v).toLocaleDateString("en-IN") : "—"}</span>;
+      return (
+        <span className="text-xs text-muted-foreground">
+          {v ? new Date(v).toLocaleDateString("en-IN") : "—"}
+        </span>
+      );
     },
   },
   {
@@ -161,8 +167,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
     cell: ({ row }) => {
       const grn = row.original;
       return (
-        <div>
-          <StatusBadge status={(grn.Status as string) || "Draft"} />
+        <div className="flex items-center gap-1.5 flex-wrap">
           <GRNChainBadge grnId={Number(grn.GRNID)} />
         </div>
       );
@@ -175,27 +180,27 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
     cell: ({ row }) => {
       const grn = row.original;
       return (
-        <div className="flex items-center justify-end gap-1.5">
+        <div className="flex items-center justify-end gap-0.5">
           <button
             onClick={() => onView(grn)}
-            className="text-muted-foreground hover:bg-muted p-2 rounded transition-colors"
+            className="text-muted-foreground hover:bg-muted p-1.5 rounded transition-colors"
             title="View GRN"
           >
-            <Eye size={18} />
+            <Eye size={15} />
           </button>
           <button
             onClick={() => onEdit(grn)}
-            className="text-primary hover:bg-primary/10 p-2 rounded transition-colors"
+            className="text-primary hover:bg-primary/10 p-1.5 rounded transition-colors"
             title="Edit GRN"
           >
-            <Edit3 size={18} />
+            <Edit3 size={15} />
           </button>
           <button
             onClick={() => deleteMutation.mutate(String(grn.GRNID))}
-            className="text-destructive hover:bg-destructive/10 p-2 rounded transition-colors"
+            className="text-destructive hover:bg-destructive/10 p-1.5 rounded transition-colors"
             title="Delete GRN"
           >
-            <Trash2 size={18} />
+            <Trash2 size={15} />
           </button>
         </div>
       );
@@ -1025,47 +1030,49 @@ export default function GRN() {
 
           {/* GRN List */}
           <div className="rounded-xl bg-card border border-border shadow-sm overflow-hidden">
-            <div className="flex justify-between items-center px-6 py-4 border-b border-border bg-card/60">
+            <div className="flex flex-wrap gap-3 items-center justify-between px-4 sm:px-6 py-4 border-b border-border bg-card/60">
               <h3 className="font-heading font-semibold">GRN History</h3>
-              <div className="relative w-80">
+              <div className="relative w-full sm:w-72">
                 <Search
                   size={15}
-                  className="absolute left-3 top-3 text-muted-foreground"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                 />
                 <input
                   type="text"
                   placeholder="Search GRN, PO or Supplier..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="pl-10 w-full py-2.5 bg-muted border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="pl-9 w-full py-2 bg-muted border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
               </div>
             </div>
 
-            <DataTable
-              data={filteredGrns}
-              columns={GRN_LIST_COLUMNS}
-              searchable={false}
-              paginated={true}
-              defaultPageSize={20}
-              emptyMessage="No GRNs found."
-            />
-            <div className="flex items-center justify-between border-t border-border px-6 py-3 text-sm">
-              <span className="text-muted-foreground">
+            <div className="overflow-x-auto">
+              <DataTable
+                data={filteredGrns}
+                columns={GRN_LIST_COLUMNS}
+                searchable={false}
+                paginated={true}
+                defaultPageSize={20}
+                emptyMessage="No GRNs found."
+              />
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 sm:px-6 py-3 text-sm">
+              <span className="text-muted-foreground text-xs">
                 Page {page} of {totalPages} ({totalRecords} records)
               </span>
               <div className="flex gap-2">
                 <button
                   onClick={() => setPage((p) => Math.max(p - 1, 1))}
                   disabled={page <= 1}
-                  className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-50"
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs disabled:opacity-50"
                 >
                   Previous
                 </button>
                 <button
                   onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
                   disabled={page >= totalPages}
-                  className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-50"
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs disabled:opacity-50"
                 >
                   Next
                 </button>
