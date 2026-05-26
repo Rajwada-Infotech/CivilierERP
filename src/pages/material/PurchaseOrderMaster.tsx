@@ -958,9 +958,9 @@ const PurchaseOrderMaster: React.FC = () => {
           patch.sgstRate !== undefined
         ) {
           updated.gstRate =
-            updated.igstRate > 0
-              ? updated.igstRate
-              : updated.cgstRate + updated.sgstRate;
+            updated.cgstRate > 0 || updated.sgstRate > 0
+              ? updated.cgstRate + updated.sgstRate
+              : updated.igstRate;
         }
         updated.taxAmount = (baseAmount * updated.gstRate) / 100;
         updated.amount = baseAmount + updated.taxAmount;
@@ -985,18 +985,21 @@ const PurchaseOrderMaster: React.FC = () => {
         u.code.toLowerCase() === itemUomNorm ||
         u.name.toLowerCase() === itemUomNorm,
     );
-    // Use CGST+SGST when both are set (intra-state); fall back to IGST (inter-state)
-    const useCgstSgst = item.cgst > 0 && item.sgst > 0;
-    const gstRate = useCgstSgst ? item.cgst + item.sgst : item.igst;
+    // Use CGST+SGST when either is set; otherwise IGST
+    const mc = Number(item.cgst ?? 0);
+    const ms = Number(item.sgst ?? 0);
+    const mi = Number(item.igst ?? 0);
+    const useCgstSgst = mc > 0 || ms > 0;
+    const gstRate = useCgstSgst ? mc + ms : mi;
     updateLine(idx, {
       itemId,
       itemName: item.name,
       itemDescription: item.description,
       uomId: uomMatch?.id ?? null,
       unit: uomMatch?.name ?? item.uom,
-      cgstRate: useCgstSgst ? item.cgst : 0,
-      sgstRate: useCgstSgst ? item.sgst : 0,
-      igstRate: useCgstSgst ? 0 : item.igst,
+      cgstRate: useCgstSgst ? mc : 0,
+      sgstRate: useCgstSgst ? ms : 0,
+      igstRate: useCgstSgst ? 0 : mi,
       gstRate,
     });
   };
@@ -1252,45 +1255,55 @@ const PurchaseOrderMaster: React.FC = () => {
         ? raw.LineItems
         : [];
 
+    // Snapshot items at call time — avoids stale closure issues
+    const itemsSnapshot = items;
+
     if (poItems.length > 0) {
       setLineItems(
         poItems.map((pi: any) => {
           const qty = Number(pi.quantity ?? pi.Quantity ?? 0);
           const rate = Number(pi.rate ?? pi.Rate ?? 0);
-          // Always re-derive GST split from item master (HSN-linked rates)
-          // Fall back to stored values only if item not found in master
-          const itemId = pi.itemId ?? pi.ItemId ?? "";
-          const masterItem = itemId
-            ? items.find((it) => String(it.id) === String(itemId))
-            : null;
           const totalTaxRate = Number(pi.tax ?? pi.Tax ?? 0);
-          let resolvedIgst = 0,
-            resolvedCgst = 0,
-            resolvedSgst = 0;
-          if (masterItem) {
-            // Item found — use HSN-linked rates from item master
-            if (masterItem.cgst > 0 || masterItem.sgst > 0) {
-              resolvedCgst = masterItem.cgst;
-              resolvedSgst = masterItem.sgst;
-            } else {
-              resolvedIgst = masterItem.igst;
-            }
+
+          // Priority 1: use stored split fields (saved by toPayload)
+          const storedCgst = Number(pi.cgstRate ?? 0);
+          const storedSgst = Number(pi.sgstRate ?? 0);
+          const storedIgst = Number(pi.igstRate ?? 0);
+
+          let resolvedCgst = 0,
+            resolvedSgst = 0,
+            resolvedIgst = 0;
+
+          if (storedCgst > 0 || storedSgst > 0) {
+            resolvedCgst = storedCgst;
+            resolvedSgst = storedSgst;
+          } else if (storedIgst > 0) {
+            resolvedIgst = storedIgst;
           } else {
-            // Item not in master — fall back to stored split fields
-            const storedCgst = Number(pi.cgstRate ?? 0);
-            const storedSgst = Number(pi.sgstRate ?? 0);
-            const storedIgst = Number(pi.igstRate ?? 0);
-            if (storedCgst > 0 || storedSgst > 0) {
-              resolvedCgst = storedCgst;
-              resolvedSgst = storedSgst;
-            } else if (storedIgst > 0) {
-              resolvedIgst = storedIgst;
+            // Priority 2: legacy record — derive from item master
+            const itemId = String(pi.itemId ?? pi.ItemId ?? "");
+            const masterItem = itemId
+              ? itemsSnapshot.find((it) => String(it.id) === itemId)
+              : null;
+            if (masterItem) {
+              const mc = Number(masterItem.cgst ?? 0);
+              const ms = Number(masterItem.sgst ?? 0);
+              const mi = Number(masterItem.igst ?? 0);
+              if (mc > 0 || ms > 0) {
+                resolvedCgst = mc;
+                resolvedSgst = ms;
+              } else {
+                resolvedIgst = mi;
+              }
             } else {
               resolvedIgst = totalTaxRate;
             }
           }
+
           const gstRate =
-            resolvedIgst > 0 ? resolvedIgst : resolvedCgst + resolvedSgst;
+            resolvedCgst > 0 || resolvedSgst > 0
+              ? resolvedCgst + resolvedSgst
+              : resolvedIgst;
           const taxAmount = (qty * rate * gstRate) / 100;
           const unitStr = (pi.unit ?? pi.UomName ?? "").trim().toLowerCase();
           const uomMatch = uoms.find(
@@ -1922,7 +1935,7 @@ const PurchaseOrderMaster: React.FC = () => {
                   <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-28">
                     Rate (₹)
                   </th>
-                  <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-20">
+                  <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-32">
                     GST %
                   </th>
                   <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-28">
@@ -2072,11 +2085,20 @@ const PurchaseOrderMaster: React.FC = () => {
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-semibold">
                             {li.gstRate}%
                           </span>
-                          <span className="text-[10px] text-muted-foreground font-medium">
-                            {li.igstRate > 0
-                              ? `IGST ${li.igstRate}%`
-                              : `CGST ${li.cgstRate}% + SGST ${li.sgstRate}%`}
-                          </span>
+                          {li.igstRate > 0 ? (
+                            <span className="text-[10px] text-muted-foreground font-medium">
+                              IGST
+                            </span>
+                          ) : (
+                            <>
+                              <span className="text-[10px] text-muted-foreground font-medium">
+                                CGST {li.cgstRate}%
+                              </span>
+                              <span className="text-[10px] text-muted-foreground font-medium">
+                                SGST {li.sgstRate}%
+                              </span>
+                            </>
+                          )}
                         </div>
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
