@@ -117,7 +117,13 @@ async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
   }
 }
 
-export async function fetchAllReminders(): Promise<ReminderItem[]> {
+export async function fetchCustomerReminders(): Promise<ReminderItem[]> {
+  // Customer-scoped: only their own EMI installments
+  return fetchEmiReminders();
+}
+
+export async function fetchAllReminders(role?: string): Promise<ReminderItem[]> {
+  if (role === "customer") return fetchCustomerReminders();
   const [poRes, grnRes, chequeRes, tdsRes, woRes] = await Promise.allSettled([
     fetchWithAuth("/api/purchase-orders"),
     fetchWithAuth("/api/grns"),
@@ -227,7 +233,7 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
       if (isManual) setLoading(true);
 
       try {
-        const items = await fetchAllReminders();
+        const items = await fetchAllReminders(role);
         setReminders([...items]);
         failCount.current = 0;
       } catch {
