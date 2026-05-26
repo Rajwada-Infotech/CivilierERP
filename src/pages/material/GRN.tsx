@@ -614,7 +614,7 @@ export default function GRN() {
               )}
             </div>
 
-            <div className="p-6 space-y-8">
+            <div className="p-4 sm:p-6 space-y-8">
               {/* ── Row 1: Fin Year + Purchase Order ── */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                 {/* Fin Year selector */}
@@ -765,7 +765,145 @@ export default function GRN() {
                   </p>
                 )}
 
-                <div className="border border-border rounded-xl overflow-hidden">
+                {/* ── Mobile card layout (< md) ── */}
+                <div className="md:hidden space-y-3">
+                  {!formData.poId ? (
+                    <div className="border border-dashed border-border rounded-xl px-4 py-10 text-center text-muted-foreground/50 text-sm italic">
+                      Select a Purchase Order above — items will be autofilled
+                      from the PO
+                    </div>
+                  ) : (
+                    formData.items.map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="border border-border rounded-xl p-4 space-y-3 bg-muted/20"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-sm text-foreground truncate">
+                            {item.itemName || "—"}
+                          </span>
+                          <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                            {item.uom || "—"}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                          <div>
+                            <p className="uppercase tracking-widest text-[10px] mb-0.5">
+                              Ordered
+                            </p>
+                            <p className="font-semibold text-foreground">
+                              {item.orderedQty}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="uppercase tracking-widest text-[10px] mb-0.5">
+                              Remaining
+                            </p>
+                            <p
+                              className={`font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                            >
+                              {item.remainingQty}
+                            </p>
+                          </div>
+                          {item.totalAmount > 0 && (
+                            <div className="text-right">
+                              <p className="uppercase tracking-widest text-[10px] mb-0.5">
+                                Total
+                              </p>
+                              <p className="font-bold text-primary">
+                                ₹
+                                {item.totalAmount.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
+                              Received{" "}
+                              <span className="text-destructive">*</span>
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              max={item.orderedQty || undefined}
+                              value={item.receivedQty}
+                              onChange={(e) =>
+                                updateReceivedQty(idx, Number(e.target.value))
+                              }
+                              className={`${inp} text-right`}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
+                              Rate (₹){" "}
+                              <span className="text-destructive">*</span>
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={item.rate}
+                              onChange={(e) =>
+                                updateItemField(
+                                  idx,
+                                  "rate",
+                                  Number(e.target.value),
+                                )
+                              }
+                              className={`${inp} text-right`}
+                              placeholder="0.00"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
+                              Qty (Bill){" "}
+                              <span className="text-destructive">*</span>
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={item.quantity}
+                              onChange={(e) =>
+                                updateItemField(
+                                  idx,
+                                  "quantity",
+                                  Number(e.target.value),
+                                )
+                              }
+                              className={`${inp} text-right`}
+                              placeholder="0"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                  {formData.poId &&
+                    formData.items.some((i) => i.totalAmount > 0) && (
+                      <div className="flex justify-between items-center px-4 py-3 rounded-xl bg-muted/40 border border-border">
+                        <span className="text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                          Grand Total
+                        </span>
+                        <span className="font-bold text-primary">
+                          ₹
+                          {formData.items
+                            .reduce((sum, i) => sum + (i.totalAmount || 0), 0)
+                            .toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                        </span>
+                      </div>
+                    )}
+                </div>
+
+                {/* ── Desktop table layout (≥ md) ── */}
+                <div className="hidden md:block border border-border rounded-xl overflow-hidden">
                   <table className="w-full text-sm table-fixed">
                     <colgroup>
                       <col style={{ width: "18%" }} />
@@ -822,7 +960,6 @@ export default function GRN() {
                           const fromPO = !!formData.poId;
                           return (
                             <tr key={idx}>
-                              {/* Item name — locked, comes from PO */}
                               <td className="px-3 py-2.5">
                                 {fromPO ? (
                                   <span className="text-foreground font-medium">
@@ -847,11 +984,9 @@ export default function GRN() {
                                   />
                                 )}
                               </td>
-                              {/* Ordered qty — locked, comes from PO */}
                               <td className="px-2 py-2 text-right font-medium text-muted-foreground">
                                 {item.orderedQty}
                               </td>
-                              {/* Received qty — always editable */}
                               <td className="px-1.5 py-1.5">
                                 <input
                                   type="number"
@@ -867,13 +1002,11 @@ export default function GRN() {
                                   className={`${inp} text-right`}
                                 />
                               </td>
-                              {/* Remaining — computed */}
                               <td
                                 className={`px-2 py-2 text-right font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
                               >
                                 {item.remainingQty}
                               </td>
-                              {/* UOM — locked if from PO */}
                               <td className="px-1.5 py-1.5">
                                 {fromPO ? (
                                   <span className="text-foreground">
@@ -910,7 +1043,6 @@ export default function GRN() {
                                   </select>
                                 )}
                               </td>
-                              {/* Rate */}
                               <td className="px-1.5 py-1.5">
                                 <input
                                   type="number"
@@ -928,7 +1060,6 @@ export default function GRN() {
                                   placeholder="0.00"
                                 />
                               </td>
-                              {/* Billing Quantity */}
                               <td className="px-1.5 py-1.5">
                                 <input
                                   type="number"
@@ -946,7 +1077,6 @@ export default function GRN() {
                                   placeholder="0"
                                 />
                               </td>
-                              {/* Total Amount — computed, read-only */}
                               <td className="px-2 py-2 text-right font-semibold text-primary">
                                 {item.totalAmount > 0
                                   ? `₹${item.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -1003,13 +1133,13 @@ export default function GRN() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-center gap-3 pt-4 border-t border-border">
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-4 border-t border-border">
                 <button
                   onClick={onSubmit}
                   disabled={
                     createMutation.isPending || updateMutation.isPending
                   }
-                  className="gradient-accent inline-flex items-center gap-2 px-8 py-2.5 rounded-xl text-white text-sm font-semibold shadow-sm transition disabled:opacity-60"
+                  className="w-full sm:w-auto gradient-accent inline-flex items-center justify-center gap-2 px-8 py-2.5 rounded-xl text-white text-sm font-semibold shadow-sm transition disabled:opacity-60"
                 >
                   <Save size={15} />
                   {createMutation.isPending || updateMutation.isPending
@@ -1020,7 +1150,7 @@ export default function GRN() {
                 </button>
                 <button
                   onClick={resetForm}
-                  className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl border border-border hover:bg-muted text-sm transition-colors"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl border border-border hover:bg-muted text-sm transition-colors"
                 >
                   <X size={15} /> Cancel
                 </button>
@@ -1086,8 +1216,8 @@ export default function GRN() {
           (() => {
             const items = parseJsonArray<GRNItemLine>(viewingGrn.GRNItems);
             return (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+              <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+                <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] sm:max-h-[90vh] overflow-y-auto">
                   {/* Header */}
                   <div className="flex items-center justify-between px-6 py-4 border-b border-border">
                     <div>
@@ -1110,9 +1240,9 @@ export default function GRN() {
                     </button>
                   </div>
 
-                  <div className="p-6 space-y-5">
+                  <div className="p-4 sm:p-6 space-y-5">
                     {/* Meta row */}
-                    <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                       <div>
                         <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
                           Doc No
@@ -1207,7 +1337,111 @@ export default function GRN() {
                       <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2">
                         Received Items
                       </p>
-                      <div className="border border-border rounded-xl overflow-x-auto">
+                      {/* Mobile cards */}
+                      <div className="md:hidden space-y-3">
+                        {items.length ? (
+                          items.map((item, i) => (
+                            <div
+                              key={i}
+                              className="border border-border rounded-xl p-4 space-y-2 bg-muted/20"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium text-sm text-foreground">
+                                  {item.itemName || "—"}
+                                </span>
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                                  {item.uom || "—"}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-3 gap-2 text-xs">
+                                <div>
+                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                    Ordered
+                                  </p>
+                                  <p className="font-semibold">
+                                    {item.orderedQty}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                    Received
+                                  </p>
+                                  <p className="font-semibold">
+                                    {item.receivedQty}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                    Remaining
+                                  </p>
+                                  <p
+                                    className={`font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                                  >
+                                    {item.remainingQty}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-3 gap-2 text-xs pt-1 border-t border-border">
+                                <div>
+                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                    Rate
+                                  </p>
+                                  <p className="font-medium">
+                                    {item.rate
+                                      ? `₹${Number(item.rate).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                      : "—"}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                    Qty (Bill)
+                                  </p>
+                                  <p className="font-medium">
+                                    {item.quantity ?? "—"}
+                                  </p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                    Total
+                                  </p>
+                                  <p className="font-bold text-primary">
+                                    {item.totalAmount
+                                      ? `₹${Number(item.totalAmount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                      : "—"}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-center text-muted-foreground text-sm py-6">
+                            No items
+                          </p>
+                        )}
+                        {items.some((i) => i.totalAmount > 0) && (
+                          <div className="flex justify-between items-center px-4 py-3 rounded-xl bg-muted/40 border border-border">
+                            <span className="text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                              Grand Total
+                            </span>
+                            <span className="font-bold text-primary">
+                              ₹
+                              {items
+                                .reduce(
+                                  (sum, i) =>
+                                    sum + (Number(i.totalAmount) || 0),
+                                  0,
+                                )
+                                .toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Desktop table */}
+                      <div className="hidden md:block border border-border rounded-xl overflow-x-auto">
                         <table className="w-full text-sm min-w-[700px]">
                           <thead>
                             <tr className="bg-muted/50">
