@@ -297,6 +297,11 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
             WHEN eb.ESourceType = 'GRN' AND grn_list.GRNNo IS NOT NULL THEN grn_list.GRNNo
             ELSE NULL
           END AS sourceDocNo,
+          -- Supplier name: from GRN supplier for GRN-linked, else from EName
+          CASE
+            WHEN eb.ESourceType = 'GRN' AND grn_list.GRNID IS NOT NULL THEN grn_supp_list.LHeadName
+            ELSE eb.EName
+          END AS ESupplierName,
           COUNT(*) OVER() AS _total
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
@@ -308,6 +313,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           ON eb.ESourceType = 'GRN' AND grn_list.GRNID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.PurchaseOrders po_list ON grn_list.POID = po_list.PurchaseOrderID
         LEFT JOIN dbo.enterprise epo_proj ON epo_proj.id = po_list.ProjectId
+        LEFT JOIN dbo.AccountHeadMaster grn_supp_list ON grn_supp_list.LHeadId = grn_list.SupplierID
         ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -406,7 +412,11 @@ router.get("/:id", async (req, res) => {
                CASE
                  WHEN eb.ESourceType = 'GRN' AND grn_det.GRNNo IS NOT NULL THEN grn_det.GRNNo
                  ELSE NULL
-               END AS sourceDocNo
+               END AS sourceDocNo,
+               CASE
+                 WHEN eb.ESourceType = 'GRN' AND grn_det.GRNID IS NOT NULL THEN grn_supp_det.LHeadName
+                 ELSE eb.EName
+               END AS ESupplierName
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
         LEFT JOIN dbo.enterprise ec ON ec.id = eb.ECompanyId
@@ -416,6 +426,7 @@ router.get("/:id", async (req, res) => {
           ON eb.ESourceType = 'GRN' AND grn_det.GRNID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.PurchaseOrders po_det ON grn_det.POID = po_det.PurchaseOrderID
         LEFT JOIN dbo.enterprise epo_proj2 ON epo_proj2.id = po_det.ProjectId
+        LEFT JOIN dbo.AccountHeadMaster grn_supp_det ON grn_supp_det.LHeadId = grn_det.SupplierID
         WHERE eb.Eid = @Eid
       `);
     if (!result.recordset.length)

@@ -361,7 +361,7 @@ export const MobileNav: React.FC = () => {
 
   // ── Nav item definitions ────────────────────────────────────────────────────
   const ADMIN_NAV_ITEMS: NavItem[] = [
-    { label: "Dashboard", icon: BarChart3, path: "/admin" },
+    { label: "Control Center", icon: BarChart3, path: "/admin/dashboard" },
     {
       label: "Enterprise",
       icon: Building2,
@@ -405,6 +405,11 @@ export const MobileNav: React.FC = () => {
       icon: CheckCircle2,
       children: [
         {
+          label: "Inbox",
+          path: "/admin/approval/inbox",
+          icon: FileText,
+        },
+        {
           label: "Approval Setup",
           path: "/admin/approval/setup",
           icon: FileText,
@@ -412,6 +417,17 @@ export const MobileNav: React.FC = () => {
         {
           label: "Post Approval Rights",
           path: "/admin/approval/post-rights",
+          icon: FileText,
+        },
+      ],
+    },
+    {
+      label: "Security",
+      icon: ShieldCheck,
+      children: [
+        {
+          label: "Password Reset",
+          path: "/admin/security/password-reset",
           icon: FileText,
         },
       ],
@@ -435,8 +451,52 @@ export const MobileNav: React.FC = () => {
           path: "/admin/communicator/whatsapp-setup",
           icon: FileText,
         },
+        {
+          label: "Integration Channels",
+          path: "/admin/masters/integration-channels",
+          icon: FileText,
+        },
       ],
     },
+    {
+      label: "Masters",
+      icon: Database,
+      children: [
+        {
+          label: "Contractor Categories",
+          path: "/admin/masters/contractor-categories",
+          icon: FileText,
+        },
+        {
+          label: "Godowns",
+          path: "/admin/masters/godowns",
+          icon: FileText,
+        },
+        {
+          label: "Page Definitions",
+          path: "/admin/page-definitions",
+          icon: FileText,
+        },
+      ],
+    },
+    {
+      label: "Support Tickets",
+      icon: MessageSquare,
+      children: [
+        {
+          label: "Resolution",
+          path: "/admin/tickets/resolution",
+          icon: FileText,
+        },
+      ],
+    },
+    {
+      label: "API Integration",
+      icon: ShieldCheck,
+      path: "/admin/api-integration",
+    },
+    { label: "Live Metrics", icon: BarChart3, path: "/admin/metrics" },
+    { label: "Signature", icon: FileText, path: "/admin/signature" },
   ];
 
   const getModuleNavItems = (): NavItem[] => {
@@ -448,6 +508,11 @@ export const MobileNav: React.FC = () => {
             label: "Transaction",
             icon: Receipt,
             children: [
+              {
+                label: "Material Request",
+                path: "/material/material-request",
+                icon: ClipboardList,
+              },
               {
                 label: "Purchase Order",
                 path: "/material/purchase-order",
@@ -461,6 +526,12 @@ export const MobileNav: React.FC = () => {
                 icon: Receipt,
               },
             ],
+          },
+          { label: "Stock", icon: Archive, path: "/material/stock" },
+          {
+            label: "Transfer",
+            icon: ClipboardList,
+            path: "/material/stock-transfer",
           },
           {
             label: "Debit Note",
@@ -477,14 +548,6 @@ export const MobileNav: React.FC = () => {
         return [
           { label: "Dashboard", icon: BarChart3, path: "/finance" },
           {
-            label: "Query",
-            icon: Landmark,
-            children: [
-              { label: "Trial Balance", path: "/transactions", icon: FileText },
-              { label: "Tasks", path: "/tasks", icon: CheckCircle2 },
-            ],
-          },
-          {
             label: "Transaction",
             icon: Landmark,
             children: [
@@ -497,8 +560,15 @@ export const MobileNav: React.FC = () => {
               { label: "BRS", path: "/brs", icon: FileText },
             ],
           },
+          {
+            label: "Query",
+            icon: Landmark,
+            children: [
+              { label: "Trial Balance", path: "/transactions", icon: FileText },
+              { label: "Tasks", path: "/tasks", icon: CheckCircle2 },
+            ],
+          },
           { label: "Records", icon: Archive, path: "/records" },
-          { label: "Widgets", icon: Puzzle, path: "/widgets" },
         ];
       case "followup":
         return [
@@ -508,8 +578,13 @@ export const MobileNav: React.FC = () => {
             icon: Users,
             children: [
               {
-                label: "Applicants",
+                label: "Applications",
                 path: "/followup/sales/applicants",
+                icon: FileText,
+              },
+              {
+                label: "Bookings",
+                path: "/followup/sales/bookings",
                 icon: FileText,
               },
               {
@@ -520,6 +595,17 @@ export const MobileNav: React.FC = () => {
               {
                 label: "Welcome Calls",
                 path: "/followup/sales/welcome-calls",
+                icon: FileText,
+              },
+            ],
+          },
+          {
+            label: "Agreement",
+            icon: FileText,
+            children: [
+              {
+                label: "Agreements",
+                path: "/followup/agreement/agreements",
                 icon: FileText,
               },
             ],
@@ -542,14 +628,20 @@ export const MobileNav: React.FC = () => {
             ],
           },
           {
+            label: "Construction",
+            icon: HardHat,
+            children: [
+              {
+                label: "Updates",
+                path: "/followup/construction/updates",
+                icon: FileText,
+              },
+            ],
+          },
+          {
             label: "Follow-Ups",
             icon: CalendarClock,
             children: [
-              {
-                label: "Reminders",
-                path: "/followup/follow-ups/reminders",
-                icon: Bell,
-              },
               {
                 label: "Tasks",
                 path: "/followup/follow-ups/tasks",
@@ -559,6 +651,36 @@ export const MobileNav: React.FC = () => {
                 label: "Follow-Up Log",
                 path: "/followup/follow-ups/log",
                 icon: FileText,
+              },
+              {
+                label: "Reminders",
+                path: "/followup/follow-ups/reminders",
+                icon: Bell,
+              },
+              {
+                label: "PO Reminders",
+                path: "/followup/follow-ups/po-reminders",
+                icon: Bell,
+              },
+              {
+                label: "WO Reminders",
+                path: "/followup/follow-ups/wo-reminders",
+                icon: Bell,
+              },
+              {
+                label: "CHQ Reminders",
+                path: "/followup/follow-ups/chq-reminders",
+                icon: Bell,
+              },
+              {
+                label: "TDS Reminders",
+                path: "/followup/follow-ups/tds-reminders",
+                icon: Bell,
+              },
+              {
+                label: "GRN Reminders",
+                path: "/followup/follow-ups/grn-reminders",
+                icon: Bell,
               },
             ],
           },
@@ -588,7 +710,7 @@ export const MobileNav: React.FC = () => {
         return [
           { label: "Dashboard", icon: BarChart3, path: "/ticket" },
           {
-            label: "Ticket",
+            label: "Tickets",
             icon: MessageSquare,
             children: [
               {
@@ -596,15 +718,11 @@ export const MobileNav: React.FC = () => {
                 path: "/ticket/create",
                 icon: FileText,
               },
-              ...(!isAdmin
-                ? [
-                    {
-                      label: "My Tickets",
-                      path: "/ticket/my-tickets",
-                      icon: FileText,
-                    },
-                  ]
-                : []),
+              {
+                label: "My Tickets",
+                path: "/ticket/my-tickets",
+                icon: FileText,
+              },
               ...(isAdmin
                 ? [
                     {

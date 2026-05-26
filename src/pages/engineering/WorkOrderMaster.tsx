@@ -4585,6 +4585,7 @@ const WorkOrderMaster: React.FC = () => {
                       preview={woDocNo}
                       refreshTrigger={docRefreshTrigger}
                       onSelect={applyWoDocNumber}
+                      readOnly={viewMode === "edit"}
                     />
                   </div>
 
