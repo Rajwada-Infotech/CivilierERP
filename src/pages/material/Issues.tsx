@@ -1282,7 +1282,7 @@ export default function Issues() {
           <Button
             onClick={onSave}
             disabled={!canSave || isSaving}
-            className="px-6 gap-2"
+            className="gradient-accent px-6 gap-2"
           >
             {isSaving ? (
               <RefreshCw size={14} className="animate-spin" />
@@ -1519,7 +1519,7 @@ export default function Issues() {
         {viewMode === "list" && (
           <Button
             onClick={() => setViewMode("form")}
-            className="gap-2 shrink-0"
+            className="gradient-accent gap-1.5 shrink-0"
           >
             <Plus size={15} /> New Issue
           </Button>

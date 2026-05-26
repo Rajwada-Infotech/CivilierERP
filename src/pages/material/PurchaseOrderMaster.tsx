@@ -1294,7 +1294,7 @@ const PurchaseOrderMaster: React.FC = () => {
           </div>
           <button
             onClick={goToCreate}
-            className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 transition"
+            className="gradient-accent inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition shrink-0"
           >
             <Plus size={16} />
             New Purchase Order
@@ -1508,7 +1508,7 @@ const PurchaseOrderMaster: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={goToList}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition"
             >
               <RotateCcw size={14} />
               Cancel
@@ -1516,7 +1516,7 @@ const PurchaseOrderMaster: React.FC = () => {
             <button
               onClick={handleSave}
               disabled={saving || saved}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-60 transition shadow-sm"
+              className="gradient-accent inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold disabled:opacity-60 transition shadow-sm"
             >
               {saved ? (
                 <Check size={14} />
@@ -1545,7 +1545,7 @@ const PurchaseOrderMaster: React.FC = () => {
             </button>
             <button
               onClick={() => setViewMode("edit")}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition shadow-sm"
+              className="gradient-accent inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold transition shadow-sm"
             >
               <PenSquare size={14} />
               Edit
