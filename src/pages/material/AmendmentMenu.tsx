@@ -432,7 +432,7 @@ export default function Amendments() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material", "Amendments"]} />
-      <div className="relative space-y-6 mt-6">
+      <div className="p-6 space-y-5">
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -465,10 +465,10 @@ export default function Amendments() {
                   setShowComparison(false);
                   setShowAudit(false);
                 }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium border transition-all ${
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border-0 transition-all gradient-accent text-white ${
                   active
-                    ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                    : "bg-background text-muted-foreground border-border hover:border-primary/40 hover:text-foreground"
+                    ? "opacity-100 shadow-md ring-2 ring-white/20"
+                    : "opacity-60 hover:opacity-80"
                 }`}
               >
                 <Icon size={14} />
