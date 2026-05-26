@@ -14,6 +14,7 @@ import {
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import {
   getPurchaseOrders,
+  getPurchaseOrderById,
   addPurchaseOrder,
   updatePurchaseOrder,
   deletePurchaseOrder,
@@ -1181,13 +1182,36 @@ const PurchaseOrderMaster: React.FC = () => {
     setViewMode("create");
   };
 
-  const goToEdit = (item: POListItem) => {
-    const raw = dbItems.find((d) => String(d.PurchaseOrderID) === item._id);
-    if (!raw) return;
+  const goToEdit = async (item: POListItem) => {
+    // Always fetch the full PO — list rows don't include POItems or DocTypeId
+    let raw: any =
+      dbItems.find((d) => String(d.PurchaseOrderID) === item._id) ?? {};
+    try {
+      const full = await getPurchaseOrderById(item._id);
+      if (full) raw = full;
+    } catch {
+      // fall back to list-row data
+    }
 
-    const supplier = suppliers.find((s) => s.name === item.supplierName);
-    const company = companies.find((c) => c.name === item.companyName);
-    const project = allProjects.find((p) => p.name === item.projectName);
+    const supplier = suppliers.find(
+      (s) =>
+        s.id === String(raw.SupplierID ?? "") || s.name === item.supplierName,
+    );
+    const company = companies.find(
+      (c) =>
+        c.id === String(raw.CompanyId ?? "") || c.name === item.companyName,
+    );
+    const project = allProjects.find(
+      (p) =>
+        p.id === String(raw.ProjectId ?? "") || p.name === item.projectName,
+    );
+
+    const docTypeId: number | null = raw.DocTypeId ?? null;
+    const docNo: string = raw.DocNo ?? raw.PurchaseOrderNo ?? "";
+
+    // Restore doc type + doc number state so DocNumberPreview renders correctly
+    setPoDocTypeId(docTypeId);
+    setPoDocNo(docNo);
 
     setForm({
       poNumber: raw.PurchaseOrderNo ?? "",
@@ -1195,44 +1219,47 @@ const PurchaseOrderMaster: React.FC = () => {
       expectedDate: raw.ExpectedDeliveryDate
         ? raw.ExpectedDeliveryDate.slice(0, 10)
         : "",
-      supplierId: supplier?.id ?? "",
-      companyId: company?.id ?? "",
-      projectId: project?.id ?? "",
+      supplierId: supplier?.id ?? String(raw.SupplierID ?? ""),
+      companyId: company?.id ?? String(raw.CompanyId ?? ""),
+      projectId: project?.id ?? String(raw.ProjectId ?? ""),
       paymentTerms: raw.PaymentTerms ?? "",
       remarks: raw.Remarks ?? "",
-      docTypeId: raw.DocTypeId ?? null,
-      docNo: raw.DocNo ?? "",
+      docTypeId,
+      docNo,
     });
 
-    // Restore line items from POItems or legacy fields
-    const poItems = raw.POItems ?? [];
+    // Restore line items from POItems (full record) or legacy fields
+    const poItems: any[] = Array.isArray(raw.POItems)
+      ? raw.POItems
+      : Array.isArray(raw.LineItems)
+        ? raw.LineItems
+        : [];
+
     if (poItems.length > 0) {
       setLineItems(
         poItems.map((pi: any) => {
-          const qty = Number(pi.quantity ?? 0);
-          const rate = Number(pi.rate ?? 0);
-          const gstRate = Number(pi.tax ?? 0);
+          const qty = Number(pi.quantity ?? pi.Quantity ?? 0);
+          const rate = Number(pi.rate ?? pi.Rate ?? 0);
+          const gstRate = Number(pi.tax ?? pi.Tax ?? 0);
           const taxAmount = (qty * rate * gstRate) / 100;
-          const unitStr = (pi.unit ?? "").trim().toLowerCase();
+          const unitStr = (pi.unit ?? pi.UomName ?? "").trim().toLowerCase();
           const uomMatch = uoms.find(
             (u) =>
               u.code.toLowerCase() === unitStr ||
               u.name.toLowerCase() === unitStr,
           );
-          // We don't have individual rates on saved items — keep gstRate as total
-          // igst assumed if no split available; user can re-select item to restore split
           return {
             id: uid(),
-            itemId: "",
-            itemName: pi.itemDescription ?? "",
-            itemDescription: "",
+            itemId: pi.itemId ?? pi.ItemId ?? "",
+            itemName: pi.itemDescription ?? pi.ItemName ?? pi.Description ?? "",
+            itemDescription: pi.description ?? pi.ItemDescription ?? "",
             quantity: qty,
             uomId: uomMatch?.id ?? null,
-            unit: uomMatch?.name ?? pi.unit ?? "",
+            unit: uomMatch?.name ?? pi.unit ?? pi.UomName ?? "",
             rate,
             cgstRate: 0,
             sgstRate: 0,
-            igstRate: gstRate, // store as igst so totalTax still sums correctly
+            igstRate: gstRate,
             gstRate,
             taxAmount,
             amount: qty * rate + taxAmount,
@@ -1261,13 +1288,14 @@ const PurchaseOrderMaster: React.FC = () => {
         },
       ]);
     }
+
     setEditingId(item._id);
-    setSelectedTCs([]); // T&C restored from PaymentTerms text — user can re-select
+    setSelectedTCs([]);
     setViewMode("edit");
   };
 
-  const goToView = (item: POListItem) => {
-    goToEdit(item);
+  const goToView = async (item: POListItem) => {
+    await goToEdit(item);
     setViewMode("view");
   };
 
@@ -1667,6 +1695,7 @@ const PurchaseOrderMaster: React.FC = () => {
                     preview={poDocNo}
                     refreshTrigger={docRefreshTrigger}
                     onSelect={applyPoDocNumber}
+                    readOnly={viewMode === "edit"}
                   />
                 )}
               </div>
