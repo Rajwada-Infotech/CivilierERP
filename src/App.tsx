@@ -1,6 +1,7 @@
 import TicketDashboard from "@/pages/ticket/TicketDashboard";
 
 import CreateTicket from "@/pages/ticket/CreateTicket";
+import CustomerPortal from "@/pages/customer/CustomerPortal";
 
 import MyTickets from "@/pages/ticket/MyTickets";
 
