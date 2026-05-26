@@ -1,8 +1,8 @@
-/**
+﻿/**
  * ticketRoutes.js
- * Full ticket workflow: create → assign → comment → resolve/close/reopen
+ * Full ticket workflow: create ΓåÆ assign ΓåÆ comment ΓåÆ resolve/close/reopen
  * Attachments are stored as binary in dbo.ticket_attachments (no disk dependency).
- * Auth-protected — all endpoints require valid JWT (via global authMiddleware in server.js).
+ * Auth-protected ΓÇö all endpoints require valid JWT (via global authMiddleware in server.js).
  */
 
 const express = require("express");
@@ -13,7 +13,7 @@ const canAcceptTickets = require("../middleware/canAcceptTickets");
 const multer = require("multer");
 const path = require("path");
 
-// ─── Socket.IO — lazy-loaded ─────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ Socket.IO ΓÇö lazy-loaded ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 let _getIo = null;
 function getIo() {
   if (!_getIo) _getIo = require("../socket").getIo;
@@ -29,7 +29,7 @@ function emitTicketUpdate(action, ticketId) {
   }
 }
 
-// ─── Multer — memory storage (files go to DB, not disk) ──────────────────────
+// ΓöÇΓöÇΓöÇ Multer ΓÇö memory storage (files go to DB, not disk) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
@@ -46,7 +46,7 @@ const upload = multer({
   },
 });
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ Helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 function userFromReq(req) {
   return {
@@ -81,6 +81,9 @@ function parsePositiveInt(value, fallback, max) {
   const normalized = Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
   return Math.min(normalized, max);
 }
+
+const VALID_STATUSES = ["Pending", "InProgress", "Resolved", "Closed"];
+const VALID_PRIORITIES = ["Urgent", "High", "Medium", "Low"];
 
 function sendTicketAccessError(res, access) {
   if (access.status === 404) {
@@ -123,17 +126,20 @@ async function getAccessibleTicket(pool, id, actor) {
   return { status: 200, ticket };
 }
 
-// ─── GET /api/tickets ─────────────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ GET /api/tickets ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+
 router.get("/", async (req, res) => {
   try {
     const actor = requireActor(req, res);
     if (!actor) return;
+    if (!isTicketAdmin(actor.role)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
     const page = parsePositiveInt(req.query.page, 1, Number.MAX_SAFE_INTEGER);
     const limit = parsePositiveInt(req.query.limit, 25, 100);
     const offset = (page - 1) * limit;
 
-    const VALID_STATUSES = ["Pending", "InProgress", "Resolved", "Closed"];
     const rawStatus = req.query.status ?? "";
     const statusFilter = rawStatus
       .split(",")
@@ -150,10 +156,10 @@ router.get("/", async (req, res) => {
     const statusIn = hasStatusFilter
       ? statusFilter.map((s) => `'${s}'`).join(",")
       : null;
-    const whereClause = statusIn ? `WHERE t.status IN (${statusIn})` : "";
-    const countWhereClause = statusIn ? `WHERE status IN (${statusIn})` : "";
+    const whereClause = statusIn ? `WHERE x.status IN (${statusIn})` : "";
 
     const result = await req2.query(`
+      WITH ticket_rows AS (
         SELECT
           t.id, t.subject, t.priority, t.customer_name, t.customer_phone,
           t.company_id, t.project_id,
@@ -176,15 +182,34 @@ router.get("/", async (req, res) => {
           FROM dbo.ticket_comments
           GROUP BY ticket_id
         ) c ON c.ticket_id = t.id
-        ${whereClause}
+      )
+      SELECT *
+      FROM ticket_rows x
+      ${whereClause}
         ORDER BY
-          t.id DESC
+          x.id DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
 
-    const countResult = await pool
-      .request()
-      .query(`SELECT COUNT(*) AS total FROM dbo.tickets ${countWhereClause}`);
+    const countResult = await pool.request().query(`
+      WITH ticket_rows AS (
+        SELECT
+          CASE
+            WHEN t.status = 'Pending' AND ISNULL(c.comment_count, 0) > 0
+            THEN 'InProgress'
+            ELSE t.status
+          END AS status
+        FROM dbo.tickets t
+        LEFT JOIN (
+          SELECT ticket_id, COUNT(*) AS comment_count
+          FROM dbo.ticket_comments
+          GROUP BY ticket_id
+        ) c ON c.ticket_id = t.id
+      )
+      SELECT COUNT(*) AS total
+      FROM ticket_rows x
+      ${whereClause}
+    `);
     const total = countResult.recordset[0]?.total ?? 0;
 
     res.json({
@@ -202,7 +227,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-// ─── GET /api/tickets/stats ───────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ GET /api/tickets/stats ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.get("/stats", async (req, res) => {
   try {
     const actor = requireActor(req, res);
@@ -213,6 +238,22 @@ router.get("/stats", async (req, res) => {
 
     const pool = getPool();
     const result = await pool.request().query(`
+      WITH ticket_rows AS (
+        SELECT
+          t.priority,
+          t.escalated_at,
+          CASE
+            WHEN t.status = 'Pending' AND ISNULL(c.comment_count, 0) > 0
+            THEN 'InProgress'
+            ELSE t.status
+          END AS status
+        FROM dbo.tickets t
+        LEFT JOIN (
+          SELECT ticket_id, COUNT(*) AS comment_count
+          FROM dbo.ticket_comments
+          GROUP BY ticket_id
+        ) c ON c.ticket_id = t.id
+      )
       SELECT
         COUNT(*) AS total,
         SUM(CASE WHEN status = 'Pending'    THEN 1 ELSE 0 END) AS pending,
@@ -222,7 +263,7 @@ router.get("/stats", async (req, res) => {
         SUM(CASE WHEN escalated_at IS NOT NULL AND status IN ('Pending','InProgress') THEN 1 ELSE 0 END) AS escalated_open,
         SUM(CASE WHEN priority = 'Urgent' AND status NOT IN ('Resolved','Closed') THEN 1 ELSE 0 END) AS urgent_open,
         SUM(CASE WHEN priority = 'High'   AND status NOT IN ('Resolved','Closed') THEN 1 ELSE 0 END) AS high_open
-      FROM dbo.tickets
+      FROM ticket_rows
     `);
     res.json({ counts: result.recordset[0] });
   } catch (err) {
@@ -231,7 +272,7 @@ router.get("/stats", async (req, res) => {
   }
 });
 
-// ─── GET /api/tickets/my  (alias /mine) ──────────────────────────────────────
+// ΓöÇΓöÇΓöÇ GET /api/tickets/my  (alias /mine) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 async function myTicketsHandler(req, res) {
   try {
     const actor = requireActor(req, res);
@@ -264,7 +305,7 @@ async function myTicketsHandler(req, res) {
 router.get("/my", myTicketsHandler);
 router.get("/mine", myTicketsHandler);
 
-// ─── GET /api/tickets/admin-users ─────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ GET /api/tickets/admin-users ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.get(
   "/admin-users",
   allowRoles("admin", "super_admin", "dba"),
@@ -272,10 +313,18 @@ router.get(
     try {
       const pool = getPool();
       const result = await pool.request().query(`
-      SELECT UserID AS id, UserName AS name, Role AS role
-      FROM dbo.Users
-      WHERE IsActive = 1
-      ORDER BY UserName
+      SELECT
+        u.id,
+        u.name,
+        r.RName AS role
+      FROM dbo.users u
+      LEFT JOIN dbo.Role r ON u.RoleId = r.RId
+      WHERE ISNULL(u.discontinue, 0) = 0
+        AND (
+          ISNULL(u.can_accept_tickets, 0) = 1
+          OR LOWER(ISNULL(r.RName, '')) IN ('admin', 'super_admin', 'dba', 'engineer')
+        )
+      ORDER BY u.name
     `);
       res.json(result.recordset);
     } catch (err) {
@@ -285,7 +334,7 @@ router.get(
   },
 );
 
-// ─── GET /api/tickets/:id ─────────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ GET /api/tickets/:id ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.get("/:id", async (req, res) => {
   try {
     const actor = requireActor(req, res);
@@ -342,7 +391,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// ─── POST /api/tickets/upload ─────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ POST /api/tickets/upload ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 // Saves file binary to dbo.ticket_attachments. Returns attachment IDs + URLs.
 // ticketId is required in body or query. commentId is optional.
 router.post("/upload", upload.array("file", 20), async (req, res) => {
@@ -400,13 +449,14 @@ router.post("/upload", upload.array("file", 20), async (req, res) => {
       urls: results.map((r) => r.url),
       attachments: results,
     });
+    emitTicketUpdate("attachment_uploaded", ticketId);
   } catch (err) {
     console.error("[Tickets POST /upload]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── GET /api/tickets/attachment/:id ─────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ GET /api/tickets/attachment/:id ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 // Stream attachment binary from DB. Checks ticket access before serving.
 router.get("/attachment/:id", async (req, res) => {
   try {
@@ -447,8 +497,8 @@ router.get("/attachment/:id", async (req, res) => {
   }
 });
 
-// ─── GET /api/tickets/file/:filename (LEGACY) ─────────────────────────────────
-// Keep for backward compat. Returns 410 Gone — all old disk files are gone.
+// ΓöÇΓöÇΓöÇ GET /api/tickets/file/:filename (LEGACY) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// Keep for backward compat. Returns 410 Gone ΓÇö all old disk files are gone.
 router.get("/file/:filename", async (req, res) => {
   try {
     const actor = requireActor(req, res);
@@ -461,7 +511,7 @@ router.get("/file/:filename", async (req, res) => {
   }
 });
 
-// ─── POST /api/tickets  ───────────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ POST /api/tickets  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 async function createTicketHandler(req, res) {
   try {
     const actor = requireActor(req, res);
@@ -483,6 +533,9 @@ async function createTicketHandler(req, res) {
       return res.status(400).json({
         error: "subject, issue_details and customer_name are required",
       });
+    }
+    if (priority && !VALID_PRIORITIES.includes(priority)) {
+      return res.status(400).json({ error: "Invalid priority value" });
     }
 
     const insertResult = await pool
@@ -537,6 +590,7 @@ async function createTicketHandler(req, res) {
     }
 
     res.json({ success: true, ticketId: newTicketId });
+    emitTicketUpdate("created", newTicketId);
   } catch (err) {
     console.error("[Tickets POST /create]", err.message);
     res.status(500).json({ error: err.message });
@@ -545,7 +599,7 @@ async function createTicketHandler(req, res) {
 router.post("/", createTicketHandler);
 router.post("/create", createTicketHandler);
 
-// ─── PUT /api/tickets/accept/:id ─────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ PUT /api/tickets/accept/:id ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.put("/accept/:id", canAcceptTickets, async (req, res) => {
   try {
     const actor = requireActor(req, res);
@@ -598,7 +652,7 @@ router.put("/accept/:id", canAcceptTickets, async (req, res) => {
   }
 });
 
-// ─── PUT /api/tickets/assign/:id ─────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ PUT /api/tickets/assign/:id ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.put(
   "/assign/:id",
   allowRoles("admin", "super_admin", "dba"),
@@ -633,6 +687,7 @@ router.put(
       }
 
       res.json({ success: true });
+      emitTicketUpdate("assigned", id);
     } catch (err) {
       console.error("[Tickets PUT /assign]", err.message);
       res.status(500).json({ error: err.message });
@@ -640,7 +695,7 @@ router.put(
   },
 );
 
-// ─── PUT /api/tickets/resolve/:id ────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ PUT /api/tickets/resolve/:id ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.put("/resolve/:id", async (req, res) => {
   try {
     const actor = requireActor(req, res);
@@ -680,7 +735,7 @@ router.put("/resolve/:id", async (req, res) => {
       commentParts.push(`[Resolved] ${resolution_note.trim()}`);
     if (rating)
       commentParts.push(
-        `[Review ${rating}★]${review_remarks?.trim() ? " " + review_remarks.trim() : ""}`,
+        `[Review ${rating}Γÿà]${review_remarks?.trim() ? " " + review_remarks.trim() : ""}`,
       );
 
     if (commentParts.length > 0) {
@@ -688,13 +743,14 @@ router.put("/resolve/:id", async (req, res) => {
     }
 
     res.json({ success: true });
+    emitTicketUpdate("resolved", id);
   } catch (err) {
     console.error("[Tickets PUT /resolve]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── PUT /api/tickets/reopen/:id ─────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ PUT /api/tickets/reopen/:id ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.put("/reopen/:id", async (req, res) => {
   try {
     const actor = requireActor(req, res);
@@ -722,13 +778,14 @@ router.put("/reopen/:id", async (req, res) => {
       `);
 
     res.json({ success: true });
+    emitTicketUpdate("reopened", id);
   } catch (err) {
     console.error("[Tickets PUT /reopen]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── PUT /api/tickets/close/:id ──────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ PUT /api/tickets/close/:id ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.put(
   "/close/:id",
   allowRoles("admin", "super_admin", "dba"),
@@ -751,6 +808,7 @@ router.put(
       }
 
       res.json({ success: true });
+      emitTicketUpdate("closed", id);
     } catch (err) {
       console.error("[Tickets PUT /close]", err.message);
       res.status(500).json({ error: err.message });
@@ -758,7 +816,7 @@ router.put(
   },
 );
 
-// ─── PUT /api/tickets/status/:id ─────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ PUT /api/tickets/status/:id ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.put("/status/:id", async (req, res) => {
   try {
     const actor = requireActor(req, res);
@@ -767,9 +825,8 @@ router.put("/status/:id", async (req, res) => {
     const id = parseTicketId(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid ticket id" });
 
-    const ALLOWED = ["Pending", "InProgress", "Resolved", "Closed"];
     const { status } = req.body;
-    if (!status || !ALLOWED.includes(status)) {
+    if (!status || !VALID_STATUSES.includes(status)) {
       return res.status(400).json({ error: "Invalid status value" });
     }
 
@@ -795,7 +852,7 @@ router.put("/status/:id", async (req, res) => {
   }
 });
 
-// ─── POST /api/tickets/comment/:id ───────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ POST /api/tickets/comment/:id ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.post("/comment/:id", async (req, res) => {
   try {
     const actor = requireActor(req, res);
@@ -866,6 +923,7 @@ router.post("/comment/:id", async (req, res) => {
     }
 
     res.json({ success: true });
+    emitTicketUpdate("commented", id);
   } catch (err) {
     console.error("[Tickets POST /comment]", err.message);
     res.status(500).json({ error: err.message });

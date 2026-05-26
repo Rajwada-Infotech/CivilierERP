@@ -204,6 +204,8 @@ router.get("/", cache("grns", 300), async (req, res) => {
         p.SourceWODocNo,
         p.SourceMRDocNo,
         p.SourceWDDocNo,
+        p.ProjectId,
+        p.CompanyId,
         td.Prefix AS DocTypePrefix,
         td.Description AS DocTypeDescription,
         COUNT(*) OVER() AS _total
@@ -266,6 +268,8 @@ router.get("/:id", async (req, res) => {
           p.SourceWODocNo,
           p.SourceMRDocNo,
           p.SourceWDDocNo,
+          p.ProjectId,
+          p.CompanyId,
           p.GST AS ParentGST,
           td.Prefix AS DocTypePrefix,
           td.Description AS DocTypeDescription
