@@ -276,6 +276,13 @@ export default function GRN() {
 
   const pos = posData
     .filter((po: PurchaseOrder) => {
+      // When editing, always include the GRN's linked PO regardless of fin-year filter
+      if (
+        editingId &&
+        formData.poId &&
+        String(po.PurchaseOrderID) === formData.poId
+      )
+        return true;
       if (!selectedFinYear) return true;
       const docNo = po.PurchaseOrderNo || "";
       return docNo.includes(selectedFinYear);
@@ -515,8 +522,20 @@ export default function GRN() {
     }
   };
 
-  onEdit = (grn: any) => {
-    const parsedItems = parseJsonArray<GRNItemLine>(grn.GRNItems).map(
+  onEdit = async (grn: any) => {
+    // Always fetch the full GRN record — list rows strip GRNItems for performance
+    let fullGrn = grn;
+    try {
+      const token = localStorage.getItem("token") ?? "";
+      const res = await fetch(`/api/grns/${grn.GRNID}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) fullGrn = await res.json();
+    } catch {
+      // fall back to list-row data
+    }
+
+    const parsedItems = parseJsonArray<GRNItemLine>(fullGrn.GRNItems).map(
       (item) => ({
         ...createEmptyItem(),
         ...item,
@@ -529,24 +548,29 @@ export default function GRN() {
       }),
     );
 
+    const grnFinYear = fullGrn.FinYear || activeFinYear || "";
+
+    // Sync the fin-year filter so the PO dropdown includes the GRN's PO
+    setSelectedFinYear(grnFinYear);
+
     setFormData({
-      grnNo: grn.GRNNo || "",
-      grnDate: grn.GRNDate ? String(grn.GRNDate).slice(0, 10) : "",
-      supplierId: String(grn.SupplierID || ""),
-      supplierName: grn.SupplierName || "",
-      poId: String(grn.POID || ""),
-      poNumber: grn.PONumber || "",
-      remarks: grn.Remarks || "",
-      status: (grn.Status as any) || "Draft",
+      grnNo: fullGrn.GRNNo || "",
+      grnDate: fullGrn.GRNDate ? String(fullGrn.GRNDate).slice(0, 10) : "",
+      supplierId: String(fullGrn.SupplierID || ""),
+      supplierName: fullGrn.SupplierName || "",
+      poId: String(fullGrn.POID || ""),
+      poNumber: fullGrn.PONumber || "",
+      remarks: fullGrn.Remarks || "",
+      status: (fullGrn.Status as any) || "Draft",
       items: parsedItems.length ? parsedItems : [createEmptyItem()],
-      docTypeId: grn.DocTypeId ?? null,
-      docNo: grn.DocNo || "",
-      parentDocNo: grn.ParentDocNo || "",
-      rootExBDocNo: grn.RootExBDocNo || "",
-      finYear: grn.FinYear || activeFinYear || "",
+      docTypeId: fullGrn.DocTypeId ?? null,
+      docNo: fullGrn.DocNo || "",
+      parentDocNo: fullGrn.ParentDocNo || "",
+      rootExBDocNo: fullGrn.RootExBDocNo || "",
+      finYear: grnFinYear,
     });
 
-    setEditingId(String(grn.GRNID));
+    setEditingId(String(fullGrn.GRNID));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -564,712 +588,720 @@ export default function GRN() {
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "GRN"]} />
       <div className="relative space-y-8 mt-6">
-
-      {/* ── Page header ── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
-            Goods Receipt Note
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Record and manage goods received against purchase orders.
-          </p>
-        </div>
-      </div>
-
-      <div className="space-y-6">
-        {/* Form Card */}
-        <div className="rounded-xl bg-card border border-border shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card/60">
-            <h2 className="font-heading font-semibold flex items-center gap-2">
-              {editingId ? <Edit3 size={18} /> : <Truck size={18} />}
-              {editingId ? "Edit Goods Receipt Note" : "New Goods Receipt Note"}
-            </h2>
-            {editingId && (
-              <span className="text-xs px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
-                Editing Mode
-              </span>
-            )}
+        {/* ── Page header ── */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Goods Receipt Note
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Record and manage goods received against purchase orders.
+            </p>
           </div>
+        </div>
 
-          <div className="p-6 space-y-6">
-            {/* Header Fields */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {/* Fin Year selector */}
-              <div>
-                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Fin Year
-                </label>
-                <select
-                  value={selectedFinYear}
-                  onChange={(e) => {
-                    setSelectedFinYear(e.target.value);
-                    // Clear PO selection when fin year changes
-                    setFormData((prev) => ({
-                      ...prev,
-                      poId: "",
-                      poNumber: "",
-                      supplierId: "",
-                      supplierName: "",
-                      items: [createEmptyItem()],
-                      grnNo: "",
-                      docNo: "",
-                      parentDocNo: "",
-                      rootExBDocNo: "",
-                      finYear: e.target.value,
-                    }));
-                  }}
-                  className={inp}
-                >
-                  <option value="">All Years</option>
-                  {finYears.map((fy) => (
-                    <option key={fy.id} value={fy.year}>
-                      {fy.year}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Purchase Order — filtered by fin year */}
-              <div className="lg:col-span-2">
-                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Purchase Order <span className="text-destructive">*</span>
-                </label>
-                <select
-                  value={formData.poId}
-                  onChange={(e) => handlePOSelect(e.target.value)}
-                  disabled={!!editingId || loadingPO}
-                  className={inp}
-                >
-                  <option value="">Select Purchase Order...</option>
-                  {pos.map((po) => (
-                    <option key={po.value} value={po.value}>
-                      {po.label}
-                    </option>
-                  ))}
-                </select>
-                {loadingPO && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Loading PO details…
-                  </p>
-                )}
-                {formData.supplierName && !loadingPO && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Supplier:{" "}
-                    <span className="text-foreground font-medium">
-                      {formData.supplierName}
-                    </span>
-                  </p>
-                )}
-                {errors.poId && (
-                  <p className="text-destructive text-sm mt-1">{errors.poId}</p>
-                )}
-              </div>
-
-              {/* GRN Date */}
-              <div>
-                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  GRN Date
-                </label>
-                <div className="relative">
-                  <Calendar
-                    size={15}
-                    className="absolute left-3 top-3 text-muted-foreground"
-                  />
-                  <input
-                    type="date"
-                    value={formData.grnDate}
-                    onChange={(e) =>
-                      setFormData((p) => ({ ...p, grnDate: e.target.value }))
-                    }
-                    className={`${inp} pl-10`}
-                  />
-                </div>
-              </div>
-
-              {/* GRN Number — auto-generated preview */}
-              <div>
-                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  GRN Number
-                </label>
-                <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-muted/40 border border-dashed border-border">
-                  <FileText
-                    size={14}
-                    className="text-muted-foreground shrink-0"
-                  />
-                  {editingId && formData.grnNo ? (
-                    <span className="font-mono text-sm text-primary font-semibold tracking-wide">
-                      {formData.grnNo}
-                    </span>
-                  ) : grnNumberPreview?.nextDocNo ? (
-                    <span className="font-mono text-sm text-primary font-semibold tracking-wide">
-                      {grnNumberPreview.nextDocNo}
-                    </span>
-                  ) : loadingPreview ? (
-                    <span className="text-sm text-muted-foreground/70">
-                      Loading preview...
-                    </span>
-                  ) : (
-                    <span className="text-sm text-muted-foreground/50 italic">
-                      Auto-generated on save
-                    </span>
-                  )}
-                </div>
-              </div>
+        <div className="space-y-6">
+          {/* Form Card */}
+          <div className="rounded-xl bg-card border border-border shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card/60">
+              <h2 className="font-heading font-semibold flex items-center gap-2">
+                {editingId ? <Edit3 size={18} /> : <Truck size={18} />}
+                {editingId
+                  ? "Edit Goods Receipt Note"
+                  : "New Goods Receipt Note"}
+              </h2>
+              {editingId && (
+                <span className="text-xs px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
+                  Editing Mode
+                </span>
+              )}
             </div>
 
-            {/* Items Table */}
-            <div>
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="font-heading font-semibold text-sm flex items-center gap-2">
-                  <Package size={17} /> Received Items
-                </h3>
-                {/* Add Item only when no PO is selected (manual entry fallback) */}
-                {!formData.poId && (
-                  <button
-                    onClick={() =>
+            <div className="p-6 space-y-6">
+              {/* Header Fields */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {/* Fin Year selector */}
+                <div>
+                  <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                    Fin Year
+                  </label>
+                  <select
+                    value={selectedFinYear}
+                    onChange={(e) => {
+                      setSelectedFinYear(e.target.value);
+                      // Clear PO selection when fin year changes
                       setFormData((prev) => ({
                         ...prev,
-                        items: [...prev.items, createEmptyItem()],
-                      }))
-                    }
-                    className="flex items-center gap-1.5 text-primary hover:bg-primary/10 px-4 py-2 rounded-lg transition-colors text-sm"
+                        poId: "",
+                        poNumber: "",
+                        supplierId: "",
+                        supplierName: "",
+                        items: [createEmptyItem()],
+                        grnNo: "",
+                        docNo: "",
+                        parentDocNo: "",
+                        rootExBDocNo: "",
+                        finYear: e.target.value,
+                      }));
+                    }}
+                    className={inp}
                   >
-                    <Plus size={16} /> Add Item
-                  </button>
-                )}
+                    <option value="">All Years</option>
+                    {finYears.map((fy) => (
+                      <option key={fy.id} value={fy.year}>
+                        {fy.year}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Purchase Order — filtered by fin year */}
+                <div className="lg:col-span-2">
+                  <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                    Purchase Order <span className="text-destructive">*</span>
+                  </label>
+                  <select
+                    value={formData.poId}
+                    onChange={(e) => handlePOSelect(e.target.value)}
+                    disabled={!!editingId || loadingPO}
+                    className={inp}
+                  >
+                    <option value="">Select Purchase Order...</option>
+                    {pos.map((po) => (
+                      <option key={po.value} value={po.value}>
+                        {po.label}
+                      </option>
+                    ))}
+                  </select>
+                  {loadingPO && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Loading PO details…
+                    </p>
+                  )}
+                  {formData.supplierName && !loadingPO && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Supplier:{" "}
+                      <span className="text-foreground font-medium">
+                        {formData.supplierName}
+                      </span>
+                    </p>
+                  )}
+                  {errors.poId && (
+                    <p className="text-destructive text-sm mt-1">
+                      {errors.poId}
+                    </p>
+                  )}
+                </div>
+
+                {/* GRN Date */}
+                <div>
+                  <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                    GRN Date
+                  </label>
+                  <div className="relative">
+                    <Calendar
+                      size={15}
+                      className="absolute left-3 top-3 text-muted-foreground"
+                    />
+                    <input
+                      type="date"
+                      value={formData.grnDate}
+                      onChange={(e) =>
+                        setFormData((p) => ({ ...p, grnDate: e.target.value }))
+                      }
+                      className={`${inp} pl-10`}
+                    />
+                  </div>
+                </div>
+
+                {/* GRN Number — auto-generated preview */}
+                <div>
+                  <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                    GRN Number
+                  </label>
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-muted/40 border border-dashed border-border">
+                    <FileText
+                      size={14}
+                      className="text-muted-foreground shrink-0"
+                    />
+                    {editingId && formData.grnNo ? (
+                      <span className="font-mono text-sm text-primary font-semibold tracking-wide">
+                        {formData.grnNo}
+                      </span>
+                    ) : grnNumberPreview?.nextDocNo ? (
+                      <span className="font-mono text-sm text-primary font-semibold tracking-wide">
+                        {grnNumberPreview.nextDocNo}
+                      </span>
+                    ) : loadingPreview ? (
+                      <span className="text-sm text-muted-foreground/70">
+                        Loading preview...
+                      </span>
+                    ) : (
+                      <span className="text-sm text-muted-foreground/50 italic">
+                        Auto-generated on save
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              {errors.items && (
-                <p className="text-destructive text-sm mb-3">{errors.items}</p>
-              )}
+              {/* Items Table */}
+              <div>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-heading font-semibold text-sm flex items-center gap-2">
+                    <Package size={17} /> Received Items
+                  </h3>
+                  {/* Add Item only when no PO is selected (manual entry fallback) */}
+                  {!formData.poId && (
+                    <button
+                      onClick={() =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          items: [...prev.items, createEmptyItem()],
+                        }))
+                      }
+                      className="flex items-center gap-1.5 text-primary hover:bg-primary/10 px-4 py-2 rounded-lg transition-colors text-sm"
+                    >
+                      <Plus size={16} /> Add Item
+                    </button>
+                  )}
+                </div>
 
-              <div className="border border-border rounded-xl overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-muted/50">
-                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                        Item
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                        Ordered
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                        Received
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                        Remaining
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                        UOM
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                        Rate (₹) <span className="text-destructive">*</span>
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                        Qty (Billing){" "}
-                        <span className="text-destructive">*</span>
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                        Total (₹)
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {formData.items.map((item, idx) => {
-                      const fromPO = !!formData.poId;
-                      return (
-                        <tr key={idx}>
-                          {/* Item name — locked if from PO */}
-                          <td className="p-3">
-                            {fromPO ? (
-                              <span className="text-foreground font-medium">
-                                {item.itemName || "—"}
-                              </span>
-                            ) : (
+                {errors.items && (
+                  <p className="text-destructive text-sm mb-3">
+                    {errors.items}
+                  </p>
+                )}
+
+                <div className="border border-border rounded-xl overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-muted/50">
+                        <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                          Item
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                          Ordered
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                          Received
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                          Remaining
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                          UOM
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                          Rate (₹) <span className="text-destructive">*</span>
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                          Qty (Billing){" "}
+                          <span className="text-destructive">*</span>
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                          Total (₹)
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {formData.items.map((item, idx) => {
+                        const fromPO = !!formData.poId;
+                        return (
+                          <tr key={idx}>
+                            {/* Item name — locked if from PO */}
+                            <td className="p-3">
+                              {fromPO ? (
+                                <span className="text-foreground font-medium">
+                                  {item.itemName || "—"}
+                                </span>
+                              ) : (
+                                <input
+                                  value={item.itemName}
+                                  onChange={(e) => {
+                                    const nextItems = [...formData.items];
+                                    nextItems[idx] = {
+                                      ...nextItems[idx],
+                                      itemName: e.target.value,
+                                    };
+                                    setFormData((p) => ({
+                                      ...p,
+                                      items: nextItems,
+                                    }));
+                                  }}
+                                  placeholder="Item name"
+                                  className={inp}
+                                />
+                              )}
+                            </td>
+                            {/* Ordered qty — locked, comes from PO */}
+                            <td className="p-3 text-right font-medium text-muted-foreground">
+                              {item.orderedQty}
+                            </td>
+                            {/* Received qty — always editable */}
+                            <td className="p-3">
                               <input
-                                value={item.itemName}
-                                onChange={(e) => {
-                                  const nextItems = [...formData.items];
-                                  nextItems[idx] = {
-                                    ...nextItems[idx],
-                                    itemName: e.target.value,
-                                  };
-                                  setFormData((p) => ({
-                                    ...p,
-                                    items: nextItems,
-                                  }));
-                                }}
-                                placeholder="Item name"
-                                className={inp}
+                                type="number"
+                                min={0}
+                                max={item.orderedQty || undefined}
+                                value={item.receivedQty}
+                                onChange={(e) =>
+                                  updateReceivedQty(idx, Number(e.target.value))
+                                }
+                                className={`${inp} text-right`}
                               />
-                            )}
-                          </td>
-                          {/* Ordered qty — locked, comes from PO */}
-                          <td className="p-3 text-right font-medium text-muted-foreground">
-                            {item.orderedQty}
-                          </td>
-                          {/* Received qty — always editable */}
-                          <td className="p-3">
-                            <input
-                              type="number"
-                              min={0}
-                              max={item.orderedQty || undefined}
-                              value={item.receivedQty}
-                              onChange={(e) =>
-                                updateReceivedQty(idx, Number(e.target.value))
-                              }
-                              className={`${inp} text-right`}
-                            />
-                          </td>
-                          {/* Remaining — computed */}
+                            </td>
+                            {/* Remaining — computed */}
+                            <td
+                              className={`p-3 text-right font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                            >
+                              {item.remainingQty}
+                            </td>
+                            {/* UOM — locked if from PO */}
+                            <td className="p-3">
+                              {fromPO ? (
+                                <span className="text-foreground">
+                                  {item.uom || "—"}
+                                </span>
+                              ) : (
+                                <select
+                                  value={item.uom}
+                                  onChange={(e) => {
+                                    const nextItems = [...formData.items];
+                                    nextItems[idx] = {
+                                      ...nextItems[idx],
+                                      uom: e.target.value,
+                                    };
+                                    setFormData((p) => ({
+                                      ...p,
+                                      items: nextItems,
+                                    }));
+                                  }}
+                                  className={inp}
+                                >
+                                  <option value="">Select UOM</option>
+                                  {uomsData
+                                    .filter((u: UOM) => u.IsActive !== false)
+                                    .map((u: UOM) => (
+                                      <option key={u.UOMCode} value={u.UOMCode}>
+                                        {u.UOMName}{" "}
+                                        {u.Symbol ? `(${u.Symbol})` : ""}
+                                      </option>
+                                    ))}
+                                </select>
+                              )}
+                            </td>
+                            {/* Rate */}
+                            <td className="p-3">
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={item.rate}
+                                onChange={(e) =>
+                                  updateItemField(
+                                    idx,
+                                    "rate",
+                                    Number(e.target.value),
+                                  )
+                                }
+                                className={`${inp} text-right`}
+                                placeholder="0.00"
+                              />
+                            </td>
+                            {/* Billing Quantity */}
+                            <td className="p-3">
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={item.quantity}
+                                onChange={(e) =>
+                                  updateItemField(
+                                    idx,
+                                    "quantity",
+                                    Number(e.target.value),
+                                  )
+                                }
+                                className={`${inp} text-right`}
+                                placeholder="0"
+                              />
+                            </td>
+                            {/* Total Amount — computed, read-only */}
+                            <td className="p-3 text-right font-semibold text-primary">
+                              {item.totalAmount > 0
+                                ? `₹${item.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    {/* Grand total footer */}
+                    {formData.items.some((i) => i.totalAmount > 0) && (
+                      <tfoot>
+                        <tr className="bg-muted/40 border-t-2 border-border">
                           <td
-                            className={`p-3 text-right font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                            colSpan={7}
+                            className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground"
                           >
-                            {item.remainingQty}
+                            Grand Total
                           </td>
-                          {/* UOM — locked if from PO */}
-                          <td className="p-3">
-                            {fromPO ? (
-                              <span className="text-foreground">
-                                {item.uom || "—"}
-                              </span>
-                            ) : (
-                              <select
-                                value={item.uom}
-                                onChange={(e) => {
-                                  const nextItems = [...formData.items];
-                                  nextItems[idx] = {
-                                    ...nextItems[idx],
-                                    uom: e.target.value,
-                                  };
-                                  setFormData((p) => ({
-                                    ...p,
-                                    items: nextItems,
-                                  }));
-                                }}
-                                className={inp}
-                              >
-                                <option value="">Select UOM</option>
-                                {uomsData
-                                  .filter((u: UOM) => u.IsActive !== false)
-                                  .map((u: UOM) => (
-                                    <option key={u.UOMCode} value={u.UOMCode}>
-                                      {u.UOMName}{" "}
-                                      {u.Symbol ? `(${u.Symbol})` : ""}
-                                    </option>
-                                  ))}
-                              </select>
-                            )}
-                          </td>
-                          {/* Rate */}
-                          <td className="p-3">
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              value={item.rate}
-                              onChange={(e) =>
-                                updateItemField(
-                                  idx,
-                                  "rate",
-                                  Number(e.target.value),
-                                )
-                              }
-                              className={`${inp} text-right`}
-                              placeholder="0.00"
-                            />
-                          </td>
-                          {/* Billing Quantity */}
-                          <td className="p-3">
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              value={item.quantity}
-                              onChange={(e) =>
-                                updateItemField(
-                                  idx,
-                                  "quantity",
-                                  Number(e.target.value),
-                                )
-                              }
-                              className={`${inp} text-right`}
-                              placeholder="0"
-                            />
-                          </td>
-                          {/* Total Amount — computed, read-only */}
-                          <td className="p-3 text-right font-semibold text-primary">
-                            {item.totalAmount > 0
-                              ? `₹${item.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                              : "—"}
+                          <td className="px-4 py-3 text-right font-bold text-primary">
+                            ₹
+                            {formData.items
+                              .reduce((sum, i) => sum + (i.totalAmount || 0), 0)
+                              .toLocaleString("en-IN", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
                           </td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                  {/* Grand total footer */}
-                  {formData.items.some((i) => i.totalAmount > 0) && (
-                    <tfoot>
-                      <tr className="bg-muted/40 border-t-2 border-border">
-                        <td
-                          colSpan={7}
-                          className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground"
-                        >
-                          Grand Total
-                        </td>
-                        <td className="px-4 py-3 text-right font-bold text-primary">
-                          ₹
-                          {formData.items
-                            .reduce((sum, i) => sum + (i.totalAmount || 0), 0)
-                            .toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              </div>
+
+              {/* Remarks */}
+              <div>
+                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  Remarks
+                </label>
+                <textarea
+                  value={formData.remarks}
+                  onChange={(e) =>
+                    setFormData((p) => ({ ...p, remarks: e.target.value }))
+                  }
+                  rows={3}
+                  className={`${inp} resize-y`}
+                  placeholder="Additional notes, remarks, etc."
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={onSubmit}
+                  disabled={
+                    createMutation.isPending || updateMutation.isPending
+                  }
+                  className="flex-1 bg-primary text-primary-foreground py-3 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors disabled:opacity-60"
+                >
+                  <Save size={18} />
+                  {editingId ? "Update GRN" : "Save GRN"}
+                </button>
+                <button
+                  onClick={resetForm}
+                  className="px-8 border border-border hover:bg-muted py-3 rounded-lg flex items-center gap-2 transition-colors"
+                >
+                  <X size={18} /> Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* GRN List */}
+          <div className="rounded-xl bg-card border border-border shadow-sm overflow-hidden">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-border bg-card/60">
+              <h3 className="font-heading font-semibold">GRN History</h3>
+              <div className="relative w-80">
+                <Search
+                  size={15}
+                  className="absolute left-3 top-3 text-muted-foreground"
+                />
+                <input
+                  type="text"
+                  placeholder="Search GRN, PO or Supplier..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-10 w-full py-2.5 bg-muted border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                />
               </div>
             </div>
 
-            {/* Remarks */}
-            <div>
-              <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                Remarks
-              </label>
-              <textarea
-                value={formData.remarks}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, remarks: e.target.value }))
-                }
-                rows={3}
-                className={`${inp} resize-y`}
-                placeholder="Additional notes, remarks, etc."
-              />
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-3 pt-4">
-              <button
-                onClick={onSubmit}
-                disabled={createMutation.isPending || updateMutation.isPending}
-                className="flex-1 bg-primary text-primary-foreground py-3 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors disabled:opacity-60"
-              >
-                <Save size={18} />
-                {editingId ? "Update GRN" : "Save GRN"}
-              </button>
-              <button
-                onClick={resetForm}
-                className="px-8 border border-border hover:bg-muted py-3 rounded-lg flex items-center gap-2 transition-colors"
-              >
-                <X size={18} /> Cancel
-              </button>
+            <DataTable
+              data={filteredGrns}
+              columns={GRN_LIST_COLUMNS}
+              searchable={false}
+              paginated={true}
+              defaultPageSize={20}
+              emptyMessage="No GRNs found."
+            />
+            <div className="flex items-center justify-between border-t border-border px-6 py-3 text-sm">
+              <span className="text-muted-foreground">
+                Page {page} of {totalPages} ({totalRecords} records)
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                  disabled={page <= 1}
+                  className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-50"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+                  disabled={page >= totalPages}
+                  className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* GRN List */}
-        <div className="rounded-xl bg-card border border-border shadow-sm overflow-hidden">
-          <div className="flex justify-between items-center px-6 py-4 border-b border-border bg-card/60">
-            <h3 className="font-heading font-semibold">GRN History</h3>
-            <div className="relative w-80">
-              <Search
-                size={15}
-                className="absolute left-3 top-3 text-muted-foreground"
-              />
-              <input
-                type="text"
-                placeholder="Search GRN, PO or Supplier..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-10 w-full py-2.5 bg-muted border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-            </div>
-          </div>
-
-          <DataTable
-            data={filteredGrns}
-            columns={GRN_LIST_COLUMNS}
-            searchable={false}
-            paginated={true}
-            defaultPageSize={20}
-            emptyMessage="No GRNs found."
-          />
-          <div className="flex items-center justify-between border-t border-border px-6 py-3 text-sm">
-            <span className="text-muted-foreground">
-              Page {page} of {totalPages} ({totalRecords} records)
-            </span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                disabled={page <= 1}
-                className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-                disabled={page >= totalPages}
-                className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* View GRN Modal */}
-      {viewingGrn &&
-        (() => {
-          const items = parseJsonArray<GRNItemLine>(viewingGrn.GRNItems);
-          return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-              <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-                {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-                  <div>
-                    <h2 className="font-heading font-bold text-lg">
-                      {viewingGrn.GRNNo
-                        ? viewingGrn.GRNNo.startsWith("GRN-")
-                          ? viewingGrn.GRNNo
-                          : `GRN-${viewingGrn.GRNNo}`
-                        : "—"}
-                    </h2>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Goods Receipt Note
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setViewingGrn(null)}
-                    className="p-2 hover:bg-muted rounded-lg transition-colors"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-
-                <div className="p-6 space-y-5">
-                  {/* Meta row */}
-                  <div className="grid grid-cols-2 gap-4 text-sm">
+        {/* View GRN Modal */}
+        {viewingGrn &&
+          (() => {
+            const items = parseJsonArray<GRNItemLine>(viewingGrn.GRNItems);
+            return (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-6 py-4 border-b border-border">
                     <div>
-                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-                        Doc No
-                      </p>
-                      <p className="font-mono font-semibold">
-                        {viewingGrn.DocNo || viewingGrn.GRNNo || "—"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-                        Purchase Order
-                      </p>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-medium">
-                          {viewingGrn.PONumber || "—"}
-                        </p>
-                        {viewingGrn.POType && (
-                          <span
-                            className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
-                              viewingGrn.POType === "Normal"
-                                ? "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800"
-                                : viewingGrn.POType === "WO_PO"
-                                  ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800"
-                                  : "bg-muted text-muted-foreground border-border"
-                            }`}
-                          >
-                            {viewingGrn.POType}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-                        Supplier
-                      </p>
-                      <p className="font-medium">
-                        {viewingGrn.SupplierName || "—"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-                        Date
-                      </p>
-                      <p className="font-medium">
-                        {viewingGrn.GRNDate
-                          ? new Date(viewingGrn.GRNDate).toLocaleDateString(
-                              "en-IN",
-                            )
+                      <h2 className="font-heading font-bold text-lg">
+                        {viewingGrn.GRNNo
+                          ? viewingGrn.GRNNo.startsWith("GRN-")
+                            ? viewingGrn.GRNNo
+                            : `GRN-${viewingGrn.GRNNo}`
                           : "—"}
+                      </h2>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Goods Receipt Note
                       </p>
                     </div>
-                    <div>
-                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-                        Status
-                      </p>
-                      <StatusBadge status={viewingGrn.Status || "Draft"} />
-                    </div>
-                    {viewingGrn.SourceMRDocNo && (
-                      <div>
-                        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-                          Source MR
-                        </p>
-                        <p className="font-mono text-sm font-semibold text-blue-600 dark:text-blue-400">
-                          {viewingGrn.SourceMRDocNo}
-                        </p>
-                      </div>
-                    )}
-                    {viewingGrn.SourceWODocNo && (
-                      <div>
-                        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-                          Source Work Order
-                        </p>
-                        <p className="font-mono text-sm font-semibold text-orange-600 dark:text-orange-400">
-                          {viewingGrn.SourceWODocNo}
-                        </p>
-                      </div>
-                    )}
-                    {viewingGrn.SourceWDDocNo && (
-                      <div>
-                        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-                          Source Work Done
-                        </p>
-                        <p className="font-mono text-sm font-semibold text-orange-600 dark:text-orange-400">
-                          {viewingGrn.SourceWDDocNo}
-                        </p>
-                      </div>
-                    )}
+                    <button
+                      onClick={() => setViewingGrn(null)}
+                      className="p-2 hover:bg-muted rounded-lg transition-colors"
+                    >
+                      <X size={20} />
+                    </button>
                   </div>
 
-                  {/* Items table */}
-                  <div>
-                    <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2">
-                      Received Items
-                    </p>
-                    <div className="border border-border rounded-xl overflow-x-auto">
-                      <table className="w-full text-sm min-w-[700px]">
-                        <thead>
-                          <tr className="bg-muted/50">
-                            <th className="px-4 py-2.5 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                              Item
-                            </th>
-                            <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                              Ordered
-                            </th>
-                            <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                              Received
-                            </th>
-                            <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                              Remaining
-                            </th>
-                            <th className="px-4 py-2.5 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                              UOM
-                            </th>
-                            <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                              Rate (₹)
-                            </th>
-                            <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                              Qty
-                            </th>
-                            <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                              Total (₹)
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                          {items.length ? (
-                            items.map((item, i) => (
-                              <tr key={i}>
-                                <td className="px-4 py-3 font-medium">
-                                  {item.itemName || "—"}
-                                </td>
-                                <td className="px-4 py-3 text-right text-muted-foreground">
-                                  {item.orderedQty}
-                                </td>
-                                <td className="px-4 py-3 text-right font-semibold">
-                                  {item.receivedQty}
-                                </td>
+                  <div className="p-6 space-y-5">
+                    {/* Meta row */}
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                          Doc No
+                        </p>
+                        <p className="font-mono font-semibold">
+                          {viewingGrn.DocNo || viewingGrn.GRNNo || "—"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                          Purchase Order
+                        </p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium">
+                            {viewingGrn.PONumber || "—"}
+                          </p>
+                          {viewingGrn.POType && (
+                            <span
+                              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
+                                viewingGrn.POType === "Normal"
+                                  ? "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800"
+                                  : viewingGrn.POType === "WO_PO"
+                                    ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800"
+                                    : "bg-muted text-muted-foreground border-border"
+                              }`}
+                            >
+                              {viewingGrn.POType}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                          Supplier
+                        </p>
+                        <p className="font-medium">
+                          {viewingGrn.SupplierName || "—"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                          Date
+                        </p>
+                        <p className="font-medium">
+                          {viewingGrn.GRNDate
+                            ? new Date(viewingGrn.GRNDate).toLocaleDateString(
+                                "en-IN",
+                              )
+                            : "—"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                          Status
+                        </p>
+                        <StatusBadge status={viewingGrn.Status || "Draft"} />
+                      </div>
+                      {viewingGrn.SourceMRDocNo && (
+                        <div>
+                          <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                            Source MR
+                          </p>
+                          <p className="font-mono text-sm font-semibold text-blue-600 dark:text-blue-400">
+                            {viewingGrn.SourceMRDocNo}
+                          </p>
+                        </div>
+                      )}
+                      {viewingGrn.SourceWODocNo && (
+                        <div>
+                          <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                            Source Work Order
+                          </p>
+                          <p className="font-mono text-sm font-semibold text-orange-600 dark:text-orange-400">
+                            {viewingGrn.SourceWODocNo}
+                          </p>
+                        </div>
+                      )}
+                      {viewingGrn.SourceWDDocNo && (
+                        <div>
+                          <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                            Source Work Done
+                          </p>
+                          <p className="font-mono text-sm font-semibold text-orange-600 dark:text-orange-400">
+                            {viewingGrn.SourceWDDocNo}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Items table */}
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2">
+                        Received Items
+                      </p>
+                      <div className="border border-border rounded-xl overflow-x-auto">
+                        <table className="w-full text-sm min-w-[700px]">
+                          <thead>
+                            <tr className="bg-muted/50">
+                              <th className="px-4 py-2.5 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                                Item
+                              </th>
+                              <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                                Ordered
+                              </th>
+                              <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                                Received
+                              </th>
+                              <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                                Remaining
+                              </th>
+                              <th className="px-4 py-2.5 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                                UOM
+                              </th>
+                              <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                                Rate (₹)
+                              </th>
+                              <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                                Qty
+                              </th>
+                              <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                                Total (₹)
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border">
+                            {items.length ? (
+                              items.map((item, i) => (
+                                <tr key={i}>
+                                  <td className="px-4 py-3 font-medium">
+                                    {item.itemName || "—"}
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-muted-foreground">
+                                    {item.orderedQty}
+                                  </td>
+                                  <td className="px-4 py-3 text-right font-semibold">
+                                    {item.receivedQty}
+                                  </td>
+                                  <td
+                                    className={`px-4 py-3 text-right font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                                  >
+                                    {item.remainingQty}
+                                  </td>
+                                  <td className="px-4 py-3 text-muted-foreground">
+                                    {item.uom || "—"}
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-muted-foreground">
+                                    {item.rate
+                                      ? `₹${Number(item.rate).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                      : "—"}
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-muted-foreground">
+                                    {item.quantity ?? "—"}
+                                  </td>
+                                  <td className="px-4 py-3 text-right font-semibold text-primary">
+                                    {item.totalAmount
+                                      ? `₹${Number(item.totalAmount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                      : "—"}
+                                  </td>
+                                </tr>
+                              ))
+                            ) : (
+                              <tr>
                                 <td
-                                  className={`px-4 py-3 text-right font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                                  colSpan={8}
+                                  className="px-4 py-4 text-center text-muted-foreground"
                                 >
-                                  {item.remainingQty}
-                                </td>
-                                <td className="px-4 py-3 text-muted-foreground">
-                                  {item.uom || "—"}
-                                </td>
-                                <td className="px-4 py-3 text-right text-muted-foreground">
-                                  {item.rate
-                                    ? `₹${Number(item.rate).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                                    : "—"}
-                                </td>
-                                <td className="px-4 py-3 text-right text-muted-foreground">
-                                  {item.quantity ?? "—"}
-                                </td>
-                                <td className="px-4 py-3 text-right font-semibold text-primary">
-                                  {item.totalAmount
-                                    ? `₹${Number(item.totalAmount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                                    : "—"}
+                                  No items
                                 </td>
                               </tr>
-                            ))
-                          ) : (
-                            <tr>
-                              <td
-                                colSpan={8}
-                                className="px-4 py-4 text-center text-muted-foreground"
-                              >
-                                No items
-                              </td>
-                            </tr>
+                            )}
+                          </tbody>
+                          {items.some((i) => i.totalAmount > 0) && (
+                            <tfoot>
+                              <tr className="bg-muted/40 border-t-2 border-border">
+                                <td
+                                  colSpan={7}
+                                  className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground"
+                                >
+                                  Grand Total
+                                </td>
+                                <td className="px-4 py-3 text-right font-bold text-primary">
+                                  ₹
+                                  {items
+                                    .reduce(
+                                      (sum, i) =>
+                                        sum + (Number(i.totalAmount) || 0),
+                                      0,
+                                    )
+                                    .toLocaleString("en-IN", {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                </td>
+                              </tr>
+                            </tfoot>
                           )}
-                        </tbody>
-                        {items.some((i) => i.totalAmount > 0) && (
-                          <tfoot>
-                            <tr className="bg-muted/40 border-t-2 border-border">
-                              <td
-                                colSpan={7}
-                                className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground"
-                              >
-                                Grand Total
-                              </td>
-                              <td className="px-4 py-3 text-right font-bold text-primary">
-                                ₹
-                                {items
-                                  .reduce(
-                                    (sum, i) =>
-                                      sum + (Number(i.totalAmount) || 0),
-                                    0,
-                                  )
-                                  .toLocaleString("en-IN", {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}
-                              </td>
-                            </tr>
-                          </tfoot>
-                        )}
-                      </table>
+                        </table>
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Remarks */}
-                  {viewingGrn.Remarks && (
-                    <div>
-                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-                        Remarks
-                      </p>
-                      <p className="text-sm text-foreground bg-muted/40 rounded-lg px-3 py-2">
-                        {viewingGrn.Remarks}
-                      </p>
-                    </div>
-                  )}
+                    {/* Remarks */}
+                    {viewingGrn.Remarks && (
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                          Remarks
+                        </p>
+                        <p className="text-sm text-foreground bg-muted/40 rounded-lg px-3 py-2">
+                          {viewingGrn.Remarks}
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })()}
-      </div>{/* end space-y-8 */}
+            );
+          })()}
+      </div>
+      {/* end space-y-8 */}
     </>
   );
 }
