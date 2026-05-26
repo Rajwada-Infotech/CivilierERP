@@ -45,7 +45,6 @@ const parseJsonArray = <T,>(val: unknown): T[] => {
   if (typeof val !== "string" || !val.trim()) return [];
   try {
     let parsed = JSON.parse(val);
-    // Handle double-encoded: stored as JSON string of a JSON string
     if (typeof parsed === "string") parsed = JSON.parse(parsed);
     return Array.isArray(parsed) ? (parsed as T[]) : [];
   } catch {
@@ -381,7 +380,6 @@ export default function GRN() {
       if (!res.ok) throw new Error("Failed to fetch PO details");
       const po = await res.json();
 
-      // Map PO line items → GRN item lines
       const lineItems: GRNItemLine[] = (po.LineItems ?? []).map((li: any) => {
         const rate = Number(li.Rate ?? 0);
         const quantity = Number(li.Quantity ?? 0);
@@ -409,7 +407,6 @@ export default function GRN() {
         parentDocNo: po.DocNo || po.PurchaseOrderNo || "",
         rootExBDocNo: po.RootExBDocNo || "",
         finYear: prev.finYear || activeFinYear || "",
-        // grnNo will be assigned by backend on save
         grnNo: "",
         docNo: "",
       }));
@@ -456,7 +453,7 @@ export default function GRN() {
     }
 
     const payload: GRNFormDataPayload = {
-      grnNo: formData.grnNo || "", // empty = backend auto-generates
+      grnNo: formData.grnNo || "",
       grnDate: formData.grnDate,
       supplierId: Number(formData.supplierId),
       poId: Number(formData.poId) || 0,
@@ -487,10 +484,8 @@ export default function GRN() {
     setFormData((prev) => {
       const nextItems = [...prev.items];
       const current = { ...nextItems[index], [field]: value };
-      // Keep receivedQty and quantity in sync when user edits receivedQty
       if (field === "receivedQty") {
         current.remainingQty = current.orderedQty - value;
-        // Only auto-sync quantity if user hasn't manually set it yet
         if (nextItems[index].quantity === nextItems[index].receivedQty) {
           current.quantity = value;
         }
@@ -502,14 +497,11 @@ export default function GRN() {
     });
   };
 
-  // Legacy alias kept so existing call-sites compile without change
   const updateReceivedQty = (index: number, value: number) =>
     updateItemField(index, "receivedQty", value);
 
-  // ── Edit ─────────────────────────────────────────────────────────────────────
+  // ── View ─────────────────────────────────────────────────────────────────────
   onView = async (grn: any) => {
-    // The list row no longer carries GRNItems (removed for perf).
-    // Fetch the full record so the view modal has item data.
     try {
       const token = localStorage.getItem("token") ?? "";
       const res = await fetch(`/api/grns/${grn.GRNID}`, {
@@ -522,6 +514,7 @@ export default function GRN() {
     }
   };
 
+  // ── Edit ─────────────────────────────────────────────────────────────────────
   onEdit = async (grn: any) => {
     // Always fetch the full GRN record — list rows strip GRNItems for performance
     let fullGrn = grn;
@@ -629,7 +622,6 @@ export default function GRN() {
                     value={selectedFinYear}
                     onChange={(e) => {
                       setSelectedFinYear(e.target.value);
-                      // Clear PO selection when fin year changes
                       setFormData((prev) => ({
                         ...prev,
                         poId: "",
@@ -751,7 +743,6 @@ export default function GRN() {
                   <h3 className="font-heading font-semibold text-sm flex items-center gap-2">
                     <Package size={17} /> Received Items
                   </h3>
-                  {/* Add Item only when no PO is selected (manual entry fallback) */}
                   {!formData.poId && (
                     <button
                       onClick={() =>
@@ -774,32 +765,42 @@ export default function GRN() {
                 )}
 
                 <div className="border border-border rounded-xl overflow-hidden">
-                  <table className="w-full text-sm">
+                  <table className="w-full text-sm table-fixed">
+                    <colgroup>
+                      <col style={{ width: "18%" }} />
+                      <col style={{ width: "9%" }} />
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: "14%" }} />
+                      <col style={{ width: "14%" }} />
+                      <col style={{ width: "15%" }} />
+                    </colgroup>
                     <thead>
                       <tr className="bg-muted/50">
-                        <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        <th className="px-3 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                           Item
                         </th>
-                        <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        <th className="px-2 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                           Ordered
                         </th>
-                        <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        <th className="px-2 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                           Received
                         </th>
-                        <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        <th className="px-2 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                           Remaining
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        <th className="px-2 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                           UOM
                         </th>
-                        <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        <th className="px-2 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                           Rate (₹) <span className="text-destructive">*</span>
                         </th>
-                        <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        <th className="px-2 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                           Qty (Billing){" "}
                           <span className="text-destructive">*</span>
                         </th>
-                        <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        <th className="px-2 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                           Total (₹)
                         </th>
                       </tr>
@@ -810,7 +811,7 @@ export default function GRN() {
                         return (
                           <tr key={idx}>
                             {/* Item name — locked if from PO */}
-                            <td className="p-3">
+                            <td className="px-1.5 py-1.5">
                               {fromPO ? (
                                 <span className="text-foreground font-medium">
                                   {item.itemName || "—"}
@@ -835,11 +836,11 @@ export default function GRN() {
                               )}
                             </td>
                             {/* Ordered qty — locked, comes from PO */}
-                            <td className="p-3 text-right font-medium text-muted-foreground">
+                            <td className="px-2 py-2 text-right font-medium text-muted-foreground">
                               {item.orderedQty}
                             </td>
                             {/* Received qty — always editable */}
-                            <td className="p-3">
+                            <td className="px-1.5 py-1.5">
                               <input
                                 type="number"
                                 min={0}
@@ -853,12 +854,12 @@ export default function GRN() {
                             </td>
                             {/* Remaining — computed */}
                             <td
-                              className={`p-3 text-right font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                              className={`px-2 py-2 text-right font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
                             >
                               {item.remainingQty}
                             </td>
                             {/* UOM — locked if from PO */}
-                            <td className="p-3">
+                            <td className="px-1.5 py-1.5">
                               {fromPO ? (
                                 <span className="text-foreground">
                                   {item.uom || "—"}
@@ -892,7 +893,7 @@ export default function GRN() {
                               )}
                             </td>
                             {/* Rate */}
-                            <td className="p-3">
+                            <td className="px-1.5 py-1.5">
                               <input
                                 type="number"
                                 min={0}
@@ -910,7 +911,7 @@ export default function GRN() {
                               />
                             </td>
                             {/* Billing Quantity */}
-                            <td className="p-3">
+                            <td className="px-1.5 py-1.5">
                               <input
                                 type="number"
                                 min={0}
@@ -928,7 +929,7 @@ export default function GRN() {
                               />
                             </td>
                             {/* Total Amount — computed, read-only */}
-                            <td className="p-3 text-right font-semibold text-primary">
+                            <td className="px-2 py-2 text-right font-semibold text-primary">
                               {item.totalAmount > 0
                                 ? `₹${item.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                                 : "—"}
@@ -937,7 +938,6 @@ export default function GRN() {
                         );
                       })}
                     </tbody>
-                    {/* Grand total footer */}
                     {formData.items.some((i) => i.totalAmount > 0) && (
                       <tfoot>
                         <tr className="bg-muted/40 border-t-2 border-border">
@@ -980,22 +980,24 @@ export default function GRN() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-3 pt-4">
+              <div className="flex items-center justify-center gap-3 pt-2 border-t border-border">
                 <button
                   onClick={onSubmit}
-                  disabled={
-                    createMutation.isPending || updateMutation.isPending
-                  }
-                  className="flex-1 bg-primary text-primary-foreground py-3 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors disabled:opacity-60"
+                  disabled={createMutation.isPending || updateMutation.isPending}
+                  className="gradient-accent inline-flex items-center gap-2 px-8 py-2.5 rounded-xl text-white text-sm font-semibold shadow-sm transition disabled:opacity-60"
                 >
-                  <Save size={18} />
-                  {editingId ? "Update GRN" : "Save GRN"}
+                  <Save size={15} />
+                  {createMutation.isPending || updateMutation.isPending
+                    ? "Saving…"
+                    : editingId
+                      ? "Update GRN"
+                      : "Save GRN"}
                 </button>
                 <button
                   onClick={resetForm}
-                  className="px-8 border border-border hover:bg-muted py-3 rounded-lg flex items-center gap-2 transition-colors"
+                  className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl border border-border hover:bg-muted text-sm transition-colors"
                 >
-                  <X size={18} /> Cancel
+                  <X size={15} /> Cancel
                 </button>
               </div>
             </div>
@@ -1301,7 +1303,6 @@ export default function GRN() {
             );
           })()}
       </div>
-      {/* end space-y-8 */}
     </>
   );
 }
