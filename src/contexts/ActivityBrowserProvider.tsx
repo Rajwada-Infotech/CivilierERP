@@ -72,6 +72,13 @@ export const ActivityBrowserProvider: React.FC<{
         return;
       }
 
+      const storedUser = getStoredUser();
+      if (storedUser?.role === "customer") {
+        setRawSessions([]);
+        setIsLoading(false);
+        return;
+      }
+
       try {
         fetchingRef.current = true;
         setIsLoading(true);

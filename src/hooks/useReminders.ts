@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { useAuth } from "@/contexts/AuthContext";
 
 export type ReminderType =
   | "cheque"
@@ -118,8 +119,9 @@ async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
 }
 
 export async function fetchCustomerReminders(): Promise<ReminderItem[]> {
-  // Customer-scoped: only their own EMI installments
-  return fetchEmiReminders();
+  // /api/expense-booking is restricted to internal roles.
+  // Return empty until a customer-scoped endpoint exists.
+  return [];
 }
 
 export async function fetchAllReminders(role?: string): Promise<ReminderItem[]> {
@@ -170,6 +172,8 @@ export async function fetchAllReminders(role?: string): Promise<ReminderItem[]> 
     }
   };
 
+  const FINANCE_ROLES = ["admin", "super_admin", "dba", "finance_manager", "branch_manager"];
+  const hasFinanceAccess = FINANCE_ROLES.includes(role || "");
   const [, emiItems, mrItems] = await Promise.all([
     Promise.all([
       process(
@@ -184,7 +188,7 @@ export async function fetchAllReminders(role?: string): Promise<ReminderItem[]> 
       process(tdsRes, "tds", "Id", "TDS", "/masters/tds"),
       process(woRes, "work_order", "Id", "WO", "/material/work-order"),
     ]),
-    fetchEmiReminders(),
+    hasFinanceAccess ? fetchEmiReminders() : Promise.resolve([]),
     fetchMaterialRequestReminders(),
   ]);
 
@@ -199,6 +203,8 @@ export async function fetchAllReminders(role?: string): Promise<ReminderItem[]> 
 
 export function useReminders(options: { pollingInterval?: number } = {}) {
   const { pollingInterval = 0 } = options;
+  const { currentUser } = useAuth();
+  const role = currentUser?.role;
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
@@ -229,6 +235,10 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
         }, 2000);
       }
 
+      if (!role) {
+        isFetching.current = false;
+        return;
+      }
       isFetching.current = true;
       if (isManual) setLoading(true);
 
@@ -245,10 +255,11 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
         }, 600);
       }
     },
-    [isLocked],
+    [isLocked, role],
   );
 
   useEffect(() => {
+    if (!role) return;
     let cancelled = false;
 
     refresh();
@@ -288,7 +299,7 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
       if (backoffTimer.current) clearTimeout(backoffTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [role]);
 
   const badgeCount = reminders.filter(
     (r) => r.urgency === "overdue" || r.urgency === "today",

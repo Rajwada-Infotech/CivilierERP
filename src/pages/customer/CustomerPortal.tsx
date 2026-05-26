@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate, useParams } from "react-router-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import {
@@ -8,7 +9,6 @@ import {
   Loader2, RefreshCw, Building2, TrendingUp, MessageCircle,
   CalendarDays, Plus, Search, X, Bell,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { useReminders } from "@/hooks/useReminders";
 import { formatDate } from "@/hooks/useReminders";
 
@@ -24,11 +24,11 @@ interface ConstructionUpdate {
 }
 
 function fmtDate(d: string | null | undefined): string {
-  if (!d) return "—";
+  if (!d) return "â€”";
   return new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
-const statusConfig: Record<string, { label: string; cls: string; icon: React.ReactNode }> = {
+const statusConfig: Record<string, { label: string; cls: string; icon: ReactNode }> = {
   Open:       { label: "Open",      cls: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800",     icon: <AlertCircle size={10} /> },
   Pending:    { label: "Pending",   cls: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800", icon: <Clock size={10} /> },
   InProgress: { label: "Resolving", cls: "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-800", icon: <Loader2 size={10} /> },
@@ -124,7 +124,7 @@ function ReminderRow({ item }: { item: { id: string | number; title: string; sub
       </div>
       <div className="text-right shrink-0">
         <p className="text-[11px] text-muted-foreground">{formatDate(item.dueDate)}</p>
-        {item.amount != null && <p className="text-[11px] font-semibold text-foreground">?{item.amount.toLocaleString("en-IN")}</p>}
+        {item.amount != null && <p className="text-[11px] font-semibold text-foreground">â‚¹{item.amount.toLocaleString("en-IN")}</p>}
       </div>
     </div>
   );
@@ -136,6 +136,14 @@ type StatusFilter = "All" | "Open" | "Pending" | "InProgress" | "Resolved" | "Cl
 export default function CustomerPortal() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const { userId } = useParams<{ userId: string }>();
+
+  // Redirect if userId param does not match the logged-in user
+  useEffect(() => {
+    if (currentUser?.id && (!userId || userId !== String(currentUser.id))) {
+      navigate(`/customer-portal/${currentUser.id}`, { replace: true });
+    }
+  }, [userId, currentUser?.id, navigate]);
   const [tab, setTab] = useState<Tab>("tickets");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [search, setSearch] = useState("");
@@ -145,7 +153,7 @@ export default function CustomerPortal() {
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   const { data: ticketsData, isLoading: ticketsLoading, isError: ticketsError, refetch: refetchTickets } =
-    useQuery<{ tickets: CustomerTicket[]; total: number }>({
+    useQuery<CustomerTicket[]>({
       queryKey: ["customer-tickets"],
       queryFn: async () => {
         const res = await fetchWithAuth("/api/tickets/my");
@@ -165,12 +173,12 @@ export default function CustomerPortal() {
         return res.json();
       },
       staleTime: 5 * 60_000,
-      enabled: tab === "progress",
+      enabled: false,
     });
 
   const { reminders, loading: remindersLoading, refresh: refreshReminders } = useReminders({ pollingInterval: 0 });
 
-  const allTickets: CustomerTicket[] = ticketsData?.tickets ?? [];
+  const allTickets: CustomerTicket[] = ticketsData ?? [];
   const filtered = allTickets.filter((t) => {
     const matchStatus = statusFilter === "All" || t.status === statusFilter;
     const matchSearch = !search || t.subject.toLowerCase().includes(search.toLowerCase());
@@ -183,7 +191,6 @@ export default function CustomerPortal() {
 
   const tabs = [
     { id: "tickets"   as Tab, label: "My Tickets",      icon: <Ticket size={14} /> },
-    { id: "progress"  as Tab, label: "Project Progress", icon: <HardHat size={14} /> },
     { id: "reminders" as Tab, label: "Reminders",        icon: <Bell size={14} /> },
   ];
 
@@ -241,7 +248,7 @@ export default function CustomerPortal() {
             <div className="space-y-2">
               <div className="relative">
                 <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tickets…"
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search ticketsâ€¦"
                   className="w-full pl-8 pr-3 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30" />
                 {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"><X size={12} /></button>}
               </div>
@@ -256,7 +263,7 @@ export default function CustomerPortal() {
               </div>
             </div>
             {ticketsLoading ? (
-              <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground"><Loader2 size={16} className="animate-spin" /> Loading tickets…</div>
+              <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground"><Loader2 size={16} className="animate-spin" /> Loading ticketsï¿½</div>
             ) : ticketsError ? (
               <div className="flex flex-col items-center gap-3 py-12 text-center">
                 <AlertCircle size={24} className="text-destructive" />
@@ -293,7 +300,7 @@ export default function CustomerPortal() {
               <Building2 size={18} className="text-muted-foreground/50" />
             </div>
             {updatesLoading ? (
-              <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground"><Loader2 size={16} className="animate-spin" /> Loading…</div>
+              <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground"><Loader2 size={16} className="animate-spin" /> Loadingï¿½</div>
             ) : updates.length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-12 text-center">
                 <HardHat size={28} className="text-muted-foreground/40" />
@@ -332,7 +339,7 @@ export default function CustomerPortal() {
               <button onClick={() => refreshReminders(true)} className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground"><RefreshCw size={13} /></button>
             </div>
             {remindersLoading ? (
-              <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground"><Loader2 size={16} className="animate-spin" /> Loading…</div>
+              <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground"><Loader2 size={16} className="animate-spin" /> Loadingï¿½</div>
             ) : reminders.length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-12 text-center">
                 <Bell size={28} className="text-muted-foreground/40" />
@@ -346,7 +353,7 @@ export default function CustomerPortal() {
         )}
 
         <p className="text-center text-[10px] text-muted-foreground/50 pb-2">
-          Civilier Customer Portal · For support contact your relationship manager
+          Civilier Customer Portal ï¿½ For support contact your relationship manager
         </p>
       </div>
     </div>
