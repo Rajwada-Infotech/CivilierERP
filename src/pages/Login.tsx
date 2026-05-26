@@ -36,6 +36,12 @@ const ROLE_HINTS = import.meta.env.DEV
         password: "engineer123",
         color: "#14b8a6",
       },
+      {
+        role: "Customer",
+        email: "customer@civilier.com",
+        password: "customer123",
+        color: "#f59e0b",
+      },
     ]
   : [];
 
@@ -1074,10 +1080,13 @@ export default function Login() {
         setLoginSuccess(true);
         setTimeout(() => {
           const role = result.role;
-          if (role === "dba") navigate("/dba", { replace: true });
+          const uid = result.userId ?? "";
+          if (role === "customer")
+            navigate(`/customer-portal/${uid}`, { replace: true });
+          else if (role === "dba") navigate(`/dba/${uid}`, { replace: true });
           else if (role === "super_admin" || role === "admin")
-            navigate("/admin/dashboard", { replace: true });
-          else navigate("/home", { replace: true });
+            navigate(`/admin/dashboard/${uid}`, { replace: true });
+          else navigate(`/home/${uid}`, { replace: true });
         }, 700);
       } else {
         setError(result.error || "Invalid email or password.");

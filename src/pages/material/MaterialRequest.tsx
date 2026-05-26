@@ -443,7 +443,11 @@ export default function MaterialRequest() {
         Remarks: ci.Remarks || null,
       })),
     };
-    if (editingId) { updateMutation.mutate(payload); } else { createMutation.mutate(payload); }
+    if (editingId) {
+      updateMutation.mutate(payload);
+    } else {
+      createMutation.mutate(payload);
+    }
   };
 
   // ── Columns ───────────────────────────────────────────────────────────────────
@@ -1341,31 +1345,31 @@ export default function MaterialRequest() {
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "Material Request"]} />
       <div className="relative space-y-8 mt-6">
-
-      {/* ── Page header ── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
-            Material Requests
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Create and manage material requisitions for projects.
-          </p>
+        {/* ── Page header ── */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Material Requests
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Create and manage material requisitions for projects.
+            </p>
+          </div>
+          {viewMode === "list" && (
+            <Button
+              onClick={() => setViewMode("form")}
+              className="gradient-accent gap-1.5 shrink-0"
+            >
+              <Plus size={15} /> New Request
+            </Button>
+          )}
         </div>
-        {viewMode === "list" && (
-          <Button
-            onClick={() => setViewMode("form")}
-            className="gradient-accent gap-1.5 shrink-0"
-          >
-            <Plus size={15} /> New Request
-          </Button>
-        )}
-      </div>
 
-      {viewMode === "list" && ListView()}
-      {viewMode === "form" && FormView()}
-      {viewMode === "view" && ViewMode()}
-      </div>{/* end space-y-8 */}
+        {viewMode === "list" && ListView()}
+        {viewMode === "form" && FormView()}
+        {viewMode === "view" && ViewMode()}
+      </div>
+      {/* end space-y-8 */}
     </>
   );
 }

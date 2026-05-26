@@ -225,7 +225,7 @@ export const AuthProvider = ({
         role: data.user.role,
       }).catch(() => {});
 
-      return { success: true, role: data.user.role };
+      return { success: true, role: data.user.role, userId: String(data.user.id) };
     } catch (err: any) {
       return {
         success: false,

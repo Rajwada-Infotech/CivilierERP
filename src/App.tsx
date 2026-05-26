@@ -23,6 +23,8 @@ import {
 // Static imports
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
+import CustomerPortal from "@/pages/customer/CustomerPortal";
+import { CustomerLayout } from "@/components/layout/CustomerLayout";
 import Maintenance from "./pages/Maintenance";
 
 // Layout
@@ -450,7 +452,7 @@ function AppRoutes() {
 
       {/* MAIN */}
       <Route
-        path="/home"
+        path="/home/:userId?"
         element={
           <ProtectedRoute>
             <Home />
@@ -1216,7 +1218,7 @@ function AppRoutes() {
 
       {/* DBA CONSOLE */}
       <Route
-        path="/dba"
+        path="/dba/:userId?"
         element={
           <ProtectedRoute>
             <DBADashboard />
@@ -1266,7 +1268,7 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/admin/dashboard"
+        path="/admin/dashboard/:userId?"
         element={
           <AdminRoute>
             <AdminDashboard />
@@ -1513,6 +1515,24 @@ function AppRoutes() {
           <SuperAdminRoute>
             <SuperAdminDashboard />
           </SuperAdminRoute>
+        }
+      />
+
+      {/* CUSTOMER PORTAL */}
+      <Route
+        path="/customer-portal/:userId?"
+        element={
+          <RequireAuth>
+            <RequireRole allowed={["customer"]}>
+              <CustomerLayout>
+                <RouteErrorBoundary>
+                  <Suspense fallback={<PageSkeleton />}>
+                    <CustomerPortal />
+                  </Suspense>
+                </RouteErrorBoundary>
+              </CustomerLayout>
+            </RequireRole>
+          </RequireAuth>
         }
       />
 

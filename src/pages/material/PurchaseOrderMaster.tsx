@@ -14,6 +14,7 @@ import {
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import {
   getPurchaseOrders,
+  getPurchaseOrderById,
   addPurchaseOrder,
   updatePurchaseOrder,
   deletePurchaseOrder,
@@ -873,16 +874,17 @@ const PurchaseOrderMaster: React.FC = () => {
   const { subtotal, totalCgst, totalSgst, totalIgst, totalTax, grandTotal } =
     useMemo(() => {
       const sub = lineItems.reduce((s, li) => s + li.quantity * li.rate, 0);
+      // A line is CGST+SGST when cgstRate or sgstRate > 0; otherwise IGST
       const cgst = lineItems.reduce((s, li) => {
-        if (li.igstRate > 0) return s; // IGST item — no CGST
+        if (li.cgstRate <= 0) return s;
         return s + (li.quantity * li.rate * li.cgstRate) / 100;
       }, 0);
       const sgst = lineItems.reduce((s, li) => {
-        if (li.igstRate > 0) return s; // IGST item — no SGST
+        if (li.sgstRate <= 0) return s;
         return s + (li.quantity * li.rate * li.sgstRate) / 100;
       }, 0);
       const igst = lineItems.reduce((s, li) => {
-        if (li.igstRate <= 0) return s;
+        if (li.cgstRate > 0 || li.sgstRate > 0) return s; // CGST+SGST item — no IGST
         return s + (li.quantity * li.rate * li.igstRate) / 100;
       }, 0);
       const tax = cgst + sgst + igst;
@@ -949,6 +951,17 @@ const PurchaseOrderMaster: React.FC = () => {
         if (i !== idx) return li;
         const updated = { ...li, ...patch };
         const baseAmount = updated.quantity * updated.rate;
+        // Recalculate gstRate from whichever split is active
+        if (
+          patch.igstRate !== undefined ||
+          patch.cgstRate !== undefined ||
+          patch.sgstRate !== undefined
+        ) {
+          updated.gstRate =
+            updated.cgstRate > 0 || updated.sgstRate > 0
+              ? updated.cgstRate + updated.sgstRate
+              : updated.igstRate;
+        }
         updated.taxAmount = (baseAmount * updated.gstRate) / 100;
         updated.amount = baseAmount + updated.taxAmount;
         return updated;
@@ -972,18 +985,21 @@ const PurchaseOrderMaster: React.FC = () => {
         u.code.toLowerCase() === itemUomNorm ||
         u.name.toLowerCase() === itemUomNorm,
     );
-    // Use CGST+SGST when both are set (intra-state); fall back to IGST (inter-state)
-    const useCgstSgst = item.cgst > 0 && item.sgst > 0;
-    const gstRate = useCgstSgst ? item.cgst + item.sgst : item.igst;
+    // Use CGST+SGST when either is set; otherwise IGST
+    const mc = Number(item.cgst ?? 0);
+    const ms = Number(item.sgst ?? 0);
+    const mi = Number(item.igst ?? 0);
+    const useCgstSgst = mc > 0 || ms > 0;
+    const gstRate = useCgstSgst ? mc + ms : mi;
     updateLine(idx, {
       itemId,
       itemName: item.name,
       itemDescription: item.description,
       uomId: uomMatch?.id ?? null,
       unit: uomMatch?.name ?? item.uom,
-      cgstRate: useCgstSgst ? item.cgst : 0,
-      sgstRate: useCgstSgst ? item.sgst : 0,
-      igstRate: useCgstSgst ? 0 : item.igst,
+      cgstRate: useCgstSgst ? mc : 0,
+      sgstRate: useCgstSgst ? ms : 0,
+      igstRate: useCgstSgst ? 0 : mi,
       gstRate,
     });
   };
@@ -1032,9 +1048,14 @@ const PurchaseOrderMaster: React.FC = () => {
         itemDescription: li.itemName,
         description: li.itemDescription || null,
         unit: li.unit,
+        uomId: li.uomId ?? null,
         quantity: li.quantity,
         rate: li.rate,
         tax: li.gstRate,
+        cgstRate: li.cgstRate,
+        sgstRate: li.sgstRate,
+        igstRate: li.igstRate,
+        gstType: li.igstRate > 0 ? "igst" : "cgst_sgst",
         amount: li.amount,
       })),
       PaymentTerms:
@@ -1181,13 +1202,36 @@ const PurchaseOrderMaster: React.FC = () => {
     setViewMode("create");
   };
 
-  const goToEdit = (item: POListItem) => {
-    const raw = dbItems.find((d) => String(d.PurchaseOrderID) === item._id);
-    if (!raw) return;
+  const goToEdit = async (item: POListItem) => {
+    // Always fetch the full PO — list rows don't include POItems or DocTypeId
+    let raw: any =
+      dbItems.find((d) => String(d.PurchaseOrderID) === item._id) ?? {};
+    try {
+      const full = await getPurchaseOrderById(item._id);
+      if (full) raw = full;
+    } catch {
+      // fall back to list-row data
+    }
 
-    const supplier = suppliers.find((s) => s.name === item.supplierName);
-    const company = companies.find((c) => c.name === item.companyName);
-    const project = allProjects.find((p) => p.name === item.projectName);
+    const supplier = suppliers.find(
+      (s) =>
+        s.id === String(raw.SupplierID ?? "") || s.name === item.supplierName,
+    );
+    const company = companies.find(
+      (c) =>
+        c.id === String(raw.CompanyId ?? "") || c.name === item.companyName,
+    );
+    const project = allProjects.find(
+      (p) =>
+        p.id === String(raw.ProjectId ?? "") || p.name === item.projectName,
+    );
+
+    const docTypeId: number | null = raw.DocTypeId ?? null;
+    const docNo: string = raw.DocNo ?? raw.PurchaseOrderNo ?? "";
+
+    // Restore doc type + doc number state so DocNumberPreview renders correctly
+    setPoDocTypeId(docTypeId);
+    setPoDocNo(docNo);
 
     setForm({
       poNumber: raw.PurchaseOrderNo ?? "",
@@ -1195,44 +1239,90 @@ const PurchaseOrderMaster: React.FC = () => {
       expectedDate: raw.ExpectedDeliveryDate
         ? raw.ExpectedDeliveryDate.slice(0, 10)
         : "",
-      supplierId: supplier?.id ?? "",
-      companyId: company?.id ?? "",
-      projectId: project?.id ?? "",
+      supplierId: supplier?.id ?? String(raw.SupplierID ?? ""),
+      companyId: company?.id ?? String(raw.CompanyId ?? ""),
+      projectId: project?.id ?? String(raw.ProjectId ?? ""),
       paymentTerms: raw.PaymentTerms ?? "",
       remarks: raw.Remarks ?? "",
-      docTypeId: raw.DocTypeId ?? null,
-      docNo: raw.DocNo ?? "",
+      docTypeId,
+      docNo,
     });
 
-    // Restore line items from POItems or legacy fields
-    const poItems = raw.POItems ?? [];
+    // Restore line items from POItems (full record) or legacy fields
+    const poItems: any[] = Array.isArray(raw.POItems)
+      ? raw.POItems
+      : Array.isArray(raw.LineItems)
+        ? raw.LineItems
+        : [];
+
+    // Snapshot items at call time — avoids stale closure issues
+    const itemsSnapshot = items;
+
     if (poItems.length > 0) {
       setLineItems(
         poItems.map((pi: any) => {
-          const qty = Number(pi.quantity ?? 0);
-          const rate = Number(pi.rate ?? 0);
-          const gstRate = Number(pi.tax ?? 0);
+          const qty = Number(pi.quantity ?? pi.Quantity ?? 0);
+          const rate = Number(pi.rate ?? pi.Rate ?? 0);
+          const totalTaxRate = Number(pi.tax ?? pi.Tax ?? 0);
+
+          // Priority 1: use stored split fields (saved by toPayload)
+          const storedCgst = Number(pi.cgstRate ?? 0);
+          const storedSgst = Number(pi.sgstRate ?? 0);
+          const storedIgst = Number(pi.igstRate ?? 0);
+
+          let resolvedCgst = 0,
+            resolvedSgst = 0,
+            resolvedIgst = 0;
+
+          if (storedCgst > 0 || storedSgst > 0) {
+            resolvedCgst = storedCgst;
+            resolvedSgst = storedSgst;
+          } else if (storedIgst > 0) {
+            resolvedIgst = storedIgst;
+          } else {
+            // Priority 2: legacy record — derive from item master
+            const itemId = String(pi.itemId ?? pi.ItemId ?? "");
+            const masterItem = itemId
+              ? itemsSnapshot.find((it) => String(it.id) === itemId)
+              : null;
+            if (masterItem) {
+              const mc = Number(masterItem.cgst ?? 0);
+              const ms = Number(masterItem.sgst ?? 0);
+              const mi = Number(masterItem.igst ?? 0);
+              if (mc > 0 || ms > 0) {
+                resolvedCgst = mc;
+                resolvedSgst = ms;
+              } else {
+                resolvedIgst = mi;
+              }
+            } else {
+              resolvedIgst = totalTaxRate;
+            }
+          }
+
+          const gstRate =
+            resolvedCgst > 0 || resolvedSgst > 0
+              ? resolvedCgst + resolvedSgst
+              : resolvedIgst;
           const taxAmount = (qty * rate * gstRate) / 100;
-          const unitStr = (pi.unit ?? "").trim().toLowerCase();
+          const unitStr = (pi.unit ?? pi.UomName ?? "").trim().toLowerCase();
           const uomMatch = uoms.find(
             (u) =>
               u.code.toLowerCase() === unitStr ||
               u.name.toLowerCase() === unitStr,
           );
-          // We don't have individual rates on saved items — keep gstRate as total
-          // igst assumed if no split available; user can re-select item to restore split
           return {
             id: uid(),
-            itemId: "",
-            itemName: pi.itemDescription ?? "",
-            itemDescription: "",
+            itemId: pi.itemId ?? pi.ItemId ?? "",
+            itemName: pi.itemDescription ?? pi.ItemName ?? pi.Description ?? "",
+            itemDescription: pi.description ?? pi.ItemDescription ?? "",
             quantity: qty,
             uomId: uomMatch?.id ?? null,
-            unit: uomMatch?.name ?? pi.unit ?? "",
+            unit: uomMatch?.name ?? pi.unit ?? pi.UomName ?? "",
             rate,
-            cgstRate: 0,
-            sgstRate: 0,
-            igstRate: gstRate, // store as igst so totalTax still sums correctly
+            cgstRate: resolvedCgst,
+            sgstRate: resolvedSgst,
+            igstRate: resolvedIgst,
             gstRate,
             taxAmount,
             amount: qty * rate + taxAmount,
@@ -1261,13 +1351,14 @@ const PurchaseOrderMaster: React.FC = () => {
         },
       ]);
     }
+
     setEditingId(item._id);
-    setSelectedTCs([]); // T&C restored from PaymentTerms text — user can re-select
+    setSelectedTCs([]);
     setViewMode("edit");
   };
 
-  const goToView = (item: POListItem) => {
-    goToEdit(item);
+  const goToView = async (item: POListItem) => {
+    await goToEdit(item);
     setViewMode("view");
   };
 
@@ -1667,6 +1758,7 @@ const PurchaseOrderMaster: React.FC = () => {
                     preview={poDocNo}
                     refreshTrigger={docRefreshTrigger}
                     onSelect={applyPoDocNumber}
+                    readOnly={viewMode === "edit"}
                   />
                 )}
               </div>
@@ -1843,7 +1935,7 @@ const PurchaseOrderMaster: React.FC = () => {
                   <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-28">
                     Rate (₹)
                   </th>
-                  <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-20">
+                  <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-32">
                     GST %
                   </th>
                   <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-28">
@@ -1934,7 +2026,16 @@ const PurchaseOrderMaster: React.FC = () => {
                         </span>
                       ) : (
                         <select
-                          value={li.uomId ?? ""}
+                          value={
+                            li.uomId ??
+                            uoms.find(
+                              (u) =>
+                                u.name.toLowerCase() ===
+                                  li.unit.toLowerCase() ||
+                                u.code.toLowerCase() === li.unit.toLowerCase(),
+                            )?.id ??
+                            ""
+                          }
                           onChange={(e) => {
                             const uom = uoms.find(
                               (u) => u.id === Number(e.target.value),
@@ -1977,7 +2078,7 @@ const PurchaseOrderMaster: React.FC = () => {
                       )}
                     </td>
 
-                    {/* GST % — shows breakdown label */}
+                    {/* GST % */}
                     <td className="px-3 py-2 text-center">
                       {li.gstRate > 0 ? (
                         <div className="flex flex-col items-center gap-0.5">
@@ -1989,9 +2090,14 @@ const PurchaseOrderMaster: React.FC = () => {
                               IGST
                             </span>
                           ) : (
-                            <span className="text-[10px] text-muted-foreground font-medium">
-                              CGST+SGST
-                            </span>
+                            <>
+                              <span className="text-[10px] text-muted-foreground font-medium">
+                                CGST {li.cgstRate}%
+                              </span>
+                              <span className="text-[10px] text-muted-foreground font-medium">
+                                SGST {li.sgstRate}%
+                              </span>
+                            </>
                           )}
                         </div>
                       ) : (
@@ -2068,7 +2174,7 @@ const PurchaseOrderMaster: React.FC = () => {
                 {/* Combined total tax row when both CGST/SGST and IGST exist */}
                 {totalTax > 0 && totalCgst > 0 && totalIgst > 0 && (
                   <div className="flex justify-between text-sm text-muted-foreground border-t border-dashed border-border pt-1">
-                    <span>Total Tax</span>
+                    <span>Total GST</span>
                     <span className="font-mono">{fmt(totalTax)}</span>
                   </div>
                 )}
