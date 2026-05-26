@@ -238,11 +238,17 @@ function normalizeFinanceDashboard(
 
 // ─── Main fetcher ─────────────────────────────────────────────────────────────
 
+const FINANCE_ROLES = ["admin", "super_admin", "dba", "finance_manager", "branch_manager"];
+
 export async function fetchHomeDashboard(
   isAdmin: boolean,
+  role?: string,
 ): Promise<HomeDashboardData> {
+  const hasFinanceAccess = FINANCE_ROLES.includes(role ?? "");
   const baseRequests = [
-    safeFetch<FinanceDashboardApiData>("/api/finance-dashboard"),
+    hasFinanceAccess
+      ? safeFetch<FinanceDashboardApiData>("/api/finance-dashboard")
+      : Promise.resolve({ data: null, error: null }),
     safeFetch<MaterialDashboardData>("/api/material-dashboard"),
     safeFetch<ApprovalInboxItem[]>("/api/approval-inbox"),
     safeFetch<{ data: TaskSummary[] }>(
