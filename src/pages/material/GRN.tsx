@@ -276,6 +276,8 @@ export default function GRN() {
 
   const pos = posData
     .filter((po: PurchaseOrder) => {
+      // When editing, show all POs so the linked PO is always visible
+      if (editingId) return true;
       if (!selectedFinYear) return true;
       const docNo = po.PurchaseOrderNo || "";
       return docNo.includes(selectedFinYear);
@@ -515,8 +517,22 @@ export default function GRN() {
     }
   };
 
-  onEdit = (grn: any) => {
-    const parsedItems = parseJsonArray<GRNItemLine>(grn.GRNItems).map(
+  onEdit = async (grn: any) => {
+    // Sync fin year filter so the PO appears in the dropdown
+    const grnFinYear = grn.FinYear || activeFinYear || "";
+    if (grnFinYear) setSelectedFinYear(grnFinYear);
+
+    // Fetch full GRN record so GRNItems (item names) are available
+    let fullGrn = grn;
+    try {
+      const token = localStorage.getItem("token") ?? "";
+      const res = await fetch(`/api/grns/${grn.GRNID}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) fullGrn = await res.json();
+    } catch { /* fall back to list row data */ }
+
+    const parsedItems = parseJsonArray<GRNItemLine>(fullGrn.GRNItems).map(
       (item) => ({
         ...createEmptyItem(),
         ...item,
@@ -530,20 +546,20 @@ export default function GRN() {
     );
 
     setFormData({
-      grnNo: grn.GRNNo || "",
-      grnDate: grn.GRNDate ? String(grn.GRNDate).slice(0, 10) : "",
-      supplierId: String(grn.SupplierID || ""),
-      supplierName: grn.SupplierName || "",
-      poId: String(grn.POID || ""),
-      poNumber: grn.PONumber || "",
-      remarks: grn.Remarks || "",
-      status: (grn.Status as any) || "Draft",
+      grnNo: fullGrn.GRNNo || "",
+      grnDate: fullGrn.GRNDate ? String(fullGrn.GRNDate).slice(0, 10) : "",
+      supplierId: String(fullGrn.SupplierID || ""),
+      supplierName: fullGrn.SupplierName || "",
+      poId: String(fullGrn.POID || ""),
+      poNumber: fullGrn.PONumber || "",
+      remarks: fullGrn.Remarks || "",
+      status: (fullGrn.Status as any) || "Draft",
       items: parsedItems.length ? parsedItems : [createEmptyItem()],
-      docTypeId: grn.DocTypeId ?? null,
-      docNo: grn.DocNo || "",
-      parentDocNo: grn.ParentDocNo || "",
-      rootExBDocNo: grn.RootExBDocNo || "",
-      finYear: grn.FinYear || activeFinYear || "",
+      docTypeId: fullGrn.DocTypeId ?? null,
+      docNo: fullGrn.DocNo || "",
+      parentDocNo: fullGrn.ParentDocNo || "",
+      rootExBDocNo: fullGrn.RootExBDocNo || "",
+      finYear: grnFinYear,
     });
 
     setEditingId(String(grn.GRNID));
@@ -724,20 +740,6 @@ export default function GRN() {
                 <h3 className="font-heading font-semibold text-sm flex items-center gap-2">
                   <Package size={17} /> Received Items
                 </h3>
-                {/* Add Item only when no PO is selected (manual entry fallback) */}
-                {!formData.poId && (
-                  <button
-                    onClick={() =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        items: [...prev.items, createEmptyItem()],
-                      }))
-                    }
-                    className="flex items-center gap-1.5 text-primary hover:bg-primary/10 px-4 py-2 rounded-lg transition-colors text-sm"
-                  >
-                    <Plus size={16} /> Add Item
-                  </button>
-                )}
               </div>
 
               {errors.items && (
@@ -745,32 +747,41 @@ export default function GRN() {
               )}
 
               <div className="border border-border rounded-xl overflow-hidden">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm table-fixed">
+                  <colgroup>
+                    <col style={{width:"18%"}} />
+                    <col style={{width:"9%"}} />
+                    <col style={{width:"10%"}} />
+                    <col style={{width:"10%"}} />
+                    <col style={{width:"10%"}} />
+                    <col style={{width:"14%"}} />
+                    <col style={{width:"14%"}} />
+                    <col style={{width:"15%"}} />
+                  </colgroup>
                   <thead>
                     <tr className="bg-muted/50">
-                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                      <th className="px-3 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                         Item
                       </th>
-                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                      <th className="px-2 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                         Ordered
                       </th>
-                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                      <th className="px-2 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                         Received
                       </th>
-                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                      <th className="px-2 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                         Remaining
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                      <th className="px-2 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                         UOM
                       </th>
-                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                      <th className="px-2 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                         Rate (₹) <span className="text-destructive">*</span>
                       </th>
-                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                        Qty (Billing){" "}
-                        <span className="text-destructive">*</span>
+                      <th className="px-2 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                        Qty (Billing) <span className="text-destructive">*</span>
                       </th>
-                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                      <th className="px-2 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                         Total (₹)
                       </th>
                     </tr>
@@ -781,7 +792,7 @@ export default function GRN() {
                       return (
                         <tr key={idx}>
                           {/* Item name — locked if from PO */}
-                          <td className="p-3">
+                          <td className="px-1.5 py-1.5">
                             {fromPO ? (
                               <span className="text-foreground font-medium">
                                 {item.itemName || "—"}
@@ -806,11 +817,11 @@ export default function GRN() {
                             )}
                           </td>
                           {/* Ordered qty — locked, comes from PO */}
-                          <td className="p-3 text-right font-medium text-muted-foreground">
+                          <td className="px-2 py-2 text-right font-medium text-muted-foreground">
                             {item.orderedQty}
                           </td>
                           {/* Received qty — always editable */}
-                          <td className="p-3">
+                          <td className="px-1.5 py-1.5">
                             <input
                               type="number"
                               min={0}
@@ -824,12 +835,12 @@ export default function GRN() {
                           </td>
                           {/* Remaining — computed */}
                           <td
-                            className={`p-3 text-right font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                            className={`px-2 py-2 text-right font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
                           >
                             {item.remainingQty}
                           </td>
                           {/* UOM — locked if from PO */}
-                          <td className="p-3">
+                          <td className="px-1.5 py-1.5">
                             {fromPO ? (
                               <span className="text-foreground">
                                 {item.uom || "—"}
@@ -863,7 +874,7 @@ export default function GRN() {
                             )}
                           </td>
                           {/* Rate */}
-                          <td className="p-3">
+                          <td className="px-1.5 py-1.5">
                             <input
                               type="number"
                               min={0}
@@ -881,7 +892,7 @@ export default function GRN() {
                             />
                           </td>
                           {/* Billing Quantity */}
-                          <td className="p-3">
+                          <td className="px-1.5 py-1.5">
                             <input
                               type="number"
                               min={0}
@@ -899,7 +910,7 @@ export default function GRN() {
                             />
                           </td>
                           {/* Total Amount — computed, read-only */}
-                          <td className="p-3 text-right font-semibold text-primary">
+                          <td className="px-2 py-2 text-right font-semibold text-primary">
                             {item.totalAmount > 0
                               ? `₹${item.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                               : "—"}
@@ -951,20 +962,24 @@ export default function GRN() {
             </div>
 
             {/* Action Buttons */}
-            <div className="flex gap-3 pt-4">
+            <div className="flex items-center justify-center gap-3 pt-2 border-t border-border">
               <button
                 onClick={onSubmit}
                 disabled={createMutation.isPending || updateMutation.isPending}
-                className="flex-1 bg-primary text-primary-foreground py-3 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors disabled:opacity-60"
+                className="gradient-accent inline-flex items-center gap-2 px-8 py-2.5 rounded-xl text-white text-sm font-semibold shadow-sm transition disabled:opacity-60"
               >
-                <Save size={18} />
-                {editingId ? "Update GRN" : "Save GRN"}
+                <Save size={15} />
+                {createMutation.isPending || updateMutation.isPending
+                  ? "Saving…"
+                  : editingId
+                    ? "Update GRN"
+                    : "Save GRN"}
               </button>
               <button
                 onClick={resetForm}
-                className="px-8 border border-border hover:bg-muted py-3 rounded-lg flex items-center gap-2 transition-colors"
+                className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl border border-border hover:bg-muted text-sm transition-colors"
               >
-                <X size={18} /> Cancel
+                <X size={15} /> Cancel
               </button>
             </div>
           </div>
