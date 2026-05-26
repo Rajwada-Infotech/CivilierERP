@@ -1078,10 +1078,15 @@ export default function Login() {
       const result = await login(email, password);
       if (result.success) {
         setLoginSuccess(true);
-        const destination =
-          result.role === "customer" ? "/ticket/my-tickets" : "/home";
         setTimeout(() => {
-          navigate(destination, { replace: true });
+          const role = result.role;
+          const uid = result.userId ?? "";
+          if (role === "customer")
+            navigate(`/customer-portal/${uid}`, { replace: true });
+          else if (role === "dba") navigate(`/dba/${uid}`, { replace: true });
+          else if (role === "super_admin" || role === "admin")
+            navigate(`/admin/dashboard/${uid}`, { replace: true });
+          else navigate(`/home/${uid}`, { replace: true });
         }, 700);
       } else {
         setError(result.error || "Invalid email or password.");
