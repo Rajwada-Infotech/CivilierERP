@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import * as grnApi from "@/api/grnApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/StatusBadge";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import type {
@@ -162,14 +161,30 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
     },
   },
   {
-    accessorKey: "Status",
-    header: "Status",
-    cell: ({ row }) => {
-      const grn = row.original;
+    accessorKey: "SourceMRDocNo",
+    header: "Source MR",
+    cell: ({ getValue }) => {
+      const v = getValue() as string;
+      return v ? (
+        <span className="font-mono text-xs font-semibold text-blue-600 dark:text-blue-400">
+          {v}
+        </span>
+      ) : (
+        <span className="text-xs text-muted-foreground">—</span>
+      );
+    },
+  },
+  {
+    accessorKey: "TotalAmount",
+    header: "Total Amount",
+    cell: ({ getValue }) => {
+      const v = getValue() as number;
       return (
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <GRNChainBadge grnId={Number(grn.GRNID)} />
-        </div>
+        <span className="text-xs font-semibold">
+          {v != null
+            ? `₹${Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            : "—"}
+        </span>
       );
     },
   },
@@ -1293,12 +1308,6 @@ export default function GRN() {
                               )
                             : "—"}
                         </p>
-                      </div>
-                      <div>
-                        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-                          Status
-                        </p>
-                        <StatusBadge status={viewingGrn.Status || "Draft"} />
                       </div>
                       {viewingGrn.SourceMRDocNo && (
                         <div>
