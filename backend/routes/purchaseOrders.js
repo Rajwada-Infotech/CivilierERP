@@ -207,7 +207,7 @@ router.get(
     try {
       const pool = getPool();
       const page = Math.max(parseInt(req.query.page) || 1, 1);
-      const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+      const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 500);
       const offset = (page - 1) * limit;
 
       const sourceWOId = req.query.sourceWOId
@@ -253,9 +253,8 @@ router.get("/:id", async (req, res) => {
     const id = requireValidId(req, res);
     if (!id) return;
     const pool = getPool();
-    const result = await pool
-      .request()
-      .input("PurchaseOrderID", sql.Int, id).query(`
+    const result = await pool.request().input("PurchaseOrderID", sql.Int, id)
+      .query(`
         ${PO_SELECT}
         WHERE po.PurchaseOrderID = @PurchaseOrderID
       `);
@@ -264,9 +263,7 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ error: "Purchase order not found" });
 
     // Also return normalised line items for the new form
-    const lineItems = await pool
-      .request()
-      .input("POID", sql.Int, id).query(`
+    const lineItems = await pool.request().input("POID", sql.Int, id).query(`
         SELECT
           Id, PurchaseOrderID, ItemId, ItemName, ItemCode, Description,
           Quantity, ReceivedQty, UomId, UomName, Rate, Discount, TaxPct,
