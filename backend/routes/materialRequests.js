@@ -27,6 +27,7 @@ const {
   resolveDocTypeId,
   previewNextDocNumber,
 } = require("../utils/docNumberLock");
+const { transition } = require("../services/approvalService");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -180,7 +181,12 @@ router.get("/uom-options", authenticateToken, async (req, res) => {
 router.get("/preview-next-number", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
-    const dtId = await resolveDocTypeId(pool, sql, "MR");
+    let dtId = null;
+    try {
+      dtId = await resolveDocTypeId(pool, sql, "MR");
+    } catch {
+      /* no MR doc type configured */
+    }
     if (!dtId) return res.json({ nextDocNo: null });
     const preview = await previewNextDocNumber(pool, sql, dtId);
     res.json({ nextDocNo: preview });
@@ -238,6 +244,109 @@ router.get("/", authenticateToken, async (req, res) => {
       limit,
       total,
       totalPages: Math.ceil(total / limit),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /approved-list ────────────────────────────────────────────────────────
+// Returns a lightweight list of all Approved MRs for use in dropdown pickers.
+router.get("/approved-list", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT
+        mr.MRId, mr.DocNo, mr.FinYearId,
+        fy.FName  AS FinYearName,
+        ec.name   AS CompanyName,
+        ep.name   AS ProjectName
+      FROM      dbo.MaterialRequests mr
+      LEFT JOIN dbo.FinYear    fy ON fy.FId = mr.FinYearId
+      LEFT JOIN dbo.enterprise ec ON ec.id  = mr.CompanyId
+      LEFT JOIN dbo.enterprise ep ON ep.id  = mr.ProjectId
+      WHERE mr.Status = 'Approved' AND mr.DocNo IS NOT NULL
+      ORDER BY mr.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /by-docno/:docNo ───────────────────────────────────────────────────────
+// Look up an Approved MR by its document number and return PO prefill data.
+// Used by the PO form's "Load from MR" input.
+router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const docNo = (req.params.docNo || "").trim().toUpperCase();
+    if (!docNo) return res.status(400).json({ error: "docNo is required" });
+
+    const lookup = await pool.request().input("docNo", sql.NVarChar(50), docNo)
+      .query(`
+        SELECT mr.MRId
+        FROM   dbo.MaterialRequests mr
+        WHERE  UPPER(mr.DocNo) = @docNo
+      `);
+
+    if (!lookup.recordset.length)
+      return res.status(404).json({
+        error: `No Material Request found with doc number "${docNo}"`,
+      });
+
+    const mrId = lookup.recordset[0].MRId;
+
+    const header = await pool.request().input("id", sql.Int, mrId).query(`
+        SELECT
+          mr.MRId, mr.DocNo, mr.Status,
+          mr.CompanyId, e_co.name  AS CompanyName,
+          mr.ProjectId, e_pr.name  AS ProjectName,
+          mr.FinYearId,
+          mr.Remarks
+        FROM dbo.MaterialRequests mr
+        LEFT JOIN dbo.enterprise      e_co ON e_co.id = mr.CompanyId
+        LEFT JOIN dbo.enterprise      e_pr ON e_pr.id = mr.ProjectId
+        WHERE mr.MRId = @id
+      `);
+
+    if (!header.recordset.length)
+      return res.status(404).json({ error: "Material Request not found" });
+
+    const mr = header.recordset[0];
+    if (mr.Status !== "Approved")
+      return res.status(400).json({
+        error: `MR is ${mr.Status}. Only Approved MRs can generate a Normal PO.`,
+      });
+
+    const items = await pool.request().input("id", sql.Int, mrId).query(`
+        SELECT
+          mri.MRItemId,
+          mri.ItemId,
+          mri.ItemName,
+          mri.UOMCode,
+          u.UOMName,
+          mri.Quantity,
+          mri.Remarks,
+          im.M_CGST,
+          im.M_SGST,
+          im.M_IGST
+        FROM dbo.MaterialRequestItems mri
+        LEFT JOIN dbo.UOMMaster  u  ON u.UOMCode = mri.UOMCode
+        LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(50), im.M_Id) = CONVERT(NVARCHAR(50), mri.ItemId)
+        WHERE mri.MRId = @id
+      `);
+
+    res.json({
+      MRId: mr.MRId,
+      DocNo: mr.DocNo,
+      CompanyId: mr.CompanyId,
+      CompanyName: mr.CompanyName,
+      ProjectId: mr.ProjectId,
+      ProjectName: mr.ProjectName,
+      FinYearId: mr.FinYearId,
+      Remarks: mr.Remarks,
+      items: items.recordset,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -306,12 +415,28 @@ router.post("/", authenticateToken, async (req, res) => {
     if (!items.length)
       return res.status(400).json({ error: "At least one item required" });
 
-    const dtId = clientDocTypeId
-      ? parseInt(clientDocTypeId, 10)
-      : await resolveDocTypeId(pool, sql, "MR");
-    const { token } = dtId
-      ? await lockNextDocNumber(pool, sql, dtId)
-      : { token: null };
+    let dtId = clientDocTypeId ? parseInt(clientDocTypeId, 10) : null;
+    if (!dtId) {
+      try {
+        dtId = await resolveDocTypeId(pool, sql, "MR");
+      } catch {
+        /* no MR doc type — proceed without numbering */
+      }
+    }
+    let lockedDocNo = null;
+    if (dtId) {
+      try {
+        lockedDocNo = await lockNextDocNumber(pool, sql, {
+          docTypeId: dtId,
+          tableName: "MaterialRequests",
+          docNoColumn: "DocNo",
+          issuedBy: user,
+        });
+      } catch (lockErr) {
+        // numbering failed — save without doc number rather than aborting
+        lockedDocNo = null;
+      }
+    }
 
     const insertHdr = await pool
       .request()
@@ -324,18 +449,28 @@ router.post("/", authenticateToken, async (req, res) => {
       .input("Reason", sql.NVarChar(sql.MAX), Reason)
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
       .input("DocTypeId", sql.Int, dtId || null)
+      .input("DocNo", sql.NVarChar(50), lockedDocNo || null)
       .input("CreatedBy", sql.NVarChar(200), user).query(`
         INSERT INTO dbo.MaterialRequests
           (CompanyId, ProjectId, FinYearId, RequestDate, RequiredByDate,
-           Priority, Reason, Remarks, Status, DocTypeId, CreatedBy, UpdatedBy)
+           Priority, Reason, Remarks, Status, DocTypeId, DocNo, CreatedBy, UpdatedBy)
         OUTPUT INSERTED.MRId
         VALUES (@CompanyId, @ProjectId, @FinYearId, @RequestDate, @RequiredByDate,
-                @Priority, @Reason, @Remarks, 'Draft', @DocTypeId, @CreatedBy, @CreatedBy)
+                @Priority, @Reason, @Remarks, 'Draft', @DocTypeId, @DocNo, @CreatedBy, @CreatedBy)
       `);
 
     const newId = insertHdr.recordset[0].MRId;
 
-    if (token) await backPatchRecordId(pool, sql, token, newId);
+    // Record the RecordId back in DocNumberSequence for lineage tracing
+    if (lockedDocNo) {
+      await backPatchRecordId(
+        pool,
+        sql,
+        lockedDocNo,
+        "MaterialRequests",
+        newId,
+      );
+    }
 
     for (const item of items) {
       await pool
@@ -500,12 +635,12 @@ router.get("/:id/create-po-prefill", authenticateToken, async (req, res) => {
           mr.MRId, mr.DocNo, mr.Status,
           mr.CompanyId, e_co.name  AS CompanyName,
           mr.ProjectId, e_pr.name  AS ProjectName,
-          mr.FinYearId, fy.FinYearName,
+          mr.FinYearId, fy.FName AS FinYearName,
           mr.Remarks
         FROM dbo.MaterialRequests mr
         LEFT JOIN dbo.enterprise      e_co ON e_co.id = mr.CompanyId
         LEFT JOIN dbo.enterprise      e_pr ON e_pr.id = mr.ProjectId
-        LEFT JOIN dbo.FinancialYear   fy   ON fy.FinYearId = mr.FinYearId
+        LEFT JOIN dbo.FinYear         fy   ON fy.FId = mr.FinYearId
         WHERE mr.MRId = @id
       `);
 
@@ -532,7 +667,7 @@ router.get("/:id/create-po-prefill", authenticateToken, async (req, res) => {
           im.M_IGST
         FROM dbo.MaterialRequestItems mri
         LEFT JOIN dbo.UOMMaster  u  ON u.UOMCode = mri.UOMCode
-        LEFT JOIN dbo.ItemMaster im ON im.M_Id = TRY_CAST(mri.ItemId AS INT)
+        LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(50), im.M_Id) = CONVERT(NVARCHAR(50), mri.ItemId)
         WHERE mri.MRId = @id
       `);
 
@@ -550,6 +685,56 @@ router.get("/:id/create-po-prefill", authenticateToken, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/approve ──────────────────────────────────────────────────────────
+router.put("/:id/approve", authenticateToken, async (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const result = await transition(
+      "material-requests",
+      id,
+      "Approved",
+      user,
+      req.user?.role,
+    );
+    await bumpCacheVersion("material-requests");
+    res.json({ message: "Material Request approved", ...result });
+  } catch (err) {
+    res
+      .status(err.message.includes("not authorized") ? 403 : 400)
+      .json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/reject ───────────────────────────────────────────────────────────
+router.put("/:id/reject", authenticateToken, async (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const { note } = req.body;
+    const result = await transition(
+      "material-requests",
+      id,
+      "Rejected",
+      user,
+      req.user?.role,
+      note || null,
+    );
+    await bumpCacheVersion("material-requests");
+    res.json({ message: "Material Request rejected", ...result });
+  } catch (err) {
+    res
+      .status(err.message.includes("not authorized") ? 403 : 400)
+      .json({ error: err.message });
   }
 });
 
