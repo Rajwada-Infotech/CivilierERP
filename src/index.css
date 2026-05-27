@@ -150,7 +150,7 @@
     }
 
     /* GLAS THEME — Premium Glassmorphism */
-    [data-theme="glas"] {
+    [data-theme="glass"] {
         --background: 240 35% 7%;
         --foreground: 220 20% 94%;
         --card: 240 30% 12%;
@@ -251,7 +251,7 @@
 /* ── GLAS THEME — glass effects ─────────────────────────────────────────────── */
 
 /* Page background: deep indigo-to-purple gradient */
-[data-theme="glas"] body {
+[data-theme="glass"] body {
     background: linear-gradient(
         135deg,
         hsl(240 55% 5%) 0%,
@@ -263,12 +263,12 @@
 }
 
 /* The main layout wrapper uses bg-background — make it transparent so the body gradient shows */
-[data-theme="glas"] .bg-background {
+[data-theme="glass"] .bg-background {
     background-color: transparent !important;
 }
 
 /* Cards: frosted glass */
-[data-theme="glas"] .bg-card {
+[data-theme="glass"] .bg-card {
     background: rgba(255, 255, 255, 0.055) !important;
     backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
@@ -276,7 +276,7 @@
 }
 
 /* Popovers / dropdowns: darker glass */
-[data-theme="glas"] .bg-popover {
+[data-theme="glass"] .bg-popover {
     background: rgba(12, 10, 28, 0.88) !important;
     backdrop-filter: blur(28px) saturate(180%);
     -webkit-backdrop-filter: blur(28px) saturate(180%);
@@ -284,22 +284,22 @@
 }
 
 /* Muted surfaces */
-[data-theme="glas"] .bg-muted {
+[data-theme="glass"] .bg-muted {
     background: rgba(255, 255, 255, 0.045) !important;
 }
 
 /* Scrollbar */
-[data-theme="glas"] ::-webkit-scrollbar {
+[data-theme="glass"] ::-webkit-scrollbar {
     width: 5px;
     height: 5px;
 }
-[data-theme="glas"] ::-webkit-scrollbar-track {
+[data-theme="glass"] ::-webkit-scrollbar-track {
     background: transparent;
 }
-[data-theme="glas"] ::-webkit-scrollbar-thumb {
+[data-theme="glass"] ::-webkit-scrollbar-thumb {
     background: rgba(139, 92, 246, 0.35);
     border-radius: 3px;
 }
-[data-theme="glas"] ::-webkit-scrollbar-thumb:hover {
+[data-theme="glass"] ::-webkit-scrollbar-thumb:hover {
     background: rgba(139, 92, 246, 0.6);
 }
