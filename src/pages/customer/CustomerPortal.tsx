@@ -292,7 +292,7 @@ export default function CustomerPortal() {
               </div>
             ) : (
               <div className="space-y-2">
-                {filtered.map((t) => <TicketCard key={t.id} ticket={t} onClick={() => navigate(`/ticket/my?id=${t.id}`)} />)}
+                {filtered.map((t) => <TicketCard key={t.id} ticket={t} onClick={() => navigate("/ticket/my-tickets")} />)}
               </div>
             )}
           </div>
