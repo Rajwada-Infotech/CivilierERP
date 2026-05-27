@@ -41,10 +41,11 @@ const fields: FieldDef[] = [
 /* -------------------- TABLE COLUMNS -------------------- */
 const columns = [
   { key: "name", label: "Customer Name" },
-  { key: "contact", label: "Contact Person" },
+  { key: "contact", label: "Contact Person", hideOnMobile: true },
+  { key: "email", label: "Email", hideOnMobile: true },
   { key: "phone", label: "Phone" },
-  { key: "gst", label: "GST No." },
-  { key: "paymentTerms", label: "Payment Terms" },
+  { key: "gst", label: "GST No.", hideOnMobile: true },
+  { key: "paymentTerms", label: "Payment Terms", hideOnMobile: true },
   { key: "status", label: "Status" },
 ];
 
@@ -75,6 +76,22 @@ const CustomerMaster: React.FC = () => {
       status: Boolean(item.LHeadStatus),
     }));
   }, [data]);
+
+  const customerStats = React.useMemo(() => {
+    const total = mappedData.length;
+    const active = mappedData.filter((item) => item.status).length;
+    const inactive = total - active;
+    const credit30 = mappedData.filter(
+      (item) => item.paymentTerms === "30 Days",
+    ).length;
+
+    return {
+      total,
+      active,
+      inactive,
+      credit30,
+    };
+  }, [mappedData]);
 
   /* -------------------- FRONTEND → BACKEND PAYLOAD -------------------- */
   const toPayload = (r: Record<string, any>) => ({
@@ -137,13 +154,100 @@ const CustomerMaster: React.FC = () => {
   /* -------------------- UI -------------------- */
   return (
     <>
-      <Breadcrumbs
-        items={["Dashboard", "Follow-Up", "Setup", "Customer Master"]}
-      />
+      <Breadcrumbs items={["Dashboard", "Masters", "Customers"]} />
 
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Customer Master
-      </h1>
+      <div className="grid gap-6 mb-6">
+        <div className="rounded-3xl border border-border bg-card/80 shadow-sm p-6">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.35em] text-muted-foreground mb-2">
+                Customer Dashboard
+              </p>
+              <h1 className="text-3xl font-heading font-bold text-foreground">
+                Customer Master
+              </h1>
+              <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
+                Manage active customers, review contact details, payment terms, and record status in one consolidated dashboard.
+              </p>
+            </div>
+
+            <div className="rounded-3xl border border-primary/20 bg-primary/10 p-5 text-primary max-w-xs">
+              <p className="text-xs uppercase tracking-[0.35em] text-primary/80">
+                Total customers
+              </p>
+              <p className="mt-3 text-4xl font-heading font-semibold">
+                {customerStats.total}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {/* Active */}
+          <div className="rounded-3xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 shadow-sm p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+              <p className="text-xs uppercase tracking-[0.35em] text-emerald-700 dark:text-emerald-400">
+                Active
+              </p>
+            </div>
+            <p className="text-3xl font-heading font-semibold text-emerald-700 dark:text-emerald-300">
+              {customerStats.active}
+            </p>
+            <p className="mt-2 text-sm text-emerald-600/70 dark:text-emerald-400/70">
+              Currently active customers
+            </p>
+          </div>
+
+          {/* Inactive */}
+          <div className="rounded-3xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 shadow-sm p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />
+              <p className="text-xs uppercase tracking-[0.35em] text-red-600 dark:text-red-400">
+                Inactive
+              </p>
+            </div>
+            <p className="text-3xl font-heading font-semibold text-red-600 dark:text-red-400">
+              {customerStats.inactive}
+            </p>
+            <p className="mt-2 text-sm text-red-500/70 dark:text-red-400/70">
+              Currently inactive customers
+            </p>
+          </div>
+
+          {/* 30-day terms */}
+          <div className="rounded-3xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 shadow-sm p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+              <p className="text-xs uppercase tracking-[0.35em] text-amber-700 dark:text-amber-400">
+                30-day terms
+              </p>
+            </div>
+            <p className="text-3xl font-heading font-semibold text-amber-700 dark:text-amber-300">
+              {customerStats.credit30}
+            </p>
+            <p className="mt-2 text-sm text-amber-600/70 dark:text-amber-400/70">
+              Customers on 30-day payment terms
+            </p>
+          </div>
+
+          {/* Latest entry */}
+          <div className="rounded-3xl border border-border bg-card/80 shadow-sm p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-2 h-2 rounded-full bg-muted-foreground shrink-0" />
+              <p className="text-xs uppercase tracking-[0.35em] text-muted-foreground">
+                Latest entry
+              </p>
+            </div>
+            <p className="text-xl font-heading font-semibold text-foreground truncate">
+              {mappedData.length > 0 ? String(mappedData[0].name || "—") : "—"}
+            </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Most recently added customer
+            </p>
+          </div>
+        </div>
+      </div>
 
       <MasterPage
         title="Customer"

@@ -372,9 +372,9 @@ const FieldLabel: React.FC<{
   children: React.ReactNode;
   required?: boolean;
 }> = ({ children, required }) => (
-  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
+  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-0.5 mb-1.5">
     {children}
-    {required && <span className="text-red-500 ml-0.5">*</span>}
+    {required && <span className="text-red-500 leading-none">*</span>}
   </label>
 );
 
@@ -3593,10 +3593,10 @@ const WorkOrderEditPanel: React.FC<{
                 {tcDropdownOpen && (
                   <>
                     <div
-                      className="fixed inset-0 z-10"
+                      className="fixed inset-0 z-[99]"
                       onClick={() => setTcDropdownOpen(false)}
                     />
-                    <div className="absolute left-0 top-full mt-1 z-20 w-80 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
+                    <div className="absolute left-0 top-full mt-1 z-[100] w-80 rounded-xl border border-border bg-card shadow-xl overflow-hidden">
                       <div className="px-3 py-2 border-b border-border">
                         <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
                           Select Terms &amp; Conditions
@@ -4419,9 +4419,9 @@ const WorkOrderMaster: React.FC = () => {
           )}
 
           {/* ── Unified Work Order Header Card ── */}
-          <div className="rounded-2xl border border-border bg-card mb-5 overflow-hidden shadow-sm">
+          <div className="rounded-2xl border border-border bg-card mb-5 shadow-sm">
             {/* Card Header */}
-            <div className="px-5 py-4 border-b border-border bg-muted/20 flex items-center justify-between">
+            <div className="px-5 py-4 border-b border-border bg-muted/20 flex items-center justify-between rounded-t-2xl">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
                   <FileText size={15} className="text-primary" />
@@ -4632,7 +4632,7 @@ const WorkOrderMaster: React.FC = () => {
                       preview={woDocNo}
                       refreshTrigger={docRefreshTrigger}
                       onSelect={applyWoDocNumber}
-                      readOnly={viewMode === "edit"}
+                      readOnly={viewMode !== "create"}
                     />
                   </div>
 
@@ -4793,10 +4793,10 @@ const WorkOrderMaster: React.FC = () => {
                       {tcDropdownOpen && (
                         <>
                           <div
-                            className="fixed inset-0 z-10"
+                            className="fixed inset-0 z-[99]"
                             onClick={() => setTcDropdownOpen(false)}
                           />
-                          <div className="absolute right-0 top-full mt-1 z-20 w-80 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
+                          <div className="absolute right-0 top-full mt-1 z-[100] w-80 rounded-xl border border-border bg-card shadow-xl overflow-hidden">
                             <div className="px-3 py-2 border-b border-border">
                               <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
                                 Select Terms &amp; Conditions
