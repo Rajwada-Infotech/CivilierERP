@@ -63,6 +63,11 @@ export async function fetchWithAuth(
       },
     });
   } catch (err: unknown) {
+    // Re-throw AbortError unchanged so callers that check err.name === "AbortError"
+    // (e.g. useEffect cleanup) can detect it and skip error handling silently.
+    if (err instanceof Error && err.name === "AbortError") {
+      throw err;
+    }
     // Suppress console spam for connection refused / backend not running.
     // The hook / component that calls fetchWithAuth is responsible for
     // showing the user a meaningful error if needed.

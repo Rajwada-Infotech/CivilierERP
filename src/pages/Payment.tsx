@@ -1,6 +1,7 @@
 import React from "react";
 import { useState, useCallback, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { Button } from "@/components/ui/button";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getPayments,
@@ -2285,12 +2286,13 @@ const Payment: React.FC = () => {
               />
             )}
             {view === "list" && (
-              <button
+              <Button
+                size="sm"
                 onClick={openNew}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white shadow-sm"
+                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold"
               >
-                <Plus size={13} /> New Payment
-              </button>
+                <Plus size={15} className="mr-1" /> New Payment
+              </Button>
             )}
           </div>
         </div>
