@@ -33,7 +33,7 @@ interface AuthContextType {
   login: (
     email: string,
     password: string,
-  ) => Promise<{ success: boolean; error?: string; role?: UserRole }>;
+  ) => Promise<{ success: boolean; error?: string; role?: UserRole; userId?: string }>;
   logout: () => void;
   addUser: (user: Omit<AppUser, "id"> & { password: string }) => void;
   deleteUser: (id: string) => Promise<void>;
@@ -191,6 +191,10 @@ export const AuthProvider = ({
       };
 
       sessionStorage.removeItem("__auth_redirecting");
+      // JWT is stored in localStorage, so it is XSS-accessible. This is an
+      // accepted SPA tradeoff here, mitigated by short token TTL, Redis
+      // blacklist on logout, and brute-force lockout on auth routes. Revisit if
+      // httpOnly cookies or SSR become viable for this app.
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(userWithInitials));
 
@@ -218,12 +222,14 @@ export const AuthProvider = ({
 
       // Fire-and-forget: log the login event to UserActivityLog.
       // Must run after setCurrentUser so the token is in localStorage.
-      recordLogin?.({
-        id: String(data.user.id),
-        name: data.user.name,
-        email: data.user.email,
-        role: data.user.role,
-      }).catch(() => {});
+      Promise.resolve(
+        recordLogin?.({
+          id: String(data.user.id),
+          name: data.user.name,
+          email: data.user.email,
+          role: data.user.role,
+        })
+      ).catch(() => {});
 
       return { success: true, role: data.user.role, userId: String(data.user.id) };
     } catch (err: any) {
