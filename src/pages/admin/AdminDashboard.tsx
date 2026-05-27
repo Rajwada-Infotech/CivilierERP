@@ -74,6 +74,78 @@ const getActivityIcon = (event: string, actionType: string) => {
   return BarChart3;
 };
 
+const PAGE_NAME_MAP: Record<string, string> = {
+  login: "Login",
+  logout: "Logout",
+  payments: "Payment",
+  "received-payments": "Received Payment",
+  transactions: "Transactions",
+  brs: "BRS",
+  reports: "Reports",
+  "finance-dashboard": "Finance Dashboard",
+  "material/purchase-order": "Purchase Order",
+  "material/grn": "GRN",
+  "material/material-request": "Material Request",
+  "material/issues": "Material Issues",
+  "material/stock": "Stock",
+  "material/stock-transfer": "Stock Transfer",
+  "material/expense-booking": "Expense Booking",
+  "material/amendments": "Amendments",
+  "material-dashboard": "Material Dashboard",
+  "engineering/work-order": "Work Order",
+  "engineering/boq": "BOQ",
+  "engineering/work-done": "Work Done",
+  "masters/contractors": "Contractors",
+  "masters/suppliers": "Suppliers",
+  "masters/customers": "Customers",
+  "masters/banks": "Bank Master",
+  "masters/expenses": "Expense Master",
+  "masters/items": "Item Master",
+  "masters/item-groups": "Item Groups",
+  "masters/hsn": "HSN Master",
+  "masters/account-group": "Account Group",
+  "masters/billing-terms": "Billing Terms",
+  "masters/general-ledger": "General Ledger",
+  "masters/financial-year": "Financial Year",
+  "masters/role-master": "Role Master",
+  "masters/type-of-doc": "Type of Doc",
+  "admin/rights/menu": "Menu Rights",
+  "admin/rights/widgets": "Widgets Rights",
+  "admin/rights/fin-year": "Fin Year Rights",
+  "admin/approval/setup": "Approval Setup",
+  "admin/masters/company": "Company Master",
+  "admin/masters/project": "Project Master",
+  "admin/masters/enterprise": "Enterprise",
+  "admin/masters/menu-types": "Menu Types",
+  "admin/masters/page-definitions": "Page Definitions",
+  "followup/applicants": "Applicants",
+  "followup/bookings": "Bookings",
+  "followup/agreements": "Agreements",
+  "followup/noc": "NOC",
+  "followup/sales-deed": "Sales Deed",
+  "followup/handover": "Handover",
+  "followup/log": "Followup Log",
+  tasks: "Tasks",
+  "ticket/my-tickets": "My Tickets",
+  "ticket/all-tickets": "All Tickets",
+  "ticket/pending": "Pending Tickets",
+  widgets: "Widgets",
+  "approval-inbox": "Approval Inbox",
+};
+
+const getPageName = (resource?: string): string => {
+  if (!resource) return "System";
+  const clean = resource.replace(/^\//, "").split("?")[0];
+  if (PAGE_NAME_MAP[clean]) return PAGE_NAME_MAP[clean];
+  const match = Object.keys(PAGE_NAME_MAP)
+    .sort((a, b) => b.length - a.length)
+    .find((k) => clean.startsWith(k));
+  if (match) return PAGE_NAME_MAP[match];
+  const segments = clean.split("/").filter(Boolean);
+  const last = segments[segments.length - 1] ?? clean;
+  return last.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+};
+
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 export default function AdminDashboard() {
   const {
@@ -301,9 +373,12 @@ export default function AdminDashboard() {
                         activity.event,
                         activity.actionType,
                       );
-                      const description =
+                      const pageName = getPageName(activity.resource);
+                      const subDetail =
                         activity.details ||
-                        `${activity.event} — ${activity.resource || activity.actionType || "system"}`;
+                        (activity.actionType
+                          ? activity.actionType.replace(/_/g, " ")
+                          : activity.event);
                       return (
                         <div
                           key={activity.id || i}
@@ -312,7 +387,10 @@ export default function AdminDashboard() {
                           <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4 mt-0.5 flex-shrink-0 text-muted-foreground" />
                           <div className="min-w-0 flex-1 space-y-1">
                             <p className="font-semibold text-foreground line-clamp-1 leading-tight">
-                              {description}
+                              {pageName}
+                            </p>
+                            <p className="text-xs text-muted-foreground leading-tight line-clamp-1">
+                              {subDetail}
                             </p>
                             <p className="text-xs text-muted-foreground leading-tight">
                               by {activity.userName || activity.userEmail} •{" "}
