@@ -19,6 +19,20 @@ import {
 
 import { getDeviceFingerprint, getDeviceInfo } from "@/utils/deviceFingerprint";
 
+// ── ROLE GUARD ────────────────────────────────────────────────────────────────
+// Only these roles may read or write activity logs. Customers and any other
+// non-privileged roles must be kept entirely out of the activity API.
+const PRIVILEGED_ROLES = ["super_admin", "admin", "dba"] as const;
+
+function isPrivilegedUser(): boolean {
+  try {
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    return PRIVILEGED_ROLES.includes(user?.role);
+  } catch {
+    return false;
+  }
+}
+
 // ── TYPES ─────────────────────────────────────────────────────────────────────
 
 export interface GroupedSession {
@@ -195,7 +209,7 @@ export const ActivityBrowserProvider: React.FC<{
   const fetchActivityCore = useCallback(
     async (page: number, filters: ActivityFilters, df: DateFilters) => {
       const token = localStorage.getItem("token");
-      if (!token) {
+      if (!token || !isPrivilegedUser()) {
         setRawSessions([]);
         setIsLoading(false);
         return;
@@ -305,7 +319,7 @@ export const ActivityBrowserProvider: React.FC<{
 
     const trySubscribe = () => {
       const token = localStorage.getItem("token");
-      if (!token) return;
+      if (!token || !isPrivilegedUser()) return;
       if (unsubscribe) return; // already subscribed
 
       unsubscribe = subscribeToActivityStream(handleNewActivity);
@@ -332,6 +346,7 @@ export const ActivityBrowserProvider: React.FC<{
 
   const recordLogin = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
+      if (!PRIVILEGED_ROLES.includes(user.role as typeof PRIVILEGED_ROLES[number])) return;
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
       const sessionId = crypto.randomUUID();
@@ -370,6 +385,7 @@ export const ActivityBrowserProvider: React.FC<{
 
   const recordLogout = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
+      if (!PRIVILEGED_ROLES.includes(user.role as typeof PRIVILEGED_ROLES[number])) return;
       const sessionId = localStorage.getItem("currentSessionId");
       if (!sessionId) return;
 
@@ -419,6 +435,7 @@ export const ActivityBrowserProvider: React.FC<{
       resource: string;
       details?: string;
     }) => {
+      if (!isPrivilegedUser()) return;
       const sessionId = localStorage.getItem("currentSessionId");
       const user = getStoredUser();
 
