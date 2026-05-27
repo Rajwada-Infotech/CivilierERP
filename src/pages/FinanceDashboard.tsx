@@ -127,30 +127,41 @@ const StatCard = ({
   onClick?: () => void;
 }) => (
   <Card
-    className={`relative overflow-hidden transition-all duration-200 ${
-      onClick ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5" : ""
-    }`}
     onClick={onClick}
+    className={`relative overflow-hidden transition-all duration-200 ${
+      onClick
+        ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5 hover:border-primary/20 active:scale-[0.98]"
+        : ""
+    }`}
   >
     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
       <CardTitle className="text-xs font-heading uppercase tracking-widest text-muted-foreground">
         {label}
       </CardTitle>
-      <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+
+      <div
+        className={`w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center transition-transform duration-200 ${
+          onClick ? "group-hover:scale-110" : ""
+        }`}
+      >
         <Icon size={15} className="text-primary" />
       </div>
     </CardHeader>
+
     <CardContent>
       <div className="text-2xl font-bold font-heading text-foreground">
         {value}
       </div>
+
       <div className="flex items-center gap-1 mt-1">
         {trend === "up" && (
           <ArrowUpRight size={13} className="text-emerald-500" />
         )}
+
         {trend === "down" && (
           <ArrowDownRight size={13} className="text-destructive" />
         )}
+
         <p className="text-xs text-muted-foreground">{sub}</p>
       </div>
     </CardContent>
@@ -243,6 +254,7 @@ const FinanceDashboard = () => {
     data: rawData,
     isLoading,
     isError,
+    error,
     refetch,
     isFetching,
   } = useQuery<FinanceDashboardData>({
@@ -580,9 +592,9 @@ const FinanceDashboard = () => {
             <button
               key={path}
               onClick={() => navigate(path)}
-              className="flex flex-col items-center gap-3 py-6 rounded-xl border border-border hover:bg-muted hover:border-primary/30 transition-all active:scale-95"
+              className="flex flex-col items-center gap-3 py-6 rounded-xl border border-border hover:bg-muted hover:border-primary/20 transition-all duration-150 active:scale-95 group"
             >
-              <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center">
+              <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform">
                 <Icon size={20} className="text-primary" />
               </div>
               <span className="text-sm font-medium text-center leading-tight">
