@@ -8,6 +8,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
 import {
   ClipboardCheck,
+  ClipboardList,
   Package,
   Hammer,
   Banknote,
@@ -114,6 +115,13 @@ const MODULE_CONFIG: Record<
     navPath: "/engineering/boq",
     apiEndpoint: "/api/boq",
     label: "BOQ",
+  },
+  "material-requests": {
+    icon: ClipboardList,
+    color: "text-orange-500 bg-orange-500/10",
+    navPath: "/material/material-request",
+    apiEndpoint: "/api/material-requests",
+    label: "Material Requests",
   },
 };
 
@@ -351,10 +359,7 @@ const ApprovalInbox: React.FC = () => {
           disabled={isRefetching}
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-xs text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
         >
-          <RefreshCw
-            size={13}
-            className={isRefetching ? "animate-spin" : ""}
-          />
+          <RefreshCw size={13} className={isRefetching ? "animate-spin" : ""} />
           <span className="hidden sm:inline">Refresh</span>
         </button>
       </div>
@@ -462,7 +467,8 @@ const ApprovalInbox: React.FC = () => {
 
             <div className="px-4 py-2.5 border-t border-border bg-muted/20">
               <p className="text-[11px] text-muted-foreground">
-                {items.length} record{items.length !== 1 ? "s" : ""} pending approval
+                {items.length} record{items.length !== 1 ? "s" : ""} pending
+                approval
                 {activeModule &&
                   ` in ${MODULE_CONFIG[activeModule]?.label ?? activeModule}`}
               </p>

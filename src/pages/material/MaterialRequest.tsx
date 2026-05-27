@@ -174,9 +174,6 @@ export default function MaterialRequest() {
 
   const { finYears: ctxFinYears } = useFinYear();
   const activeYear = ctxFinYears.find((y) => y.status === "Active") ?? null;
-  const finYearStr = activeYear
-    ? `${String(activeYear.startDate).slice(2, 4)}-${String(activeYear.endDate).slice(2, 4)}`
-    : undefined;
 
   const { data: companies = [] } = useQuery({
     queryKey: ["mr-companies"],
@@ -195,6 +192,26 @@ export default function MaterialRequest() {
     queryFn: mrApi.getMRFinYears,
     staleTime: 5 * 60_000,
   });
+  // Convert a FName like "2026-2027", "2025-26", or already "26-27" → "26-27"
+  const toShortFinYear = (name: string): string => {
+    const parts = name.split("-");
+    if (parts.length === 2) {
+      const start = parts[0].trim().slice(-2); // last 2 digits
+      const end = parts[1].trim().slice(-2);
+      return `${start}-${end}`;
+    }
+    return name;
+  };
+
+  // Prefer the fin year the user has selected in the form; fall back to context active year
+  const selectedFY = (finYears as any[]).find(
+    (fy) => String(fy.id) === String(header.finYearId),
+  );
+  const finYearStr = selectedFY
+    ? toShortFinYear(String(selectedFY.name))
+    : activeYear
+      ? `${String(activeYear.startDate).slice(2, 4)}-${String(activeYear.endDate).slice(2, 4)}`
+      : undefined;
 
   const { data: itemOptions = [] } = useQuery({
     queryKey: ["mr-items"],

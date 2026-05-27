@@ -169,6 +169,25 @@ export interface MRPOPrefill {
   items: MRPOPrefillItem[];
 }
 
+export interface ApprovedMRSummary {
+  MRId: number;
+  DocNo: string;
+  FinYearId: number | null;
+  FinYearName: string | null;
+  CompanyName: string | null;
+  ProjectName: string | null;
+}
+
+export const getApprovedMRList = () =>
+  fetchWithAuth(`${BASE}/approved-list`).then((r) =>
+    handleResponse<ApprovedMRSummary[]>(r),
+  );
+
+export const getMRPOPrefillByDocNo = (docNo: string) =>
+  fetchWithAuth(
+    `${BASE}/by-docno/${encodeURIComponent(docNo.trim().toUpperCase())}`,
+  ).then((r) => handleResponse<MRPOPrefill>(r));
+
 export const getMRPOPrefill = (id: number | string) =>
   fetchWithAuth(`${BASE}/${id}/create-po-prefill`).then((r) =>
     handleResponse<MRPOPrefill>(r),

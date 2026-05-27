@@ -205,6 +205,29 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "material-requests") {
+      queries.push(`
+        SELECT
+          'material-requests'      AS Module,
+          'Material Request'       AS ModuleLabel,
+          CAST(MRId AS NVARCHAR)   AS RecordId,
+          ISNULL(DocNo, CONCAT('MR#', CAST(MRId AS NVARCHAR))) AS Reference,
+          RequestDate              AS RecordDate,
+          Status,
+          NULL                     AS ContractorName,
+          NULL                     AS SupplierName,
+          NULL                     AS Amount,
+          CreatedBy,
+          ''                       AS ApprovedBy,
+          ''                       AS ApprovedAt,
+          ''                       AS RejectedBy,
+          ''                       AS RejectionNote,
+          UpdatedAt                AS LastModified
+        FROM dbo.MaterialRequests
+        WHERE Status = 'Pending'
+      `);
+    }
+
     if (queries.length === 0) return res.json([]);
 
     const fullQuery =
@@ -236,7 +259,8 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.GoodsReceiptNotes  WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.ExpenseBooking     WHERE EStatus = 'Pending') +
         (SELECT COUNT(*) FROM dbo.WorkDone           WHERE ISNULL(Status,'Draft') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.BOQ                WHERE ISNULL(Status,'Draft') = 'Pending')
+        (SELECT COUNT(*) FROM dbo.BOQ                WHERE ISNULL(Status,'Draft') = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.MaterialRequests     WHERE Status = 'Pending')
       AS TotalPending
     `);
     res.json({ count: result.recordset[0].TotalPending ?? 0 });
