@@ -144,10 +144,10 @@ async function buildCommonOptions() {
       ORDER BY name
     `),
     pool.request().query(`
-      SELECT Id, Name
-      FROM (SELECT 0 AS Id, '' AS Name WHERE 1=0) AS _empty
-      WHERE ISNULL(IsDeleted, 0) = 0 AND ISNULL(IsActive, 1) = 1
-      ORDER BY Name
+      SELECT id AS Id, name AS Name
+      FROM dbo.enterprise
+      WHERE business_type = 'C'
+      ORDER BY name
     `),
     pool.request().query(`
       SELECT id AS Id, name AS Name

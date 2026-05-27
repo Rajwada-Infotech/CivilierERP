@@ -8,6 +8,7 @@ const { blacklistToken } = require("../middleware/blacklist");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const allowRoles = require("../middleware/role");
+const { normalizeRole: normalizeRoleFromRoleMiddleware } = allowRoles;
 
 // Privileged roles that can always list users (Password Reset, User Management)
 const PRIVILEGED_ROLES = ["super_admin", "admin", "dba"];
@@ -19,73 +20,7 @@ const LOCKOUT_SECONDS = 15 * 60;
 // ======================
 // ROLE NORMALIZER - Root Cause Fix
 // ======================
-const normalizeRole = (role) => {
-  if (!role || typeof role !== "string") return "user";
-
-  const r = role.trim().toLowerCase();
-
-  const roleMap = {
-    // super_admin variants
-    sa: "super_admin",
-    "super admin": "super_admin",
-    superadmin: "super_admin",
-    super_admin: "super_admin",
-    "super administrator": "super_admin",
-
-    // dba variants
-    dba: "dba",
-    "db admin": "dba",
-    "database admin": "dba",
-    "database administrator": "dba",
-    db_admin: "dba",
-    "db administrator": "dba",
-
-    // admin variants
-    admin: "admin",
-    administrator: "admin",
-    "system admin": "admin",
-    "system administrator": "admin",
-
-    // branch_manager variants
-    "branch manager": "branch_manager",
-    "branch admin": "branch_manager",
-    branch_manager: "branch_manager",
-
-    // finance_manager variants
-    "finance manager": "finance_manager",
-    finance: "finance_manager",
-    finance_manager: "finance_manager",
-    accountant: "finance_manager",
-
-    // store_manager variants
-    "store manager": "store_manager",
-    "material manager": "store_manager",
-    store_manager: "store_manager",
-
-    // engineer variants
-    engineer: "engineer",
-    "site engineer": "engineer",
-    "field engineer": "engineer",
-    // user variants
-    user: "user",
-    "standard user": "user",
-    employee: "user",
-    staff: "user",
-    // customer variants
-    customer: "customer",
-    "customer demo": "customer",
-    client: "customer",
-    "end user": "customer",
-  };
-
-  const mapped = roleMap[r];
-  if (!mapped) {
-    console.warn(
-      `[normalizeRole] Unrecognised role string: "${role}" — defaulting to "user"`,
-    );
-  }
-  return mapped || "user";
-};
+const normalizeRole = normalizeRoleFromRoleMiddleware;
 
 // ======================
 // LOGIN

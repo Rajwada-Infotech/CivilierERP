@@ -138,9 +138,12 @@ export default function CustomerPortal() {
   const navigate = useNavigate();
   const { userId } = useParams<{ userId: string }>();
 
-  // Redirect if userId param does not match the logged-in user
+  // Redirect if userId param does not match the logged-in user.
+  // Guard: only redirect once currentUser is hydrated (not null) to avoid
+  // a premature redirect to /customer-portal/undefined on first render.
   useEffect(() => {
-    if (currentUser?.id && (!userId || userId !== String(currentUser.id))) {
+    if (!currentUser?.id) return;
+    if (!userId || userId !== String(currentUser.id)) {
       navigate(`/customer-portal/${currentUser.id}`, { replace: true });
     }
   }, [userId, currentUser?.id, navigate]);
@@ -154,7 +157,7 @@ export default function CustomerPortal() {
 
   const { data: ticketsData, isLoading: ticketsLoading, isError: ticketsError, refetch: refetchTickets } =
     useQuery<CustomerTicket[]>({
-      queryKey: ["customer-tickets"],
+      queryKey: ["customer-tickets", currentUser?.id],
       queryFn: async () => {
         const res = await fetchWithAuth("/api/tickets/my");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -166,7 +169,7 @@ export default function CustomerPortal() {
 
   const { data: updatesData, isLoading: updatesLoading } =
     useQuery<{ data: ConstructionUpdate[] }>({
-      queryKey: ["customer-construction-updates", tab],
+      queryKey: ["customer-construction-updates", currentUser?.id],
       queryFn: async () => {
         const res = await fetchWithAuth("/api/followup-construction-updates?pageSize=50");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -292,7 +295,7 @@ export default function CustomerPortal() {
               </div>
             ) : (
               <div className="space-y-2">
-                {filtered.map((t) => <TicketCard key={t.id} ticket={t} onClick={() => navigate("/ticket/my-tickets")} />)}
+                {filtered.map((t) => <TicketCard key={t.id} ticket={t} onClick={() => navigate(`/ticket/${t.id}`)} />)}
               </div>
             )}
           </div>
