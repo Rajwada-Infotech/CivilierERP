@@ -174,9 +174,6 @@ export default function MaterialRequest() {
 
   const { finYears: ctxFinYears } = useFinYear();
   const activeYear = ctxFinYears.find((y) => y.status === "Active") ?? null;
-  const finYearStr = activeYear
-    ? `${String(activeYear.startDate).slice(2, 4)}-${String(activeYear.endDate).slice(2, 4)}`
-    : undefined;
 
   const { data: companies = [] } = useQuery({
     queryKey: ["mr-companies"],
@@ -195,6 +192,26 @@ export default function MaterialRequest() {
     queryFn: mrApi.getMRFinYears,
     staleTime: 5 * 60_000,
   });
+  // Convert a FName like "2026-2027", "2025-26", or already "26-27" → "26-27"
+  const toShortFinYear = (name: string): string => {
+    const parts = name.split("-");
+    if (parts.length === 2) {
+      const start = parts[0].trim().slice(-2); // last 2 digits
+      const end = parts[1].trim().slice(-2);
+      return `${start}-${end}`;
+    }
+    return name;
+  };
+
+  // Prefer the fin year the user has selected in the form; fall back to context active year
+  const selectedFY = (finYears as any[]).find(
+    (fy) => String(fy.id) === String(header.finYearId),
+  );
+  const finYearStr = selectedFY
+    ? toShortFinYear(String(selectedFY.name))
+    : activeYear
+      ? `${String(activeYear.startDate).slice(2, 4)}-${String(activeYear.endDate).slice(2, 4)}`
+      : undefined;
 
   const { data: itemOptions = [] } = useQuery({
     queryKey: ["mr-items"],
@@ -553,18 +570,19 @@ export default function MaterialRequest() {
     {
       id: "actions",
       header: "Actions",
-      cell: ({ row }) => (
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => handleView(row.original)}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            title="View"
-          >
-            <Eye size={14} />
-          </button>
-          {row.original.Status === "Draft" && (
-            <>
+      cell: ({ row }) => {
+        const status = row.original.Status as string;
+        return (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => handleView(row.original)}
+              className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              title="View"
+            >
+              <Eye size={14} />
+            </button>
+            {status === "Draft" && (
               <button
                 type="button"
                 onClick={() => handleEdit(row.original)}
@@ -573,6 +591,8 @@ export default function MaterialRequest() {
               >
                 <Edit3 size={14} />
               </button>
+            )}
+            {(status === "Draft" || status === "Rejected") && (
               <button
                 type="button"
                 onClick={() => {
@@ -584,20 +604,20 @@ export default function MaterialRequest() {
               >
                 <Trash2 size={14} />
               </button>
-            </>
-          )}
-          {row.original.Status === "Approved" && (
-            <button
-              type="button"
-              onClick={() => handleCreatePO(row.original)}
-              className="p-1.5 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 transition-colors"
-              title="Create Normal PO from this MR"
-            >
-              <ExternalLink size={14} />
-            </button>
-          )}
-        </div>
-      ),
+            )}
+            {status === "Approved" && (
+              <button
+                type="button"
+                onClick={() => handleCreatePO(row.original)}
+                className="p-1.5 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 transition-colors"
+                title="Create Normal PO from this MR"
+              >
+                <ExternalLink size={14} />
+              </button>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -1206,6 +1226,22 @@ export default function MaterialRequest() {
                     Submit
                   </Button>
                 </>
+              )}
+              {(viewingRecord.Status === "Draft" ||
+                viewingRecord.Status === "Rejected") && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (confirm("Delete this material request?")) {
+                      deleteMutation.mutate(viewingRecord.MRId);
+                      goToList();
+                    }
+                  }}
+                  className="gap-1.5 h-8 border-destructive/40 text-destructive hover:bg-destructive/10"
+                >
+                  <Trash2 size={13} /> Delete
+                </Button>
               )}
               <Button
                 variant="ghost"
