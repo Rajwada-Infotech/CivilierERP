@@ -434,6 +434,7 @@ interface DocSelectorProps {
   filterCompanyId?: number | null;
   filterProjectId?: number | null;
   filterFinYear?: string | null;
+  filterSupplier?: string | null;
   /** IDs already booked — excludes them from picker (except the one being edited) */
   bookedPOIds?: Set<number>;
   bookedWorkDoneIds?: Set<number>;
@@ -463,6 +464,7 @@ function DocSelectorPanel({
   filterCompanyId,
   filterProjectId,
   filterFinYear,
+  filterSupplier,
   bookedPOIds,
   bookedWorkDoneIds,
   bookedWOPOIds,
@@ -501,15 +503,26 @@ function DocSelectorPanel({
   const q = search.toLowerCase();
 
   // Match fin year by looking for the year string embedded in the doc number.
-  // e.g. filterFinYear = "2026-2027", docNo = "CI/PUR/000001/2026-2027" → match
+  // Supports three doc number conventions:
+  //   Old style:  "CI/PUR/000001/2025-2026" → contains the full fin year string
+  //   Dash style: "GRN-2026-00002"          → contains the START-year of the fin year
+  //               "PO-2026-00002"           → same pattern
+  //   End-year:   legacy where end-year was embedded (e.g. "PO-2027-00002")
   // Falls back to true when no filter is set or doc has no number.
   const inFinYear = (docNo?: string, recFinYear?: string) => {
     if (!filterFinYear) return true;
     // Prefer matching against the record's own FinYear field if available
     if (recFinYear) return recFinYear === filterFinYear;
-    // Fallback: check if the doc number embeds the fin year (PO/GRN style)
     if (!docNo) return true;
-    return docNo.includes(filterFinYear);
+    // Old style: full fin year string embedded (e.g. "2025-2026")
+    if (docNo.includes(filterFinYear)) return true;
+    const [startYearStr, endYearStr] = filterFinYear.split("-");
+    // Dash style (GRN-2026-00002, PO-2026-00002): embed the START 4-digit year
+    // filterFinYear "2026-2027" → startYear "2026" → look for "-2026-"
+    if (startYearStr && docNo.includes(`-${startYearStr}-`)) return true;
+    // Fallback: some legacy docs embed the END year (e.g. "2026" for "2025-2026")
+    if (endYearStr && docNo.includes(`-${endYearStr}-`)) return true;
+    return false;
   };
 
   const filteredPO = poList.filter((p) => {
@@ -527,6 +540,11 @@ function DocSelectorPanel({
     )
       return false;
     if (!inFinYear(p.DocNo || p.PurchaseOrderNo)) return false;
+    if (
+      filterSupplier &&
+      (p.SupplierName || "").toLowerCase() !== filterSupplier.toLowerCase()
+    )
+      return false;
     return (
       (p.DocNo || p.PurchaseOrderNo).toLowerCase().includes(q) ||
       (p.SupplierName || "").toLowerCase().includes(q)
@@ -547,6 +565,11 @@ function DocSelectorPanel({
     )
       return false;
     if (!inFinYear(wd.DocNo, wd.FinYear)) return false;
+    if (
+      filterSupplier &&
+      (wd.ContractorName || "").toLowerCase() !== filterSupplier.toLowerCase()
+    )
+      return false;
     return (
       (wd.DocNo || "").toLowerCase().includes(q) ||
       (wd.ContractorName || "").toLowerCase().includes(q) ||
@@ -569,6 +592,11 @@ function DocSelectorPanel({
     )
       return false;
     if (!inFinYear(p.DocNo || p.PurchaseOrderNo)) return false;
+    if (
+      filterSupplier &&
+      (p.SupplierName || "").toLowerCase() !== filterSupplier.toLowerCase()
+    )
+      return false;
     return (
       (p.DocNo || p.PurchaseOrderNo).toLowerCase().includes(q) ||
       (p.SupplierName || "").toLowerCase().includes(q) ||
@@ -580,14 +608,34 @@ function DocSelectorPanel({
       (t.FullPrefix ?? t.Prefix).toLowerCase().includes(q) ||
       t.Description.toLowerCase().includes(q),
   );
-  const filteredGRN = grnList.filter(
-    (g) =>
-      !bookedGRNIds?.has(g.GRNID) &&
-      inFinYear(g.GRNNo) &&
-      ((g.GRNNo || "").toLowerCase().includes(q) ||
-        (g.SupplierName || "").toLowerCase().includes(q) ||
-        (g.PONumber || "").toLowerCase().includes(q)),
-  );
+  const filteredGRN = grnList.filter((g) => {
+    if (bookedGRNIds?.has(g.GRNID)) return false;
+    if (
+      filterCompanyId &&
+      g.CompanyId &&
+      Number(g.CompanyId) !== Number(filterCompanyId)
+    )
+      return false;
+    if (
+      filterProjectId &&
+      g.ProjectId &&
+      Number(g.ProjectId) !== Number(filterProjectId)
+    )
+      return false;
+    const grnDocNo = g.DocNo || g.GRNNo;
+    if (!inFinYear(grnDocNo, (g as any).FinYear)) return false;
+    if (
+      filterSupplier &&
+      (g.SupplierName || "").trim().toLowerCase() !==
+        filterSupplier.trim().toLowerCase()
+    )
+      return false;
+    return (
+      (grnDocNo || "").toLowerCase().includes(q) ||
+      (g.SupplierName || "").toLowerCase().includes(q) ||
+      (g.PONumber || "").toLowerCase().includes(q)
+    );
+  });
 
   if (selected) {
     const isPO = selected.kind === "PO",
@@ -1040,11 +1088,7 @@ function DocSelectorPanel({
                     onClick={() =>
                       onSelect({
                         kind: "GRN",
-                        docNo: g.GRNNo
-                          ? g.GRNNo.startsWith("GRN-")
-                            ? g.GRNNo
-                            : `GRN-${g.GRNNo}`
-                          : g.GRNNo,
+                        docNo: g.DocNo || g.GRNNo || "",
                         sourceId: g.GRNID,
                         vendorLabel: g.SupplierName,
                         status: g.Status,
@@ -1073,11 +1117,7 @@ function DocSelectorPanel({
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono text-xs font-bold text-teal-600 dark:text-teal-400">
-                          {g.GRNNo
-                            ? g.GRNNo.startsWith("GRN-")
-                              ? g.GRNNo
-                              : `GRN-${g.GRNNo}`
-                            : "—"}
+                          {g.DocNo || g.GRNNo || "—"}
                         </span>
                         {g.Status && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border/50">
@@ -1150,25 +1190,20 @@ function resolveGstRates(
   fallbackCgst: number,
   fallbackSgst: number,
 ) {
-  if (
-    (doc.kind === "PO" ||
-      doc.kind === "WORK_DONE" ||
-      doc.kind === "WO_PO" ||
-      doc.kind === "GRN") &&
-    doc.gst?.applicable
-  ) {
-    const { type, rate } = doc.gst;
-    if (type === "cgst_sgst") return { cgst: rate / 2, sgst: rate / 2 };
-    if (type === "igst") return { cgst: rate, sgst: 0 };
+  // GRN: GST fields are hidden entirely — always 0
+  if (doc.kind === "GRN") return { cgst: 0, sgst: 0 };
+
+  // PO / WO_PO / WORK_DONE: always fetch from the parent document
+  if (doc.kind === "PO" || doc.kind === "WORK_DONE" || doc.kind === "WO_PO") {
+    if (doc.gst?.applicable) {
+      const { type, rate } = doc.gst;
+      if (type === "cgst_sgst") return { cgst: rate / 2, sgst: rate / 2 };
+      if (type === "igst") return { cgst: rate, sgst: 0 };
+    }
     return { cgst: 0, sgst: 0 };
   }
-  if (
-    doc.kind === "PO" ||
-    doc.kind === "WORK_DONE" ||
-    doc.kind === "WO_PO" ||
-    doc.kind === "GRN"
-  )
-    return { cgst: 0, sgst: 0 };
+
+  // TOD / others: keep whatever the user typed
   return { cgst: fallbackCgst, sgst: fallbackSgst };
 }
 
@@ -1230,7 +1265,9 @@ const PAGE_SIZE = 20;
 
 export default function MaterialExpenseBooking() {
   const { finYears } = useFinYear();
-  const activeFinYears = finYears.filter((fy) => fy.status === "Active");
+  const activeFinYears = finYears
+    .filter((fy) => fy.status === "Active")
+    .sort((a, b) => b.year.localeCompare(a.year));
 
   const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
   const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([]);
@@ -1333,6 +1370,9 @@ export default function MaterialExpenseBooking() {
         .finally(() => setLd(false));
     };
 
+    // Always re-fetch PO and WO_PO fresh so newly-created docs appear
+    _mastersCache.po = null;
+    _mastersCache.woPO = null;
     load("po", "/api/purchase-orders?limit=500", setPoList, setLoadingPO);
     // Always re-fetch Work Done fresh (no cache) so newly-approved entries appear
     _mastersCache.workDone = null;
@@ -1962,7 +2002,7 @@ export default function MaterialExpenseBooking() {
     selectedDoc?.kind === "WORK_DONE" ||
     selectedDoc?.kind === "WO_PO";
   const isGRN = selectedDoc?.kind === "GRN";
-  const hasParentGST = isPOorWO || isGRN;
+  const hasParentGST = isPOorWO; // GRN: no GST section shown
   const gstHighlighted = hasParentGST && !!selectedDoc?.gst?.applicable;
 
   // Compute sets of already-booked source IDs from the full dataset (all pages),
@@ -2256,6 +2296,7 @@ export default function MaterialExpenseBooking() {
                         form.projectSite ? parseInt(form.projectSite) : null
                       }
                       filterFinYear={form.financialYear || null}
+                      filterSupplier={form.supplier || null}
                       bookedPOIds={bookedPOIds}
                       bookedWorkDoneIds={bookedWorkDoneIds}
                       bookedWOPOIds={bookedWOPOIds}
@@ -2363,9 +2404,7 @@ export default function MaterialExpenseBooking() {
                         <span className="font-semibold">
                           {selectedDoc!.kind === "PO"
                             ? "Purchase Order"
-                            : selectedDoc!.kind === "GRN"
-                              ? "GRN (parent PO)"
-                              : "Work Done"}
+                            : "Work Done"}
                         </span>
                         {" — "}
                         {selectedDoc!.gst!.type === "cgst_sgst"
@@ -2380,15 +2419,15 @@ export default function MaterialExpenseBooking() {
                         Linked{" "}
                         {selectedDoc!.kind === "PO"
                           ? "Purchase Order"
-                          : selectedDoc!.kind === "GRN"
-                            ? "GRN (parent PO)"
-                            : "Work Done"}{" "}
+                          : "Work Done"}{" "}
                         has no GST applied — rates set to 0. Editable if needed.
                       </span>
                     )}
                   </div>
                 )}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div
+                  className={`grid grid-cols-1 gap-4 ${isGRN ? "sm:grid-cols-1" : "sm:grid-cols-3"}`}
+                >
                   <Field
                     label="Basic Amount (₹)"
                     required
@@ -2418,46 +2457,50 @@ export default function MaterialExpenseBooking() {
                       />
                     </div>
                   </Field>
-                  <Field
-                    label="CGST Rate (%)"
-                    hint={
-                      isPOorWO
-                        ? selectedDoc!.gst?.applicable
-                          ? selectedDoc!.gst!.type === "igst"
-                            ? "IGST mapped here — editable"
-                            : "Auto-filled from linked order — editable"
-                          : "No GST on this order — editable"
-                        : "Enter CGST rate manually"
-                    }
-                  >
-                    <RateInput
-                      value={form.cgstRate}
-                      onChange={(v) => set("cgstRate", v)}
-                      highlighted={gstHighlighted}
-                    />
-                  </Field>
-                  <Field
-                    label={
-                      selectedDoc?.gst?.type === "igst"
-                        ? "SGST Rate (%) — N/A for IGST"
-                        : "SGST Rate (%)"
-                    }
-                    hint={
-                      isPOorWO
-                        ? selectedDoc!.gst?.type === "igst"
-                          ? "IGST order — SGST is 0"
-                          : selectedDoc!.gst?.applicable
-                            ? "Auto-filled from linked order — editable"
-                            : "No GST on this order — editable"
-                        : "Enter SGST rate manually"
-                    }
-                  >
-                    <RateInput
-                      value={form.sgstRate}
-                      onChange={(v) => set("sgstRate", v)}
-                      highlighted={gstHighlighted}
-                    />
-                  </Field>
+                  {!isGRN && (
+                    <>
+                      <Field
+                        label="CGST Rate (%)"
+                        hint={
+                          isPOorWO
+                            ? selectedDoc!.gst?.applicable
+                              ? selectedDoc!.gst!.type === "igst"
+                                ? "IGST mapped here — editable"
+                                : "Auto-filled from linked order — editable"
+                              : "No GST on this order — editable"
+                            : "Enter CGST rate manually"
+                        }
+                      >
+                        <RateInput
+                          value={form.cgstRate}
+                          onChange={(v) => set("cgstRate", v)}
+                          highlighted={gstHighlighted}
+                        />
+                      </Field>
+                      <Field
+                        label={
+                          selectedDoc?.gst?.type === "igst"
+                            ? "SGST Rate (%) — N/A for IGST"
+                            : "SGST Rate (%)"
+                        }
+                        hint={
+                          isPOorWO
+                            ? selectedDoc!.gst?.type === "igst"
+                              ? "IGST order — SGST is 0"
+                              : selectedDoc!.gst?.applicable
+                                ? "Auto-filled from linked order — editable"
+                                : "No GST on this order — editable"
+                            : "Enter SGST rate manually"
+                        }
+                      >
+                        <RateInput
+                          value={form.sgstRate}
+                          onChange={(v) => set("sgstRate", v)}
+                          highlighted={gstHighlighted}
+                        />
+                      </Field>
+                    </>
+                  )}
                 </div>
                 {form.basicAmount > 0 && (
                   <>
