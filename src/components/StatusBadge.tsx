@@ -68,6 +68,17 @@ const STATUS_CONFIG: Record<
     icon: PackageCheck,
     classes: "bg-teal-50 text-teal-700 border-teal-200",
   },
+  // Material Request domain statuses
+  Ordered: {
+    label: "Ordered",
+    icon: PackageCheck,
+    classes: "bg-teal-50 text-teal-700 border-teal-200",
+  },
+  "Partially Ordered": {
+    label: "Partial PO",
+    icon: PackageSearch,
+    classes: "bg-orange-50 text-orange-700 border-orange-200",
+  },
 };
 
 // Fallback for unknown statuses
