@@ -3,31 +3,14 @@ const router = express.Router();
 const { getPool, getPoolStats, sql } = require("../db");
 const bcrypt = require("bcrypt");
 const logger = require("../logger");
+const { normalizeRole } = require("../middleware/role");
 
 const SALT_ROUNDS = 12;
-
-const normalizeRole = (role) => {
-  if (!role || typeof role !== "string") return "user";
-  const r = role.trim().toLowerCase();
-  const roleMap = {
-    sa: "super_admin",
-    "super admin": "super_admin",
-    superadmin: "super_admin",
-    super_admin: "super_admin",
-    dba: "dba",
-    "db admin": "dba",
-    "database admin": "dba",
-    db_admin: "dba",
-    admin: "admin",
-    administrator: "admin",
-  };
-  return roleMap[r] || r.replace(/\s+/g, "_");
-};
 
 function isSelfOrAdmin(req) {
   const requestedId = parseInt(req.params.id, 10);
   const callerId = req.user?.userId || req.user?.id;
-  const callerRole = req.user?.role || "";
+  const callerRole = normalizeRole(req.user?.role);
   if (["admin", "super_admin", "dba"].includes(callerRole)) return true;
   return parseInt(callerId, 10) === requestedId;
 }

@@ -43,3 +43,6 @@ bun.lock
 README/
 backend/uploads/tickets/
 implementation_plan.md
+hotfix_portal.txt
+hotfix_ticketchat.txt
+hotfix_ticketroutes.txt
