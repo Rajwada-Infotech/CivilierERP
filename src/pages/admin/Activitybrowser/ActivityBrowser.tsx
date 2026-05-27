@@ -25,6 +25,7 @@ import {
   ChevronDown,
   ChevronRight,
   RefreshCw,
+  Trash2,
   Activity,
   AlertTriangle,
   Globe,
@@ -456,6 +457,7 @@ const ActivityBrowser: React.FC = () => {
     setPage,
     setFilters,
     refresh,
+    clearHistory,
   } = useActivityBrowser();
 
   const [activeTab, setActiveTab] = useState<"sessions" | "log">("sessions");
@@ -467,6 +469,8 @@ const ActivityBrowser: React.FC = () => {
     null,
   );
   const [refreshing, setRefreshing] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -482,6 +486,18 @@ const ActivityBrowser: React.FC = () => {
     setRefreshing(true);
     await refresh();
     setTimeout(() => setRefreshing(false), 600);
+  };
+
+  const handleClearHistory = async () => {
+    setClearing(true);
+    try {
+      await clearHistory();
+    } catch {
+      // error already logged in provider
+    } finally {
+      setClearing(false);
+      setConfirmClearOpen(false);
+    }
   };
 
   // Stats
@@ -575,6 +591,13 @@ const ActivityBrowser: React.FC = () => {
           >
             <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
             Refresh
+          </button>
+          <button
+            onClick={() => setConfirmClearOpen(true)}
+            className="flex items-center gap-2 rounded-xl border border-destructive/40 bg-card px-3 py-2 text-xs font-medium text-destructive/70 transition-colors hover:border-destructive hover:text-destructive"
+          >
+            <Trash2 size={13} />
+            Clear History
           </button>
           <div className="rounded-xl border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
             {activity.total} records
@@ -882,8 +905,46 @@ const ActivityBrowser: React.FC = () => {
           </div>
         </div>
       )}
+      {/* Clear History confirm */}
+      {confirmClearOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-destructive/10">
+                <Trash2 size={18} className="text-destructive" />
+              </div>
+              <div>
+                <p className="font-heading font-semibold text-foreground">
+                  Clear all history?
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  This permanently deletes all activity logs from the database.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmClearOpen(false)}
+                disabled={clearing}
+                className="rounded-xl border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClearHistory}
+                disabled={clearing}
+                className="flex items-center gap-2 rounded-xl bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors disabled:opacity-50"
+              >
+                {clearing && (
+                  <div className="h-3 w-3 animate-spin rounded-full border border-destructive-foreground border-t-transparent" />
+                )}
+                {clearing ? "Clearing…" : "Clear History"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-
 export default ActivityBrowser;

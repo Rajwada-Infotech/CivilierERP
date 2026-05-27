@@ -12,7 +12,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Search,
@@ -433,17 +432,18 @@ export default function Amendments() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material", "Amendments"]} />
-      <div className="space-y-5">
+      <div className="p-6 space-y-5">
         {/* Header */}
-        <div>
-          <h1 className="text-lg sm:text-xl font-heading font-bold text-foreground flex items-center gap-2">
-            <FileEdit size={20} className="text-primary" />
-            Amendments
-          </h1>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-            Centralized amendment workflow for GRN, PO, WO &amp; Expense Booking
-            — with full audit trail.
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Amendments
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Centralized amendment workflow for GRN, PO, WO &amp; Expense Booking
+              — with full audit trail.
+            </p>
+          </div>
         </div>
 
         {/* Doc Type Tabs */}
@@ -465,10 +465,10 @@ export default function Amendments() {
                   setShowComparison(false);
                   setShowAudit(false);
                 }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium border transition-all ${
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border-0 transition-all gradient-accent text-white ${
                   active
-                    ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                    : "bg-background text-muted-foreground border-border hover:border-primary/40 hover:text-foreground"
+                    ? "opacity-100 shadow-md ring-2 ring-white/20"
+                    : "opacity-60 hover:opacity-80"
                 }`}
               >
                 <Icon size={14} />
@@ -481,8 +481,8 @@ export default function Amendments() {
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
           {/* Left: Search + List */}
           <div className="lg:col-span-2 space-y-3">
-            <Card className="border-border shadow-sm">
-              <CardHeader className="pb-3 px-4 border-b border-border">
+            <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+              <div className="px-4 py-3 border-b border-border">
                 <div className="flex items-center gap-2">
                   <Search
                     size={14}
@@ -503,8 +503,8 @@ export default function Amendments() {
                     <RefreshCw size={13} />
                   </button>
                 </div>
-              </CardHeader>
-              <CardContent className="p-0">
+              </div>
+              <div>
                 {loading && (
                   <div className="flex items-center justify-center gap-2 py-10 text-muted-foreground text-sm">
                     <Loader2 size={14} className="animate-spin" />
@@ -588,27 +588,27 @@ export default function Amendments() {
                     </span>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           </div>
 
           {/* Right: Detail / Edit */}
           <div className="lg:col-span-3 space-y-4">
             {!selectedRecord ? (
-              <Card className="border-dashed border-border">
-                <CardContent className="flex flex-col items-center justify-center py-20 text-center gap-3">
+              <div className="rounded-xl border border-dashed border-border bg-card">
+                <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
                   <FileText size={36} className="text-muted-foreground/30" />
                   <p className="text-sm text-muted-foreground max-w-xs">
                     Select a {cfg.label} from the list to view its details and
                     submit amendments.
                   </p>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             ) : (
               <>
                 {/* Record card */}
-                <Card className="border-primary/20 shadow-sm">
-                  <CardHeader className="pb-3 px-4 sm:px-5 border-b border-border">
+                <div className="rounded-xl border border-primary/20 bg-card shadow-sm overflow-hidden">
+                  <div className="pb-3 px-4 sm:px-5 pt-4 border-b border-border">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
@@ -708,9 +708,9 @@ export default function Amendments() {
                         </span>
                       </div>
                     )}
-                  </CardHeader>
+                  </div>
 
-                  <CardContent className="pt-4 px-4 sm:px-5 space-y-4">
+                  <div className="pt-4 px-4 sm:px-5 pb-4 space-y-4">
                     {/* Fields grid */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {fields.map((f) => {
@@ -818,13 +818,13 @@ export default function Amendments() {
                         )}
                       </div>
                     )}
-                  </CardContent>
-                </Card>
+                  </div>
+                </div>
 
                 {/* Side-by-side comparison */}
                 {showComparison && amendedFields.length > 0 && (
-                  <Card className="border-amber-400/40 shadow-sm">
-                    <CardHeader className="pb-0 px-4 sm:px-5">
+                  <div className="rounded-xl border border-amber-400/40 bg-card shadow-sm overflow-hidden">
+                    <div className="pb-0 px-4 sm:px-5 pt-4">
                       <button
                         type="button"
                         className="flex items-center justify-between w-full py-3"
@@ -835,13 +835,13 @@ export default function Amendments() {
                             size={14}
                             className="text-amber-500"
                           />
-                          <CardTitle className="text-sm font-heading">
+                          <h3 className="text-sm font-heading">
                             Change Summary —{" "}
                             <span className="text-amber-600 dark:text-amber-400">
                               {amendedFields.length} field
                               {amendedFields.length !== 1 ? "s" : ""} amended
                             </span>
-                          </CardTitle>
+                          </h3>
                         </div>
                         {showComparison ? (
                           <ChevronUp size={14} />
@@ -849,8 +849,8 @@ export default function Amendments() {
                           <ChevronDown size={14} />
                         )}
                       </button>
-                    </CardHeader>
-                    <CardContent className="px-4 sm:px-5 pb-4">
+                    </div>
+                    <div className="px-4 sm:px-5 pb-4">
                       <div className="rounded-xl overflow-hidden border border-border">
                         <div className="grid grid-cols-3 bg-muted/60 px-4 py-2">
                           <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
@@ -882,14 +882,14 @@ export default function Amendments() {
                           </div>
                         ))}
                       </div>
-                    </CardContent>
-                  </Card>
+                    </div>
+                  </div>
                 )}
 
                 {/* Audit trail */}
                 {showAudit && (
-                  <Card className="border-border shadow-sm">
-                    <CardHeader className="pb-0 px-4 sm:px-5">
+                  <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+                    <div className="pb-0 px-4 sm:px-5 pt-4">
                       <button
                         type="button"
                         className="flex items-center justify-between w-full py-3"
@@ -897,9 +897,9 @@ export default function Amendments() {
                       >
                         <div className="flex items-center gap-2">
                           <Clock size={14} className="text-primary" />
-                          <CardTitle className="text-sm font-heading">
+                          <h3 className="text-sm font-heading">
                             Amendment History
-                          </CardTitle>
+                          </h3>
                         </div>
                         {showAudit ? (
                           <ChevronUp size={14} />
@@ -907,8 +907,8 @@ export default function Amendments() {
                           <ChevronDown size={14} />
                         )}
                       </button>
-                    </CardHeader>
-                    <CardContent className="px-4 sm:px-5 pb-4">
+                    </div>
+                    <div className="px-4 sm:px-5 pb-4">
                       {auditLog.length === 0 ? (
                         <p className="text-sm text-muted-foreground text-center py-6">
                           No amendment history for this record.
@@ -953,8 +953,8 @@ export default function Amendments() {
                           ))}
                         </div>
                       )}
-                    </CardContent>
-                  </Card>
+                    </div>
+                  </div>
                 )}
               </>
             )}

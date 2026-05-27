@@ -188,26 +188,38 @@ export default function Transactions() {
         {
           label: "Total Payments",
           value: fmt(summary.totalPayments),
+          sub: "outgoing",
           icon: ArrowUpRight,
-          color: "hsl(0, 72%, 51%)",
+          ring: "ring-rose-500/20",
+          bg: "bg-rose-500/10",
+          color: "text-rose-500",
         },
         {
-          label: "Total Purchase Orders",
+          label: "Purchase Orders",
           value: fmt(summary.totalPOs),
+          sub: "incoming",
           icon: ArrowDownLeft,
-          color: "hsl(142, 71%, 45%)",
+          ring: "ring-emerald-500/20",
+          bg: "bg-emerald-500/10",
+          color: "text-emerald-500",
         },
         {
           label: "Net Cash Flow",
           value: fmt(Math.abs(summary.netCashFlow)),
+          sub: "net total",
           icon: IndianRupee,
-          color: "hsl(var(--primary))",
+          ring: "ring-primary/20",
+          bg: "bg-primary/10",
+          color: "text-primary",
         },
         {
           label: "Pending Txns",
           value: String(summary.pendingCount),
+          sub: "awaiting action",
           icon: CreditCard,
-          color: "hsl(var(--secondary))",
+          ring: "ring-amber-500/20",
+          bg: "bg-amber-500/10",
+          color: "text-amber-500",
         },
       ]
     : [];
@@ -216,114 +228,127 @@ export default function Transactions() {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Transactions"]} />
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-heading font-bold text-foreground">
-          Transactions
-        </h1>
-        <button
-          onClick={() => fetchData()}
-          disabled={loading}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-accent transition disabled:opacity-50"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
-      </div>
+      <Breadcrumbs items={["Dashboard", "Finance", "Transactions"]} />
+      <div className="relative space-y-8 mt-6">
 
-      {error && (
-        <div className="mb-4 px-4 py-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
-          {error}
-        </div>
-      )}
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        {loading
-          ? Array.from({ length: 4 }).map((_, i) => (
-              <div
-                key={i}
-                className="rounded-xl bg-card border border-border p-4 h-20 animate-pulse"
-              />
-            ))
-          : statCards.map((s) => (
-              <div
-                key={s.label}
-                className="rounded-xl bg-card border border-border p-4 flex items-center gap-4"
-                style={{ borderLeftWidth: 3, borderLeftColor: s.color }}
-              >
-                <div
-                  className="p-2 rounded-lg"
-                  style={{ background: `${s.color}20` }}
-                >
-                  <s.icon size={20} style={{ color: s.color }} />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground font-heading">
-                    {s.label}
-                  </p>
-                  <p className="text-base sm:text-lg font-heading font-bold text-foreground">
-                    {s.value}
-                  </p>
-                </div>
-              </div>
-            ))}
-      </div>
-
-      {/* Table — server-side pagination, DataTable search operates on current page */}
-      <div className="rounded-xl bg-card border border-border overflow-hidden">
-        <div className="p-4 border-b border-border">
-          <h2 className="font-heading font-semibold text-foreground text-sm">
-            Recent Transactions
-          </h2>
-        </div>
-        <DataTable
-          data={transactions}
-          columns={columns}
-          loading={loading}
-          paginated={false}
-          searchable={false}
-          emptyMessage="No transactions found."
-        />
-      </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-4 px-1">
-          <p className="text-xs text-muted-foreground">
-            Page {page} of {totalPages} · {totalRecords} total transactions
-          </p>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="px-3 py-1.5 rounded-md text-xs border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-            >
-              Previous
-            </button>
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              const pg = page <= 3 ? i + 1 : page - 2 + i;
-              if (pg < 1 || pg > totalPages) return null;
-              return (
-                <button
-                  key={pg}
-                  onClick={() => setPage(pg)}
-                  className={`px-3 py-1.5 rounded-md text-xs border transition-colors ${pg === page ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
-                >
-                  {pg}
-                </button>
-              );
-            })}
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="px-3 py-1.5 rounded-md text-xs border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-            >
-              Next
-            </button>
+        {/* ── Page header ──────────────────────────────────────────────────── */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Transactions
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              View all payments, purchase orders, receipts and journal entries
+            </p>
           </div>
+          <button
+            onClick={() => fetchData()}
+            disabled={loading}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50 shrink-0"
+          >
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+            Refresh
+          </button>
         </div>
-      )}
+
+        {error && (
+          <div className="px-4 py-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
+            {error}
+          </div>
+        )}
+
+        {/* ── Stats ────────────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {loading && !summary
+            ? Array.from({ length: 4 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="glass rounded-xl px-4 py-3.5 h-[76px] animate-pulse ring-1 ring-border"
+                />
+              ))
+            : statCards.map(({ label, value, sub, icon: Icon, ring, bg, color }) => (
+                <div
+                  key={label}
+                  className={`glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 ${ring}`}
+                >
+                  <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
+                    <Icon size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-lg font-bold font-heading text-foreground leading-none">
+                      {value}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+                      {label}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
+                      {sub}
+                    </p>
+                  </div>
+                </div>
+              ))}
+        </div>
+
+        {/* ── Table ────────────────────────────────────────────────────────── */}
+        <div className="rounded-xl bg-card border border-border overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-border">
+            <h2 className="font-heading font-semibold text-foreground text-sm">
+              Recent Transactions
+            </h2>
+          </div>
+          <DataTable
+            data={transactions}
+            columns={columns}
+            loading={loading}
+            paginated={false}
+            searchable={false}
+            emptyMessage="No transactions found."
+          />
+        </div>
+
+        {/* ── Pagination ───────────────────────────────────────────────────── */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-1">
+            <p className="text-xs text-muted-foreground tabular-nums">
+              Page {page} of {totalPages} · {totalRecords} total transactions
+            </p>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                const pg = page <= 3 ? i + 1 : page - 2 + i;
+                if (pg < 1 || pg > totalPages) return null;
+                return (
+                  <button
+                    key={pg}
+                    onClick={() => setPage(pg)}
+                    className={`px-3 py-1.5 rounded-md text-xs border transition-colors ${
+                      pg === page
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {pg}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
     </>
   );
 }

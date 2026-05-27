@@ -71,6 +71,7 @@ interface Comment {
 interface TicketDetail {
   ticket: Ticket;
   comments: Comment[];
+  attachments: TicketAttachment[];
 }
 
 type StatusFilter =

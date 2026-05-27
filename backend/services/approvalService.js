@@ -20,7 +20,12 @@ const MODULE_MAP = {
   "work-orders": { table: "dbo.WorkOrderHeader", pk: "Id", status: "Status" },
   boq: { table: "dbo.BOQ", pk: "BoqID", status: "Status" },
   "work-done": { table: "dbo.WorkDone", pk: "ID", status: "Status" },
-  grn: { table: "dbo.GRN", pk: "GRNId", status: "GRNStatus" },
+  grn: { table: "dbo.GoodsReceiptNotes", pk: "GRNID", status: "Status" },
+  "goods-receipt": {
+    table: "dbo.GoodsReceiptNotes",
+    pk: "GRNID",
+    status: "Status",
+  },
   payments: { table: "dbo.NewPayment", pk: "PPaymentID", status: "Status" },
 };
 

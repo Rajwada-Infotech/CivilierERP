@@ -1,5 +1,5 @@
-import { useState, useCallback } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useState, useCallback, useRef } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { DashboardBackground } from "@/components/DashboardBackground";
@@ -37,6 +37,8 @@ import {
   Trash2,
   XCircle,
   Loader2,
+  ChevronDown,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -75,9 +77,55 @@ interface QueryResult {
   message: string;
 }
 
+// ─── Smart cell renderer ──────────────────────────────────────────────────────
+// Detects base64 image data URIs → renders a thumbnail.
+// Truncates any other string longer than 80 chars with a title tooltip.
+const BASE64_IMAGE_RE = /^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/i;
+const MAX_CELL_LEN = 80;
+
+function QueryCellValue({ value }: { value: unknown }) {
+  if (value === null || value === undefined) {
+    return (
+      <span className="text-muted-foreground italic text-[10px]">null</span>
+    );
+  }
+
+  const str = String(value);
+
+  // Base64 image → thumbnail
+  if (BASE64_IMAGE_RE.test(str)) {
+    return (
+      <img
+        src={str}
+        alt="img"
+        loading="lazy"
+        decoding="async"
+        className="h-8 w-8 rounded object-cover border border-border"
+      />
+    );
+  }
+
+  // Long string → truncate, show full on hover via title
+  if (str.length > MAX_CELL_LEN) {
+    return (
+      <span
+        title={str}
+        className="font-mono text-[10px] cursor-default"
+        style={{ wordBreak: "break-all" }}
+      >
+        {str.slice(0, MAX_CELL_LEN)}
+        <span className="text-muted-foreground">…</span>
+      </span>
+    );
+  }
+
+  return <span className="font-mono text-[10px]">{str}</span>;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function DBADashboard() {
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<
     "overview" | "tables" | "query" | "history"
   >("overview");
@@ -89,6 +137,9 @@ export default function DBADashboard() {
   const [tableSearch, setTableSearch] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingQuery, setPendingQuery] = useState("");
+  const [dbPopoverOpen, setDbPopoverOpen] = useState(false);
+  const [selectedDb, setSelectedDb] = useState<string | null>(null);
+  const dbPopoverRef = useRef<HTMLDivElement>(null);
 
   const tabs = [
     { key: "overview", label: "DB Overview", icon: Database },
@@ -145,12 +196,26 @@ export default function DBADashboard() {
     staleTime: 30_000,
   });
 
+  // ── Available Databases ────────────────────────────────────────────────────
+  const { data: databases = [] } = useQuery<
+    { name: string; current_db: string }[]
+  >({
+    queryKey: ["dba-databases"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/dba/databases");
+      if (!res.ok) throw new Error("Failed to fetch databases");
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
+
   // ── Query Runner ───────────────────────────────────────────────────────────
   const queryMutation = useMutation({
     mutationFn: async (q: string) => {
+      const effectiveQuery = selectedDb ? `USE [${selectedDb}];\n${q}` : q;
       const res = await fetchWithAuth("/api/dba/query", {
         method: "POST",
-        body: JSON.stringify({ query: q }),
+        body: JSON.stringify({ query: effectiveQuery }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Query failed");
@@ -160,11 +225,15 @@ export default function DBADashboard() {
       setQueryResult(data);
       setQueryError(null);
       toast.success(`Query executed — ${data.rowCount} row(s) returned`);
+      // Invalidate history so count + list stay fresh
+      queryClient.invalidateQueries({ queryKey: ["dba-query-history"] });
     },
     onError: (err: Error) => {
       setQueryError(err.message);
       setQueryResult(null);
       toast.error(err.message);
+      // Still invalidate — backend logs failed queries too
+      queryClient.invalidateQueries({ queryKey: ["dba-query-history"] });
     },
   });
 
@@ -225,13 +294,17 @@ export default function DBADashboard() {
             icon: HardDrive,
             color: "text-blue-500",
             bg: "bg-blue-500/10",
+            clickable: false,
           },
           {
             label: "Database",
-            value: healthLoading ? "…" : (health?.database_name ?? "—"),
+            value: healthLoading
+              ? "…"
+              : (selectedDb ?? health?.database_name ?? "—"),
             icon: Database,
             color: "text-green-500",
             bg: "bg-green-500/10",
+            clickable: true,
           },
           {
             label: "Total Size",
@@ -243,6 +316,7 @@ export default function DBADashboard() {
             icon: Server,
             color: "text-purple-500",
             bg: "bg-purple-500/10",
+            clickable: false,
           },
           {
             label: "Queries Logged",
@@ -250,22 +324,130 @@ export default function DBADashboard() {
             icon: Terminal,
             color: "text-orange-500",
             bg: "bg-orange-500/10",
+            clickable: false,
           },
-        ].map((s) => (
-          <Card key={s.label}>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className={`p-2 rounded-lg ${s.bg}`}>
-                <s.icon size={18} className={s.color} />
-              </div>
-              <div>
-                <p className="text-2xl font-bold truncate max-w-[120px]">
-                  {s.value}
-                </p>
-                <p className="text-xs text-muted-foreground">{s.label}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+        ].map((s) =>
+          s.clickable ? (
+            <div key={s.label} className="relative" ref={dbPopoverRef}>
+              <Card
+                className="cursor-pointer hover:border-green-500/40 hover:shadow-md transition-all duration-150 select-none"
+                onClick={() => setDbPopoverOpen((o) => !o)}
+              >
+                <CardContent className="p-4 flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${s.bg}`}>
+                    <s.icon size={18} className={s.color} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-2xl font-bold truncate max-w-[110px]">
+                      {s.value}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{s.label}</p>
+                  </div>
+                  <ChevronDown
+                    size={14}
+                    className={`text-muted-foreground transition-transform duration-200 flex-shrink-0 ${dbPopoverOpen ? "rotate-180" : ""}`}
+                  />
+                </CardContent>
+              </Card>
+
+              {/* DB Switcher Dropdown */}
+              {dbPopoverOpen && (
+                <>
+                  {/* Backdrop */}
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setDbPopoverOpen(false)}
+                  />
+                  <div className="absolute top-full mt-2 left-0 z-50 w-64 rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
+                    <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
+                      <Database size={13} className="text-green-500" />
+                      <span className="text-xs font-heading font-semibold text-foreground uppercase tracking-wider">
+                        Switch Database
+                      </span>
+                    </div>
+                    <div className="p-1.5 max-h-60 overflow-y-auto">
+                      {databases.length === 0 ? (
+                        <p className="text-xs text-muted-foreground text-center py-4">
+                          Loading databases…
+                        </p>
+                      ) : (
+                        databases.map((db) => {
+                          const isActive =
+                            (selectedDb ?? health?.database_name) === db.name;
+                          return (
+                            <button
+                              key={db.name}
+                              onClick={() => {
+                                setSelectedDb(db.name);
+                                setDbPopoverOpen(false);
+                                toast.success(
+                                  `Switched to database: ${db.name}`,
+                                );
+                              }}
+                              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all duration-150 text-sm font-heading ${
+                                isActive
+                                  ? "bg-green-500/10 text-green-600"
+                                  : "hover:bg-muted text-foreground"
+                              }`}
+                            >
+                              <Database
+                                size={13}
+                                className={
+                                  isActive
+                                    ? "text-green-500"
+                                    : "text-muted-foreground"
+                                }
+                              />
+                              <span className="flex-1 truncate font-mono text-xs">
+                                {db.name}
+                              </span>
+                              {isActive && (
+                                <Check
+                                  size={12}
+                                  className="text-green-500 flex-shrink-0"
+                                />
+                              )}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                    {selectedDb && selectedDb !== health?.database_name && (
+                      <div className="border-t border-border px-3 py-2">
+                        <button
+                          onClick={() => {
+                            setSelectedDb(null);
+                            setDbPopoverOpen(false);
+                            toast.info(
+                              `Reverted to default: ${health?.database_name}`,
+                            );
+                          }}
+                          className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          ↩ Reset to default ({health?.database_name})
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <Card key={s.label}>
+              <CardContent className="p-4 flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${s.bg}`}>
+                  <s.icon size={18} className={s.color} />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold truncate max-w-[120px]">
+                    {s.value}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{s.label}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ),
+        )}
       </div>
 
       {/* Tabs */}
@@ -491,6 +673,12 @@ export default function DBADashboard() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Terminal size={16} className="text-primary" /> SQL Query Runner
+                {(selectedDb ?? health?.database_name) && (
+                  <span className="ml-auto text-[10px] font-normal font-mono px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 border border-green-500/20">
+                    <Database size={9} className="inline mr-1" />
+                    {selectedDb ?? health?.database_name}
+                  </span>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -572,14 +760,8 @@ export default function DBADashboard() {
                       {queryResult.rows.map((row, i) => (
                         <TableRow key={i} className="text-xs">
                           {Object.values(row).map((v, j) => (
-                            <TableCell key={j}>
-                              {v === null ? (
-                                <span className="text-muted-foreground italic">
-                                  null
-                                </span>
-                              ) : (
-                                String(v)
-                              )}
+                            <TableCell key={j} className="align-middle">
+                              <QueryCellValue value={v} />
                             </TableCell>
                           ))}
                         </TableRow>

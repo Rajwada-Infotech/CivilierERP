@@ -88,7 +88,7 @@ const selectWorkDoneSql = `
     wd.PeriodTo,
     wd.DescriptionOfWork,
     wd.QuantityDone,
-    wd.Unit,
+    COALESCE(wd.Unit, wo_uom.UOMName) AS Unit,
     wd.RatePerUnit,
     wd.GrossAmount,
     wd.Deductions,
@@ -105,6 +105,13 @@ const selectWorkDoneSql = `
   LEFT JOIN dbo.AccountHeadMaster sup ON sup.LHeadId = wd.SupplierId
   LEFT JOIN dbo.WorkOrderHeader woh ON woh.Id = wd.WorkOrderID
   LEFT JOIN dbo.AccountHeadMaster ctr ON ctr.LHeadId = woh.ContractorId
+  LEFT JOIN (
+    SELECT woa.WorkOrderHeaderId, MIN(uom.UOMName) AS UOMName
+    FROM dbo.WorkOrderActivities woa
+    LEFT JOIN dbo.UOMMaster uom ON uom.Id = woa.UOMId
+    WHERE uom.UOMName IS NOT NULL
+    GROUP BY woa.WorkOrderHeaderId
+  ) wo_uom ON wo_uom.WorkOrderHeaderId = wd.WorkOrderID
 `;
 
 router.get("/dashboard", async (req, res) => {

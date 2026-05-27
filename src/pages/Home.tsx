@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { motion, useInView, useAnimation } from "framer-motion";
 import { Navigate, useNavigate } from "react-router-dom";
+import { motion, useInView, useAnimation } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -549,6 +549,11 @@ export default function Home() {
       : isAdmin
         ? "Admin"
         : "Site Engineer";
+
+  // Customers have their own portal — redirect immediately, don't fetch ERP data
+  if (role === "customer") {
+    return <Navigate to="/ticket/my-tickets" replace />;
+  }
 
   const hour = new Date().getHours();
   const greeting =
