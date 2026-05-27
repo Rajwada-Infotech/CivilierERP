@@ -1,10 +1,17 @@
-import React from "react";
+import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { DashboardBackground } from "@/components/DashboardBackground";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Package,
   Truck,
@@ -503,8 +510,171 @@ const REQUEST_DASH_COLS: ColumnDef<any, unknown>[] = [
   },
 ];
 
+// ─── Items Modal Columns ──────────────────────────────────────────────────────
+const ITEMS_MODAL_COLS: ColumnDef<any, unknown>[] = [
+  {
+    accessorKey: "M_code",
+    header: "Code",
+    cell: ({ getValue }: any) => (
+      <span className="font-mono text-xs text-primary">
+        {(getValue() as string) || "—"}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "M_Name",
+    header: "Item Name",
+    cell: ({ getValue }: any) => (
+      <span className="text-xs font-medium text-foreground">
+        {getValue() as string}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "M_Group",
+    header: "Group",
+    cell: ({ getValue }: any) => (
+      <span className="text-xs text-muted-foreground">
+        {(getValue() as string) || "—"}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "M_Type",
+    header: "Type",
+    cell: ({ getValue }: any) => (
+      <span className="text-xs text-muted-foreground">
+        {(getValue() as string) || "—"}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "M_UOM",
+    header: "UOM",
+    cell: ({ getValue }: any) => (
+      <span className="text-xs text-muted-foreground">
+        {(getValue() as string) || "—"}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "M_HSN",
+    header: "HSN",
+    cell: ({ getValue }: any) => (
+      <span className="text-xs text-muted-foreground">
+        {(getValue() as string) || "—"}
+      </span>
+    ),
+  },
+];
+
+type ModalKey =
+  | "items"
+  | "grns"
+  | "pos"
+  | "expenses"
+  | "stock"
+  | "issues"
+  | "requests"
+  | null;
+
 export default function MaterialDashboard() {
   const navigate = useNavigate();
+  const [openModal, setOpenModal] = useState<ModalKey>(null);
+
+  const open = (key: ModalKey) => setOpenModal(key);
+  const close = () => setOpenModal(null);
+
+  // ── Per-modal queries (all lazy) ──────────────────────────────────────
+  const { data: itemsData, isLoading: itemsLoading } = useQuery<any[]>({
+    queryKey: ["modalItemMaster"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/item-master");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      return Array.isArray(json) ? json : (json.data ?? []);
+    },
+    enabled: openModal === "items",
+    staleTime: 60_000,
+  });
+
+  const { data: grnsData, isLoading: grnsLoading } = useQuery<any[]>({
+    queryKey: ["modalGRNs"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/grns?page=1&limit=200");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      return Array.isArray(json) ? json : (json.data ?? []);
+    },
+    enabled: openModal === "grns",
+    staleTime: 30_000,
+  });
+
+  const { data: posData, isLoading: posLoading } = useQuery<any[]>({
+    queryKey: ["modalPOs"],
+    queryFn: async () => {
+      const res = await fetchWithAuth(
+        "/api/purchase-orders?page=1&limit=200&status=Open",
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      return Array.isArray(json) ? json : (json.data ?? []);
+    },
+    enabled: openModal === "pos",
+    staleTime: 30_000,
+  });
+
+  const { data: expensesData, isLoading: expensesLoading } = useQuery<any[]>({
+    queryKey: ["modalExpenses"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/expense-booking?status=Pending");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      return Array.isArray(json) ? json : (json.data ?? []);
+    },
+    enabled: openModal === "expenses",
+    staleTime: 30_000,
+  });
+
+  const { data: stockData, isLoading: stockLoading } = useQuery<any[]>({
+    queryKey: ["modalStock"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/stock-ledger?page=1&limit=200");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      return Array.isArray(json) ? json : (json.data ?? []);
+    },
+    enabled: openModal === "stock",
+    staleTime: 30_000,
+  });
+
+  const { data: issuesData, isLoading: issuesLoading } = useQuery<any[]>({
+    queryKey: ["modalIssues"],
+    queryFn: async () => {
+      const res = await fetchWithAuth(
+        "/api/material-issues?page=1&limit=200&search=",
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      return Array.isArray(json) ? json : (json.data ?? []);
+    },
+    enabled: openModal === "issues",
+    staleTime: 30_000,
+  });
+
+  const { data: requestsData, isLoading: requestsLoading } = useQuery<any[]>({
+    queryKey: ["modalRequests"],
+    queryFn: async () => {
+      const res = await fetchWithAuth(
+        "/api/material-requests?page=1&limit=200&status=Pending",
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      return Array.isArray(json) ? json : (json.data ?? []);
+    },
+    enabled: openModal === "requests",
+    staleTime: 30_000,
+  });
 
   const { data, isLoading, isError, error, refetch, isFetching } =
     useQuery<DashboardData>({
@@ -587,7 +757,7 @@ export default function MaterialDashboard() {
           iconColor: "text-emerald-600",
           iconBg: "bg-emerald-500/10",
           trend: "neutral" as const,
-          onClick: () => navigate("/masters/items"),
+          onClick: () => open("items"),
         },
         {
           label: "GRNs This Month",
@@ -597,7 +767,7 @@ export default function MaterialDashboard() {
           iconColor: "text-blue-600",
           iconBg: "bg-blue-500/10",
           trend: "up" as const,
-          onClick: () => navigate("/material/grn"),
+          onClick: () => open("grns"),
         },
         {
           label: "Open Purchase Orders",
@@ -610,7 +780,7 @@ export default function MaterialDashboard() {
             data.purchaseOrders.open > 0
               ? ("down" as const)
               : ("neutral" as const),
-          onClick: () => navigate("/material/purchase-order"),
+          onClick: () => open("pos"),
         },
         {
           label: "Pending Expenses",
@@ -623,7 +793,7 @@ export default function MaterialDashboard() {
             data.expenses.pending > 0
               ? ("down" as const)
               : ("neutral" as const),
-          onClick: () => navigate("/material/expense-booking"),
+          onClick: () => open("expenses"),
         },
         {
           label: "Net Stock Movements",
@@ -636,6 +806,7 @@ export default function MaterialDashboard() {
             data.stock.totalIn > data.stock.totalOut
               ? ("up" as const)
               : ("down" as const),
+          onClick: () => open("stock"),
         },
         {
           label: "Material Issues",
@@ -645,7 +816,7 @@ export default function MaterialDashboard() {
           iconColor: "text-orange-600",
           iconBg: "bg-orange-500/10",
           trend: "neutral" as const,
-          onClick: () => navigate("/material/issues"),
+          onClick: () => open("issues"),
         },
         {
           label: "Pending Requests",
@@ -658,7 +829,7 @@ export default function MaterialDashboard() {
             data.materialRequests.pending > 0
               ? ("down" as const)
               : ("neutral" as const),
-          onClick: () => navigate("/material/material-request"),
+          onClick: () => open("requests"),
         },
       ]
     : [];
@@ -680,13 +851,13 @@ export default function MaterialDashboard() {
             </p>
           </div>
           <button
-  onClick={() => refetch()}
-  disabled={isFetching}
-  className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
->
-  <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
-  Refresh
-</button>
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+            Refresh
+          </button>
         </div>
 
         {isError && !data && (
@@ -1019,6 +1190,7 @@ export default function MaterialDashboard() {
 
         {/* Quick Actions */}
         <div className="rounded-xl border border-border bg-card p-5">
+          {" "}
           <SectionHeader icon={BarChart3} title="Quick Actions" />
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
             {[
@@ -1097,6 +1269,243 @@ export default function MaterialDashboard() {
           </div>
         </div>
       </div>
+
+      {/* ── Unified Modal ── */}
+      <Dialog open={openModal !== null} onOpenChange={(v) => !v && close()}>
+        <DialogContent className="max-w-4xl w-full p-0">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-border">
+            <DialogTitle className="flex items-center gap-2 text-base font-heading">
+              {openModal === "items" && (
+                <>
+                  <Package size={16} className="text-emerald-600" /> Item Master{" "}
+                  {itemsData && (
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">
+                      ({itemsData.length} items)
+                    </span>
+                  )}
+                </>
+              )}
+              {openModal === "grns" && (
+                <>
+                  <Truck size={16} className="text-blue-600" /> GRN List{" "}
+                  {grnsData && (
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">
+                      ({grnsData.length} records)
+                    </span>
+                  )}
+                </>
+              )}
+              {openModal === "pos" && (
+                <>
+                  <ShoppingCart size={16} className="text-amber-600" /> Open
+                  Purchase Orders{" "}
+                  {posData && (
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">
+                      ({posData.length} records)
+                    </span>
+                  )}
+                </>
+              )}
+              {openModal === "expenses" && (
+                <>
+                  <Receipt size={16} className="text-red-600" /> Pending
+                  Expenses{" "}
+                  {expensesData && (
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">
+                      ({expensesData.length} records)
+                    </span>
+                  )}
+                </>
+              )}
+              {openModal === "stock" && (
+                <>
+                  <Layers size={16} className="text-teal-600" /> Stock Movements{" "}
+                  {stockData && (
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">
+                      ({stockData.length} records)
+                    </span>
+                  )}
+                </>
+              )}
+              {openModal === "issues" && (
+                <>
+                  <PackageCheck size={16} className="text-orange-600" />{" "}
+                  Material Issues{" "}
+                  {issuesData && (
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">
+                      ({issuesData.length} records)
+                    </span>
+                  )}
+                </>
+              )}
+              {openModal === "requests" && (
+                <>
+                  <Send size={16} className="text-indigo-600" /> Pending
+                  Material Requests{" "}
+                  {requestsData && (
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">
+                      ({requestsData.length} records)
+                    </span>
+                  )}
+                </>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          <ScrollArea className="max-h-[70vh]">
+            {/* Items */}
+            {openModal === "items" &&
+              (itemsLoading ? (
+                <TableSkeleton rows={6} cols={6} />
+              ) : !itemsData?.length ? (
+                <EmptyState label="No items found" />
+              ) : (
+                <DataTable
+                  data={itemsData}
+                  columns={ITEMS_MODAL_COLS}
+                  searchable
+                  paginated
+                  emptyMessage="No items found."
+                />
+              ))}
+            {/* GRNs */}
+            {openModal === "grns" &&
+              (grnsLoading ? (
+                <TableSkeleton rows={6} cols={5} />
+              ) : !grnsData?.length ? (
+                <EmptyState label="No GRNs found" />
+              ) : (
+                <DataTable
+                  data={grnsData}
+                  columns={GRN_DASH_COLS}
+                  searchable
+                  paginated
+                  emptyMessage="No GRNs found."
+                />
+              ))}
+            {/* Purchase Orders */}
+            {openModal === "pos" &&
+              (posLoading ? (
+                <TableSkeleton rows={6} cols={5} />
+              ) : !posData?.length ? (
+                <EmptyState label="No open purchase orders" />
+              ) : (
+                <DataTable
+                  data={posData}
+                  columns={PO_DASH_COLS}
+                  searchable
+                  paginated
+                  emptyMessage="No purchase orders found."
+                />
+              ))}
+            {/* Expenses */}
+            {openModal === "expenses" &&
+              (expensesLoading ? (
+                <TableSkeleton rows={6} cols={5} />
+              ) : !expensesData?.length ? (
+                <EmptyState label="No pending expenses" />
+              ) : (
+                <DataTable
+                  data={expensesData}
+                  columns={EXP_DASH_COLS}
+                  searchable
+                  paginated
+                  emptyMessage="No expenses found."
+                />
+              ))}
+            {/* Stock */}
+            {openModal === "stock" &&
+              (stockLoading ? (
+                <TableSkeleton rows={6} cols={5} />
+              ) : !stockData?.length ? (
+                <EmptyState label="No stock movements found" />
+              ) : (
+                <DataTable
+                  data={stockData}
+                  columns={[
+                    {
+                      accessorKey: "ItemCode",
+                      header: "Code",
+                      cell: ({ getValue }: any) => (
+                        <span className="font-mono text-xs text-primary">
+                          {(getValue() as string) || "—"}
+                        </span>
+                      ),
+                    },
+                    {
+                      accessorKey: "ItemName",
+                      header: "Item Name",
+                      cell: ({ getValue }: any) => (
+                        <span className="text-xs font-medium">
+                          {(getValue() as string) || "—"}
+                        </span>
+                      ),
+                    },
+                    {
+                      accessorKey: "TransactionType",
+                      header: "Type",
+                      cell: ({ getValue }: any) => (
+                        <span className="text-xs text-muted-foreground">
+                          {(getValue() as string) || "—"}
+                        </span>
+                      ),
+                    },
+                    {
+                      accessorKey: "Quantity",
+                      header: "Qty",
+                      cell: ({ getValue }: any) => (
+                        <span className="text-xs font-medium">
+                          {getValue() as number}
+                        </span>
+                      ),
+                    },
+                    {
+                      accessorKey: "TransactionDate",
+                      header: "Date",
+                      cell: ({ getValue }: any) => (
+                        <span className="text-xs text-muted-foreground">
+                          {fmtDate(getValue() as string)}
+                        </span>
+                      ),
+                    },
+                  ]}
+                  searchable
+                  paginated
+                  emptyMessage="No stock records found."
+                />
+              ))}
+            {/* Issues */}
+            {openModal === "issues" &&
+              (issuesLoading ? (
+                <TableSkeleton rows={6} cols={5} />
+              ) : !issuesData?.length ? (
+                <EmptyState label="No material issues found" />
+              ) : (
+                <DataTable
+                  data={issuesData}
+                  columns={ISSUE_DASH_COLS}
+                  searchable
+                  paginated
+                  emptyMessage="No issues found."
+                />
+              ))}
+            {/* Requests */}
+            {openModal === "requests" &&
+              (requestsLoading ? (
+                <TableSkeleton rows={6} cols={5} />
+              ) : !requestsData?.length ? (
+                <EmptyState label="No pending requests found" />
+              ) : (
+                <DataTable
+                  data={requestsData}
+                  columns={REQUEST_DASH_COLS}
+                  searchable
+                  paginated
+                  emptyMessage="No requests found."
+                />
+              ))}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
