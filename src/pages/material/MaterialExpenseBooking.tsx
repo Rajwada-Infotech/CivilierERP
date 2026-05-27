@@ -1298,6 +1298,16 @@ export default function MaterialExpenseBooking() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const saveInFlight = useRef(false);
+  // Remaining-items split booking dialog state
+  const [remainingBookingDialog, setRemainingBookingDialog] = useState<{
+    grnDocNo: string;
+    grnSourceId: number;
+    remainingItems: GRNItemLine[];
+    remainingTotal: number;
+    savedFormSnapshot: Omit<ExpenseRecord, "id">;
+  } | null>(null);
+  const [creatingRemainingBooking, setCreatingRemainingBooking] =
+    useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [approvalTrail, setApprovalTrail] =
     useState<ExpenseRecord["approvalTrail"]>(undefined);
@@ -1956,6 +1966,9 @@ export default function MaterialExpenseBooking() {
           30000,
         );
         toast.success("Expense booking updated.");
+        cancelForm();
+        await fetchRecords(page);
+        fetchBookedSources();
       } else {
         const result = await apiFetch(
           API,
@@ -1968,14 +1981,135 @@ export default function MaterialExpenseBooking() {
         toast.success(
           `Expense booking created — Ref: ${result?.docNo || form.bookingReference}`,
         );
+
+        // ── Check for remaining GRN items ────────────────────────────────────
+        // If the source is a GRN and some items still have qty remaining,
+        // offer to create a second draft booking for those items.
+        if (
+          selectedDoc?.kind === "GRN" &&
+          selectedDoc.grnItems &&
+          selectedDoc.grnItems.length > 0
+        ) {
+          const remainingItems = selectedDoc.grnItems.filter(
+            (i) => Number(i.remainingQty) > 0,
+          );
+          if (remainingItems.length > 0) {
+            const remainingTotal = remainingItems.reduce((s, i) => {
+              const amt =
+                Number(i.totalAmount) > 0
+                  ? Number(i.totalAmount)
+                  : Number(i.rate || 0) * Number(i.remainingQty || 0);
+              return s + amt;
+            }, 0);
+            // Show dialog; don't navigate away yet
+            setRemainingBookingDialog({
+              grnDocNo: selectedDoc.docNo,
+              grnSourceId: selectedDoc.sourceId,
+              remainingItems,
+              remainingTotal,
+              savedFormSnapshot: { ...form },
+            });
+            await fetchRecords(page);
+            fetchBookedSources();
+            return; // hold on the form view until user responds to dialog
+          }
+        }
+
+        cancelForm();
+        await fetchRecords(page);
+        fetchBookedSources();
       }
-      cancelForm();
-      await fetchRecords(page);
-      fetchBookedSources();
     } catch (err: any) {
       toast.error("Save failed: " + err.message);
     } finally {
       setSaving(false);
+      saveInFlight.current = false;
+    }
+  };
+
+  // ── Create a draft booking for remaining GRN items ───────────────────────────
+  const handleCreateRemainingBooking = async () => {
+    if (!remainingBookingDialog) return;
+    const {
+      grnDocNo,
+      grnSourceId,
+      remainingItems,
+      remainingTotal,
+      savedFormSnapshot,
+    } = remainingBookingDialog;
+
+    setCreatingRemainingBooking(true);
+    try {
+      const remainingBody = {
+        EName: savedFormSnapshot.bookingName
+          ? `[Remaining] ${savedFormSnapshot.bookingName}`
+          : `Remaining items – ${grnDocNo}`,
+        EProjectName: savedFormSnapshot.projectSite || null,
+        EDocumentType: "GRN",
+        EDocDate: savedFormSnapshot.bookingDate || null,
+        EAmount: remainingTotal,
+        ENetAmount: remainingTotal,
+        ECgstRate: 0,
+        ESgstRate: 0,
+        EDiscountData: JSON.stringify(savedFormSnapshot.discount),
+        EBillingTermsData: JSON.stringify(savedFormSnapshot.billingTerms ?? []),
+        EDocNo: null, // will be auto-assigned by backend
+        EDocTypeId: null,
+        EFinYear: savedFormSnapshot.financialYear || null,
+        EEmiPayment: false,
+        EEmiData: JSON.stringify({
+          enabled: false,
+          installmentCount: 0,
+          emiAmount: 0,
+          startDate: "",
+          schedule: [],
+        }),
+        EInstallmentCount: null,
+        EEmiAmount: null,
+        EEmiStartDate: null,
+        EReminder: savedFormSnapshot.dueDate || null,
+        ERemarks: (() => {
+          const itemList = remainingItems
+            .map((i) => `${i.itemName || "Item"} (${i.remainingQty} remaining)`)
+            .join(", ");
+          const full = `Auto-created for remaining items from GRN ${grnDocNo}. Items: ${itemList}`;
+          return full.length > 990 ? full.slice(0, 987) + "…" : full;
+        })(),
+        EStatus: "Draft",
+        ECompanyId: savedFormSnapshot.companyId ?? null,
+        EBillingTermId: null,
+        EBillingTermName: null,
+        ETCId: savedFormSnapshot.tcId ?? null,
+        ETCName: savedFormSnapshot.tcName || null,
+        ETCText: savedFormSnapshot.tcText || null,
+        EVendorInvoiceNo: null,
+        EVendorInvoiceDate: null,
+        EAdditionalCharges: null,
+        ECostCenter: savedFormSnapshot.costCenter || null,
+        EGLAccount: savedFormSnapshot.glAccount || null,
+        EWorkDoneRef: null,
+        ESourceType: "GRN",
+        ESourceId: grnSourceId,
+      };
+
+      const result = await apiFetch(
+        API,
+        { method: "POST", body: JSON.stringify(remainingBody) },
+        30000,
+      );
+
+      toast.success(
+        `Remaining items booking created as Draft — Ref: ${result?.docNo || "—"}. Open it to review and enter the invoice amount.`,
+        { duration: 8000 },
+      );
+      setRemainingBookingDialog(null);
+      cancelForm();
+      await fetchRecords(page);
+      fetchBookedSources();
+    } catch (err: any) {
+      toast.error("Failed to create remaining items booking: " + err.message);
+    } finally {
+      setCreatingRemainingBooking(false);
     }
   };
 
@@ -3138,6 +3272,153 @@ export default function MaterialExpenseBooking() {
         onClose={() => setPreviewRecord(null)}
         onEdit={(record) => openEdit(record)}
       />
+
+      {/* Remaining GRN Items — Split Booking Dialog */}
+      <Dialog
+        open={!!remainingBookingDialog}
+        onOpenChange={(open) => {
+          if (!open && !creatingRemainingBooking) {
+            setRemainingBookingDialog(null);
+            cancelForm();
+          }
+        }}
+      >
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Package size={16} className="text-amber-500 shrink-0" />
+              Remaining Items Detected
+            </DialogTitle>
+            <DialogDescription>
+              The booking was saved. Some items in{" "}
+              <span className="font-mono font-semibold text-foreground">
+                {remainingBookingDialog?.grnDocNo}
+              </span>{" "}
+              still have quantities pending billing. Would you like to create a
+              separate{" "}
+              <span className="font-semibold text-foreground">Draft</span>{" "}
+              booking for them now?
+            </DialogDescription>
+          </DialogHeader>
+
+          {remainingBookingDialog && (
+            <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 overflow-hidden my-1">
+              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-amber-500/20 bg-amber-500/8">
+                <Clock size={12} className="text-amber-500 shrink-0" />
+                <span className="text-xs font-heading font-semibold text-amber-600 dark:text-amber-400">
+                  Items with remaining quantities
+                </span>
+                <span className="ml-auto text-[10px] text-muted-foreground">
+                  {remainingBookingDialog.remainingItems.length}{" "}
+                  {remainingBookingDialog.remainingItems.length === 1
+                    ? "item"
+                    : "items"}
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-muted/20 border-b border-amber-500/15">
+                      <th className="px-4 py-2 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                        Item
+                      </th>
+                      <th className="px-4 py-2 text-right font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400 text-[10px]">
+                        Remaining Qty
+                      </th>
+                      <th className="px-4 py-2 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                        UOM
+                      </th>
+                      <th className="px-4 py-2 text-right font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                        Est. Amount (₹)
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-amber-500/10">
+                    {remainingBookingDialog.remainingItems.map((item, idx) => {
+                      const estAmt =
+                        Number(item.totalAmount) > 0
+                          ? Number(item.totalAmount)
+                          : Number(item.rate || 0) *
+                            Number(item.remainingQty || 0);
+                      return (
+                        <tr
+                          key={idx}
+                          className="hover:bg-amber-500/5 transition-colors"
+                        >
+                          <td className="px-4 py-2 font-medium text-foreground max-w-[160px] truncate">
+                            {item.itemName || `Item ${idx + 1}`}
+                          </td>
+                          <td className="px-4 py-2 text-right font-mono font-semibold text-amber-600 dark:text-amber-400">
+                            {Number(item.remainingQty)}
+                          </td>
+                          <td className="px-4 py-2 text-muted-foreground">
+                            {item.uom || "—"}
+                          </td>
+                          <td className="px-4 py-2 text-right font-mono text-foreground">
+                            {estAmt > 0 ? `₹${fmt(estAmt)}` : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot className="border-t border-amber-500/20 bg-muted/10">
+                    <tr>
+                      <td
+                        colSpan={3}
+                        className="px-4 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground"
+                      >
+                        Estimated Total
+                      </td>
+                      <td className="px-4 py-2 text-right font-mono text-xs font-bold text-foreground">
+                        ₹{fmt(remainingBookingDialog.remainingTotal)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <div className="px-4 py-2.5 border-t border-amber-500/15 bg-amber-500/5">
+                <p className="text-[10px] text-muted-foreground">
+                  The new booking will be created as a{" "}
+                  <span className="font-semibold">Draft</span> linked to the
+                  same GRN. You can edit the invoice amount, add GST, and submit
+                  it for approval separately.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2 mt-1">
+            <Button
+              variant="outline"
+              className="w-full sm:w-auto"
+              disabled={creatingRemainingBooking}
+              onClick={() => {
+                setRemainingBookingDialog(null);
+                cancelForm();
+              }}
+            >
+              Skip for Now
+            </Button>
+            <Button
+              className="gradient-accent gap-1.5 w-full sm:w-auto"
+              disabled={creatingRemainingBooking}
+              onClick={handleCreateRemainingBooking}
+            >
+              {creatingRemainingBooking ? (
+                <>
+                  <Loader2 size={13} className="animate-spin" />
+                  Creating…
+                </>
+              ) : (
+                <>
+                  <Plus size={13} />
+                  Create Remaining Booking
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
