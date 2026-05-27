@@ -11,25 +11,11 @@ const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 const logger = require("./logger");
 const { getPool, sql } = require("./db");
-
-const ALLOWED_ORIGINS = [
-  "http://localhost:3000",
-  "http://localhost:8080",
-  "http://localhost:8081",
-  "http://localhost:5173",
-  "http://127.0.0.1:3000",
-  "http://127.0.0.1:8080",
-  "http://127.0.0.1:5173",
-  "https://civiliererp.vercel.app",
-  "https://civiliererp.in",
-];
+const { normalizeRole } = require("./middleware/role");
+const { ALLOWED_ORIGINS } = require("./config/origins");
 
 /** @type {import('socket.io').Server | null} */
 let io = null;
-
-function normalizeRole(role) {
-  return String(role || "").trim().toLowerCase();
-}
 
 function isTicketAdmin(role) {
   return ["admin", "super_admin", "dba", "engineer"].includes(

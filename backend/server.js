@@ -24,6 +24,8 @@ const { ipKeyGenerator } = require("express-rate-limit");
 const { safeLoadRoutes, printRoutesSummary } = require("./utils/loadRoutes");
 const http = require("http");
 const { initSocket } = require("./socket");
+const { ALLOWED_ORIGINS } = require("./config/origins");
+const { validateApprovalModuleMap } = require("./services/approvalService");
 
 const {
   getRedis,
@@ -37,30 +39,16 @@ const {
   getDynamicLimit,
 } = require("./redis");
 
-const ALLOWED_ORIGINS = [
-  "http://localhost:3000",
-  "http://localhost:8080",
-  "http://localhost:8081",
-  "http://localhost:5173",
-  "http://[::1]:3000",
-  "http://[::1]:8080",
-  "http://[::1]:8081",
-  "http://[::1]:5173",
-  "http://127.0.0.1:3000",
-  "http://127.0.0.1:8080",
-  "http://127.0.0.1:5173",
-  "https://civiliererp.vercel.app",
-  "https://civiliererp.in",
-];
-
+// ─── Banner ──────────────────────────────────────────────────────────────────
 function printBanner(port) {
   if (!isDev) return;
-  logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  logger.info(" [APP] CivilierERP API");
-  logger.info(` [URL] http://localhost:${port}`);
-  logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  const line = "-".repeat(42);
+  process.stdout.write(
+    `\n${line}\n  CivilierERP API\n  http://localhost:${port}\n${line}\n\n`,
+  );
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 function makeStore(prefix) {
   return new RedisStore({
     prefix,
@@ -78,99 +66,94 @@ function isLocalRequest(req) {
   );
 }
 
-// ─── ALL routes ─────────────────────────────────────────────────────────────
+// ─── Routes ──────────────────────────────────────────────────────────────────
 const ALL_ROUTES = [
-  { path: "/api/roles", file: "./routes/roles" },
-  { path: "/api/user-rights", file: "./routes/userRights" },
-  { path: "/api/user-widget-rights", file: "./routes/userWidgetRights" },
-  { path: "/api/account-group", file: "./routes/accountGroup" },
-  { path: "/api/account-head", file: "./routes/accountHeadMaster" },
-  { path: "/api/activity-master", file: "./routes/activityMaster" },
-  { path: "/api/bank-master", file: "./routes/bankMaster" },
-  { path: "/api/billing-terms", file: "./routes/billingTerms" },
-  { path: "/api/card-master", file: "./routes/cardMaster" },
-  { path: "/api/cheque-master", file: "./routes/chequeMaster" },
-  { path: "/api/document-type", file: "./routes/document-type" },
-  { path: "/api/fin-year", file: "./routes/finYear" },
-  { path: "/api/general-ledger", file: "./routes/generalLedger" },
-  { path: "/api/hsn", file: "./routes/hsn" },
-  { path: "/api/item-groups", file: "./routes/itemGroup" },
-  { path: "/api/item-master", file: "./routes/itemMaster" },
-  { path: "/api/tds-master", file: "./routes/tdsMaster" },
-  { path: "/api/enterprises", file: "./routes/enterprise" },
-  { path: "/api/entry-type", file: "./routes/entryType" },
-  { path: "/api/expense-booking", file: "./routes/expenseBooking" },
-  { path: "/api/amendments", file: "./routes/amendments" },
-  { path: "/api/new-payment", file: "./routes/newPayment" },
-  { path: "/api/received-payment", file: "./routes/receivedPayment" },
-  { path: "/api/purchase-orders", file: "./routes/purchaseOrders" },
-  { path: "/api/tenants", file: "./routes/tenants" },
-  { path: "/api/work-orders", file: "./routes/workOrder" },
-  { path: "/api/user-profile", file: "./routes/userProfile" },
-  { path: "/api/uom-master", file: "./routes/uomMaster" },
-  { path: "/api/debit-note", file: "./routes/debitNote" },
-  { path: "/api/tc-master", file: "./routes/tcMaster" },
-  { path: "/api/transactions", file: "./routes/transactions" },
-  { path: "/api/grns", file: "./routes/grns" },
-  { path: "/api/stock-ledger", file: "./routes/stockLedger" },
-  { path: "/api/inventory-master", file: "./routes/inventoryMaster" },
-  { path: "/api/brs", file: "./routes/brs" },
-  { path: "/api/reports", file: "./routes/reports" },
-  { path: "/api/finance-dashboard", file: "./routes/financeDashboard" },
-  { path: "/api/material-dashboard", file: "./routes/materialDashboard" },
-  { path: "/api/engineering", file: "./routes/engineering" },
-  { path: "/api/material-issues", file: "./routes/materialIssues" },
-  { path: "/api/material-requests", file: "./routes/materialRequests" },
-  { path: "/api/admin-dashboard", file: "./routes/adminDashboard" },
-  { path: "/api/user-activity", file: "./routes/userActivity" },
-  { path: "/api/cheque-leaf", file: "./routes/chequeLeaf" },
-  { path: "/api/contractor-category", file: "./routes/contractorCategory" },
-  { path: "/api/approval-workflows", file: "./routes/approvalWorkflows" },
-  { path: "/api/approval-inbox", file: "./routes/approvalInbox" },
-  { path: "/api/tasks", file: "./routes/tasks" },
-  { path: "/api/widgets", file: "./routes/widgets" },
-  { path: "/api/tenant-reminders", file: "./routes/tenantReminders" },
-  { path: "/api/reminders", file: "./routes/tenantReminders" },
-  { path: "/api/followup-log", file: "./routes/followupLog" },
-  { path: "/api/applicants", file: "./routes/applicants" },
-  { path: "/api/followup-applications", file: "./routes/followupApplications" },
-  {
-    path: "/api/followup-unit-selections",
-    file: "./routes/followupUnitSelections",
-  },
-  { path: "/api/followup-bookings", file: "./routes/followupBookings" },
-  { path: "/api/followup-agreements", file: "./routes/followupAgreements" },
-  { path: "/api/followup-noc", file: "./routes/followupNoc" },
-  { path: "/api/followup-sales-deed", file: "./routes/followupSalesDeed" },
-  { path: "/api/followup-handover", file: "./routes/followupHandover" },
-  {
-    path: "/api/followup-construction-updates",
-    file: "./routes/followupConstructionUpdates",
-  },
-  { path: "/api/company-master", file: "./routes/companyMaster" },
-  { path: "/api/project-master", file: "./routes/projectMaster" },
-  { path: "/api/block-master", file: "./routes/blockMaster" },
-  { path: "/api/unit-master", file: "./routes/unitMaster" },
-  { path: "/api/payment-plan-master", file: "./routes/paymentPlanMaster" },
-  { path: "/api/business", file: "./routes/businessRoutes" },
-  { path: "/api/tickets", file: "./routes/ticketRoutes" },
-  { path: "/api/signatures", file: "./routes/signatures" },
-  { path: "/api/communicator", file: "./routes/communicator" },
-  { path: "/api/system/metrics", file: "./routes/systemMetrics" },
-  { path: "/api/menu-master", file: "./routes/menuMaster" },
-  { path: "/api/menu-type", file: "./routes/menuType" },
-  { path: "/api/menu-types", file: "./routes/menuType" },
-  { path: "/api/typeofdoc", file: "./routes/typeofdoc" },
-  { path: "/api/boq", file: "./routes/boq" },
-  { path: "/api/app-version", file: "./routes/appVersion" },
-  { path: "/api/godowns", file: "./routes/godowns" },
-  { path: "/api/stock-transfers", file: "./routes/stockTransfers" },
-  { path: "/api/widget-catalog", file: "./routes/widgetCatalogAdmin" },
-  { path: "/api/page-definitions", file: "./routes/pageDefinitions" },
-  { path: "/api/lookups",          file: "./routes/lookups" },
+  { path: "/api/roles",                        file: "./routes/roles" },
+  { path: "/api/user-rights",                  file: "./routes/userRights" },
+  { path: "/api/user-widget-rights",           file: "./routes/userWidgetRights" },
+  { path: "/api/account-group",                file: "./routes/accountGroup" },
+  { path: "/api/account-head",                 file: "./routes/accountHeadMaster" },
+  { path: "/api/activity-master",              file: "./routes/activityMaster" },
+  { path: "/api/bank-master",                  file: "./routes/bankMaster" },
+  { path: "/api/billing-terms",                file: "./routes/billingTerms" },
+  { path: "/api/card-master",                  file: "./routes/cardMaster" },
+  { path: "/api/cheque-master",                file: "./routes/chequeMaster" },
+  { path: "/api/document-type",                file: "./routes/document-type" },
+  { path: "/api/fin-year",                     file: "./routes/finYear" },
+  { path: "/api/general-ledger",               file: "./routes/generalLedger" },
+  { path: "/api/hsn",                          file: "./routes/hsn" },
+  { path: "/api/item-groups",                  file: "./routes/itemGroup" },
+  { path: "/api/item-master",                  file: "./routes/itemMaster" },
+  { path: "/api/tds-master",                   file: "./routes/tdsMaster" },
+  { path: "/api/enterprises",                  file: "./routes/enterprise" },
+  { path: "/api/entry-type",                   file: "./routes/entryType" },
+  { path: "/api/expense-booking",              file: "./routes/expenseBooking" },
+  { path: "/api/amendments",                   file: "./routes/amendments" },
+  { path: "/api/new-payment",                  file: "./routes/newPayment" },
+  { path: "/api/received-payment",             file: "./routes/receivedPayment" },
+  { path: "/api/purchase-orders",              file: "./routes/purchaseOrders" },
+  { path: "/api/tenants",                      file: "./routes/tenants" },
+  { path: "/api/work-orders",                  file: "./routes/workOrder" },
+  { path: "/api/user-profile",                 file: "./routes/userProfile" },
+  { path: "/api/uom-master",                   file: "./routes/uomMaster" },
+  { path: "/api/debit-note",                   file: "./routes/debitNote" },
+  { path: "/api/tc-master",                    file: "./routes/tcMaster" },
+  { path: "/api/transactions",                 file: "./routes/transactions" },
+  { path: "/api/grns",                         file: "./routes/grns" },
+  { path: "/api/stock-ledger",                 file: "./routes/stockLedger" },
+  { path: "/api/inventory-master",             file: "./routes/inventoryMaster" },
+  { path: "/api/brs",                          file: "./routes/brs" },
+  { path: "/api/reports",                      file: "./routes/reports" },
+  { path: "/api/finance-dashboard",            file: "./routes/financeDashboard" },
+  { path: "/api/material-dashboard",           file: "./routes/materialDashboard" },
+  { path: "/api/engineering",                  file: "./routes/engineering" },
+  { path: "/api/material-issues",              file: "./routes/materialIssues" },
+  { path: "/api/material-requests",            file: "./routes/materialRequests" },
+  { path: "/api/admin-dashboard",              file: "./routes/adminDashboard" },
+  { path: "/api/user-activity",                file: "./routes/userActivity" },
+  { path: "/api/cheque-leaf",                  file: "./routes/chequeLeaf" },
+  { path: "/api/contractor-category",          file: "./routes/contractorCategory" },
+  { path: "/api/approval-workflows",           file: "./routes/approvalWorkflows" },
+  { path: "/api/approval-inbox",               file: "./routes/approvalInbox" },
+  { path: "/api/tasks",                        file: "./routes/tasks" },
+  { path: "/api/widgets",                      file: "./routes/widgets" },
+  { path: "/api/tenant-reminders",             file: "./routes/tenantReminders" },
+  { path: "/api/reminders",                    file: "./routes/tenantReminders" },
+  { path: "/api/followup-log",                 file: "./routes/followupLog" },
+  { path: "/api/applicants",                   file: "./routes/applicants" },
+  { path: "/api/followup-applications",        file: "./routes/followupApplications" },
+  { path: "/api/followup-unit-selections",     file: "./routes/followupUnitSelections" },
+  { path: "/api/followup-bookings",            file: "./routes/followupBookings" },
+  { path: "/api/followup-agreements",          file: "./routes/followupAgreements" },
+  { path: "/api/followup-noc",                 file: "./routes/followupNoc" },
+  { path: "/api/followup-sales-deed",          file: "./routes/followupSalesDeed" },
+  { path: "/api/followup-handover",            file: "./routes/followupHandover" },
+  { path: "/api/followup-construction-updates",file: "./routes/followupConstructionUpdates" },
+  { path: "/api/company-master",               file: "./routes/companyMaster" },
+  { path: "/api/project-master",               file: "./routes/projectMaster" },
+  { path: "/api/block-master",                 file: "./routes/blockMaster" },
+  { path: "/api/unit-master",                  file: "./routes/unitMaster" },
+  { path: "/api/payment-plan-master",          file: "./routes/paymentPlanMaster" },
+  { path: "/api/business",                     file: "./routes/businessRoutes" },
+  { path: "/api/tickets",                      file: "./routes/ticketRoutes" },
+  { path: "/api/signatures",                   file: "./routes/signatures" },
+  { path: "/api/communicator",                 file: "./routes/communicator" },
+  { path: "/api/system/metrics",               file: "./routes/systemMetrics" },
+  { path: "/api/menu-master",                  file: "./routes/menuMaster" },
+  { path: "/api/menu-type",                    file: "./routes/menuType" },
+  // Backward-compatible plural alias; frontend uses /api/menu-type.
+  { path: "/api/menu-types",                   file: "./routes/menuType" },
+  { path: "/api/typeofdoc",                    file: "./routes/typeofdoc" },
+  { path: "/api/boq",                          file: "./routes/boq" },
+  { path: "/api/app-version",                  file: "./routes/appVersion" },
+  { path: "/api/godowns",                      file: "./routes/godowns" },
+  { path: "/api/stock-transfers",              file: "./routes/stockTransfers" },
+  { path: "/api/widget-catalog",               file: "./routes/widgetCatalogAdmin" },
+  { path: "/api/page-definitions",             file: "./routes/pageDefinitions" },
+  { path: "/api/lookups",                      file: "./routes/lookups" },
 ];
 
-// ─── createApp ──────────────────────────────────────────────────────────────
+// ─── createApp ───────────────────────────────────────────────────────────────
 async function createApp() {
   const app = express();
   app.locals.startupTime = new Date().toISOString();
@@ -215,16 +198,17 @@ async function createApp() {
 
   // Ticket attachments are served through /api/tickets/file/:filename after auth.
   // Do not expose backend/uploads/tickets statically.
+
   // Global request tracking
   if (!isTest) {
-    app.use(async (req, res, next) => {
+    app.use((req, res, next) => {
       incrGlobalRequests().catch(() => {});
       trackHourLoad().catch(() => {});
       next();
     });
   }
 
-  // ── Rate limiters ──────────────────────────────────────────────────────────
+  // ── Rate limiters ─────────────────────────────────────────────────────────
   // Registered inside createApp() so they apply in ALL environments,
   // including the Vercel serverless entry point (api/index.js) which calls
   // createApp() directly and never goes through startServer().
@@ -275,11 +259,10 @@ async function createApp() {
 
   app.get("/", (req, res) => res.send("CivilierERP API running"));
   app.use("/health", require("./routes/health"));
-
   app.use("/api/users", require("./routes/users"));
 
-  // Active user tracking
-  app.use("/api", authMiddleware, async (req, res, next) => {
+  // Active user tracking — runs after auth on all /api routes
+  app.use("/api", authMiddleware, (req, res, next) => {
     if (req.user?.userId) {
       pfaddActiveUser(req.user.userId).catch(() => {});
     }
@@ -295,7 +278,7 @@ async function createApp() {
     verbose: isDev,
   });
 
-  // DBA route
+  // DBA route — role-gated, loaded separately
   try {
     app.use(
       "/api/dba",
@@ -314,14 +297,14 @@ async function createApp() {
     logger.info(`[OK] Routes loaded: ${routeResults.loaded.length}`);
   }
 
-  // ==================== IMPROVED GLOBAL ERROR HANDLER ====================
+  // ── Global error handler ──────────────────────────────────────────────────
+  // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
     const statusCode = err.status || err.statusCode || 500;
 
-    // Log full error with Pino
     req.log?.error(
       {
-        err, // This passes the real error + stack
+        err,
         requestId: req.id,
         method: req.method,
         url: req.originalUrl || req.url,
@@ -330,16 +313,13 @@ async function createApp() {
       `Unhandled error ${statusCode} on ${req.method} ${req.url}`,
     );
 
-    // Extra console output in development
     if (isDev) {
-      console.error("\n🔥 UNHANDLED ERROR 🔥");
-      console.error(err);
-      console.error(`→ ${req.method} ${req.originalUrl || req.url}`);
-      console.error("────────────────────────────────────\n");
+      process.stderr.write(
+        `\n[ERROR] ${req.method} ${req.originalUrl} => ${statusCode}: ${err.message}\n`,
+      );
     }
 
-    // Help pino-http show the real error instead of generic message
-    res.err = err;
+    res.err = err; // Let pino-http surface the real error
 
     res.status(statusCode).json({
       success: false,
@@ -352,23 +332,28 @@ async function createApp() {
   return app;
 }
 
-// ─── startServer ────────────────────────────────────────────────────────────
+// ─── startServer ─────────────────────────────────────────────────────────────
 async function startServer() {
   try {
     logger.info("[DB] Connecting to database...");
     await connectDB();
-    const worker = require("./worker"); // Redis engagement decay + cleanup worker
+
+    validateApprovalModuleMap(logger).catch((err) => {
+      logger.warn(
+        { event: "APPROVAL_MODULE_VALIDATION_FAILED", err },
+        "Approval module startup validation failed",
+      );
+    });
+
+    const worker = require("./worker");
     await worker.startWorker();
 
     logger.info("[OK] Database connected");
 
     const app = await createApp();
-
-    // Rate limiters are registered inside createApp() — no duplication needed here.
-
     const PORT = process.env.PORT || 5000;
-
     const httpServer = http.createServer(app);
+
     initSocket(httpServer);
 
     const server = httpServer.listen(PORT, () => {
@@ -385,6 +370,7 @@ async function startServer() {
   }
 }
 
+// ─── Graceful shutdown ────────────────────────────────────────────────────────
 function setupGracefulShutdown(server, worker) {
   let shuttingDown = false;
 
@@ -440,12 +426,9 @@ function setupGracefulShutdown(server, worker) {
   process.once("SIGINT", () => shutdown("SIGINT"));
 }
 
-// ─── Exports ────────────────────────────────────────────────────────────────
+// ─── Exports ──────────────────────────────────────────────────────────────────
 module.exports = { startServer, createApp };
 
-// Auto-start in non-test mode
 if (!isTest) {
-  startServer().then((serverApp) => {
-    module.exports.app = serverApp;
-  });
+  startServer();
 }
