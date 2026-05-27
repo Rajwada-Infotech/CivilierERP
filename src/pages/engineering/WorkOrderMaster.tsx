@@ -357,10 +357,10 @@ const EMPTY_GROUP = (): ActivityGroup => ({
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
 const inputCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
+  "w-full h-10 text-sm rounded-lg border border-border px-3 py-0 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
 
 const selectCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none";
+  "w-full h-10 text-sm rounded-lg border border-border px-3 py-0 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none";
 
 const cellInput =
   "w-full text-sm rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
@@ -3316,212 +3316,260 @@ const WorkOrderEditPanel: React.FC<{
             {form.docNumber}
           </span>
         </div>
-        <div className="p-4 sm:p-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-4">
-            {/* ── BOQ Link ────────────────────────────────────────────── */}
-            <div>
-              <FieldLabel>
-                <span className="flex items-center gap-1.5">
-                  <FileText size={11} />
-                  Linked BOQ
-                </span>
-              </FieldLabel>
-              <select
-                value={form.boqId}
-                onChange={async (e) => {
-                  const boqId = e.target.value;
-                  const boq = approvedBoqs.find((b) => String(b.id) === boqId);
-                  setFormState((prev) => ({
-                    ...prev,
-                    boqId,
-                    companyId: boq?.CompanyId
-                      ? String(boq.CompanyId)
-                      : prev.companyId,
-                    projectId: boq?.ProjectId
-                      ? String(boq.ProjectId)
-                      : prev.projectId,
-                  }));
-                  // Inherit BOQ activities as WO activity groups
-                  if (boqId) {
-                    try {
-                      const acts = await fetchWithAuth(
-                        `/api/engineering/boq-activities/${boqId}`,
-                      ).then((r) => r.json());
-                      if (Array.isArray(acts) && acts.length > 0) {
-                        // Group by ActivityName (BOQ uses flat list; each becomes its own group)
-                        const inherited: ActivityGroup[] = acts.map(
-                          (a: any) => ({
-                            id: uid(),
-                            groupId: null,
-                            name: a.ActivityName || "",
-                            expanded: true,
-                            activities: [
-                              {
-                                id: uid(),
-                                activityId: a.ActivityId
-                                  ? parseInt(a.ActivityId)
-                                  : null,
-                                name: a.ActivityName || "",
-                                uomId: a.UomId ?? null,
-                                unit: a.UomName || "",
-                                ratePerUnit: parseFloat(a.Rate || 0),
-                                area: parseFloat(a.Quantity || 0),
-                                materials: [],
-                                hsnCode: "",
-                                hsnGstRate: parseFloat(a.TaxPct || 0),
-                                hsnGstType: "cgst_sgst" as const,
-                              },
-                            ],
-                          }),
-                        );
-                        setGroups(inherited);
+        <div className="divide-y divide-border/60">
+          {/* ── Section 1: Project Configuration ── */}
+          <div className="px-4 sm:px-5 py-4">
+            <div className="flex items-center gap-2 mb-3.5">
+              <div className="w-1 h-4 rounded-full bg-primary/60 shrink-0" />
+              <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                Project Configuration
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {/* ── BOQ Link ────────────────────────────────────────────── */}
+              <div>
+                <FieldLabel>
+                  <span className="flex items-center gap-1.5">
+                    <FileText size={11} />
+                    Linked BOQ
+                  </span>
+                  <span className="invisible text-red-500 ml-0.5">*</span>
+                </FieldLabel>
+                <select
+                  value={form.boqId}
+                  onChange={async (e) => {
+                    const boqId = e.target.value;
+                    const boq = approvedBoqs.find(
+                      (b) => String(b.id) === boqId,
+                    );
+                    setFormState((prev) => ({
+                      ...prev,
+                      boqId,
+                      companyId: boq?.CompanyId
+                        ? String(boq.CompanyId)
+                        : prev.companyId,
+                      projectId: boq?.ProjectId
+                        ? String(boq.ProjectId)
+                        : prev.projectId,
+                    }));
+                    // Inherit BOQ activities as WO activity groups
+                    if (boqId) {
+                      try {
+                        const acts = await fetchWithAuth(
+                          `/api/engineering/boq-activities/${boqId}`,
+                        ).then((r) => r.json());
+                        if (Array.isArray(acts) && acts.length > 0) {
+                          // Group by ActivityName (BOQ uses flat list; each becomes its own group)
+                          const inherited: ActivityGroup[] = acts.map(
+                            (a: any) => ({
+                              id: uid(),
+                              groupId: null,
+                              name: a.ActivityName || "",
+                              expanded: true,
+                              activities: [
+                                {
+                                  id: uid(),
+                                  activityId: a.ActivityId
+                                    ? parseInt(a.ActivityId)
+                                    : null,
+                                  name: a.ActivityName || "",
+                                  uomId: a.UomId ?? null,
+                                  unit: a.UomName || "",
+                                  ratePerUnit: parseFloat(a.Rate || 0),
+                                  area: parseFloat(a.Quantity || 0),
+                                  materials: [],
+                                  hsnCode: "",
+                                  hsnGstRate: parseFloat(a.TaxPct || 0),
+                                  hsnGstType: "cgst_sgst" as const,
+                                },
+                              ],
+                            }),
+                          );
+                          setGroups(inherited);
+                        }
+                      } catch {
+                        /* non-fatal */
                       }
-                    } catch {
-                      /* non-fatal */
                     }
-                  }
-                }}
-                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="">— None —</option>
-                {approvedBoqs.map((b) => (
-                  <option key={b.id} value={String(b.id)}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-              {form.boqId && (
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  Company &amp; Project auto-filled from BOQ
-                </p>
-              )}
+                  }}
+                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">— None —</option>
+                  {approvedBoqs.map((b) => (
+                    <option key={b.id} value={String(b.id)}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+                {form.boqId && (
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Company &amp; Project auto-filled from BOQ
+                  </p>
+                )}
+              </div>
+              <div>
+                <FieldLabel required>
+                  <span className="flex items-center gap-1.5">
+                    <Building2 size={11} />
+                    Company Name
+                  </span>
+                </FieldLabel>
+                {renderSelect(
+                  "companyId",
+                  form.companyId,
+                  (v) => setField("companyId", v),
+                  companies,
+                  "Select company",
+                  errors.companyId ?? false,
+                )}
+                {errors.companyId && (
+                  <p className="text-xs text-red-500 mt-1">Required</p>
+                )}
+              </div>
+              <div>
+                <FieldLabel required>
+                  <span className="flex items-center gap-1.5">
+                    <Layers size={11} />
+                    Project Name
+                  </span>
+                </FieldLabel>
+                {renderSelect(
+                  "projectId",
+                  form.projectId,
+                  (v) => setField("projectId", v),
+                  projects,
+                  "Select project",
+                  errors.projectId ?? false,
+                )}
+                {errors.projectId && (
+                  <p className="text-xs text-red-500 mt-1">Required</p>
+                )}
+              </div>
             </div>
-            <div>
-              <FieldLabel required>
-                <span className="flex items-center gap-1.5">
-                  <Building2 size={11} />
-                  Company Name
-                </span>
-              </FieldLabel>
-              {renderSelect(
-                "companyId",
-                form.companyId,
-                (v) => setField("companyId", v),
-                companies,
-                "Select company",
-                errors.companyId ?? false,
-              )}
-              {errors.companyId && (
-                <p className="text-xs text-red-500 mt-1">Required</p>
-              )}
+          </div>
+
+          {/* ── Section 2: Document Configuration ── */}
+          <div className="px-4 sm:px-5 py-4">
+            <div className="flex items-center gap-2 mb-3.5">
+              <div className="w-1 h-4 rounded-full bg-indigo-400/70 shrink-0" />
+              <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                Document Configuration
+              </span>
             </div>
-            <div>
-              <FieldLabel required>
-                <span className="flex items-center gap-1.5">
-                  <Layers size={11} />
-                  Project Name
-                </span>
-              </FieldLabel>
-              {renderSelect(
-                "projectId",
-                form.projectId,
-                (v) => setField("projectId", v),
-                projects,
-                "Select project",
-                errors.projectId ?? false,
-              )}
-              {errors.projectId && (
-                <p className="text-xs text-red-500 mt-1">Required</p>
-              )}
-            </div>
-            <div>
-              <FieldLabel>
-                <span className="flex items-center gap-1.5">
-                  <Hash size={11} />
-                  Document Number
-                </span>
-              </FieldLabel>
-              <input
-                value={form.docNumber}
-                readOnly
-                className={`${inputCls} bg-muted/50 text-muted-foreground font-mono cursor-not-allowed`}
-              />
-              <p className="text-[11px] text-muted-foreground mt-1">
-                Auto-generated
-              </p>
-            </div>
-            <div>
-              <FieldLabel required>
-                <span className="flex items-center gap-1.5">
-                  <Calendar size={11} />
-                  Document Date
-                </span>
-              </FieldLabel>
-              <input
-                type="date"
-                value={form.docDate}
-                onChange={(e) => setField("docDate", e.target.value)}
-                className={`${inputCls} ${errors.docDate ? "border-red-400" : ""}`}
-              />
-            </div>
-            <div>
-              <FieldLabel required>
-                <span className="flex items-center gap-1.5">
-                  <User size={11} />
-                  Contractor
-                </span>
-              </FieldLabel>
-              {renderSelect(
-                "contractorId",
-                form.contractorId,
-                (v) => setField("contractorId", v),
-                contractors,
-                "Select contractor",
-                errors.contractorId ?? false,
-              )}
-              {errors.contractorId && (
-                <p className="text-xs text-red-500 mt-1">Required</p>
-              )}
-            </div>
-            <div>
-              <FieldLabel>
-                <span className="flex items-center gap-1.5">
-                  <User size={11} />
-                  Supplier
-                </span>
-              </FieldLabel>
-              {renderSelect(
-                "supplierId",
-                form.supplierId,
-                (v) => setField("supplierId", v),
-                suppliers,
-                "Select supplier",
-                false,
-              )}
-            </div>
-            <div>
-              <FieldLabel>
-                <span className="flex items-center gap-1.5">
-                  <IndianRupee size={11} />
-                  Total Amount
-                </span>
-              </FieldLabel>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
-                  ₹
-                </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <FieldLabel>
+                  <span className="flex items-center gap-1.5">
+                    <Hash size={11} />
+                    Document Number
+                  </span>
+                </FieldLabel>
                 <input
+                  value={form.docNumber}
                   readOnly
-                  value={grandTotal > 0 ? grandTotal.toFixed(2) : ""}
-                  placeholder="Calculated from activities"
-                  className={`${inputCls} pl-7 bg-muted/50 text-muted-foreground cursor-not-allowed`}
+                  className={`${inputCls} bg-muted/50 text-muted-foreground font-mono cursor-not-allowed`}
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Auto-generated
+                </p>
+              </div>
+              <div>
+                <FieldLabel required>
+                  <span className="flex items-center gap-1.5">
+                    <Calendar size={11} />
+                    Document Date
+                  </span>
+                </FieldLabel>
+                <input
+                  type="date"
+                  value={form.docDate}
+                  onChange={(e) => setField("docDate", e.target.value)}
+                  className={`${inputCls} ${errors.docDate ? "border-red-400" : ""}`}
                 />
               </div>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                Auto-calculated from activities
-              </p>
             </div>
-            <div className="col-span-1 sm:col-span-2 lg:col-span-3">
+          </div>
+
+          {/* ── Section 3: Parties & Amount ── */}
+          <div className="px-4 sm:px-5 py-4">
+            <div className="flex items-center gap-2 mb-3.5">
+              <div className="w-1 h-4 rounded-full bg-emerald-400/70 shrink-0" />
+              <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                Parties &amp; Amount
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <FieldLabel required>
+                  <span className="flex items-center gap-1.5">
+                    <User size={11} />
+                    Contractor
+                  </span>
+                </FieldLabel>
+                {renderSelect(
+                  "contractorId",
+                  form.contractorId,
+                  (v) => setField("contractorId", v),
+                  contractors,
+                  "Select contractor",
+                  errors.contractorId ?? false,
+                )}
+                {errors.contractorId && (
+                  <p className="text-xs text-red-500 mt-1">Required</p>
+                )}
+              </div>
+              <div>
+                <FieldLabel>
+                  <span className="flex items-center gap-1.5">
+                    <User size={11} />
+                    Supplier
+                  </span>
+                  <span className="invisible text-red-500 ml-0.5">*</span>
+                </FieldLabel>
+                {renderSelect(
+                  "supplierId",
+                  form.supplierId,
+                  (v) => setField("supplierId", v),
+                  suppliers,
+                  "Select supplier",
+                  false,
+                )}
+              </div>
+              <div>
+                <FieldLabel>
+                  <span className="flex items-center gap-1.5">
+                    <IndianRupee size={11} />
+                    Total Amount
+                  </span>
+                  <span className="invisible text-red-500 ml-0.5">*</span>
+                </FieldLabel>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                    ₹
+                  </span>
+                  <input
+                    readOnly
+                    value={grandTotal > 0 ? grandTotal.toFixed(2) : ""}
+                    placeholder="Calculated from activities"
+                    className={`${inputCls} pl-7 bg-muted/50 text-muted-foreground cursor-not-allowed`}
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Auto-calculated from activities
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Section 4: Notes & Terms ── */}
+          <div className="px-4 sm:px-5 py-4">
+            <div className="flex items-center gap-2 mb-3.5">
+              <div className="w-1 h-4 rounded-full bg-amber-400/70 shrink-0" />
+              <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                Notes &amp; Terms
+              </span>
+            </div>
+            <div className="mb-4">
               <FieldLabel>Remarks</FieldLabel>
               <input
                 value={form.remarks}
@@ -3530,7 +3578,7 @@ const WorkOrderEditPanel: React.FC<{
                 className={inputCls}
               />
             </div>
-            <div className="col-span-1 sm:col-span-2 lg:col-span-3">
+            <div>
               <FieldLabel>Terms &amp; Conditions</FieldLabel>
               {/* T&C Picker from TCMaster */}
               <div className="relative">
@@ -3656,8 +3704,6 @@ const WorkOrderEditPanel: React.FC<{
           </div>
         </div>
       </div>
-
-      {/* Activity Details */}
       <div className="rounded-xl border border-border bg-card mb-5">
         <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
@@ -4413,6 +4459,7 @@ const WorkOrderMaster: React.FC = () => {
                         <FileText size={11} />
                         Linked BOQ
                       </span>
+                      <span className="invisible text-red-500 ml-0.5">*</span>
                     </FieldLabel>
                     <select
                       value={form.boqId}
@@ -4469,7 +4516,7 @@ const WorkOrderMaster: React.FC = () => {
                           }
                         }
                       }}
-                      className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring appearance-none"
+                      className={selectCls}
                     >
                       <option value="">— None —</option>
                       {approvedBoqs.map((b) => (
@@ -4538,7 +4585,7 @@ const WorkOrderMaster: React.FC = () => {
                     Document Configuration
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {/* Financial Year */}
                   <div>
                     <FieldLabel>
@@ -4611,7 +4658,18 @@ const WorkOrderMaster: React.FC = () => {
                       Auto-filled, still editable
                     </p>
                   </div>
+                </div>
+              </div>
 
+              {/* ── Section 3: Parties & Amount ── */}
+              <div className="px-5 py-4">
+                <div className="flex items-center gap-2 mb-3.5">
+                  <div className="w-1 h-4 rounded-full bg-emerald-400/70 shrink-0" />
+                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                    Parties &amp; Amount
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   {/* Document Date */}
                   <div>
                     <FieldLabel required>
@@ -4630,18 +4688,6 @@ const WorkOrderMaster: React.FC = () => {
                       <p className="text-xs text-red-500 mt-1">Required</p>
                     )}
                   </div>
-                </div>
-              </div>
-
-              {/* ── Section 3: Parties & Amount ── */}
-              <div className="px-5 py-4">
-                <div className="flex items-center gap-2 mb-3.5">
-                  <div className="w-1 h-4 rounded-full bg-emerald-400/70 shrink-0" />
-                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-                    Parties &amp; Amount
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {/* Contractor */}
                   <div>
                     <FieldLabel required>
@@ -4670,6 +4716,7 @@ const WorkOrderMaster: React.FC = () => {
                         <User size={11} />
                         Supplier
                       </span>
+                      <span className="invisible text-red-500 ml-0.5">*</span>
                     </FieldLabel>
                     {renderSelect(
                       "supplierId",
@@ -4688,6 +4735,7 @@ const WorkOrderMaster: React.FC = () => {
                         <IndianRupee size={11} />
                         Total Amount
                       </span>
+                      <span className="invisible text-red-500 ml-0.5">*</span>
                     </FieldLabel>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">
