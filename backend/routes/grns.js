@@ -3,6 +3,8 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
+const { validateBody } = require("../middleware/validateRequest");
+const { grnBodySchema } = require("../validation/financialRouteSchemas");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const {
@@ -297,7 +299,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST - Create GRN + Stock Ledger Entries
-router.post("/", async (req, res) => {
+router.post("/", validateBody(grnBodySchema), async (req, res) => {
   const {
     grnNo,
     grnDate,
@@ -477,7 +479,7 @@ router.post("/", async (req, res) => {
 });
 
 // PUT - Update GRN
-router.put("/:id", async (req, res) => {
+router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
   try {
     await guardEdit("goods-receipt", req.params.id);
   } catch (err) {

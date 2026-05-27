@@ -29,7 +29,48 @@ const MODULE_MAP = {
   payments: { table: "dbo.NewPayment", pk: "PPaymentID", status: "Status" },
 };
 
+const MODULE_DOC_LINKS = {
+  "expense-booking": "Expense Booking",
+  "purchase-orders": "Purchase Order",
+  "work-orders": "Work Order",
+  boq: "BOQ",
+  "work-done": "Work Done",
+  grn: "GRN",
+  "goods-receipt": "GRN",
+  payments: "Payment",
+};
+
 const APPROVER_ROLES = ["admin", "super_admin", "dba"];
+
+async function validateApprovalModuleMap(log = console) {
+  const pool = getPool();
+  const missing = [];
+
+  for (const [module, linkLabel] of Object.entries(MODULE_DOC_LINKS)) {
+    const result = await pool
+      .request()
+      .input("LinkLabel", sql.NVarChar(100), `%${linkLabel}%`)
+      .query(`
+        SELECT TOP 1 TypeOfDocId
+        FROM dbo.TypeOfDoc
+        WHERE IsActive = 1
+          AND links_to LIKE @LinkLabel
+      `);
+
+    if (!result.recordset.length) {
+      missing.push({ module, expectedLink: linkLabel });
+    }
+  }
+
+  if (missing.length > 0) {
+    log.warn(
+      { event: "APPROVAL_MODULE_DOC_TYPE_MISSING", missing },
+      "Approval modules are registered without matching active TypeOfDoc links",
+    );
+  }
+
+  return missing;
+}
 
 /**
  * Fetch the active workflow for a module.
@@ -240,4 +281,10 @@ async function transition(
   throw new Error(`Unknown target status: ${targetStatus}`);
 }
 
-module.exports = { transition, guardEdit, getWorkflow, getRecordStatus };
+module.exports = {
+  transition,
+  guardEdit,
+  getWorkflow,
+  getRecordStatus,
+  validateApprovalModuleMap,
+};
