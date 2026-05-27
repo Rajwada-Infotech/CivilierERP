@@ -24,7 +24,12 @@ import {
   getUOMs,
   type CreatePOPayload,
 } from "@/api/purchaseOrdersApi";
-import { type MRPOPrefill } from "@/api/materialRequestApi";
+import {
+  type MRPOPrefill,
+  getMRPOPrefillByDocNo,
+  getMRPOPrefill,
+  getApprovedMRList,
+} from "@/api/materialRequestApi";
 import { type WDPOPrefill } from "@/api/engineeringApi";
 import { type WOPOPrefill } from "@/api/workOrderApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
@@ -341,6 +346,11 @@ const PurchaseOrderMaster: React.FC = () => {
     docNo: string;
   } | null>(null);
 
+  // ── Approved MR dropdown ──────────────────────────────────────────────────
+  const [mrDropdownValue, setMrDropdownValue] = useState<string>("");
+  const [mrDropdownLoading, setMrDropdownLoading] = useState(false);
+  const [mrDropdownError, setMrDropdownError] = useState<string | null>(null);
+
   // Source WD reference — set when form is opened from a Work Done entry
   const [sourceWD, setSourceWD] = useState<{
     id: number;
@@ -352,6 +362,14 @@ const PurchaseOrderMaster: React.FC = () => {
     id: number;
     docNo: string;
   } | null>(null);
+
+  // Must be declared after sourceMR, sourceWD, sourceWO — all used in `enabled`
+  const { data: approvedMRs = [], isLoading: approvedMRsLoading } = useQuery({
+    queryKey: ["approvedMRList"],
+    queryFn: getApprovedMRList,
+    enabled: viewMode === "create" && !sourceMR && !sourceWD && !sourceWO,
+    staleTime: 30_000,
+  });
 
   // ── Remote data ───────────────────────────────────────────────────────────
   const { data: dbData, isLoading } = useQuery({
@@ -709,6 +727,15 @@ const PurchaseOrderMaster: React.FC = () => {
 
     if (prefillLines.length > 0) setLineItems(prefillLines);
     setSourceMR({ id: mrPrefill.MRId, docNo: mrPrefill.DocNo });
+
+    // Auto-select fin year from MR
+    if (mrPrefill.FinYearId) {
+      const matchFY = finYears.find(
+        (fy) => String(fy.id) === String(mrPrefill.FinYearId),
+      );
+      if (matchFY) setSelectedFinYear(matchFY.year);
+    }
+
     setViewMode("create");
     // Only run once when mrPrefill is present and master data is loaded
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -857,6 +884,91 @@ const PurchaseOrderMaster: React.FC = () => {
     uoms.length,
     items.length,
   ]);
+
+  // ── Apply an MRPOPrefill object to the form (shared by both prefill paths) ──
+  const applyMRPrefill = (prefill: MRPOPrefill) => {
+    const matchCompany = companies.find(
+      (c) => String(c.id) === String(prefill.CompanyId),
+    );
+    const matchProject = allProjects.find(
+      (p) => String(p.id) === String(prefill.ProjectId),
+    );
+
+    // Resolve fin year: match prefill.FinYearId against context finYears
+    if (prefill.FinYearId) {
+      const matchFY = finYears.find(
+        (fy) => String(fy.id) === String(prefill.FinYearId),
+      );
+      if (matchFY) setSelectedFinYear(matchFY.year);
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      companyId: matchCompany?.id ?? prev.companyId,
+      projectId: matchProject?.id ?? prev.projectId,
+      remarks: prefill.Remarks ?? prev.remarks,
+    }));
+    const prefillLines: POLineItem[] = prefill.items.map((it) => {
+      const cgst = Number(it.M_CGST ?? 0);
+      const sgst = Number(it.M_SGST ?? 0);
+      const igst = Number(it.M_IGST ?? 0);
+      const gstRate = igst > 0 ? igst : cgst + sgst;
+      const qty = Number(it.Quantity ?? 1);
+      const rate = 0;
+      const taxAmount = (qty * rate * gstRate) / 100;
+      const uomCodeNorm = (it.UOMCode ?? "").trim().toLowerCase();
+      const uomNameNorm = (it.UOMName ?? "").trim().toLowerCase();
+      const uomMatch =
+        uoms.find(
+          (u) =>
+            (uomCodeNorm && u.code.toLowerCase() === uomCodeNorm) ||
+            (uomNameNorm && u.name.toLowerCase() === uomNameNorm),
+        ) ?? null;
+      return {
+        id: uid(),
+        itemId: it.ItemId ?? "",
+        itemName: it.ItemName ?? "",
+        itemDescription: "",
+        quantity: qty,
+        uomId: uomMatch?.id ?? null,
+        unit: uomMatch?.name ?? it.UOMName ?? it.UOMCode ?? "",
+        rate,
+        cgstRate: cgst,
+        sgstRate: sgst,
+        igstRate: igst,
+        gstRate,
+        taxAmount,
+        amount: qty * rate + taxAmount,
+      };
+    });
+    if (prefillLines.length > 0) setLineItems(prefillLines);
+    setSourceMR({ id: prefill.MRId, docNo: prefill.DocNo });
+    setMrDropdownError(null);
+  };
+
+  const handleMRDropdownSelect = async (mrId: string) => {
+    setMrDropdownValue(mrId);
+    if (!mrId) return;
+    if (
+      companies.length === 0 ||
+      allProjects.length === 0 ||
+      uoms.length === 0
+    ) {
+      setMrDropdownError("Master data still loading — please wait a moment.");
+      return;
+    }
+    setMrDropdownLoading(true);
+    setMrDropdownError(null);
+    try {
+      const prefill = await getMRPOPrefill(Number(mrId));
+      applyMRPrefill(prefill);
+      setViewMode("create");
+    } catch (err: any) {
+      setMrDropdownError(err.message ?? "Could not load Material Request.");
+    } finally {
+      setMrDropdownLoading(false);
+    }
+  };
 
   const filteredList = useMemo(() => {
     if (!searchQuery.trim()) return listData;
@@ -1189,6 +1301,8 @@ const PurchaseOrderMaster: React.FC = () => {
     setSourceMR(null);
     setSourceWD(null);
     setSourceWO(null);
+    setMrDropdownValue("");
+    setMrDropdownError(null);
   };
 
   const goToCreate = () => {
@@ -1199,6 +1313,8 @@ const PurchaseOrderMaster: React.FC = () => {
     setSourceMR(null);
     setSourceWD(null);
     setSourceWO(null);
+    setMrDropdownValue("");
+    setMrDropdownError(null);
     setViewMode("create");
   };
 
@@ -1647,6 +1763,63 @@ const PurchaseOrderMaster: React.FC = () => {
 
       <div className="space-y-5">
         {/* ── Document Type & Fin Year Card ─────────────────────────────────── */}
+        {/* ── MR Doc Number Lookup (only shown in create mode, before any source is set) ── */}
+        {viewMode === "create" &&
+          !sourceMR &&
+          !sourceWD &&
+          !sourceWO &&
+          !isReadOnly && (
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                <ClipboardList size={11} className="text-primary" />
+                Load from Material Request
+              </h3>
+              <p className="text-xs text-muted-foreground mb-3">
+                Select an approved Material Request to auto-fill items, company,
+                project and financial year.
+              </p>
+              <div className="flex items-start gap-2">
+                <div className="flex-1">
+                  <select
+                    value={mrDropdownValue}
+                    onChange={(e) =>
+                      void handleMRDropdownSelect(e.target.value)
+                    }
+                    disabled={approvedMRsLoading || mrDropdownLoading}
+                    className={`${inputCls} ${mrDropdownError ? "border-red-400" : ""}`}
+                  >
+                    <option value="">
+                      {approvedMRsLoading
+                        ? "Loading approved MRs…"
+                        : approvedMRs.length === 0
+                          ? "No approved Material Requests"
+                          : "— Select a Material Request —"}
+                    </option>
+                    {approvedMRs.map((mr) => (
+                      <option key={mr.MRId} value={String(mr.MRId)}>
+                        {mr.DocNo}
+                        {mr.ProjectName ? ` · ${mr.ProjectName}` : ""}
+                        {mr.FinYearName ? ` (${mr.FinYearName})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {mrDropdownError && (
+                    <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                      <AlertCircle size={11} />
+                      {mrDropdownError}
+                    </p>
+                  )}
+                </div>
+                {mrDropdownLoading && (
+                  <div className="flex items-center gap-1.5 px-3 py-2.5 text-xs text-muted-foreground shrink-0">
+                    <RefreshCw size={13} className="animate-spin" />
+                    Loading…
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
         {sourceMR && !isReadOnly && (
           <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 flex items-center gap-3 text-sm">
             <ClipboardList

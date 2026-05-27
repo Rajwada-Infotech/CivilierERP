@@ -27,6 +27,11 @@ const MODULE_MAP = {
     status: "Status",
   },
   payments: { table: "dbo.NewPayment", pk: "PPaymentID", status: "Status" },
+  "material-requests": {
+    table: "dbo.MaterialRequests",
+    pk: "MRId",
+    status: "Status",
+  },
 };
 
 const APPROVER_ROLES = ["admin", "super_admin", "dba"];
