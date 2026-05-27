@@ -1081,7 +1081,8 @@ export default function Login() {
         setTimeout(() => {
           const role = result.role;
           const uid = result.userId ?? "";
-          if (role === "customer") navigate(`/customer-portal/${uid}`, { replace: true });
+          if (role === "customer")
+            navigate(`/customer-portal/${uid}`, { replace: true });
           else if (role === "dba") navigate(`/dba/${uid}`, { replace: true });
           else if (role === "super_admin" || role === "admin")
             navigate(`/admin/dashboard/${uid}`, { replace: true });

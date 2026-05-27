@@ -674,7 +674,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
                     >
                       <span
                         style={{
-                          fontFamily: "monospace",
+                          fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                          fontVariantNumeric: "tabular-nums",
                           fontSize: 10,
                           color: "hsl(var(--muted-foreground))",
                           background: "hsl(var(--muted))",
@@ -745,7 +746,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
                       {readOnly ? (
                         <span
                           style={{
-                            fontFamily: "monospace",
+                            fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                            fontVariantNumeric: "tabular-nums",
                             fontSize: 12.5,
                             display: "block",
                             textAlign: "right",
@@ -770,7 +772,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
                             fontSize: 12,
                             color: "hsl(var(--foreground))",
                             outline: "none",
-                            fontFamily: "monospace",
+                            fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                            fontVariantNumeric: "tabular-nums",
                             textAlign: "right",
                           }}
                         />
@@ -827,7 +830,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
                       {readOnly ? (
                         <span
                           style={{
-                            fontFamily: "monospace",
+                            fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                            fontVariantNumeric: "tabular-nums",
                             fontSize: 12.5,
                             display: "block",
                             textAlign: "right",
@@ -852,7 +856,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
                             fontSize: 12,
                             color: "hsl(var(--foreground))",
                             outline: "none",
-                            fontFamily: "monospace",
+                            fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                            fontVariantNumeric: "tabular-nums",
                             textAlign: "right",
                           }}
                         />
@@ -869,7 +874,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
                       {readOnly ? (
                         <span
                           style={{
-                            fontFamily: "monospace",
+                            fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                            fontVariantNumeric: "tabular-nums",
                             fontSize: 11.5,
                             display: "block",
                             textAlign: "right",
@@ -896,7 +902,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
                             fontSize: 12,
                             color: "hsl(var(--muted-foreground))",
                             outline: "none",
-                            fontFamily: "monospace",
+                            fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                            fontVariantNumeric: "tabular-nums",
                             textAlign: "right",
                           }}
                         />
@@ -913,7 +920,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
                     >
                       <span
                         style={{
-                          fontFamily: "monospace",
+                          fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                          fontVariantNumeric: "tabular-nums",
                           fontSize: 12.5,
                           fontWeight: 700,
                           color: "hsl(var(--primary))",
@@ -935,7 +943,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
                     >
                       <span
                         style={{
-                          fontFamily: "monospace",
+                          fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                          fontVariantNumeric: "tabular-nums",
                           fontSize: 12.5,
                           fontWeight: 600,
                           color: "hsl(var(--muted-foreground))",
@@ -1017,7 +1026,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
                 <td style={{ padding: "6px 10px", textAlign: "right" }}>
                   <span
                     style={{
-                      fontFamily: "monospace",
+                      fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                      fontVariantNumeric: "tabular-nums",
                       fontSize: 13,
                       fontWeight: 700,
                       color: "hsl(var(--primary))",
@@ -1061,7 +1071,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
             </span>
             <span
               style={{
-                fontFamily: "monospace",
+                fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                fontVariantNumeric: "tabular-nums",
                 fontSize: 12.5,
                 fontWeight: 600,
                 color: "hsl(var(--foreground))",
@@ -1085,7 +1096,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
             </span>
             <span
               style={{
-                fontFamily: "monospace",
+                fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                fontVariantNumeric: "tabular-nums",
                 fontSize: 12.5,
                 fontWeight: 600,
                 color: "hsl(var(--foreground))",
@@ -1109,7 +1121,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
           </span>
           <span
             style={{
-              fontFamily: "monospace",
+              fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+              fontVariantNumeric: "tabular-nums",
               fontSize: 20,
               fontWeight: 700,
               color: "hsl(var(--primary))",
@@ -1726,7 +1739,8 @@ const DetailModal: React.FC<DetailModalProps> = ({
                 fontSize: 16,
                 fontWeight: 600,
                 color: "hsl(var(--primary))",
-                fontFamily: "monospace",
+                fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                fontVariantNumeric: "tabular-nums",
               }}
             >
               {record.BoqNo || record.DocNo}
@@ -1820,13 +1834,13 @@ const DetailModal: React.FC<DetailModalProps> = ({
             <DetailRow label="BOQ Date" value={fmtDate(record.BoqDate)} />
             <DetailRow
               label="Document No"
-              value={<span className="font-mono">{record.DocNo}</span>}
+              value={<span className="tabular-nums">{record.DocNo}</span>}
             />
             <DetailRow label="Created By" value={record.CreatedBy} />
             <DetailRow
               label="Total Amount"
               value={
-                <span className="font-mono text-primary font-bold">
+                <span className="tabular-nums text-primary font-bold">
                   {fmt(record.TotalAmount)}
                 </span>
               }
@@ -1923,7 +1937,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     accessorKey: "BoqNo",
     header: "BOQ No",
     cell: ({ row }) => (
-      <span className="font-mono font-semibold text-primary text-sm">
+      <span className="tabular-nums font-semibold text-primary text-sm">
         {row.original.BoqNo || row.original.DocNo || "—"}
       </span>
     ),
@@ -1957,7 +1971,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     accessorKey: "TotalAmount",
     header: "Total Amount",
     cell: ({ getValue }) => (
-      <span className="text-sm font-semibold font-mono tabular-nums">
+      <span className="text-sm font-semibold tabular-nums">
         {fmt(getValue() as number)}
       </span>
     ),
@@ -2460,7 +2474,8 @@ export default function BOQ() {
                     fontSize: 22,
                     fontWeight: 700,
                     marginTop: 4,
-                    fontFamily: "monospace",
+                    fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                    fontVariantNumeric: "tabular-nums",
                   }}
                 >
                   {s.value}

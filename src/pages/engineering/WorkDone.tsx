@@ -566,7 +566,15 @@ function WorkDoneForm({
                     if (actRes.ok) {
                       const acts = await actRes.json();
                       console.log("[WO activities raw]", acts);
-                      setWoActivities(Array.isArray(acts) ? acts : []);
+                      const actList = Array.isArray(acts) ? acts : [];
+                      setWoActivities(actList);
+                      // Auto-fill Unit from first activity's UOMName
+                      if (actList.length > 0 && actList[0].UOMName) {
+                        setForm((prev) => ({
+                          ...prev,
+                          Unit: prev.Unit || actList[0].UOMName,
+                        }));
+                      }
                     } else {
                       console.error(
                         "[WO activities] non-ok",
@@ -666,8 +674,8 @@ function WorkDoneForm({
         </div>
 
         <div className="p-5 space-y-5">
-          {/* Period range */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+          {/* Period range + Unit */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
             <div>
               <FieldLabel>Period From</FieldLabel>
               <input
@@ -683,6 +691,16 @@ function WorkDoneForm({
                 type="date"
                 value={form.PeriodTo}
                 onChange={(e) => setField("PeriodTo", e.target.value)}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <FieldLabel>Unit</FieldLabel>
+              <input
+                type="text"
+                value={form.Unit}
+                onChange={(e) => setField("Unit", e.target.value)}
+                placeholder="e.g. Sqft, Rmt, LS…"
                 className={inputCls}
               />
             </div>

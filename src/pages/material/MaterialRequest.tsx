@@ -443,7 +443,11 @@ export default function MaterialRequest() {
         Remarks: ci.Remarks || null,
       })),
     };
-    if (editingId) { updateMutation.mutate(payload); } else { createMutation.mutate(payload); }
+    if (editingId) {
+      updateMutation.mutate(payload);
+    } else {
+      createMutation.mutate(payload);
+    }
   };
 
   // ── Columns ───────────────────────────────────────────────────────────────────
@@ -1132,7 +1136,7 @@ export default function MaterialRequest() {
         <Button
           onClick={onSave}
           disabled={!canSave || isSaving}
-          className="px-6 gap-2"
+          className="gradient-accent px-6 gap-2"
         >
           {isSaving ? (
             <RefreshCw size={14} className="animate-spin" />
@@ -1340,30 +1344,32 @@ export default function MaterialRequest() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "Material Request"]} />
-
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <ClipboardList size={22} className="text-primary" />
-            Material Requests
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Create and manage material requisitions for projects.
-          </p>
+      <div className="relative space-y-8 mt-6">
+        {/* ── Page header ── */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Material Requests
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Create and manage material requisitions for projects.
+            </p>
+          </div>
+          {viewMode === "list" && (
+            <Button
+              onClick={() => setViewMode("form")}
+              className="gradient-accent gap-1.5 shrink-0"
+            >
+              <Plus size={15} /> New Request
+            </Button>
+          )}
         </div>
-        {viewMode === "list" && (
-          <Button
-            onClick={() => setViewMode("form")}
-            className="gap-2 shrink-0"
-          >
-            <Plus size={15} /> New Request
-          </Button>
-        )}
-      </div>
 
-      {viewMode === "list" && ListView()}
-      {viewMode === "form" && FormView()}
-      {viewMode === "view" && ViewMode()}
+        {viewMode === "list" && ListView()}
+        {viewMode === "form" && FormView()}
+        {viewMode === "view" && ViewMode()}
+      </div>
+      {/* end space-y-8 */}
     </>
   );
 }

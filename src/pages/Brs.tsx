@@ -347,50 +347,52 @@ export default function Brs() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "BRS"]} />
+      <div className="relative space-y-8 mt-6">
 
-      {/* ── Page header ────────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
-            Bank Reconciliation Statement
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Verify payments against your bank passbook — tick each entry once
-            confirmed
-          </p>
+        {/* ── Page header ────────────────────────────────────────────────────── */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Bank Reconciliation Statement
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Verify payments against your bank passbook — tick each entry once
+              confirmed
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={fetchData}
+              disabled={loading}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              title="Refresh"
+            >
+              <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+              Refresh
+            </button>
+            <ExportMenu
+              data={exportData}
+              columns={EXPORT_COLUMNS}
+              title="Bank Reconciliation Statement"
+              filename="brs-export"
+              subtitle={
+                [
+                  fromDate && `From: ${fmt(fromDate)}`,
+                  toDate && `To: ${fmt(toDate)}`,
+                  statusFilter &&
+                    `Status: ${statusFilter === "clear" ? "Clear" : "Unclear"}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || undefined
+              }
+              disabled={filtered.length === 0}
+            />
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={fetchData}
-            disabled={loading}
-            className="p-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
-            title="Refresh"
-          >
-            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-          </button>
-          <ExportMenu
-            data={exportData}
-            columns={EXPORT_COLUMNS}
-            title="Bank Reconciliation Statement"
-            filename="brs-export"
-            subtitle={
-              [
-                fromDate && `From: ${fmt(fromDate)}`,
-                toDate && `To: ${fmt(toDate)}`,
-                statusFilter &&
-                  `Status: ${statusFilter === "clear" ? "Clear" : "Unclear"}`,
-              ]
-                .filter(Boolean)
-                .join(" · ") || undefined
-            }
-            disabled={filtered.length === 0}
-          />
-        </div>
-      </div>
-
-      {/* ── Stats ──────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        {/* ── Stats ──────────────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {stats.map(({ label, value, sub, icon: Icon, ring, bg, color }) => (
           <div
             key={label}
@@ -416,7 +418,7 @@ export default function Brs() {
 
       {/* ── Progress bar ───────────────────────────────────────────────────── */}
       {total > 0 && (
-        <div className="glass rounded-xl px-5 py-3.5 mb-5">
+        <div className="glass rounded-xl px-5 py-3.5">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-xs font-medium text-muted-foreground">
               Reconciliation progress
@@ -441,7 +443,7 @@ export default function Brs() {
       )}
 
       {/* ── Filters ────────────────────────────────────────────────────────── */}
-      <div className="glass rounded-xl px-5 py-4 mb-5 space-y-3">
+      <div className="glass rounded-xl px-5 py-4 space-y-3">
         {/* Row 1: search + company + bank */}
         <div className="flex flex-wrap gap-2 items-center">
           {/* Search */}
@@ -808,6 +810,7 @@ export default function Brs() {
           Showing payments and received payments with a linked bank account
         </p>
       </div>
+      </div>{/* end p-6 space-y-8 */}
     </>
   );
 }

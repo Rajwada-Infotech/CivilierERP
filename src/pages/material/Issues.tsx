@@ -1282,7 +1282,7 @@ export default function Issues() {
           <Button
             onClick={onSave}
             disabled={!canSave || isSaving}
-            className="px-6 gap-2"
+            className="gradient-accent px-6 gap-2"
           >
             {isSaving ? (
               <RefreshCw size={14} className="animate-spin" />
@@ -1504,30 +1504,33 @@ export default function Issues() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "Issues"]} />
-
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <PackageMinus size={22} className="text-primary" />
-            Material Issues
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Issue stock items to projects with real-time availability tracking.
-          </p>
+      <div className="relative space-y-8 mt-6">
+        {/* ── Page header ── */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Material Issues
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Issue stock items to projects with real-time availability
+              tracking.
+            </p>
+          </div>
+          {viewMode === "list" && (
+            <Button
+              onClick={() => setViewMode("form")}
+              className="gradient-accent gap-1.5 shrink-0"
+            >
+              <Plus size={15} /> New Issue
+            </Button>
+          )}
         </div>
-        {viewMode === "list" && (
-          <Button
-            onClick={() => setViewMode("form")}
-            className="gap-2 shrink-0"
-          >
-            <Plus size={15} /> New Issue
-          </Button>
-        )}
-      </div>
 
-      {viewMode === "list" && IssueList()}
-      {viewMode === "form" && IssueForm()}
-      {viewMode === "view" && IssueView()}
+        {viewMode === "list" && IssueList()}
+        {viewMode === "form" && IssueForm()}
+        {viewMode === "view" && IssueView()}
+      </div>
+      {/* end space-y-8 */}
     </>
   );
 }
