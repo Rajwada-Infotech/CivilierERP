@@ -213,19 +213,20 @@ export function DocNumberPreview({
   const isSpinning = refreshing || generating;
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5 min-w-0 w-full overflow-hidden">
       {/* ── Dropdown + refresh button ── */}
-      <div className="flex gap-2 items-start">
-        <div className="flex-1">
+      <div className="flex gap-2 items-start min-w-0">
+        <div className="flex-1 min-w-0 overflow-hidden">
           <Select
             value={selectedDocTypeId ? String(selectedDocTypeId) : ""}
             onValueChange={handleSelect}
             disabled={docTypesLoading || readOnly}
           >
-            <SelectTrigger>
-              <div className="flex items-center gap-2 min-w-0">
+            <SelectTrigger className="w-full min-w-0 rounded-lg border border-border bg-background text-sm !ring-0 !shadow-none !outline-none focus:!ring-0 focus-visible:!ring-0 focus-visible:!ring-offset-0 data-[state=open]:!ring-0 [&>span]:truncate">
+              <div className="flex items-center gap-2 min-w-0 overflow-hidden">
                 <Hash size={13} className="text-muted-foreground shrink-0" />
                 <SelectValue
+                  className="truncate"
                   placeholder={
                     docTypesLoading
                       ? "Loading document types..."
@@ -237,16 +238,20 @@ export function DocNumberPreview({
               </div>
             </SelectTrigger>
 
-            <SelectContent>
+            <SelectContent
+              position="popper"
+              sideOffset={4}
+              className="z-[200] w-[var(--radix-select-trigger-width)] min-w-[220px]"
+            >
               {docTypes.map((dt) => (
                 <SelectItem key={dt.TypeOfDocId} value={String(dt.TypeOfDocId)}>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 w-full min-w-0">
                     {/* Prefix badge — shows the effective doc number prefix */}
-                    <span className="font-mono text-xs font-semibold text-primary">
+                    <span className="font-mono text-xs font-semibold text-primary shrink-0">
                       {docTypeLabel(dt)}
                     </span>
-                    <span className="text-xs opacity-40">·</span>
-                    <span className="text-xs opacity-80">{dt.Description}</span>
+                    <span className="text-xs opacity-40 shrink-0">·</span>
+                    <span className="text-xs opacity-80 truncate">{dt.Description}</span>
                     {dt.EntryType && (
                       <span className="text-[10px] opacity-40 ml-auto pl-3 shrink-0">
                         {dt.EntryType}
@@ -275,19 +280,19 @@ export function DocNumberPreview({
 
       {/* ── Live preview pill ── */}
       {selectedType && (
-        <div className="flex items-center gap-2 px-1">
+        <div className="flex items-center gap-1.5 px-1 min-w-0 overflow-hidden">
           {isSpinning ? (
-            <p className="text-xs text-muted-foreground animate-pulse">
+            <p className="text-xs text-muted-foreground animate-pulse truncate">
               {generating ? "Generating" : "Refreshing"} next number
               {finYear ? ` · FY ${finYear}` : ""}…
             </p>
           ) : preview ? (
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-sm font-bold text-primary tracking-wider">
+            <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+              <span className="font-mono text-sm font-bold text-primary tracking-wider truncate min-w-0">
                 {preview}
               </span>
               {finYear && (
-                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading">
+                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading shrink-0 whitespace-nowrap">
                   FY {finYear}
                 </span>
               )}
