@@ -198,6 +198,19 @@ router.get("/", cache("grns", 300), async (req, res) => {
         grn.DocTypeId,
         grn.DocNo,
         grn.TotalAmount,
+        grn.DocYear,
+        -- Derive a FinYear string so the expense-booking picker can filter correctly.
+        -- Dash-format GRNs store the calendar year of GRN date in DocYear (e.g. 2026).
+        -- Indian FY runs Apr–Mar: if GRN month >= 4 the FY starts that year, else previous year.
+        CASE
+          WHEN grn.DocYear IS NOT NULL THEN
+            CASE
+              WHEN MONTH(grn.GRNDate) >= 4
+                THEN CAST(grn.DocYear AS NVARCHAR(4)) + '-' + CAST(grn.DocYear + 1 AS NVARCHAR(4))
+              ELSE CAST(grn.DocYear - 1 AS NVARCHAR(4)) + '-' + CAST(grn.DocYear AS NVARCHAR(4))
+            END
+          ELSE NULL
+        END AS FinYear,
         s.LHeadName AS SupplierName,
         p.PurchaseOrderNo AS PONumber,
         p.POType,
