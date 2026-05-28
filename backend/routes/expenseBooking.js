@@ -156,8 +156,8 @@ async function buildGrnGstData(pool, grnId) {
   const vendorState = header.VendorState || "";
   const companyState = header.CompanyState || "";
   const isIntraState =
-    normalizeState(vendorState) &&
-    normalizeState(companyState) &&
+    !normalizeState(vendorState) ||
+    !normalizeState(companyState) ||
     normalizeState(vendorState) === normalizeState(companyState);
 
   const lines = grnItems.map((item, index) => {
@@ -203,7 +203,7 @@ async function buildGrnGstData(pool, grnId) {
       toNumber(header.POGstRate) ||
       parentGstRate;
     const gstPercent = configuredGst;
-    const taxableAmount =
+    const inclusiveAmount =
       toNumber(item.totalAmountInclGST) ||
       toNumber(item.totalAmount) ||
       toNumber(item.amount) ||
@@ -215,11 +215,17 @@ async function buildGrnGstData(pool, grnId) {
       ? configuredSgst || storedSgst || gstPercent / 2
       : 0;
     const igstRate = isIntraState ? 0 : configuredIgst || storedIgst || gstPercent;
+    const totalGstRate = cgstRate + sgstRate + igstRate;
+    const taxableAmount = roundMoney(
+      totalGstRate > 0
+        ? inclusiveAmount / (1 + totalGstRate / 100)
+        : inclusiveAmount,
+    );
     const cgstAmount = roundMoney((taxableAmount * cgstRate) / 100);
     const sgstAmount = roundMoney((taxableAmount * sgstRate) / 100);
     const igstAmount = roundMoney((taxableAmount * igstRate) / 100);
     const splitGstAmount = roundMoney(cgstAmount + sgstAmount + igstAmount);
-    const netAmount = roundMoney(taxableAmount + splitGstAmount);
+    const netAmount = roundMoney(inclusiveAmount);
     const gstAmount = splitGstAmount;
 
     return {
@@ -271,6 +277,19 @@ async function buildGrnGstData(pool, grnId) {
     0,
   );
 
+  const effectiveCgstRate =
+    totals.taxableAmount > 0
+      ? roundMoney((totals.cgstAmount / totals.taxableAmount) * 100)
+      : 0;
+  const effectiveSgstRate =
+    totals.taxableAmount > 0
+      ? roundMoney((totals.sgstAmount / totals.taxableAmount) * 100)
+      : 0;
+  const effectiveIgstRate =
+    totals.taxableAmount > 0
+      ? roundMoney((totals.igstAmount / totals.taxableAmount) * 100)
+      : 0;
+
   return {
     grnId: header.GRNID,
     grnNo: header.GRNNo || header.DocNo,
@@ -283,9 +302,9 @@ async function buildGrnGstData(pool, grnId) {
     companyState,
     taxMode: isIntraState ? "cgst_sgst" : "igst",
     gstPercent: maxGstPercent,
-    cgstRate: isIntraState ? maxGstPercent / 2 : 0,
-    sgstRate: isIntraState ? maxGstPercent / 2 : 0,
-    igstRate: isIntraState ? 0 : maxGstPercent,
+    cgstRate: effectiveCgstRate,
+    sgstRate: effectiveSgstRate,
+    igstRate: effectiveIgstRate,
     totals,
     lines,
   };
