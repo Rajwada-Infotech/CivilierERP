@@ -7,7 +7,13 @@ const BASE_URL = "/api/new-payment";
 async function parseError(res: Response, fallback: string) {
   try {
     const err = await res.json();
-    return err.error || fallback;
+    const details = Array.isArray(err.details)
+      ? err.details
+          .map((detail: any) => `${detail.field || "field"}: ${detail.message}`)
+          .join(" | ")
+      : "";
+    const message = err.message || err.error;
+    return details ? `${message || fallback} - ${details}` : message || fallback;
   } catch {
     return fallback;
   }
