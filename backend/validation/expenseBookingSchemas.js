@@ -14,7 +14,15 @@ const optCoerceDate = z.coerce.date().optional();
 const optJsonPassthrough = z.any().optional(); // JSON blobs validated downstream
 
 const VALID_STATUSES = ["Draft", "Submitted", "Approved", "Rejected", "Paid"];
-const VALID_SOURCE_TYPES = ["PO", "WO", "GRN", "Manual"];
+const VALID_SOURCE_TYPES = [
+  "PO",
+  "WO",
+  "WO_PO",
+  "GRN",
+  "TOD",
+  "WORK_DONE",
+  "Manual",
+];
 
 // ─── Core expense booking body (shared by POST and PUT /:id) ─────────────────
 

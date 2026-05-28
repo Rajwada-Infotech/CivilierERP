@@ -2,8 +2,8 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft,
   Plus,
+  RefreshCw,
   Search,
   X,
   FileText,
@@ -27,6 +27,7 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -429,7 +430,7 @@ export function AgreementsPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: result, isLoading } = useQuery({
+  const { data: result, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["agreements", page, search, statusFilter],
     queryFn: () =>
       fetchAgreements({
@@ -614,20 +615,13 @@ export function AgreementsPage() {
       <style>{`
         /* ── Theme bridge: all ag-* classes use CSS vars ── */
         .ag-page {
-          min-height: 100vh;
-          background: hsl(var(--background));
           font-family: 'DM Sans', 'Segoe UI', sans-serif;
           color: hsl(var(--foreground));
         }
 
         /* ── Header ── */
         .ag-header {
-          background: hsl(var(--card));
-          border-bottom: 1px solid hsl(var(--border));
-          padding: 20px 28px 0;
-          position: sticky;
-          top: 0;
-          z-index: 20;
+          padding: 0 0 0 0;
         }
         .ag-header-top {
           display: flex;
@@ -663,14 +657,14 @@ export function AgreementsPage() {
         }
         .ag-add-btn {
           display: flex; align-items: center; gap: 6px;
-          background: hsl(var(--primary));
-          color: hsl(var(--primary-foreground)); border: none; border-radius: 10px;
-          padding: 9px 16px; font-size: 13px; font-weight: 600;
+          background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary) / 0.8));
+          color: hsl(var(--primary-foreground)); border: none; border-radius: 8px;
+          padding: 7px 14px; font-size: 13px; font-weight: 600;
           cursor: pointer; transition: all 0.15s;
-          font-family: inherit; box-shadow: 0 2px 8px rgba(37,99,235,0.25);
-          white-space: nowrap;
+          font-family: var(--font-heading, inherit); box-shadow: 0 2px 8px hsl(var(--primary) / 0.25);
+          white-space: nowrap; height: 32px;
         }
-        .ag-add-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+        .ag-add-btn:hover { opacity: 0.9; }
 
         /* ── Filter bar ── */
         .ag-filter-bar {
@@ -725,7 +719,7 @@ export function AgreementsPage() {
         .ag-stat-val.amber { color: hsl(38 92% 50%); }
 
         /* ── Body ── */
-        .ag-body { padding: 24px 28px; width: 100%; display: flex; flex-direction: column; }
+        .ag-body { padding: 24px 0; width: 100%; display: flex; flex-direction: column; gap: 20px; }
 
         /* ── Table ── */
         .ag-table-wrap {
@@ -920,134 +914,146 @@ export function AgreementsPage() {
         }
       `}</style>
 
-      <div className="ag-page" onClick={() => setOpenMenuId(null)}>
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Agreements", path: "/followup/agreement/agreements" },
+        ]}
+      />
+      <div className="ag-page relative space-y-8 mt-6" onClick={() => setOpenMenuId(null)}>
         {/* ── Header ── */}
-        <div className="ag-header">
-          <div className="ag-header-top">
-            <div>
-              <button className="ag-back" onClick={() => navigate(-1)}>
-                <ArrowLeft size={13} /> Follow-Up
-              </button>
-              <div className="ag-title-row" style={{ marginTop: 8 }}>
-                <div className="ag-icon">
-                  <FileText size={20} />
-                </div>
-                <span className="ag-title">Agreements</span>
-                {pagination && (
-                  <span className="ag-count">{pagination.total}</span>
-                )}
-              </div>
-            </div>
-            <button className="ag-add-btn" onClick={openCreate}>
-              <Plus size={15} /> New Agreement
-            </button>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Agreements
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {pagination ? `${pagination.total} agreement${pagination.total !== 1 ? "s" : ""}` : "Manage all agreements"}
+            </p>
           </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              Refresh
+            </button>
+            <Button
+              size="sm"
+              onClick={openCreate}
+              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+            >
+              <Plus size={14} /> New Agreement
+            </Button>
+          </div>
+        </div>
 
-          {/* Filter bar */}
-          <div className="ag-filter-bar">
-            <div className="ag-search-wrap">
-              <Search size={14} />
-              <input
-                className="ag-search"
-                placeholder="Search agreements, applicants, units…"
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
+        {/* Filter bar */}
+        <div className="ag-filter-bar">
+          <div className="ag-search-wrap">
+            <Search size={14} />
+            <input
+              className="ag-search"
+              placeholder="Search agreements, applicants, units…"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+            />
+            {search && (
+              <button
+                className="ag-search-clear"
+                onClick={() => {
+                  setSearch("");
                   setPage(1);
                 }}
-              />
-              {search && (
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+          <div className="ag-pills">
+            {STATUS_FILTERS.map((s) => {
+              const isActive = statusFilter === s;
+              let cls = "ag-pill";
+              if (isActive) {
+                cls +=
+                  s === ""
+                    ? " active"
+                    : s === "Draft"
+                      ? " active-draft"
+                      : s === "Issued"
+                        ? " active-issued"
+                        : s === "Signed"
+                          ? " active-signed"
+                          : " active-cancelled";
+              }
+              return (
                 <button
-                  className="ag-search-clear"
+                  key={s}
+                  className={cls}
                   onClick={() => {
-                    setSearch("");
+                    setStatusFilter(s);
                     setPage(1);
                   }}
                 >
-                  <X size={13} />
+                  {STATUS_FILTER_LABELS[s]}
                 </button>
-              )}
-            </div>
-            <div className="ag-pills">
-              {STATUS_FILTERS.map((s) => {
-                const isActive = statusFilter === s;
-                let cls = "ag-pill";
-                if (isActive) {
-                  cls +=
-                    s === ""
-                      ? " active"
-                      : s === "Draft"
-                        ? " active-draft"
-                        : s === "Issued"
-                          ? " active-issued"
-                          : s === "Signed"
-                            ? " active-signed"
-                            : " active-cancelled";
-                }
-                return (
-                  <button
-                    key={s}
-                    className={cls}
-                    onClick={() => {
-                      setStatusFilter(s);
-                      setPage(1);
-                    }}
-                  >
-                    {STATUS_FILTER_LABELS[s]}
-                  </button>
-                );
-              })}
-            </div>
+              );
+            })}
           </div>
-
-          {/* Stats */}
-          {!isLoading &&
-            agreements.length > 0 &&
-            (() => {
-              const total = agreements.reduce(
-                (s, a) => s + (a.AgreementValue ?? 0),
-                0,
-              );
-              const adv = agreements.reduce(
-                (s, a) => s + (a.AdvanceAmount ?? 0),
-                0,
-              );
-              const bal = agreements.reduce(
-                (s, a) => s + (a.BalanceAmount ?? 0),
-                0,
-              );
-              const signed = agreements.filter(
-                (a) => a.Status === "Signed",
-              ).length;
-              return (
-                <div className="ag-stats">
-                  <div className="ag-stat">
-                    <div className="ag-stat-val blue">{agreements.length}</div>
-                    <div className="ag-stat-label">Shown</div>
-                  </div>
-                  <div className="ag-stat">
-                    <div className="ag-stat-val">₹{fmt(total)}</div>
-                    <div className="ag-stat-label">Total Value</div>
-                  </div>
-                  <div className="ag-stat">
-                    <div className="ag-stat-val green">₹{fmt(adv)}</div>
-                    <div className="ag-stat-label">Advance</div>
-                  </div>
-                  <div className="ag-stat">
-                    <div className="ag-stat-val amber">₹{fmt(bal)}</div>
-                    <div className="ag-stat-label">Balance</div>
-                  </div>
-                  <div className="ag-stat">
-                    <div className="ag-stat-val green">{signed}</div>
-                    <div className="ag-stat-label">Signed</div>
-                  </div>
-                </div>
-              );
-            })()}
         </div>
 
+        {/* Stats */}
+        {!isLoading &&
+          agreements.length > 0 &&
+          (() => {
+            const total = agreements.reduce(
+              (s, a) => s + (a.AgreementValue ?? 0),
+              0,
+            );
+            const adv = agreements.reduce(
+              (s, a) => s + (a.AdvanceAmount ?? 0),
+              0,
+            );
+            const bal = agreements.reduce(
+              (s, a) => s + (a.BalanceAmount ?? 0),
+              0,
+            );
+            const signed = agreements.filter(
+              (a) => a.Status === "Signed",
+            ).length;
+            return (
+              <div className="ag-stats">
+                <div className="ag-stat">
+                  <div className="ag-stat-val blue">{agreements.length}</div>
+                  <div className="ag-stat-label">Shown</div>
+                </div>
+                <div className="ag-stat">
+                  <div className="ag-stat-val">₹{fmt(total)}</div>
+                  <div className="ag-stat-label">Total Value</div>
+                </div>
+                <div className="ag-stat">
+                  <div className="ag-stat-val green">₹{fmt(adv)}</div>
+                  <div className="ag-stat-label">Advance</div>
+                </div>
+                <div className="ag-stat">
+                  <div className="ag-stat-val amber">₹{fmt(bal)}</div>
+                  <div className="ag-stat-label">Balance</div>
+                </div>
+                <div className="ag-stat">
+                  <div className="ag-stat-val green">{signed}</div>
+                  <div className="ag-stat-label">Signed</div>
+                </div>
+              </div>
+            );
+          })()}
+
         {/* ── Body ── */}
-        <div className="ag-body">
+        <div className="ag-body" style={{ paddingTop: 0, paddingBottom: 0 }}>
           {isLoading ? (
             <div className="ag-table-wrap">
               <table className="ag-table">
