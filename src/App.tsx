@@ -241,7 +241,6 @@ const TDSReminders = lazy(() => import("./pages/followup/TDSReminders"));
 const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
 const PendingTasksPage = lazy(() => import("./pages/followup/PendingTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
-const FollowupApplicants = lazy(() => import("./pages/followup/Applicants"));
 const BookingsPage = lazy(() => import("./pages/followup/Bookings"));
 const FollowupUnitSelection = lazy(
   () => import("./pages/followup/UnitSelection"),
@@ -252,6 +251,9 @@ const FollowupAgreements = lazy(() =>
   })),
 );
 const ApplicantDetail = lazy(() => import("./pages/followup/ApplicantDetail"));
+const FollowupApplications = lazy(
+  () => import("./pages/followup/Applications"),
+);
 const WelcomeCallsPage = lazy(() =>
   import("./pages/followup/FollowupExtraPages").then((module) => ({
     default: module.WelcomeCallsPage,
@@ -692,15 +694,6 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/followup/sales/applicants"
-        element={
-          <ProtectedRoute>
-            <FollowupApplicants />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/followup/sales/applicants/:id"
         element={
           <ProtectedRoute>
             <ApplicantDetail />
@@ -712,6 +705,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ApplicantDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/sales/applicants"
+        element={
+          <ProtectedRoute>
+            <FollowupApplications />
           </ProtectedRoute>
         }
       />
