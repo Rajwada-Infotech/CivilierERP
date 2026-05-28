@@ -27,6 +27,221 @@ const requireUserEmail = (req, res) => {
   return email;
 };
 
+function parseJsonArray(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function normalizeState(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function roundMoney(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function toNumber(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+async function buildGrnGstData(pool, grnId) {
+  const headerResult = await pool.request().input("GRNID", sql.Int, grnId)
+    .query(`
+      SELECT
+        grn.GRNID,
+        grn.GRNNo,
+        grn.DocNo,
+        grn.GRNDate,
+        grn.GRNItems,
+        grn.SupplierID,
+        grn.POID,
+        supplier.LHeadName AS SupplierName,
+        supplier.LGSTState AS VendorState,
+        po.PurchaseOrderID,
+        po.PurchaseOrderNo,
+        po.POItems,
+        po.HsnCode AS POHsnCode,
+        po.GstRate AS POGstRate,
+        po.GstType AS POGstType,
+        po.Rate AS PORate,
+        po.CompanyId,
+        company.state AS CompanyState
+      FROM dbo.GoodsReceiptNotes grn
+      LEFT JOIN dbo.AccountHeadMaster supplier ON supplier.LHeadId = grn.SupplierID
+      LEFT JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
+      LEFT JOIN dbo.enterprise company ON company.id = po.CompanyId
+      WHERE grn.GRNID = @GRNID
+    `);
+
+  const header = headerResult.recordset[0];
+  if (!header) return null;
+
+  const grnItems = parseJsonArray(header.GRNItems);
+  const poItems = parseJsonArray(header.POItems);
+  const itemIds = [
+    ...new Set(
+      [...grnItems, ...poItems]
+        .map((item) => item.itemId || item.ItemId)
+        .filter(Boolean)
+        .map(String),
+    ),
+  ];
+
+  const itemMasterMap = new Map();
+  if (itemIds.length > 0) {
+    const itemResult = await pool.request().query(`
+      SELECT
+        CONVERT(NVARCHAR(100), img.M_Id) AS ItemId,
+        img.M_Name,
+        img.M_HSN,
+        h.HCGST,
+        h.HSGST,
+        h.HIGST
+      FROM dbo.Item_Master_Group img
+      LEFT JOIN dbo.HSN h ON h.HCode = img.M_HSN AND h.HStatus = 1
+      WHERE CONVERT(NVARCHAR(100), img.M_Id) IN (${itemIds
+        .map((id) => `'${id.replace(/'/g, "''")}'`)
+        .join(",")})
+    `);
+    itemResult.recordset.forEach((row) => {
+      itemMasterMap.set(String(row.ItemId), row);
+    });
+  }
+
+  const poItemMap = new Map();
+  poItems.forEach((item) => {
+    const key = String(item.itemId || item.ItemId || item.itemName || "");
+    if (key) poItemMap.set(key, item);
+  });
+
+  const vendorState = header.VendorState || "";
+  const companyState = header.CompanyState || "";
+  const isIntraState =
+    normalizeState(vendorState) &&
+    normalizeState(companyState) &&
+    normalizeState(vendorState) === normalizeState(companyState);
+
+  const lines = grnItems.map((item, index) => {
+    const itemId = String(item.itemId || item.ItemId || "");
+    const poItem =
+      poItemMap.get(itemId) ||
+      poItemMap.get(String(item.itemName || item.ItemName || "")) ||
+      {};
+    const master = itemMasterMap.get(itemId) || {};
+
+    const receivedQty = toNumber(
+      item.receivedQty ?? item.quantity ?? item.qty ?? item.Quantity,
+    );
+    const orderedQty = toNumber(
+      item.orderedQty ?? poItem.quantity ?? poItem.Quantity,
+    );
+    const unitRate =
+      toNumber(item.rate) ||
+      toNumber(poItem.rate ?? poItem.Rate) ||
+      toNumber(header.PORate);
+    const hsnCode =
+      item.hsnCode ||
+      item.HsnCode ||
+      poItem.hsnCode ||
+      poItem.HsnCode ||
+      master.M_HSN ||
+      header.POHsnCode ||
+      null;
+
+    const configuredGst =
+      toNumber(master.HIGST) ||
+      toNumber(master.HCGST) + toNumber(master.HSGST) ||
+      toNumber(poItem.tax) ||
+      toNumber(header.POGstRate);
+    const gstPercent = configuredGst;
+    const taxableAmount = roundMoney(receivedQty * unitRate);
+    const gstAmount = roundMoney((taxableAmount * gstPercent) / 100);
+    const cgstRate = isIntraState ? gstPercent / 2 : 0;
+    const sgstRate = isIntraState ? gstPercent / 2 : 0;
+    const igstRate = isIntraState ? 0 : gstPercent;
+    const cgstAmount = roundMoney((taxableAmount * cgstRate) / 100);
+    const sgstAmount = roundMoney((taxableAmount * sgstRate) / 100);
+    const igstAmount = roundMoney((taxableAmount * igstRate) / 100);
+
+    return {
+      lineNo: index + 1,
+      itemId: itemId || null,
+      itemName: item.itemName || item.ItemName || master.M_Name || `Item ${index + 1}`,
+      orderedQty,
+      receivedQty,
+      uom: item.uom || poItem.unit || poItem.UomName || "",
+      unitRate,
+      hsnCode,
+      gstPercent,
+      taxableAmount,
+      cgstRate,
+      sgstRate,
+      igstRate,
+      cgstAmount,
+      sgstAmount,
+      igstAmount,
+      gstAmount: roundMoney(cgstAmount + sgstAmount + igstAmount),
+      netAmount: roundMoney(taxableAmount + cgstAmount + sgstAmount + igstAmount),
+    };
+  });
+
+  const totals = lines.reduce(
+    (sum, line) => ({
+      taxableAmount: roundMoney(sum.taxableAmount + line.taxableAmount),
+      cgstAmount: roundMoney(sum.cgstAmount + line.cgstAmount),
+      sgstAmount: roundMoney(sum.sgstAmount + line.sgstAmount),
+      igstAmount: roundMoney(sum.igstAmount + line.igstAmount),
+      gstAmount: roundMoney(sum.gstAmount + line.gstAmount),
+      netAmount: roundMoney(sum.netAmount + line.netAmount),
+      receivedQty: roundMoney(sum.receivedQty + line.receivedQty),
+    }),
+    {
+      taxableAmount: 0,
+      cgstAmount: 0,
+      sgstAmount: 0,
+      igstAmount: 0,
+      gstAmount: 0,
+      netAmount: 0,
+      receivedQty: 0,
+    },
+  );
+
+  const maxGstPercent = lines.reduce(
+    (max, line) => Math.max(max, line.gstPercent || 0),
+    0,
+  );
+
+  return {
+    grnId: header.GRNID,
+    grnNo: header.GRNNo || header.DocNo,
+    poId: header.PurchaseOrderID,
+    poNo: header.PurchaseOrderNo,
+    supplierId: header.SupplierID,
+    supplierName: header.SupplierName,
+    companyId: header.CompanyId,
+    vendorState,
+    companyState,
+    taxMode: isIntraState ? "cgst_sgst" : "igst",
+    gstPercent: maxGstPercent,
+    cgstRate: isIntraState ? maxGstPercent / 2 : 0,
+    sgstRate: isIntraState ? maxGstPercent / 2 : 0,
+    igstRate: isIntraState ? 0 : maxGstPercent,
+    totals,
+    lines,
+  };
+}
+
 async function handleChainStatus(req, res) {
   const { sourceType, sourceId } = req.query;
   const srcId = parseInt(sourceId, 10);
@@ -360,6 +575,26 @@ router.get(
 );
 
 // ─── GET /:id ─────────────────────────────────────────────────────────────────
+// GET /grn-gst-data?grnId=123
+// Authoritative GRN billing calculation: received quantity x PO rate, with GST
+// resolved from item HSN master and split by vendor/company state.
+router.get("/grn-gst-data", async (req, res) => {
+  const grnId = parseInt(req.query.grnId, 10);
+  if (!Number.isFinite(grnId) || grnId <= 0) {
+    return res.status(400).json({ error: "Valid grnId is required" });
+  }
+
+  try {
+    const pool = getPool();
+    const data = await buildGrnGstData(pool, grnId);
+    if (!data) return res.status(404).json({ error: "GRN not found" });
+    res.json(data);
+  } catch (err) {
+    console.error("GRN GST data error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/chain-status", handleChainStatus);
 
 router.get("/:id/can-delete", async (req, res) => {
@@ -563,9 +798,40 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
   const transaction = pool.transaction();
 
   let finalDocNo = EDocNo || null;
+  let bookingAmount = EAmount;
+  let bookingNetAmount = ENetAmount;
+  let bookingCgstRate = ECgstRate;
+  let bookingSgstRate = ESgstRate;
 
   try {
     await transaction.begin();
+
+    if (ESourceType === "GRN") {
+      const grnId = parseInt(ESourceId, 10);
+      if (!Number.isFinite(grnId) || grnId <= 0) {
+        await transaction.rollback();
+        return res.status(400).json({ error: "GRN source is required." });
+      }
+
+      const grnGst = await buildGrnGstData(pool, grnId);
+      if (!grnGst) {
+        await transaction.rollback();
+        return res.status(404).json({ error: "Linked GRN not found." });
+      }
+      if (!grnGst.totals.receivedQty || grnGst.totals.receivedQty <= 0) {
+        await transaction.rollback();
+        return res
+          .status(400)
+          .json({ error: "Cannot book expense for a GRN with no received quantity." });
+      }
+
+      bookingAmount = grnGst.totals.taxableAmount;
+      bookingNetAmount = grnGst.totals.netAmount;
+      // Existing schema stores only CGST/SGST rates. For inter-state GRNs the
+      // net amount includes IGST and the frontend reloads the IGST split by GRN.
+      bookingCgstRate = grnGst.cgstRate;
+      bookingSgstRate = grnGst.sgstRate;
+    }
 
     if (EDocTypeId) {
       const typeId = parseInt(EDocTypeId, 10);
@@ -679,15 +945,17 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
       .input(
         "EAmount",
         sql.Decimal(18, 2),
-        EAmount != null && EAmount !== "" ? Number(EAmount) : 0,
+        bookingAmount != null && bookingAmount !== "" ? Number(bookingAmount) : 0,
       )
       .input(
         "ENetAmount",
         sql.Decimal(18, 2),
-        ENetAmount != null && ENetAmount !== "" ? Number(ENetAmount) : 0,
+        bookingNetAmount != null && bookingNetAmount !== ""
+          ? Number(bookingNetAmount)
+          : 0,
       )
-      .input("ECgstRate", sql.Decimal(5, 2), ECgstRate ?? 0)
-      .input("ESgstRate", sql.Decimal(5, 2), ESgstRate ?? 0)
+      .input("ECgstRate", sql.Decimal(5, 2), bookingCgstRate ?? 0)
+      .input("ESgstRate", sql.Decimal(5, 2), bookingSgstRate ?? 0)
       .input(
         "EDiscountData",
         sql.NVarChar(sql.MAX),
@@ -1247,6 +1515,33 @@ router.put(
 
     try {
       const pool = getPool();
+      let bookingAmount = EAmount;
+      let bookingNetAmount = ENetAmount;
+      let bookingCgstRate = ECgstRate;
+      let bookingSgstRate = ESgstRate;
+
+      if (ESourceType === "GRN") {
+        const grnId = parseInt(ESourceId, 10);
+        if (!Number.isFinite(grnId) || grnId <= 0) {
+          return res.status(400).json({ error: "GRN source is required." });
+        }
+
+        const grnGst = await buildGrnGstData(pool, grnId);
+        if (!grnGst) {
+          return res.status(404).json({ error: "Linked GRN not found." });
+        }
+        if (!grnGst.totals.receivedQty || grnGst.totals.receivedQty <= 0) {
+          return res
+            .status(400)
+            .json({ error: "Cannot book expense for a GRN with no received quantity." });
+        }
+
+        bookingAmount = grnGst.totals.taxableAmount;
+        bookingNetAmount = grnGst.totals.netAmount;
+        bookingCgstRate = grnGst.cgstRate;
+        bookingSgstRate = grnGst.sgstRate;
+      }
+
       const result = await pool
         .request()
         .input("Eid", sql.Int, numericId)
@@ -1257,15 +1552,17 @@ router.put(
         .input(
           "EAmount",
           sql.Decimal(18, 2),
-          EAmount != null && EAmount !== "" ? Number(EAmount) : 0,
+          bookingAmount != null && bookingAmount !== "" ? Number(bookingAmount) : 0,
         )
         .input(
           "ENetAmount",
           sql.Decimal(18, 2),
-          ENetAmount != null && ENetAmount !== "" ? Number(ENetAmount) : 0,
+          bookingNetAmount != null && bookingNetAmount !== ""
+            ? Number(bookingNetAmount)
+            : 0,
         )
-        .input("ECgstRate", sql.Decimal(5, 2), ECgstRate ?? 0)
-        .input("ESgstRate", sql.Decimal(5, 2), ESgstRate ?? 0)
+        .input("ECgstRate", sql.Decimal(5, 2), bookingCgstRate ?? 0)
+        .input("ESgstRate", sql.Decimal(5, 2), bookingSgstRate ?? 0)
         .input(
           "EDiscountData",
           sql.NVarChar(sql.MAX),
