@@ -414,12 +414,12 @@ router.get(
           ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))) AS docNo,
           COALESCE(proj.name, eb.EProjectName, '') AS projectName,
           ISNULL(eb.EName, '')            AS partyName,
-          -- GRN-linked supplier name preferred; falls back to EName
-          ISNULL(
-            CASE WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL
-                 THEN ahm.LHeadName ELSE NULL END,
-            ISNULL(eb.EName, '')
-          )                               AS supplierName,
+          -- Supplier name: GRN -> account head name, PO/WO_PO/WORK_DONE -> EName (party), TOD -> empty
+          CASE
+            WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm.LHeadName, '')
+            WHEN eb.ESourceType IN ('PO','WO_PO','WORK_DONE') THEN ISNULL(eb.EName, '')
+            ELSE ''
+          END                             AS supplierName,
           -- For GRN-linked bookings use the live GRN total (incl. GST);
           -- it is always up-to-date whereas ENetAmount may be stale.
           CASE
@@ -475,11 +475,12 @@ router.get(
           ei.Status                    AS status,
           COALESCE(proj2.name, eb.EProjectName, '') AS projectName,
           ISNULL(eb.EName, '')         AS partyName,
-          ISNULL(
-            CASE WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL
-                 THEN ahm2.LHeadName ELSE NULL END,
-            ISNULL(eb.EName, '')
-          )                            AS supplierName,
+          -- Supplier name: GRN -> account head name, PO/WO_PO/WORK_DONE -> EName, TOD -> empty
+          CASE
+            WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm2.LHeadName, '')
+            WHEN eb.ESourceType IN ('PO','WO_PO','WORK_DONE') THEN ISNULL(eb.EName, '')
+            ELSE ''
+          END                          AS supplierName,
           eb.ECompanyId                AS companyId,
           ISNULL(e2.name, '')          AS companyName,
           ISNULL(eb.EFinYear, '')      AS financialYear,
