@@ -42,14 +42,23 @@ const expenseBookingBodySchema = z.object({
   EDocNo: optStr(100),
   EEmiPayment: z.coerce.boolean().optional(),
   EEmiData: optJsonPassthrough,
-  EInstallmentCount: z.coerce.number().int().min(1).max(360).optional(),
-  EEmiAmount: z.coerce.number().min(0).optional(),
+  EInstallmentCount: z.preprocess(
+    (v) => (v === null || v === undefined || v === "" ? undefined : v),
+    z.coerce.number().int().min(1).max(360).optional(),
+  ),
+  EEmiAmount: z.preprocess(
+    (v) => (v === null || v === undefined || v === "" ? undefined : v),
+    z.coerce.number().min(0).optional(),
+  ),
   EEmiStartDate: optCoerceDate,
-  EReminder: z.coerce.boolean().optional(),
+  EReminder: optCoerceDate,
   ERemarks: optStr(1000),
   EStatus: z.enum(VALID_STATUSES).default("Draft"),
   ECompanyId: optCoerceNumber,
-  EDocTypeId: z.coerce.number().int().positive().optional(),
+  EDocTypeId: z.preprocess(
+    (v) => (v === null || v === undefined || v === "" ? undefined : v),
+    z.coerce.number().int().positive().optional(),
+  ),
   EFinYear: optStr(20),
   ESourceType: z.enum(VALID_SOURCE_TYPES).optional(),
   ESourceId: z.coerce.number().int().positive().optional(),
@@ -58,7 +67,11 @@ const expenseBookingBodySchema = z.object({
   EBillingTermsData: optJsonPassthrough,
   ETCId: optCoerceNumber,
   ETCName: optStr(200),
-  ETCText: optStr(4000),
+  ETCText: z.preprocess((v) => {
+    if (v === undefined || v === null) return undefined;
+    const t = String(v).trim();
+    return t === "" ? undefined : t;
+  }, z.string().optional()),
   EVendorInvoiceNo: optStr(100),
   EVendorInvoiceDate: optCoerceDate,
   EAdditionalCharges: optJsonPassthrough,
