@@ -2948,26 +2948,51 @@ const Payment: React.FC = () => {
                                 {preGstRows.length === 0 && (
                                   <div className="border-t border-border/40 pt-1" />
                                 )}
-                                {cgst > 0 && (
-                                  <Row
-                                    label={`CGST @ ${cgstRate}%`}
-                                    value={formatINR(cgst)}
-                                    color="text-primary"
-                                  />
-                                )}
-                                {sgst > 0 && (
-                                  <Row
-                                    label={`SGST @ ${sgstRate}%`}
-                                    value={formatINR(sgst)}
-                                    color="text-primary"
-                                  />
-                                )}
-                                {igst > 0 && (
-                                  <Row
-                                    label={`IGST @ ${igstRate}%`}
-                                    value={formatINR(igst)}
-                                    color="text-primary"
-                                  />
+                                {grnGstBreakdown ? (
+                                  /* Per-item GST rows — correct slab per item */
+                                  <>
+                                    {grnGstBreakdown.items.map((item, i) => item.cgstAmount > 0 && (
+                                      <Row
+                                        key={`cgst-${i}`}
+                                        label={`CGST [${item.cgstRate}%] · ${item.itemName}`}
+                                        value={formatINR(item.cgstAmount)}
+                                        color="text-primary"
+                                      />
+                                    ))}
+                                    {grnGstBreakdown.items.map((item, i) => item.sgstAmount > 0 && (
+                                      <Row
+                                        key={`sgst-${i}`}
+                                        label={`SGST [${item.sgstRate}%] · ${item.itemName}`}
+                                        value={formatINR(item.sgstAmount)}
+                                        color="text-primary"
+                                      />
+                                    ))}
+                                  </>
+                                ) : (
+                                  /* Non-GRN: single averaged rate is the actual rate */
+                                  <>
+                                    {cgst > 0 && (
+                                      <Row
+                                        label={`CGST @ ${cgstRate}%`}
+                                        value={formatINR(cgst)}
+                                        color="text-primary"
+                                      />
+                                    )}
+                                    {sgst > 0 && (
+                                      <Row
+                                        label={`SGST @ ${sgstRate}%`}
+                                        value={formatINR(sgst)}
+                                        color="text-primary"
+                                      />
+                                    )}
+                                    {igst > 0 && (
+                                      <Row
+                                        label={`IGST @ ${igstRate}%`}
+                                        value={formatINR(igst)}
+                                        color="text-primary"
+                                      />
+                                    )}
+                                  </>
                                 )}
                               </>
                             )}
