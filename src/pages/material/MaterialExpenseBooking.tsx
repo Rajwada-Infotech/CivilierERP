@@ -2719,12 +2719,67 @@ export default function MaterialExpenseBooking() {
                 </div>
                 {form.basicAmount > 0 && (
                   <>
-                    <PriceBreakdownPanel
-                      bd={bd}
-                      cgstRate={form.cgstRate}
-                      sgstRate={form.sgstRate}
-                      hasDiscount={form.discount.applicable}
-                    />
+                    {/* For GRN bookings with per-item GST breakdown, skip the
+                        averaged-rate PriceBreakdownPanel and show exact per-item rows */}
+                    {isGRN && gstBreakdown ? (
+                      <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-sm">
+                        {/* Base amount row */}
+                        <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
+                          <div>
+                            <p className="text-xs font-medium">Basic Amount</p>
+                            <p className="text-[10px] text-muted-foreground">Pre-tax value (excl. GST)</p>
+                          </div>
+                          <p className="font-mono text-sm font-semibold">₹{fmt(gstBreakdown.totals.totalBase)}</p>
+                        </div>
+                        {/* Per-item CGST rows */}
+                        {gstBreakdown.items.filter(it => it.cgstAmount > 0).map((it, i) => (
+                          <div key={`cgst-${i}`} className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]">
+                            <div>
+                              <p className="text-xs text-muted-foreground">
+                                CGST{" "}
+                                <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
+                                  {it.cgstRate}%
+                                </span>
+                                {" "}· {it.itemName}
+                              </p>
+                              <p className="text-[10px] text-muted-foreground">Central GST</p>
+                            </div>
+                            <p className="font-mono text-sm text-foreground/80">+ ₹{fmt(it.cgstAmount)}</p>
+                          </div>
+                        ))}
+                        {/* Per-item SGST rows */}
+                        {gstBreakdown.items.filter(it => it.sgstAmount > 0).map((it, i) => (
+                          <div key={`sgst-${i}`} className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]">
+                            <div>
+                              <p className="text-xs text-muted-foreground">
+                                SGST{" "}
+                                <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
+                                  {it.sgstRate}%
+                                </span>
+                                {" "}· {it.itemName}
+                              </p>
+                              <p className="text-[10px] text-muted-foreground">State GST</p>
+                            </div>
+                            <p className="font-mono text-sm text-foreground/80">+ ₹{fmt(it.sgstAmount)}</p>
+                          </div>
+                        ))}
+                        {/* Gross subtotal */}
+                        <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20">
+                          <div>
+                            <p className="text-xs font-medium">Gross Amount</p>
+                            <p className="text-[10px] text-muted-foreground">Basic + CGST + SGST</p>
+                          </div>
+                          <p className="font-mono text-sm font-semibold">₹{fmt(gstBreakdown.totals.totalInclGST)}</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <PriceBreakdownPanel
+                        bd={bd}
+                        cgstRate={form.cgstRate}
+                        sgstRate={form.sgstRate}
+                        hasDiscount={form.discount.applicable}
+                      />
+                    )}
                     <div className="flex items-center justify-between rounded-xl bg-primary/8 border border-primary/20 px-5 py-4">
                       <div className="flex items-center gap-2">
                         <TrendingUp size={15} className="text-primary" />
@@ -2733,7 +2788,7 @@ export default function MaterialExpenseBooking() {
                         </span>
                       </div>
                       <span className="font-mono text-xl font-bold text-primary">
-                        ₹{fmt(bd.netAmount)}
+                        ₹{fmt(isGRN && gstBreakdown ? gstBreakdown.totals.totalInclGST : bd.netAmount)}
                       </span>
                     </div>
                   </>
