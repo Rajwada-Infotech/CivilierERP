@@ -55,29 +55,6 @@ function toNumber(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
-function parseGstConfig(value) {
-  if (!value) return null;
-  if (typeof value === "object") return value;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
-
-function getGstConfigRate(value) {
-  const gst = parseGstConfig(value);
-  if (Array.isArray(gst)) {
-    return gst.reduce((sum, row) => sum + toNumber(row?.rate), 0);
-  }
-  if (!gst || typeof gst !== "object") return 0;
-  return (
-    toNumber(gst.rate) ||
-    toNumber(gst.igst) ||
-    toNumber(gst.cgst) + toNumber(gst.sgst)
-  );
-}
-
 async function buildGrnGstData(pool, grnId) {
   const headerResult = await pool.request().input("GRNID", sql.Int, grnId)
     .query(`
@@ -94,7 +71,6 @@ async function buildGrnGstData(pool, grnId) {
         po.PurchaseOrderID,
         po.PurchaseOrderNo,
         po.POItems,
-        po.GST AS ParentGST,
         po.HsnCode AS POHsnCode,
         po.GstRate AS POGstRate,
         po.GstType AS POGstType,
@@ -113,7 +89,6 @@ async function buildGrnGstData(pool, grnId) {
 
   const grnItems = parseJsonArray(header.GRNItems);
   const poItems = parseJsonArray(header.POItems);
-  const parentGstRate = getGstConfigRate(header.ParentGST);
   const itemIds = [
     ...new Set(
       [...grnItems, ...poItems]
@@ -130,9 +105,6 @@ async function buildGrnGstData(pool, grnId) {
         CONVERT(NVARCHAR(100), img.M_Id) AS ItemId,
         img.M_Name,
         img.M_HSN,
-        img.M_CGST,
-        img.M_SGST,
-        img.M_IGST,
         h.HCGST,
         h.HSGST,
         h.HIGST
@@ -187,40 +159,20 @@ async function buildGrnGstData(pool, grnId) {
       header.POHsnCode ||
       null;
 
-    const configuredCgst = toNumber(master.HCGST) || toNumber(master.M_CGST);
-    const configuredSgst = toNumber(master.HSGST) || toNumber(master.M_SGST);
-    const configuredIgst = toNumber(master.HIGST) || toNumber(master.M_IGST);
-    const storedCgst = toNumber(item.cgstRate ?? poItem.cgstRate);
-    const storedSgst = toNumber(item.sgstRate ?? poItem.sgstRate);
-    const storedIgst = toNumber(item.igstRate ?? poItem.igstRate);
     const configuredGst =
-      configuredIgst ||
-      configuredCgst + configuredSgst ||
-      toNumber(item.gstRate ?? item.gstPercent ?? item.tax) ||
-      storedIgst ||
-      storedCgst + storedSgst ||
+      toNumber(master.HIGST) ||
+      toNumber(master.HCGST) + toNumber(master.HSGST) ||
       toNumber(poItem.tax) ||
-      toNumber(header.POGstRate) ||
-      parentGstRate;
+      toNumber(header.POGstRate);
     const gstPercent = configuredGst;
-    const taxableAmount =
-      toNumber(item.totalAmountInclGST) ||
-      toNumber(item.totalAmount) ||
-      toNumber(item.amount) ||
-      roundMoney(receivedQty * unitRate);
-    const cgstRate = isIntraState
-      ? configuredCgst || storedCgst || gstPercent / 2
-      : 0;
-    const sgstRate = isIntraState
-      ? configuredSgst || storedSgst || gstPercent / 2
-      : 0;
-    const igstRate = isIntraState ? 0 : configuredIgst || storedIgst || gstPercent;
+    const taxableAmount = roundMoney(receivedQty * unitRate);
+    const gstAmount = roundMoney((taxableAmount * gstPercent) / 100);
+    const cgstRate = isIntraState ? gstPercent / 2 : 0;
+    const sgstRate = isIntraState ? gstPercent / 2 : 0;
+    const igstRate = isIntraState ? 0 : gstPercent;
     const cgstAmount = roundMoney((taxableAmount * cgstRate) / 100);
     const sgstAmount = roundMoney((taxableAmount * sgstRate) / 100);
     const igstAmount = roundMoney((taxableAmount * igstRate) / 100);
-    const splitGstAmount = roundMoney(cgstAmount + sgstAmount + igstAmount);
-    const netAmount = roundMoney(taxableAmount + splitGstAmount);
-    const gstAmount = splitGstAmount;
 
     return {
       lineNo: index + 1,
@@ -239,9 +191,8 @@ async function buildGrnGstData(pool, grnId) {
       cgstAmount,
       sgstAmount,
       igstAmount,
-      gstAmount,
-      netAmount,
-      totalAmountInclGST: netAmount,
+      gstAmount: roundMoney(cgstAmount + sgstAmount + igstAmount),
+      netAmount: roundMoney(taxableAmount + cgstAmount + sgstAmount + igstAmount),
     };
   });
 
