@@ -1598,7 +1598,8 @@ const Payment: React.FC = () => {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [supplierFilter, setSupplierFilter] = useState("");
-  const [companyFilter, setCompanyFilter] = useState("");
+  const [companyFilter, setCompanyFilter] = useState(""); // stores numeric ID for display
+  const [companyNameFilter, setCompanyNameFilter] = useState(""); // stores label for backend
   const [projectFilter, setProjectFilter] = useState("");
   const [finYearFilter, setFinYearFilter] = useState("");
   const [docNumberFilter, setDocNumberFilter] = useState("");
@@ -1782,6 +1783,18 @@ const Payment: React.FC = () => {
   };
   const [loadingExpense, setLoadingExpense] = useState(false);
   const [linkedGRNs, setLinkedGRNs] = useState<GRNRef[]>([]);
+  const [grnGstBreakdown, setGrnGstBreakdown] = useState<{
+    items: {
+      itemName: string; hsnCode: string; gstPercent: number;
+      receivedQty: number; totalAmountInclGST: number;
+      baseAmount: number; cgstRate: number; cgstAmount: number;
+      sgstRate: number; sgstAmount: number; gstAmount: number;
+    }[];
+    totals: {
+      totalBase: number; totalCGST: number; totalSGST: number;
+      totalGST: number; totalInclGST: number;
+    };
+  } | null>(null);
   const [supplierBookingFilter, setSupplierBookingFilter] = useState("");
   const [bookingFilters, setBookingFilters] = useState<BookingFilters>({
     company: "",
@@ -1802,7 +1815,7 @@ const Payment: React.FC = () => {
       "payments",
       page,
       supplierFilter,
-      companyFilter,
+      companyNameFilter,
       projectFilter,
       finYearFilter,
       docNumberFilter,
@@ -1813,7 +1826,7 @@ const Payment: React.FC = () => {
         page,
         PAGE_SIZE,
         supplierFilter,
-        companyFilter,
+        companyNameFilter,
         projectFilter,
         finYearFilter,
         docNumberFilter,
@@ -2066,6 +2079,35 @@ const Payment: React.FC = () => {
         if (grns.length > 0 && grns[0].ProjectName) {
           setForm((prev) => ({ ...prev, projectSite: grns[0].ProjectName! }));
         }
+
+        // If this expense is linked to a GRN, fetch the per-item GST breakdown
+        if (detail.ESourceType === "GRN" && detail.ESourceId) {
+          try {
+            const bdRes = await fetchWithAuth(`/api/grns/${detail.ESourceId}/gst-breakdown`);
+            if (bdRes.ok) {
+              const bd = await bdRes.json();
+              setGrnGstBreakdown(bd);
+              // Override form amounts with correct values from GRN item-level GST breakdown.
+              // This ensures the Amount field matches the Net Payable shown in the breakdown.
+              if (bd?.totals?.totalInclGST > 0) {
+                const t = bd.totals;
+                const inclTotal = Math.round(t.totalInclGST * 100) / 100;
+                const avgCGST = t.totalBase > 0 ? (t.totalCGST / t.totalBase) * 100 : 0;
+                const avgSGST = t.totalBase > 0 ? (t.totalSGST / t.totalBase) * 100 : 0;
+                setForm((prev) => ({
+                  ...prev,
+                  amount: inclTotal,                                      // sync Amount field
+                  baseAmount: Math.round(t.totalBase * 100) / 100,
+                  cgstRate: Math.round(avgCGST * 100) / 100,
+                  sgstRate: Math.round(avgSGST * 100) / 100,
+                  igstRate: 0,
+                }));
+              }
+            }
+          } catch { /* non-fatal */ }
+        } else {
+          setGrnGstBreakdown(null);
+        }
       } catch {
         toast.error("Could not load expense booking details.");
       } finally {
@@ -2093,6 +2135,7 @@ const Payment: React.FC = () => {
       billingTermsData: null,
     }));
     setLinkedGRNs([]);
+    setGrnGstBreakdown(null);
     setSupplierBookingFilter("");
   };
 
@@ -2618,7 +2661,9 @@ const Payment: React.FC = () => {
                     label="Amount (₹)"
                     required={isCashMode}
                     hint={
-                      form.expenseRef
+                      grnGstBreakdown
+                        ? "Auto-filled from GRN item totals (incl. GST) — editable if needed."
+                        : form.expenseRef
                         ? "Net amount from expense booking — editable if needed."
                         : undefined
                     }
@@ -2642,10 +2687,16 @@ const Payment: React.FC = () => {
                   </Field>
                   {(form.amount ?? 0) > 0 &&
                     (() => {
-                      const base =
-                        form.baseAmount && form.baseAmount > 0
-                          ? form.baseAmount
-                          : (form.amount ?? 0);
+                      // Only render a breakdown when we have reliable GST data:
+                      // either a GRN item-level breakdown OR explicit GST rates on the booking.
+                      const hasGrnBreakdown = !!(grnGstBreakdown && grnGstBreakdown.totals.totalInclGST > 0);
+                      const hasExplicitGst = (form.cgstRate ?? 0) > 0 || (form.sgstRate ?? 0) > 0 || (form.igstRate ?? 0) > 0;
+                      const hasBaseAmount = !!(form.baseAmount && form.baseAmount > 0);
+
+                      // Don't render if we can't compute a meaningful breakdown
+                      if (!hasGrnBreakdown && !hasExplicitGst && !hasBaseAmount) return null;
+
+                      const base = hasBaseAmount ? form.baseAmount! : (form.amount ?? 0);
                       const cgstRate = form.cgstRate ?? 0;
                       const sgstRate = form.sgstRate ?? 0;
                       const igstRate = form.igstRate ?? 0;
@@ -2703,10 +2754,20 @@ const Payment: React.FC = () => {
                         else taxable = Math.max(0, taxable - amt);
                       }
 
-                      const cgst = (taxable * cgstRate) / 100;
-                      const sgst = (taxable * sgstRate) / 100;
-                      const igst = (taxable * igstRate) / 100;
-                      let gross = taxable + cgst + sgst + igst;
+                      // When a GRN breakdown is available, use its exact per-item sums
+                      // instead of recomputing from averaged rates — avoids floating-point drift.
+                      const cgst = grnGstBreakdown
+                        ? grnGstBreakdown.totals.totalCGST
+                        : (taxable * cgstRate) / 100;
+                      const sgst = grnGstBreakdown
+                        ? grnGstBreakdown.totals.totalSGST
+                        : (taxable * sgstRate) / 100;
+                      const igst = grnGstBreakdown
+                        ? 0
+                        : (taxable * igstRate) / 100;
+                      let gross = grnGstBreakdown
+                        ? grnGstBreakdown.totals.totalInclGST
+                        : taxable + cgst + sgst + igst;
 
                       const postGstRows: {
                         term: (typeof postGst)[0];
@@ -2768,17 +2829,87 @@ const Payment: React.FC = () => {
                       return (
                         <div className="rounded-xl bg-primary/5 border border-primary/20 px-4 py-3 space-y-2">
                           <div className="flex items-center gap-2">
-                            <TrendingUp
-                              size={13}
-                              className="text-primary shrink-0"
-                            />
+                            <TrendingUp size={13} className="text-primary shrink-0" />
                             <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
                               Payment Breakdown
                             </p>
                           </div>
+
+                          {/* ── GRN item-level GST breakdown ── */}
+                          {grnGstBreakdown && grnGstBreakdown.totals.totalInclGST > 0 && (
+                            <div className="rounded-lg border border-blue-500/20 bg-blue-500/[0.03] overflow-hidden mb-2">
+                              <div className="flex items-center gap-2 px-3 py-2 border-b border-blue-500/15 bg-blue-500/5">
+                                <Truck size={11} className="text-blue-500 shrink-0" />
+                                <span className="text-[10px] font-heading font-semibold text-blue-700 dark:text-blue-300">
+                                  GST Breakdown by Item (Incl. → Base + Tax)
+                                </span>
+                              </div>
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-[11px]">
+                                  <thead>
+                                    <tr className="border-b border-blue-500/10 bg-muted/10">
+                                      <th className="px-2 py-1.5 text-left text-muted-foreground font-heading uppercase tracking-wider text-[9px]">Item</th>
+                                      <th className="px-2 py-1.5 text-right text-muted-foreground font-heading uppercase tracking-wider text-[9px]">GST%</th>
+                                      <th className="px-2 py-1.5 text-right text-muted-foreground font-heading uppercase tracking-wider text-[9px]">Qty</th>
+                                      <th className="px-2 py-1.5 text-right text-foreground font-heading uppercase tracking-wider text-[9px]">Incl.</th>
+                                      <th className="px-2 py-1.5 text-right text-blue-600 dark:text-blue-400 font-heading uppercase tracking-wider text-[9px]">Base</th>
+                                      <th className="px-2 py-1.5 text-right text-violet-600 dark:text-violet-400 font-heading uppercase tracking-wider text-[9px]">CGST</th>
+                                      <th className="px-2 py-1.5 text-right text-violet-600 dark:text-violet-400 font-heading uppercase tracking-wider text-[9px]">SGST</th>
+                                      <th className="px-2 py-1.5 text-right text-orange-600 dark:text-orange-400 font-heading uppercase tracking-wider text-[9px]">Tax</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-blue-500/8">
+                                    {grnGstBreakdown.items.map((item, idx) => (
+                                      <tr key={idx} className="hover:bg-blue-500/5">
+                                        <td className="px-2 py-1.5 font-medium text-foreground max-w-[100px] truncate">{item.itemName || `Item ${idx+1}`}</td>
+                                        <td className="px-2 py-1.5 text-right font-mono text-muted-foreground">{item.gstPercent > 0 ? `${item.gstPercent}%` : "—"}</td>
+                                        <td className="px-2 py-1.5 text-right font-mono text-foreground">{item.receivedQty}</td>
+                                        <td className="px-2 py-1.5 text-right font-mono font-semibold text-foreground">{formatINR(item.totalAmountInclGST)}</td>
+                                        <td className="px-2 py-1.5 text-right font-mono font-semibold text-blue-600 dark:text-blue-400">{formatINR(item.baseAmount)}</td>
+                                        <td className="px-2 py-1.5 text-right font-mono text-violet-600 dark:text-violet-400">
+                                          <span className="flex flex-col items-end">
+                                            <span className="text-[8px] text-muted-foreground">{item.cgstRate}%</span>
+                                            <span>{formatINR(item.cgstAmount)}</span>
+                                          </span>
+                                        </td>
+                                        <td className="px-2 py-1.5 text-right font-mono text-violet-600 dark:text-violet-400">
+                                          <span className="flex flex-col items-end">
+                                            <span className="text-[8px] text-muted-foreground">{item.sgstRate}%</span>
+                                            <span>{formatINR(item.sgstAmount)}</span>
+                                          </span>
+                                        </td>
+                                        <td className="px-2 py-1.5 text-right font-mono font-semibold text-orange-600 dark:text-orange-400">{formatINR(item.gstAmount)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                  <tfoot className="border-t-2 border-blue-500/20 bg-muted/10">
+                                    <tr>
+                                      <td colSpan={3} className="px-2 py-1.5 text-[9px] font-heading uppercase text-muted-foreground">Totals</td>
+                                      <td className="px-2 py-1.5 text-right font-mono text-xs font-bold text-foreground">{formatINR(grnGstBreakdown.totals.totalInclGST)}</td>
+                                      <td className="px-2 py-1.5 text-right font-mono text-xs font-bold text-blue-600 dark:text-blue-400">{formatINR(grnGstBreakdown.totals.totalBase)}</td>
+                                      <td className="px-2 py-1.5 text-right font-mono text-xs font-bold text-violet-600 dark:text-violet-400">{formatINR(grnGstBreakdown.totals.totalCGST)}</td>
+                                      <td className="px-2 py-1.5 text-right font-mono text-xs font-bold text-violet-600 dark:text-violet-400">{formatINR(grnGstBreakdown.totals.totalSGST)}</td>
+                                      <td className="px-2 py-1.5 text-right font-mono text-xs font-bold text-orange-600 dark:text-orange-400">{formatINR(grnGstBreakdown.totals.totalGST)}</td>
+                                    </tr>
+                                  </tfoot>
+                                </table>
+                              </div>
+                              {/* Equation */}
+                              <div className="px-3 py-2 border-t border-blue-500/10 flex flex-wrap gap-1 text-[10px] font-mono">
+                                <span className="text-blue-600 dark:text-blue-400 font-semibold">{formatINR(grnGstBreakdown.totals.totalBase)}</span>
+                                <span className="text-muted-foreground">base +</span>
+                                <span className="text-violet-600 dark:text-violet-400 font-semibold">{formatINR(grnGstBreakdown.totals.totalCGST)}</span>
+                                <span className="text-muted-foreground">CGST +</span>
+                                <span className="text-violet-600 dark:text-violet-400 font-semibold">{formatINR(grnGstBreakdown.totals.totalSGST)}</span>
+                                <span className="text-muted-foreground">SGST =</span>
+                                <span className="text-foreground font-bold">{formatINR(grnGstBreakdown.totals.totalInclGST)}</span>
+                              </div>
+                            </div>
+                          )}
+
                           <div className="space-y-1.5">
                             {/* Base */}
-                            <Row label="Basic Amount" value={formatINR(base)} />
+                            <Row label="Basic Amount" sub={grnGstBreakdown ? "Excl. GST" : undefined} value={formatINR(base)} />
 
                             {/* Pre-GST billing terms */}
                             {preGstRows.map(({ term, amt }, i) => {
@@ -3085,6 +3216,7 @@ const Payment: React.FC = () => {
               );
               const clearAll = () => {
                 setCompanyFilter("");
+                setCompanyNameFilter("");
                 setProjectFilter("");
                 setFinYearFilter("");
                 setDocNumberFilter("");
@@ -3156,7 +3288,12 @@ const Payment: React.FC = () => {
                             <select
                               value={companyFilter}
                               onChange={(e) => {
-                                setCompanyFilter(e.target.value);
+                                const val = e.target.value;
+                                setCompanyFilter(val);
+                                const label = val
+                                  ? (companyOptions.find((c) => String(c.id) === val)?.label ?? val)
+                                  : "";
+                                setCompanyNameFilter(label);
                                 setPage(1);
                               }}
                               className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
@@ -3338,6 +3475,7 @@ const Payment: React.FC = () => {
                               <button
                                 onClick={() => {
                                   setCompanyFilter("");
+                                  setCompanyNameFilter("");
                                   setPage(1);
                                 }}
                                 className="ml-0.5 hover:text-destructive"

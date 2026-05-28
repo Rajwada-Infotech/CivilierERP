@@ -754,6 +754,7 @@ router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
     await transaction.commit();
 
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("expense-booking-options");
     await bumpCacheVersion("stock-ledger");
     res.json({ message: "GRN updated successfully" });
   } catch (err) {
@@ -795,6 +796,7 @@ router.delete("/:id", async (req, res) => {
     await transaction.commit();
 
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("expense-booking-options");
     await bumpCacheVersion("stock-ledger");
     res.json({ message: "GRN deleted successfully" });
   } catch (err) {
@@ -822,6 +824,7 @@ router.put("/:id/submit", async (req, res) => {
       req.user?.role,
     );
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("expense-booking-options");
     res.json({ message: "GRN submitted for approval", ...result });
   } catch (err) {
     console.error("GRN submit error:", err.message);
@@ -844,6 +847,7 @@ router.put("/:id/approve", async (req, res) => {
       req.user?.role,
     );
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("expense-booking-options");
     res.json({ message: "GRN approved", ...result });
   } catch (err) {
     console.error("GRN approve error:", err.message);
@@ -869,6 +873,7 @@ router.put("/:id/reject", async (req, res) => {
       note || null,
     );
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("expense-booking-options");
     res.json({ message: "GRN rejected", ...result });
   } catch (err) {
     console.error("GRN reject error:", err.message);
