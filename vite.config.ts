@@ -39,7 +39,11 @@ export default defineConfig(({ mode }) => ({
       },
     },
   },
-  plugins: [react()],
+  plugins: [
+    react({
+      disableOxcRecommendation: true, // Suppresses Vite 8 recommendation warning
+    }),
+  ],
   build: {
     rollupOptions: {
       output: {
@@ -67,10 +71,10 @@ export default defineConfig(({ mode }) => ({
           ) {
             return "vendor-charts";
           }
-          if (normalizedId.includes("/node_modules/framer-motion/")) {
-            return "vendor-ui";
-          }
-          if (normalizedId.includes("/node_modules/motion-dom/")) {
+          if (
+            normalizedId.includes("/node_modules/framer-motion/") ||
+            normalizedId.includes("/node_modules/motion-dom/")
+          ) {
             return "vendor-ui";
           }
           if (normalizedId.includes("/node_modules/@react-pdf/")) {

@@ -52,9 +52,13 @@ const ROLE_ALIASES = {
   // engineering
   engineer: "engineer",
   "site engineer": "engineer",
+  "field engineer": "engineer",
 
   // customer
   customer: "customer",
+  "customer demo": "customer",
+  client: "customer",
+  "end user": "customer",
   "portal user": "customer",
 
   // general user
