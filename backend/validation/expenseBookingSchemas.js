@@ -12,6 +12,10 @@ const optStr = (max) =>
 const optCoerceNumber = z.coerce.number().optional();
 const optCoerceDate = z.coerce.date().optional();
 const optJsonPassthrough = z.any().optional(); // JSON blobs validated downstream
+const optPositiveInt = z.preprocess(
+  (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
+  z.number().int().positive().optional(),
+);
 
 const VALID_STATUSES = ["Draft", "Submitted", "Approved", "Rejected", "Paid"];
 const VALID_SOURCE_TYPES = [
@@ -74,7 +78,10 @@ const expenseBookingBodySchema = z.object({
   EDocumentType: optStr(100),
   EDocDate: optCoerceDate,
   EAmount: eAmount,
-  ENetAmount: z.coerce.number().min(0).optional(),
+  ENetAmount: z.preprocess(
+    (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
+    z.number().min(0).optional(),
+  ),
   ECgstRate: z.coerce.number().min(0).max(100).optional(),
   ESgstRate: z.coerce.number().min(0).max(100).optional(),
   EDiscountData: optJsonPassthrough,
@@ -93,18 +100,12 @@ const expenseBookingBodySchema = z.object({
   EReminder: optCoerceDate,
   ERemarks: optStr(1000),
   EStatus: z.enum(VALID_STATUSES).default("Draft"),
-  ECompanyId: optCoerceNumber,
-  EDocTypeId: z.preprocess(
-    (v) => (v === null || v === undefined || v === "" ? undefined : v),
-    z.coerce.number().int().positive().optional(),
-  ),
+  ECompanyId: z.preprocess((v) => (v === null || v === undefined || v === "" ? undefined : Number(v)), z.number().optional()),
+  EDocTypeId: optPositiveInt,
   EFinYear: optStr(20),
   ESourceType: eSourceType,
-  ESourceId: z.coerce.number().int().positive().optional(),
-  EBillingTermId: z.preprocess(
-    (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
-    z.number().optional(),
-  ),
+  ESourceId: optPositiveInt,
+  EBillingTermId: z.preprocess((v) => (v === null || v === undefined || v === "" ? undefined : Number(v)), z.number().optional()),
   EBillingTermName: optStr(200),
   EBillingTermsData: optJsonPassthrough,
   ETCId: z.preprocess(
@@ -125,10 +126,7 @@ const expenseBookingBodySchema = z.object({
   EAdditionalCharges: optJsonPassthrough,
   ECostCenter: optStr(200),
   EGLAccount: optStr(200),
-  EWorkDoneRef: z.preprocess(
-    (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
-    z.number().optional(),
-  ),
+  EWorkDoneRef: optStr(100),
 });
 
 // PUT /:id — partial update (all fields optional except numeric consistency)
