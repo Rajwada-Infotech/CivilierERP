@@ -103,9 +103,14 @@ async function apiFetch(url: string, opts?: RequestInit, timeoutMs = 25000) {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     const details = Array.isArray(body.details)
-      ? body.details.map((d: any) => `${d.field || '?'}: ${d.message}`).join(' | ')
-      : '';
-    throw new Error((body.error ?? body.message ?? `HTTP ${res.status}`) + (details ? ` → ${details}` : ''));
+      ? body.details
+          .map((d: any) => `${d.field || "?"}: ${d.message}`)
+          .join(" | ")
+      : "";
+    throw new Error(
+      (body.error ?? body.message ?? `HTTP ${res.status}`) +
+        (details ? ` → ${details}` : ""),
+    );
   }
   return res.json();
 }
@@ -515,25 +520,13 @@ function DocSelectorPanel({
 
   const q = search.toLowerCase();
 
-  // Match fin year by looking for the year string embedded in the doc number.
-  // Supports three doc number conventions:
-  //   Old style:  "CI/PUR/000001/2025-2026" → contains the full fin year string
-  //   Dash style: "GRN-2026-00002"          → contains the START-year of the fin year
-  //               "PO-2026-00002"           → same pattern
-  //   End-year:   legacy where end-year was embedded (e.g. "PO-2027-00002")
-  // Falls back to true when no filter is set or doc has no number.
   const inFinYear = (docNo?: string, recFinYear?: string) => {
     if (!filterFinYear) return true;
-    // Prefer matching against the record's own FinYear field if available
     if (recFinYear) return recFinYear === filterFinYear;
     if (!docNo) return true;
-    // Old style: full fin year string embedded (e.g. "2025-2026")
     if (docNo.includes(filterFinYear)) return true;
     const [startYearStr, endYearStr] = filterFinYear.split("-");
-    // Dash style (GRN-2026-00002, PO-2026-00002): embed the START 4-digit year
-    // filterFinYear "2026-2027" → startYear "2026" → look for "-2026-"
     if (startYearStr && docNo.includes(`-${startYearStr}-`)) return true;
-    // Fallback: some legacy docs embed the END year (e.g. "2026" for "2025-2026")
     if (endYearStr && docNo.includes(`-${endYearStr}-`)) return true;
     return false;
   };
@@ -1072,8 +1065,6 @@ function DocSelectorPanel({
               <EmptyState label="No GRNs found" />
             ) : (
               filteredGRN.map((g) => {
-                // FIX: parse GRNItems from list data for preview counts only —
-                // the full fetch in applyDoc will always override this with fresh data.
                 const parsedItems: GRNItemLine[] = (() => {
                   try {
                     if (Array.isArray(g.GRNItems))
@@ -1208,10 +1199,8 @@ function resolveGstRates(
   fallbackCgst: number,
   fallbackSgst: number,
 ) {
-  // GRN: GST fields are hidden entirely — always 0
   if (doc.kind === "GRN") return { cgst: 0, sgst: 0 };
 
-  // PO / WO_PO / WORK_DONE: always fetch from the parent document
   if (doc.kind === "PO" || doc.kind === "WORK_DONE" || doc.kind === "WO_PO") {
     if (doc.gst?.applicable) {
       const { type, rate } = doc.gst;
@@ -1221,7 +1210,6 @@ function resolveGstRates(
     return { cgst: 0, sgst: 0 };
   }
 
-  // TOD / others: keep whatever the user typed
   return { cgst: fallbackCgst, sgst: fallbackSgst };
 }
 
@@ -1362,7 +1350,6 @@ export default function MaterialExpenseBooking() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const saveInFlight = useRef(false);
-  // Remaining-items split booking dialog state
   const [remainingBookingDialog, setRemainingBookingDialog] = useState<{
     grnDocNo: string;
     grnSourceId: number;
@@ -1413,7 +1400,7 @@ export default function MaterialExpenseBooking() {
       const data = await apiFetch(`${API}/source-ids`);
       setBookedSourceIds(Array.isArray(data) ? data : []);
     } catch {
-      // non-fatal — pickers will show everything if this fails
+      // non-fatal
     }
   }, []);
 
@@ -1444,11 +1431,9 @@ export default function MaterialExpenseBooking() {
         .finally(() => setLd(false));
     };
 
-    // Always re-fetch PO and WO_PO fresh so newly-created docs appear
     _mastersCache.po = null;
     _mastersCache.woPO = null;
     load("po", "/api/purchase-orders?limit=500", setPoList, setLoadingPO);
-    // Always re-fetch Work Done fresh (no cache) so newly-approved entries appear
     _mastersCache.workDone = null;
     setLoadingWorkDone(true);
     apiFetch("/api/engineering/work-done?status=Approved&limit=500")
@@ -1600,14 +1585,12 @@ export default function MaterialExpenseBooking() {
           if (items.length === 0)
             toast.info("This GRN has no item lines recorded against it.");
 
-          // Fetch GST breakdown — back-calculates base/tax per item using Item_Master_Group HSN rates
           return apiFetch(`${API}/grn-gst-data?grnId=${doc.sourceId}`)
             .then((grnGst: any) => {
               const bd = grnGstDataToBreakdown(grnGst);
               setGstBreakdown(bd);
               const t = bd?.totals;
               if (t && t.totalInclGST > 0) {
-                // Weighted average GST rates
                 const avgCGST =
                   t.totalBase > 0 ? (t.totalCGST / t.totalBase) * 100 : 0;
                 const avgSGST =
@@ -1628,7 +1611,6 @@ export default function MaterialExpenseBooking() {
               }
             })
             .catch(() => {
-              // Breakdown fetch failed — fall back to raw total
               setForm((prev) => ({
                 ...prev,
                 bookingReference: canonicalDocNo,
@@ -1670,7 +1652,6 @@ export default function MaterialExpenseBooking() {
                 : doc.docNo.split("/")[0],
       cgstRate: cgst,
       sgstRate: sgst,
-      // Auto-populate workDoneRef for WO_PO and WORK_DONE sources
       workDoneRef:
         doc.kind === "WORK_DONE"
           ? doc.docNo
@@ -1678,9 +1659,6 @@ export default function MaterialExpenseBooking() {
             ? (doc as any).sourceWDDocNo
             : undefined,
     }));
-    if (doc.kind === "GRN") {
-      // GRN selected — no filter state to update
-    }
   };
 
   const clearDoc = () => {
@@ -1715,7 +1693,6 @@ export default function MaterialExpenseBooking() {
   };
 
   const openEdit = (rec: ExpenseRecord) => {
-    // Reset stale form/doc state before populating with the new record
     resetForm();
     if (!rec.id) {
       toast.error("Cannot edit this booking because its record id is missing.");
@@ -1727,7 +1704,6 @@ export default function MaterialExpenseBooking() {
     setApprovalTrail(undefined);
     setLiveEmiSchedule(null);
 
-    // ── Rebuild selectedDoc so the doc selector shows the linked document ──
     if (rec.eSourceType && rec.eSourceId) {
       const kind = rec.eSourceType;
       const sourceId = rec.eSourceId;
@@ -1779,7 +1755,6 @@ export default function MaterialExpenseBooking() {
           .catch(() => {})
           .finally(() => setGrnItemsLoading(false));
       } else if (kind === "PO") {
-        // PO: find from already-loaded list or fetch lazily after fetchMasters
         const tryBuildPO = (list: POItem[]) => {
           const po = list.find((p) => p.PurchaseOrderID === sourceId);
           if (po) {
@@ -2022,7 +1997,6 @@ export default function MaterialExpenseBooking() {
         ? form.billingTerms
         : form.discount,
     );
-    // For GRN bookings, snap net payable to the GRN's exact TotalAmount
     if (selectedDoc?.kind === "GRN" && selectedDoc.amount != null) {
       bd.roundOff = selectedDoc.amount - bd.grossAmount;
       bd.netAmount = selectedDoc.amount;
@@ -2084,9 +2058,6 @@ export default function MaterialExpenseBooking() {
           `Expense booking created — Ref: ${result?.docNo || form.bookingReference}`,
         );
 
-        // ── Check for remaining GRN items ────────────────────────────────────
-        // If the source is a GRN and some items still have qty remaining,
-        // offer to create a second draft booking for those items.
         if (
           selectedDoc?.kind === "GRN" &&
           selectedDoc.grnItems &&
@@ -2103,7 +2074,6 @@ export default function MaterialExpenseBooking() {
                   : Number(i.rate || 0) * Number(i.remainingQty || 0);
               return s + amt;
             }, 0);
-            // Show dialog; don't navigate away yet
             setRemainingBookingDialog({
               grnDocNo: selectedDoc.docNo,
               grnSourceId: selectedDoc.sourceId,
@@ -2113,7 +2083,7 @@ export default function MaterialExpenseBooking() {
             });
             await fetchRecords(page);
             fetchBookedSources();
-            return; // hold on the form view until user responds to dialog
+            return;
           }
         }
 
@@ -2129,7 +2099,6 @@ export default function MaterialExpenseBooking() {
     }
   };
 
-  // ── Create a draft booking for remaining GRN items ───────────────────────────
   const handleCreateRemainingBooking = async () => {
     if (!remainingBookingDialog) return;
     const {
@@ -2155,7 +2124,7 @@ export default function MaterialExpenseBooking() {
         ESgstRate: 0,
         EDiscountData: JSON.stringify(savedFormSnapshot.discount),
         EBillingTermsData: JSON.stringify(savedFormSnapshot.billingTerms ?? []),
-        EDocNo: null, // will be auto-assigned by backend
+        EDocNo: null,
         EDocTypeId: null,
         EFinYear: savedFormSnapshot.financialYear || null,
         EEmiPayment: false,
@@ -2223,8 +2192,6 @@ export default function MaterialExpenseBooking() {
       ? form.billingTerms
       : form.discount,
   );
-  // For GRN bookings, snap net payable exactly to the GRN's TotalAmount
-  // instead of using a generic nearest-rupee round-off.
   if (selectedDoc?.kind === "GRN" && selectedDoc.amount != null) {
     const grnTotal = selectedDoc.amount;
     bd.roundOff = grnTotal - bd.grossAmount;
@@ -2245,11 +2212,9 @@ export default function MaterialExpenseBooking() {
     selectedDoc?.kind === "WORK_DONE" ||
     selectedDoc?.kind === "WO_PO";
   const isGRN = selectedDoc?.kind === "GRN";
-  const hasParentGST = isPOorWO; // GRN: no GST section shown
+  const hasParentGST = isPOorWO;
   const gstHighlighted = hasParentGST && !!selectedDoc?.gst?.applicable;
 
-  // Compute sets of already-booked source IDs from the full dataset (all pages),
-  // excluding the record currently being edited so it can re-select its own doc.
   const editingIdNum = editingId ? parseInt(editingId, 10) : null;
   const bookedPOIds = new Set<number>();
   const bookedWorkDoneIds = new Set<number>();
@@ -2263,7 +2228,6 @@ export default function MaterialExpenseBooking() {
     if (r.ESourceType === "GRN") bookedGRNIds.add(r.ESourceId);
   }
 
-  // Gate: reveal Document Selection only after booking info is started
   const showDocSection = !!(form.bookingDate || form.companyId);
 
   return (
@@ -2442,10 +2406,6 @@ export default function MaterialExpenseBooking() {
                             No projects found
                           </SelectItem>
                         )}
-                        {/* Inject synthetic option when editing a booking whose project
-                            enterprise has a different business_type than 'P' — ensures
-                            the Select can display the saved value even if it's absent
-                            from projectOptions */}
                         {form.projectSite &&
                           !projectOptions.some(
                             (p) => String(p.id) === form.projectSite,
@@ -2508,7 +2468,7 @@ export default function MaterialExpenseBooking() {
                 </div>
               </div>
 
-              {/* ── 1. Document Selection (gated on booking info) ──────── */}
+              {/* ── 1. Document Selection ──────────────────────────────── */}
               {showDocSection ? (
                 <>
                   <div className="space-y-3">
@@ -2609,7 +2569,6 @@ export default function MaterialExpenseBooking() {
                     </Field>
                   </div>
 
-                  {/* Booking Name — separate block, inside the fragment */}
                   <div className="space-y-2">
                     <Field
                       label="Booking Name"
@@ -2747,57 +2706,77 @@ export default function MaterialExpenseBooking() {
                 </div>
                 {form.basicAmount > 0 && (
                   <>
-                    {/* For GRN bookings with per-item GST breakdown, skip the
-                        averaged-rate PriceBreakdownPanel and show exact per-item rows */}
                     {isGRN && gstBreakdown ? (
                       <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-sm">
-                        {/* Base amount row */}
                         <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
                           <div>
                             <p className="text-xs font-medium">Basic Amount</p>
-                            <p className="text-[10px] text-muted-foreground">Pre-tax value (excl. GST)</p>
+                            <p className="text-[10px] text-muted-foreground">
+                              Pre-tax value (excl. GST)
+                            </p>
                           </div>
-                          <p className="font-mono text-sm font-semibold">₹{fmt(gstBreakdown.totals.totalBase)}</p>
+                          <p className="font-mono text-sm font-semibold">
+                            ₹{fmt(gstBreakdown.totals.totalBase)}
+                          </p>
                         </div>
-                        {/* Per-item CGST rows */}
-                        {gstBreakdown.items.filter(it => it.cgstAmount > 0).map((it, i) => (
-                          <div key={`cgst-${i}`} className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]">
-                            <div>
-                              <p className="text-xs text-muted-foreground">
-                                CGST{" "}
-                                <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                                  {it.cgstRate}%
-                                </span>
-                                {" "}· {it.itemName}
+                        {gstBreakdown.items
+                          .filter((it) => it.cgstAmount > 0)
+                          .map((it, i) => (
+                            <div
+                              key={`cgst-${i}`}
+                              className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]"
+                            >
+                              <div>
+                                <p className="text-xs text-muted-foreground">
+                                  CGST{" "}
+                                  <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
+                                    {it.cgstRate}%
+                                  </span>{" "}
+                                  · {it.itemName}
+                                </p>
+                                <p className="text-[10px] text-muted-foreground">
+                                  Central GST
+                                </p>
+                              </div>
+                              <p className="font-mono text-sm text-foreground/80">
+                                + ₹{fmt(it.cgstAmount)}
                               </p>
-                              <p className="text-[10px] text-muted-foreground">Central GST</p>
                             </div>
-                            <p className="font-mono text-sm text-foreground/80">+ ₹{fmt(it.cgstAmount)}</p>
-                          </div>
-                        ))}
-                        {/* Per-item SGST rows */}
-                        {gstBreakdown.items.filter(it => it.sgstAmount > 0).map((it, i) => (
-                          <div key={`sgst-${i}`} className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]">
-                            <div>
-                              <p className="text-xs text-muted-foreground">
-                                SGST{" "}
-                                <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                                  {it.sgstRate}%
-                                </span>
-                                {" "}· {it.itemName}
+                          ))}
+                        {gstBreakdown.items
+                          .filter((it) => it.sgstAmount > 0)
+                          .map((it, i) => (
+                            <div
+                              key={`sgst-${i}`}
+                              className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]"
+                            >
+                              <div>
+                                <p className="text-xs text-muted-foreground">
+                                  SGST{" "}
+                                  <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
+                                    {it.sgstRate}%
+                                  </span>{" "}
+                                  · {it.itemName}
+                                </p>
+                                <p className="text-[10px] text-muted-foreground">
+                                  State GST
+                                </p>
+                              </div>
+                              <p className="font-mono text-sm text-foreground/80">
+                                + ₹{fmt(it.sgstAmount)}
                               </p>
-                              <p className="text-[10px] text-muted-foreground">State GST</p>
                             </div>
-                            <p className="font-mono text-sm text-foreground/80">+ ₹{fmt(it.sgstAmount)}</p>
-                          </div>
-                        ))}
-                        {/* Gross subtotal */}
+                          ))}
                         <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20">
                           <div>
                             <p className="text-xs font-medium">Gross Amount</p>
-                            <p className="text-[10px] text-muted-foreground">Basic + CGST + SGST</p>
+                            <p className="text-[10px] text-muted-foreground">
+                              Basic + CGST + SGST
+                            </p>
                           </div>
-                          <p className="font-mono text-sm font-semibold">₹{fmt(gstBreakdown.totals.totalInclGST)}</p>
+                          <p className="font-mono text-sm font-semibold">
+                            ₹{fmt(gstBreakdown.totals.totalInclGST)}
+                          </p>
                         </div>
                       </div>
                     ) : (
@@ -2816,7 +2795,12 @@ export default function MaterialExpenseBooking() {
                         </span>
                       </div>
                       <span className="font-mono text-xl font-bold text-primary">
-                        ₹{fmt(isGRN && gstBreakdown ? gstBreakdown.totals.totalInclGST : bd.netAmount)}
+                        ₹
+                        {fmt(
+                          isGRN && gstBreakdown
+                            ? gstBreakdown.totals.totalInclGST
+                            : bd.netAmount,
+                        )}
                       </span>
                     </div>
                   </>
@@ -2840,7 +2824,7 @@ export default function MaterialExpenseBooking() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {/* ── Per-item breakdown table ── */}
+                      {/* Per-item breakdown table */}
                       <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 overflow-hidden">
                         <div className="flex items-center gap-2 px-4 py-2.5 border-b border-teal-500/20 bg-teal-500/8">
                           <Truck size={12} className="text-teal-500 shrink-0" />
@@ -2892,7 +2876,6 @@ export default function MaterialExpenseBooking() {
                             </thead>
                             <tbody className="divide-y divide-teal-500/10">
                               {(() => {
-                                // Use enriched breakdown items if available, fall back to raw grnItems
                                 const bdItems = gstBreakdown?.items;
                                 const rows =
                                   bdItems && bdItems.length > 0
@@ -2904,8 +2887,8 @@ export default function MaterialExpenseBooking() {
                                             ? Number(it.totalAmount)
                                             : Number(it.rate || 0) *
                                               Number(
-                                                it.quantity ||
-                                                  it.receivedQty ||
+                                                it.receivedQty ||
+                                                  it.quantity ||
                                                   0,
                                               ),
                                       }));
@@ -2988,18 +2971,14 @@ export default function MaterialExpenseBooking() {
                                   ₹
                                   {fmt(
                                     gstBreakdown?.totals.totalInclGST ??
-                                      selectedDoc!.grnItems!.reduce((s, i) => {
-                                        const amt =
-                                          Number(i.totalAmount) > 0
-                                            ? Number(i.totalAmount)
-                                            : Number(i.rate || 0) *
-                                              Number(
-                                                i.quantity ||
-                                                  i.receivedQty ||
-                                                  0,
-                                              );
-                                        return s + amt;
-                                      }, 0),
+                                      selectedDoc!.grnItems!.reduce(
+                                        (s, i) =>
+                                          s +
+                                          (Number(i.totalAmountInclGST) ||
+                                            Number(i.totalAmount) ||
+                                            0),
+                                        0,
+                                      ),
                                   )}
                                 </td>
                                 <td className="px-3 py-2.5 text-right font-mono text-xs font-bold text-blue-600 dark:text-blue-400">
@@ -3028,56 +3007,76 @@ export default function MaterialExpenseBooking() {
                         </div>
                       </div>
 
-                      {/* ── GST Breakdown by Item ── */}
+                      {/* GST Summary Cards + Equation */}
                       {gstBreakdown && gstBreakdown.totals.totalInclGST > 0 && (
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                          {[
-                            {
-                              label: "Base Amount",
-                              value: gstBreakdown.totals.totalBase,
-                              cls: "border-blue-500/30 bg-blue-500/5 text-blue-700 dark:text-blue-300",
-                            },
-                            {
-                              label: "CGST",
-                              value: gstBreakdown.totals.totalCGST,
-                              cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
-                            },
-                            {
-                              label: "SGST",
-                              value: gstBreakdown.totals.totalSGST,
-                              cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
-                            },
-                            {
-                              label: "Total GST",
-                              value: gstBreakdown.totals.totalGST,
-                              cls: "border-orange-500/30 bg-orange-500/5 text-orange-700 dark:text-orange-300",
-                            },
-                          ].map(({ label, value, cls }) => (
-                            <div
-                              key={label}
-                              className={`rounded-lg border px-3 py-2 ${cls}`}
-                            >
-                              <div className="text-[10px] font-heading uppercase tracking-wider opacity-70">
-                                {label}
+                        <>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            {[
+                              {
+                                label: "Base Amount",
+                                value: gstBreakdown.totals.totalBase,
+                                cls: "border-blue-500/30 bg-blue-500/5 text-blue-700 dark:text-blue-300",
+                              },
+                              {
+                                label: "CGST",
+                                value: gstBreakdown.totals.totalCGST,
+                                cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
+                              },
+                              {
+                                label: "SGST",
+                                value: gstBreakdown.totals.totalSGST,
+                                cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
+                              },
+                              {
+                                label: "Total GST",
+                                value: gstBreakdown.totals.totalGST,
+                                cls: "border-orange-500/30 bg-orange-500/5 text-orange-700 dark:text-orange-300",
+                              },
+                            ].map(({ label, value, cls }) => (
+                              <div
+                                key={label}
+                                className={`rounded-lg border px-3 py-2 ${cls}`}
+                              >
+                                <div className="text-[10px] font-heading uppercase tracking-wider opacity-70">
+                                  {label}
+                                </div>
+                                <div className="text-sm font-mono font-bold mt-1">
+                                  ₹{fmt(value)}
+                                </div>
                               </div>
                             ))}
                           </div>
 
-                          {/* Equation banner */}
-                          <div className="px-4 py-2.5 bg-muted/10 border-t border-blue-500/10 flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
-                            <span className="text-blue-600 dark:text-blue-400 font-semibold">₹{fmt(gstBreakdown.totals.totalBase)}</span>
-                            <span className="text-muted-foreground">(base)</span>
+                          <div className="px-4 py-2.5 bg-muted/10 border-t border-blue-500/10 flex flex-wrap items-center gap-1.5 text-[11px] font-mono mt-3">
+                            <span className="text-blue-600 dark:text-blue-400 font-semibold">
+                              ₹{fmt(gstBreakdown.totals.totalBase)}
+                            </span>
+                            <span className="text-muted-foreground">
+                              (base)
+                            </span>
                             <span className="text-muted-foreground">+</span>
-                            <span className="text-violet-600 dark:text-violet-400 font-semibold">₹{fmt(gstBreakdown.totals.totalCGST)}</span>
-                            <span className="text-muted-foreground">(CGST)</span>
+                            <span className="text-violet-600 dark:text-violet-400 font-semibold">
+                              ₹{fmt(gstBreakdown.totals.totalCGST)}
+                            </span>
+                            <span className="text-muted-foreground">
+                              (CGST)
+                            </span>
                             <span className="text-muted-foreground">+</span>
-                            <span className="text-violet-600 dark:text-violet-400 font-semibold">₹{fmt(gstBreakdown.totals.totalSGST)}</span>
-                            <span className="text-muted-foreground">(SGST)</span>
+                            <span className="text-violet-600 dark:text-violet-400 font-semibold">
+                              ₹{fmt(gstBreakdown.totals.totalSGST)}
+                            </span>
+                            <span className="text-muted-foreground">
+                              (SGST)
+                            </span>
                             <span className="text-muted-foreground">=</span>
-                            <span className="text-foreground font-bold">₹{fmt(gstBreakdown.totals.totalInclGST)}</span>
-                            <span className="text-muted-foreground">(incl. GST)</span>
+                            <span className="text-foreground font-bold">
+                              ₹{fmt(gstBreakdown.totals.totalInclGST)}
+                            </span>
+                            <span className="text-muted-foreground">
+                              (incl. GST)
+                            </span>
                           </div>
-                        </div>
+                        </>
                       )}
                     </div>
                   )}
@@ -3095,7 +3094,11 @@ export default function MaterialExpenseBooking() {
                   billingTerms={form.billingTerms}
                   onChange={(d) => set("discount", d)}
                   onChangeBillingTerms={(terms) => set("billingTerms", terms)}
-                  grnNetAmount={isGRN && selectedDoc?.amount != null ? selectedDoc.amount : null}
+                  grnNetAmount={
+                    isGRN && selectedDoc?.amount != null
+                      ? selectedDoc.amount
+                      : null
+                  }
                 />
               </div>
 
@@ -3146,8 +3149,7 @@ export default function MaterialExpenseBooking() {
                 </div>
               )}
 
-              {/* ── 6. Remarks ─────────────────────────────────────────── */}
-              {/* ── Terms & Conditions ────────────────────────────────── */}
+              {/* ── 6. Terms & Conditions ─────────────────────────────── */}
               <div className="space-y-3">
                 <SectionHeader label="Terms & Conditions" />
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3190,6 +3192,7 @@ export default function MaterialExpenseBooking() {
                 )}
               </div>
 
+              {/* ── 7. Remarks ─────────────────────────────────────────── */}
               <div className="space-y-3">
                 <SectionHeader label="Remarks" />
                 <textarea
@@ -3314,7 +3317,7 @@ export default function MaterialExpenseBooking() {
                   ))}
                 </div>
 
-                {/* Records table — compact, no horizontal scroll */}
+                {/* Records table */}
                 <Card className="hidden sm:block border-border shadow-sm">
                   <CardContent className="p-0">
                     <div className="rounded-md">
@@ -3369,7 +3372,6 @@ export default function MaterialExpenseBooking() {
                                 }
                                 className="hover:bg-muted/20"
                               >
-                                {/* Booking Ref + date + type stacked */}
                                 <TableCell className="py-2.5">
                                   <p className="font-mono text-[11px] font-semibold text-primary leading-tight break-all">
                                     {rec.bookingReference || "—"}
@@ -3389,35 +3391,27 @@ export default function MaterialExpenseBooking() {
                                     ) : null}
                                   </p>
                                 </TableCell>
-                                {/* Vendor */}
                                 <TableCell className="text-xs max-w-[140px] truncate py-2.5">
                                   {rec.supplier || "—"}
                                 </TableCell>
-                                {/* Basic Amt */}
                                 <TableCell className="font-mono text-xs text-right text-muted-foreground py-2.5">
                                   ₹{fmt(rec.basicAmount)}
                                 </TableCell>
-                                {/* CGST */}
                                 <TableCell className="font-mono text-xs text-right text-foreground/70 py-2.5 hidden md:table-cell">
                                   {rec.cgstRate}%
                                 </TableCell>
-                                {/* SGST */}
                                 <TableCell className="font-mono text-xs text-right text-foreground/70 py-2.5 hidden md:table-cell">
                                   {rec.sgstRate}%
                                 </TableCell>
-                                {/* Net Amt */}
                                 <TableCell className="font-mono text-xs font-semibold text-right py-2.5">
                                   ₹{fmt(rbd.netAmount)}
                                 </TableCell>
-                                {/* GRN */}
                                 <TableCell className="hidden lg:table-cell py-2.5">
                                   <GRNChainBadge bookingId={rec.id} />
                                 </TableCell>
-                                {/* Status */}
                                 <TableCell className="py-2.5">
                                   <StatusBadge status={rec.status} />
                                 </TableCell>
-                                {/* Actions */}
                                 <TableCell className="py-2.5">
                                   <div className="flex gap-1 items-center justify-end">
                                     <ApprovalActions
