@@ -14,6 +14,7 @@ import { MobileNav } from "./MobileNav";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useModule } from "@/contexts/ModuleContext";
 import { useActivityBrowser } from "@/contexts/ActivityBrowserContext";
+import SlowConnectionBanner from "@/components/SlowConnectionBanner";
 
 // ─── Sidebar Context ──────────────────────────────────────────────────────────
 
@@ -178,6 +179,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
               {children}
             </div>
           </main>
+          <SlowConnectionBanner />
         </div>
       </NavbarCollapseContext.Provider>
     </SidebarContext.Provider>
