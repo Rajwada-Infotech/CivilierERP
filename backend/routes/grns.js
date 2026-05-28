@@ -957,8 +957,12 @@ router.get("/:id/gst-breakdown", async (req, res) => {
     const companyState = String(grnResult.recordset[0].CompanyState || "")
       .trim()
       .toLowerCase();
+    // Default to intra-state (CGST+SGST) when state info is missing —
+    // most Indian construction bookings are intra-state.
     const isIntraState =
-      vendorState && companyState && vendorState === companyState;
+      !vendorState || !companyState
+        ? true  // unknown states → assume intra-state
+        : vendorState === companyState;
 
     const poItemMap = new Map();
     poItems.forEach((item) => {
@@ -975,9 +979,11 @@ router.get("/:id/gst-breakdown", async (req, res) => {
         .forEach((key) => poItemMap.set(String(key).trim(), item));
     });
 
+    // Use ItemMaster (same table as /grn-gst-data) — has GSTPercent as a single
+    // authoritative field. Item_Master_Group + HSN join often returns 0 when
+    // HSN codes are missing or M_Id format doesn't match stored itemId strings.
     let masterMap = {};
     if (itemIds.length > 0) {
-      // Parameterised IN clause — one param per id
       const masterReq = pool.request();
       const placeholders = itemIds
         .map((id, i) => {
@@ -989,24 +995,20 @@ router.get("/:id/gst-breakdown", async (req, res) => {
       const masterRes = await masterReq.query(`
         SELECT
           CONVERT(NVARCHAR(100), M_Id) AS M_Id,
-          M_HSN,
-          ISNULL(M_CGST, 0) AS M_CGST,
-          ISNULL(M_SGST, 0) AS M_SGST,
-          ISNULL(M_IGST, 0) AS M_IGST,
-          ISNULL(h.HCGST, 0) AS HCGST,
-          ISNULL(h.HSGST, 0) AS HSGST,
-          ISNULL(h.HIGST, 0) AS HIGST
-        FROM dbo.Item_Master_Group img
-        LEFT JOIN dbo.HSN h ON h.HCode = img.M_HSN AND h.HStatus = 1
+          ISNULL(M_HSN, '') AS HSNCode,
+          ISNULL(M_CGST, 0) + ISNULL(M_SGST, 0) AS GSTPercent
+        FROM dbo.Item_Master_Group
         WHERE CONVERT(NVARCHAR(100), M_Id) IN (${placeholders})
       `);
 
       for (const row of masterRes.recordset) {
+        const gst = parseFloat(row.GSTPercent) || 0;
         masterMap[row.M_Id] = {
-          hsnCode: row.M_HSN || "",
-          cgstRate: parseFloat(row.HCGST) || parseFloat(row.M_CGST) || 0,
-          sgstRate: parseFloat(row.HSGST) || parseFloat(row.M_SGST) || 0,
-          igstRate: parseFloat(row.HIGST) || parseFloat(row.M_IGST) || 0,
+          hsnCode: row.HSNCode || "",
+          gstPercent: gst,
+          cgstRate: gst / 2,
+          sgstRate: gst / 2,
+          igstRate: gst,
         };
       }
     }
@@ -1026,45 +1028,46 @@ router.get("/:id/gst-breakdown", async (req, res) => {
       const receivedQty = Number(it.receivedQty || it.ReceivedQty || 0);
       const rate = Number(it.rate || it.Rate || 0);
       // totalAmount stored in GRN = receivedQty × rate (inclusive of GST)
-      const baseFromGrn =
+      // totalAmount in GRN = receivedQty × rate — stored INCLUSIVE of GST.
+      // We back-calculate the true base (exclusive) using the HSN slab.
+      const inclFromGrn =
         Number(it.totalAmount) > 0
           ? Number(it.totalAmount)
           : receivedQty * rate;
 
       const master = masterMap[itemId] || {
         hsnCode: "",
+        gstPercent: 0,
         cgstRate: 0,
         sgstRate: 0,
         igstRate: 0,
       };
-      const storedCgst = Number(it.cgstRate ?? poItem.cgstRate ?? 0);
-      const storedSgst = Number(it.sgstRate ?? poItem.sgstRate ?? 0);
-      const storedIgst = Number(it.igstRate ?? poItem.igstRate ?? 0);
-      const storedTotalGst =
-        Number(it.gstRate ?? it.gstPercent ?? it.tax ?? poItem.tax ?? 0) ||
-        storedIgst ||
-        storedCgst + storedSgst ||
-        parentGstRate;
-      const totalGSTRate =
-        master.igstRate ||
-        master.cgstRate + master.sgstRate ||
-        storedTotalGst;
 
-      const baseAmount = baseFromGrn;
-      const cgstRate = isIntraState
-        ? master.cgstRate || storedCgst || totalGSTRate / 2
-        : 0;
-      const sgstRate = isIntraState
-        ? master.sgstRate || storedSgst || totalGSTRate / 2
-        : 0;
-      const igstRate = isIntraState
-        ? 0
-        : master.igstRate || storedIgst || totalGSTRate;
+      // Resolve GST% — priority: ItemMaster → stored on item → parentGST from PO
+      const resolvedGstPct =
+        master.gstPercent ||
+        Number(it.gstPercent ?? it.gstRate ?? it.tax ?? 0) ||
+        parentGstRate ||
+        0;
+
+      const totalGSTRate = resolvedGstPct;
+
+      const cgstRate = isIntraState ? totalGSTRate / 2 : 0;
+      const sgstRate = isIntraState ? totalGSTRate / 2 : 0;
+      const igstRate = isIntraState ? 0 : totalGSTRate;
+
+      // Back-calculate exclusive base from the inclusive amount
+      const effectiveGSTRate = cgstRate + sgstRate + igstRate; // e.g. 18
+      const baseAmount =
+        effectiveGSTRate > 0
+          ? inclFromGrn / (1 + effectiveGSTRate / 100)
+          : inclFromGrn;
+
       const cgstAmount = (baseAmount * cgstRate) / 100;
       const sgstAmount = (baseAmount * sgstRate) / 100;
       const igstAmount = (baseAmount * igstRate) / 100;
       const gstAmount = cgstAmount + sgstAmount + igstAmount;
-      const inclGST = baseAmount + gstAmount;
+      const inclGST = baseAmount + gstAmount; // should equal inclFromGrn
 
       totalBase += baseAmount;
       totalCGST += cgstAmount;
@@ -1081,7 +1084,7 @@ router.get("/:id/gst-breakdown", async (req, res) => {
         remainingQty: Number(it.remainingQty || 0),
         rate,
         totalAmountInclGST: Math.round(inclGST * 100) / 100,
-        hsnCode: master.hsnCode,
+        hsnCode: master.hsnCode || it.hsnCode || it.HSNCode || "",
         gstPercent: totalGSTRate,
         cgstRate,
         sgstRate,
