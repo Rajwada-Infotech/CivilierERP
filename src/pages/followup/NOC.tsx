@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
+  RefreshCw,
   Search,
   X,
   ShieldCheck,
@@ -27,7 +28,6 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { DashboardBackground } from "@/components/DashboardBackground";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import {
@@ -421,7 +421,7 @@ export function NOCPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: result, isLoading } = useQuery({
+  const { data: result, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["nocs", page, search, statusFilter],
     queryFn: () =>
       fetchNOCs({ page, pageSize: PAGE_SIZE, search, status: statusFilter }),
@@ -616,18 +616,13 @@ export function NOCPage() {
       <style>{`
         /* ── All noc-* classes use CSS vars — theme-safe ── */
         .noc-page {
-          min-height: 100vh;
-          background: hsl(var(--background));
           font-family: 'DM Sans', 'Segoe UI', sans-serif;
           color: hsl(var(--foreground));
         }
 
         /* ── Header ── */
         .noc-header {
-          background: hsl(var(--card));
-          border-bottom: 1px solid hsl(var(--border));
-          padding: 20px 28px 0;
-          position: sticky; top: 0; z-index: 20;
+          padding: 0;
         }
         .noc-header-top {
           display: flex; align-items: flex-start;
@@ -649,13 +644,14 @@ export function NOCPage() {
         }
         .noc-add-btn {
           display: flex; align-items: center; gap: 6px;
-          background: hsl(var(--primary)); color: hsl(var(--primary-foreground));
-          border: none; border-radius: 10px; padding: 9px 16px;
+          background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary) / 0.8));
+          color: hsl(var(--primary-foreground));
+          border: none; border-radius: 8px; padding: 7px 14px;
           font-size: 13px; font-weight: 600; cursor: pointer;
-          transition: all 0.15s; font-family: inherit;
-          box-shadow: 0 2px 8px hsl(var(--primary) / 0.25); white-space: nowrap;
+          transition: all 0.15s; font-family: var(--font-heading, inherit);
+          box-shadow: 0 2px 8px hsl(var(--primary) / 0.25); white-space: nowrap; height: 32px;
         }
-        .noc-add-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+        .noc-add-btn:hover { opacity: 0.9; }
 
         /* ── Filter bar ── */
         .noc-filter-bar {
@@ -697,7 +693,7 @@ export function NOCPage() {
         .noc-stat-val.amber  { color: hsl(38 92% 50%); }
 
         /* ── Body ── */
-        .noc-body { padding: 24px 28px; width: 100%; display: flex; flex-direction: column; }
+        .noc-body { padding: 24px 0; width: 100%; display: flex; flex-direction: column; gap: 20px; }
 
         /* ── Table ── */
         .noc-table-wrap {
@@ -875,35 +871,44 @@ export function NOCPage() {
         }
       `}</style>
 
-      <DashboardBackground />
-
-      <div className="noc-page" onClick={() => setOpenMenuId(null)}>
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Closure", path: "/followup/closure/noc" },
+          { label: "NOC", path: "/followup/closure/noc" },
+        ]}
+      />
+      <div className="noc-page relative space-y-8 mt-6" onClick={() => setOpenMenuId(null)}>
         {/* ── Header ── */}
-        <div className="noc-header">
-          <div className="noc-header-top">
-            <div>
-              <Breadcrumbs
-                items={[
-                  { label: "Follow-Up", path: "/followup" },
-                  { label: "Closure", path: "/followup/closure/noc" },
-                  { label: "NOC", path: "/followup/closure/noc" },
-                ]}
-              />
-              <div className="noc-title-row" style={{ marginTop: 8 }}>
-                <div className="noc-icon">
-                  <ShieldCheck size={20} />
-                </div>
-                <span className="noc-title">No Objection Certificates</span>
-                <span className="noc-count">{pagination?.total ?? 0}</span>
-              </div>
+        <div className="flex items-start justify-between gap-4">
+          <div className="noc-title-row">
+            <div className="noc-icon">
+              <ShieldCheck size={20} />
             </div>
-            <button className="noc-add-btn" onClick={openCreate}>
-              <Plus size={15} /> New NOC
-            </button>
+            <span className="noc-title">No Objection Certificates</span>
+            <span className="noc-count">{pagination?.total ?? 0}</span>
           </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              Refresh
+            </button>
+            <Button
+              size="sm"
+              onClick={openCreate}
+              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+            >
+              <Plus size={14} /> New NOC
+            </Button>
+          </div>
+        </div>
 
-          {/* Filter + search */}
-          <div className="noc-filter-bar">
+        {/* Filter + search */}
+        <div className="noc-filter-bar">
             <div className="noc-search-wrap">
               <Search size={14} />
               <input
@@ -957,24 +962,23 @@ export function NOCPage() {
             </div>
           </div>
 
-          {/* Stats bar */}
-          <div className="noc-stats">
-            {[
-              { label: "Total", val: pagination?.total ?? 0, cls: "blue" },
-              { label: "Pending", val: stats.pending, cls: "" },
-              { label: "Approved", val: stats.approved, cls: "green" },
-              { label: "Issued", val: stats.issued, cls: "amber" },
-            ].map(({ label, val, cls }) => (
-              <div key={label} className="noc-stat">
-                <div className={`noc-stat-val ${cls}`}>{val}</div>
-                <div className="noc-stat-label">{label}</div>
-              </div>
-            ))}
-          </div>
+        {/* Stats bar */}
+        <div className="noc-stats">
+          {[
+            { label: "Total", val: pagination?.total ?? 0, cls: "blue" },
+            { label: "Pending", val: stats.pending, cls: "" },
+            { label: "Approved", val: stats.approved, cls: "green" },
+            { label: "Issued", val: stats.issued, cls: "amber" },
+          ].map(({ label, val, cls }) => (
+            <div key={label} className="noc-stat">
+              <div className={`noc-stat-val ${cls}`}>{val}</div>
+              <div className="noc-stat-label">{label}</div>
+            </div>
+          ))}
         </div>
 
         {/* ── Body ── */}
-        <div className="noc-body">
+        <div className="noc-body" style={{ paddingTop: 0, paddingBottom: 0 }}>
           <div className="noc-table-wrap">
             {isLoading ? (
               <table className="noc-table">

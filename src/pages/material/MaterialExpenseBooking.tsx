@@ -72,7 +72,6 @@ import { ExpenseBookingPreviewModal } from "./ExpenseBookingPreviewModal";
 import {
   blankForm,
   computeBreakdown,
-  computeGrnGst,
   dbToRecord,
   fmt,
   generateEmiSchedule,
@@ -81,7 +80,6 @@ import {
 import type {
   BookingStatus,
   ExpenseRecord,
-  GrnGstData,
   PageView,
 } from "./ExpenseBooking/types";
 
@@ -191,6 +189,7 @@ type SourceKind = "PO" | "WO" | "WO_PO" | "TOD" | "GRN" | "WORK_DONE";
 
 interface GRNItemLine {
   itemName?: string;
+  itemId?: string;
   orderedQty: number;
   receivedQty: number;
   remainingQty: number;
@@ -198,6 +197,15 @@ interface GRNItemLine {
   rate?: number;
   quantity?: number;
   totalAmount?: number;
+  // GST breakdown fields (populated after /gst-breakdown fetch)
+  hsnCode?: string;
+  cgstRate?: number;
+  sgstRate?: number;
+  baseAmount?: number;
+  cgstAmount?: number;
+  sgstAmount?: number;
+  gstAmount?: number;
+  totalAmountInclGST?: number;
 }
 
 interface SelectedDoc {
@@ -213,13 +221,11 @@ interface SelectedDoc {
   date?: string;
   gst?: GSTConfig | null;
   grnItems?: GRNItemLine[];
-  grnGst?: GrnGstData | null;
 }
 
 interface GRNItem {
   GRNID: number;
   GRNNo: string;
-  DocNo?: string;
   GRNDate: string;
   SupplierName?: string;
   PONumber?: string;
@@ -229,9 +235,50 @@ interface GRNItem {
   Remarks?: string;
   GRNItems?: string | GRNItemLine[];
   ParentGST?: GSTConfig | string | null;
-  CompanyId?: number | string | null;
-  ProjectId?: number | string | null;
-  FinYear?: string | null;
+  DocNo?: string;
+  CompanyId?: number;
+  ProjectId?: number;
+  TotalAmount?: number | string;
+  FinYear?: string;
+}
+
+// ── GrnGstData ─────────────────────────────────────────────────────────────────
+// Returned by /api/grns/grn-gst-data?grnId=<id>
+interface GrnGstData {
+  grnId: number;
+  grnNo: string;
+  supplierName: string;
+  taxMode: "igst" | "cgst_sgst";
+  gstPercent: number;
+  cgstRate: number;
+  sgstRate: number;
+  igstRate: number;
+  vendorState?: string;
+  companyState?: string;
+  companyId?: number;
+  totals: {
+    taxableAmount: number;
+    cgstAmount: number;
+    sgstAmount: number;
+    igstAmount: number;
+    netAmount: number;
+    receivedQty: number;
+  };
+  lines: Array<{
+    itemId: string;
+    itemName: string;
+    hsnCode: string;
+    uom: string;
+    orderedQty: number;
+    receivedQty: number;
+    unitRate: number;
+    taxableAmount: number;
+    gstPercent: number;
+    cgstAmount: number;
+    sgstAmount: number;
+    igstAmount: number;
+    netAmount: number;
+  }>;
 }
 
 interface BillingTermOption {
@@ -1102,8 +1149,8 @@ function DocSelectorPanel({
                         date: g.GRNDate,
                         nameLabel: g.Remarks,
                         grnItems: parsedItems,
-                        projectId: g.ProjectId != null ? Number(g.ProjectId) : undefined,
-                        companyId: g.CompanyId != null ? Number(g.CompanyId) : undefined,
+                        projectId: g.ProjectId,
+                        companyId: g.CompanyId,
                         gst:
                           typeof g.ParentGST === "string"
                             ? (() => {
@@ -1290,6 +1337,16 @@ export default function MaterialExpenseBooking() {
   const [loadingGRN, setLoadingGRN] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<SelectedDoc | null>(null);
   const [grnItemsLoading, setGrnItemsLoading] = useState(false);
+  const [gstBreakdown, setGstBreakdown] = useState<{
+    items: GRNItemLine[];
+    totals: {
+      totalBase: number;
+      totalCGST: number;
+      totalSGST: number;
+      totalGST: number;
+      totalInclGST: number;
+    };
+  } | null>(null);
   const [grnGstData, setGrnGstData] = useState<GrnGstData | null>(null);
   const [selectedTod, setSelectedTod] = useState<TodItem | null>(null);
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
@@ -1518,8 +1575,8 @@ export default function MaterialExpenseBooking() {
     setSelectedDoc(doc);
 
     if (doc.kind === "GRN") {
-      setGrnGstData(null);
       setSelectedDoc({ ...doc, grnItems: [] });
+      setGstBreakdown(null);
       setGrnItemsLoading(true);
       // Fetch GRN header and GST data independently so one failure
       // doesn't kill the other. GST endpoint may not be deployed yet
@@ -1594,6 +1651,41 @@ export default function MaterialExpenseBooking() {
 
           if (items.length === 0)
             toast.info("This GRN has no item lines recorded against it.");
+
+          // Fetch GST breakdown — back-calculates base/tax per item using Item_Master_Group HSN rates
+          return apiFetch(`/api/grns/${doc.sourceId}/gst-breakdown`)
+            .then((bd: any) => {
+              setGstBreakdown(bd);
+              const t = bd?.totals;
+              if (t && t.totalInclGST > 0) {
+                // Weighted average GST rates
+                const avgCGST =
+                  t.totalBase > 0 ? (t.totalCGST / t.totalBase) * 100 : 0;
+                const avgSGST =
+                  t.totalBase > 0 ? (t.totalSGST / t.totalBase) * 100 : 0;
+                setForm((prev) => ({
+                  ...prev,
+                  bookingReference: canonicalDocNo,
+                  basicAmount: Math.round(t.totalBase * 100) / 100,
+                  cgstRate: Math.round(avgCGST * 100) / 100,
+                  sgstRate: Math.round(avgSGST * 100) / 100,
+                }));
+              } else {
+                setForm((prev) => ({
+                  ...prev,
+                  bookingReference: canonicalDocNo,
+                  basicAmount: prev.basicAmount,
+                }));
+              }
+            })
+            .catch(() => {
+              // Breakdown fetch failed — fall back to raw total
+              setForm((prev) => ({
+                ...prev,
+                bookingReference: canonicalDocNo,
+                basicAmount: prev.basicAmount,
+              }));
+            });
         })
         .catch((err: any) => {
           toast.error("Could not load GRN data: " + (err?.message ?? "Unknown error"));
@@ -1642,6 +1734,7 @@ export default function MaterialExpenseBooking() {
     setSelectedDoc(null);
     setSelectedTod(null);
     setGrnItemsLoading(false);
+    setGstBreakdown(null);
     setGrnGstData(null);
     setForm((prev) => ({
       ...prev,
@@ -1657,7 +1750,6 @@ export default function MaterialExpenseBooking() {
     setApprovalTrail(undefined);
     setSelectedDoc(null);
     setSelectedTod(null);
-    setGrnGstData(null);
     setLiveEmiSchedule(null);
     setPreviewRecord(null);
   };
@@ -1697,7 +1789,6 @@ export default function MaterialExpenseBooking() {
           grnItems: [],
         };
         setSelectedDoc(stub);
-        setGrnGstData(null);
         setGrnItemsLoading(true);
         Promise.allSettled([
           apiFetch(`/api/grns/${sourceId}`),
@@ -1982,18 +2073,14 @@ export default function MaterialExpenseBooking() {
       toast.error("Basic amount is required and must be greater than 0.");
       return;
     }
-    const bd =
-      selectedDoc?.kind === "GRN" && grnGstData
-        ? computeGrnGst(grnGstData)
-        : computeBreakdown(
-            form.basicAmount,
-            form.cgstRate,
-            form.sgstRate,
-            form.billingTerms && form.billingTerms.length > 0
-              ? form.billingTerms
-              : form.discount,
-            form.igstRate ?? 0,
-          );
+    const bd = computeBreakdown(
+      form.basicAmount,
+      form.cgstRate,
+      form.sgstRate,
+      form.billingTerms && form.billingTerms.length > 0
+        ? form.billingTerms
+        : form.discount,
+    );
 
     let emiForSave = { ...form.emi };
     if (
@@ -2182,18 +2269,14 @@ export default function MaterialExpenseBooking() {
     }
   };
 
-  const bd =
-    selectedDoc?.kind === "GRN" && grnGstData
-      ? computeGrnGst(grnGstData)
-      : computeBreakdown(
-          form.basicAmount,
-          form.cgstRate,
-          form.sgstRate,
-          form.billingTerms && form.billingTerms.length > 0
-            ? form.billingTerms
-            : form.discount,
-          form.igstRate ?? 0,
-        );
+  const bd = computeBreakdown(
+    form.basicAmount,
+    form.cgstRate,
+    form.sgstRate,
+    form.billingTerms && form.billingTerms.length > 0
+      ? form.billingTerms
+      : form.discount,
+  );
   const filteredRecords =
     statusFilter && statusFilter !== "All"
       ? records.filter((r) => r.status === statusFilter)
@@ -2717,7 +2800,6 @@ export default function MaterialExpenseBooking() {
                       bd={bd}
                       cgstRate={form.cgstRate}
                       sgstRate={form.sgstRate}
-                      igstRate={form.igstRate ?? 0}
                       hasDiscount={form.discount.applicable}
                     />
                     <div className="flex items-center justify-between rounded-xl bg-primary/8 border border-primary/20 px-5 py-4">
@@ -2874,20 +2956,18 @@ export default function MaterialExpenseBooking() {
               )}
 
               {/* ── 3. Billing Terms ──────────────────────────────────── */}
-              {!isGRN && (
-                <div className="space-y-3">
-                  <SectionHeader label="Billing Terms" />
-                  <BillingAccordion
-                    basicAmount={form.basicAmount}
-                    cgstRate={form.cgstRate}
-                    sgstRate={form.sgstRate}
-                    discount={form.discount}
-                    billingTerms={form.billingTerms}
-                    onChange={(d) => set("discount", d)}
-                    onChangeBillingTerms={(terms) => set("billingTerms", terms)}
-                  />
-                </div>
-              )}
+              <div className="space-y-3">
+                <SectionHeader label="Billing Terms" />
+                <BillingAccordion
+                  basicAmount={form.basicAmount}
+                  cgstRate={form.cgstRate}
+                  sgstRate={form.sgstRate}
+                  discount={form.discount}
+                  billingTerms={form.billingTerms}
+                  onChange={(d) => set("discount", d)}
+                  onChangeBillingTerms={(terms) => set("billingTerms", terms)}
+                />
+              </div>
 
               {/* ── 4. EMI Options ─────────────────────────────────────── */}
               {!isGRN && (

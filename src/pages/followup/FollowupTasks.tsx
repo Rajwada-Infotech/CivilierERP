@@ -15,7 +15,6 @@ import { toast } from "sonner";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { DashboardBackground } from "@/components/DashboardBackground";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Button } from "@/components/ui/button";
@@ -473,36 +472,28 @@ export default function FollowupTasks() {
 
   return (
     <>
-      <DashboardBackground />
-      <div className="relative z-10 p-6 space-y-6 max-w-[1600px] mx-auto">
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Tasks", path: "/followup/follow-ups/tasks" },
+        ]}
+      />
+      <div className="relative space-y-8 mt-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <Breadcrumbs
-              items={[
-                { label: "Follow-Up", path: "/followup" },
-                { label: "Tasks", path: "/followup/follow-ups/tasks" },
-              ]}
-            />
-            <div className="flex items-center gap-3 mt-1">
-              <div className="p-2 rounded-lg bg-indigo-500/10">
-                <ListTodo size={20} className="text-indigo-600" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-heading font-bold text-foreground">
-                  Follow-Up Tasks
-                </h1>
-                <p className="text-xs text-muted-foreground">
-                  Live task list filtered to the follow-up module
-                </p>
-              </div>
-            </div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Follow-Up Tasks
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Live task list filtered to the follow-up module
+            </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
               <RefreshCw
                 size={13}
@@ -514,7 +505,7 @@ export default function FollowupTasks() {
               <Button
                 size="sm"
                 onClick={() => setIsDialogOpen(true)}
-                className="gap-1.5"
+                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
               >
                 <Plus size={14} />
                 New Task
