@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 
 import { getGRNs } from "@/api/grnApi";
-import { DashboardBackground } from "@/components/DashboardBackground";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -554,41 +553,38 @@ export default function GRNReminders() {
 
   return (
     <>
-      <DashboardBackground />
-      <div className="relative z-10 p-6 space-y-6 max-w-[1600px] mx-auto">
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          {
+            label: "GRN Reminders",
+            path: "/followup/follow-ups/grn-reminders",
+          },
+        ]}
+      />
+      <div className="relative space-y-6 mt-6">
         {/* ── Page header ── */}
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <Breadcrumbs
-              items={[
-                { label: "Follow-Up", path: "/followup" },
-                {
-                  label: "GRN Reminders",
-                  path: "/followup/follow-ups/grn-reminders",
-                },
-              ]}
-            />
-            <div className="flex items-center gap-3 mt-1.5">
-              <div className="p-2.5 rounded-xl bg-emerald-500/10">
-                <PackageCheck size={20} className="text-emerald-600" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-heading font-bold text-foreground">
-                  GRN Reminders
-                </h1>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Live goods receipt follow-up tracker — same source as the
-                  reminder bell
-                </p>
-              </div>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-emerald-500/10 shrink-0">
+              <PackageCheck size={20} className="text-emerald-600" />
+            </div>
+            <div>
+              <h1 className="text-xl font-heading font-bold text-foreground">
+                GRN Reminders
+              </h1>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Live goods receipt follow-up tracker — same source as the
+                reminder bell
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
               <RefreshCw
                 size={13}
