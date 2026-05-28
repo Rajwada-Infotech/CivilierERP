@@ -332,13 +332,31 @@ export function dbToRecord(row: any): ExpenseRecord {
   };
 }
 
+/**
+ * Generate a human-readable fallback name for an expense booking.
+ * Used when the user hasn't typed a name and the source doc has no description.
+ * The backend schema requires EName to be a non-empty string (min 1 char).
+ */
+function fallbackBookingName(): string {
+  const d = new Date().toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+  return `Expense ${d}`;
+}
+
 export function recordToDb(
   form: Omit<ExpenseRecord, "id">,
   netAmount: number,
   docTypeId?: number | null,
 ) {
+  // EName is required (schema: min(1)). Never send null/empty — fall back to a
+  // dated label so the POST/PUT never fails purely due to a missing name.
+  const eName = (form.bookingName ?? "").trim() || fallbackBookingName();
+
   return {
-    EName: form.bookingName || null,
+    EName: eName,
     // projectSite holds the enterprise ID string (e.g. "42") for the project site
     EProjectName: form.projectSite || null,
     EDocumentType: form.materialCategory || null,
