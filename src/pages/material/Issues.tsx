@@ -252,13 +252,17 @@ export default function Issues() {
   });
 
   // Reference list queries — only fire when that reference type is selected
-  const { data: grnList = [], isLoading: loadingGrnList } = useQuery<ReferenceListItem[]>({
+  const { data: grnList = [], isLoading: loadingGrnList } = useQuery<
+    ReferenceListItem[]
+  >({
     queryKey: ["issues-grn-list"],
     queryFn: issuesApi.getGrnList,
     enabled: header.referenceType === "GRN",
     staleTime: 60_000,
   });
-  const { data: mrList = [], isLoading: loadingMrList } = useQuery<ReferenceListItem[]>({
+  const { data: mrList = [], isLoading: loadingMrList } = useQuery<
+    ReferenceListItem[]
+  >({
     queryKey: ["issues-mr-list"],
     queryFn: issuesApi.getMrList,
     enabled: header.referenceType === "MR",
@@ -268,16 +272,13 @@ export default function Issues() {
   // ── Auto-select active fin year ──────────────────────────────────────────
 
   useEffect(() => {
-    if (
-      finYears.length > 0 &&
-      !header.finYearId &&
-      viewMode === "form" &&
-      !editingId
-    ) {
-      const active = (finYears as any[]).find((f) => f.isActive);
+    if (finYears.length > 0 && !header.finYearId && viewMode === "form") {
+      const active = (finYears as any[]).find(
+        (f) => f.status === "Active" || f.isActive === true || f.isActive === 1,
+      );
       if (active) setH("finYearId", String(active.id));
     }
-  }, [finYears, viewMode, editingId]);
+  }, [finYears, viewMode, header.finYearId]);
 
   // ── Item lookup helpers ──────────────────────────────────────────────────
 
@@ -422,7 +423,10 @@ export default function Issues() {
 
   // Called when user selects a doc from the GRN or MR dropdown.
   // Auto-fires the prefill request and populates company, project, fin year, and cart.
-  const handleReferenceDocSelect = async (selectedId: string, selectedDocNo: string) => {
+  const handleReferenceDocSelect = async (
+    selectedId: string,
+    selectedDocNo: string,
+  ) => {
     if (!selectedId || !header.referenceType) return;
     setH("referenceId", selectedId);
     setH("referenceDocNo", selectedDocNo);
@@ -483,7 +487,8 @@ export default function Issues() {
       date: record.Date ? String(record.Date).slice(0, 10) : defaultHeader.date,
       reason: record.Reason ?? "",
       remarks: record.Remarks ?? "",
-      referenceType: (record.ReferenceType ?? "") as IssueHeader["referenceType"],
+      referenceType: (record.ReferenceType ??
+        "") as IssueHeader["referenceType"],
       referenceId: String(record.ReferenceId ?? ""),
       referenceDocNo: record.ReferenceDocNo ?? "",
       docTypeId: record.DocTypeId ?? null,
@@ -838,19 +843,30 @@ export default function Issues() {
                   onValueChange={handleReferenceTypeChange}
                 >
                   <SelectTrigger className="h-9 gap-2">
-                    <FileText size={13} className="text-muted-foreground shrink-0" />
+                    <FileText
+                      size={13}
+                      className="text-muted-foreground shrink-0"
+                    />
                     <SelectValue placeholder="None (optional)" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">None</SelectItem>
-                    <SelectItem value="GRN">GRN (Goods Receipt Note)</SelectItem>
+                    <SelectItem value="GRN">
+                      GRN (Goods Receipt Note)
+                    </SelectItem>
                     <SelectItem value="MR">MR (Material Request)</SelectItem>
                   </SelectContent>
                 </Select>
               </Field>
 
               {header.referenceType ? (
-                <Field label={header.referenceType === "GRN" ? "Select GRN" : "Select Material Request"}>
+                <Field
+                  label={
+                    header.referenceType === "GRN"
+                      ? "Select GRN"
+                      : "Select Material Request"
+                  }
+                >
                   {loadingPrefill ? (
                     <div className="flex items-center gap-2 h-9 px-3 rounded-md border border-border bg-muted/30 text-sm text-muted-foreground">
                       <RefreshCw size={13} className="animate-spin" />
@@ -867,45 +883,70 @@ export default function Issues() {
                       }}
                     >
                       <SelectTrigger className="h-9 gap-2">
-                        <FileText size={13} className="text-muted-foreground shrink-0" />
+                        <FileText
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
                         <SelectValue
                           placeholder={
                             header.referenceType === "GRN"
-                              ? (loadingGrnList ? "Loading GRNs…" : "Select a GRN")
-                              : (loadingMrList ? "Loading MRs…" : "Select a Material Request")
+                              ? loadingGrnList
+                                ? "Loading GRNs…"
+                                : "Select a GRN"
+                              : loadingMrList
+                                ? "Loading MRs…"
+                                : "Select a Material Request"
                           }
                         />
                       </SelectTrigger>
                       <SelectContent className="max-h-64">
-                        {header.referenceType === "GRN" && (
-                          grnList.length === 0
-                            ? <div className="px-3 py-2 text-xs text-muted-foreground">No GRNs found</div>
-                            : grnList.map((g) => (
-                                <SelectItem key={g.id} value={`${g.id}||${g.docNo}`}>
-                                  <span className="font-mono text-xs">{g.docNo || `GRN #${g.id}`}</span>
-                                </SelectItem>
-                              ))
-                        )}
-                        {header.referenceType === "MR" && (
-                          mrList.length === 0
-                            ? <div className="px-3 py-2 text-xs text-muted-foreground">No MRs found</div>
-                            : mrList.map((m) => (
-                                <SelectItem key={m.id} value={`${m.id}||${m.docNo}`}>
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-mono text-xs">{m.docNo || `MR #${m.id}`}</span>
-                                    {m.status && (
-                                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                        {header.referenceType === "GRN" &&
+                          (grnList.length === 0 ? (
+                            <div className="px-3 py-2 text-xs text-muted-foreground">
+                              No GRNs found
+                            </div>
+                          ) : (
+                            grnList.map((g) => (
+                              <SelectItem
+                                key={g.id}
+                                value={`${g.id}||${g.docNo}`}
+                              >
+                                <span className="font-mono text-xs">
+                                  {g.docNo || `GRN #${g.id}`}
+                                </span>
+                              </SelectItem>
+                            ))
+                          ))}
+                        {header.referenceType === "MR" &&
+                          (mrList.length === 0 ? (
+                            <div className="px-3 py-2 text-xs text-muted-foreground">
+                              No MRs found
+                            </div>
+                          ) : (
+                            mrList.map((m) => (
+                              <SelectItem
+                                key={m.id}
+                                value={`${m.id}||${m.docNo}`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono text-xs">
+                                    {m.docNo || `MR #${m.id}`}
+                                  </span>
+                                  {m.status && (
+                                    <span
+                                      className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                                         m.status === "Approved"
                                           ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
                                           : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                                      }`}>
-                                        {m.status}
-                                      </span>
-                                    )}
-                                  </div>
-                                </SelectItem>
-                              ))
-                        )}
+                                      }`}
+                                    >
+                                      {m.status}
+                                    </span>
+                                  )}
+                                </div>
+                              </SelectItem>
+                            ))
+                          ))}
                       </SelectContent>
                     </Select>
                   )}
@@ -1000,10 +1041,10 @@ export default function Issues() {
                       <SelectItem
                         key={fy.id}
                         value={String(fy.id)}
-                        disabled={fy.isLocked}
+                        disabled={fy.locked}
                       >
-                        {fy.name}
-                        {fy.isLocked && (
+                        {fy.year}
+                        {fy.locked && (
                           <span className="ml-1 text-xs text-muted-foreground">
                             (locked)
                           </span>
@@ -1575,7 +1616,12 @@ export default function Issues() {
           </div>
           {viewMode === "list" && (
             <Button
-              onClick={() => setViewMode("form")}
+              onClick={() => {
+                setHeader(defaultHeader);
+                setCart([blankCartItem()]);
+                setEditingId(null);
+                setViewMode("form");
+              }}
               className="gradient-accent gap-1.5 shrink-0"
             >
               <Plus size={15} /> New Issue
