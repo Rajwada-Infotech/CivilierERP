@@ -109,11 +109,12 @@ export const deleteIssue = async (id: number) => {
 };
 
 export interface IssuePrefill {
-  referenceType: "GRN" | "MR" | "WORK_DONE";
+  referenceType: "GRN" | "MR";
   referenceId: number;
   referenceDocNo: string;
   companyId?: number | null;
   projectId?: number | null;
+  finYearId?: number | null;
   items: {
     ItemId: string;
     ItemName?: string;
@@ -124,14 +125,34 @@ export interface IssuePrefill {
 }
 
 export const getIssuePrefill = async (
-  type: "GRN" | "MR" | "WORK_DONE",
-  id: number,
+  type: "GRN" | "MR",
+  id: string | number,
 ): Promise<IssuePrefill> => {
   const res = await fetchWithAuth(`${BASE}/prefill/${type}/${id}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error((err as any).error || "Failed to fetch prefill data");
   }
+  return res.json();
+};
+
+// ── Reference list fetchers (for dropdown menus) ──────────────────────────────
+
+export interface ReferenceListItem {
+  id: number;
+  docNo: string;
+  status?: string;
+}
+
+export const getGrnList = async (): Promise<ReferenceListItem[]> => {
+  const res = await fetchWithAuth(`${BASE}/reference-list/grn`);
+  if (!res.ok) throw new Error("Failed to fetch GRN list");
+  return res.json();
+};
+
+export const getMrList = async (): Promise<ReferenceListItem[]> => {
+  const res = await fetchWithAuth(`${BASE}/reference-list/mr`);
+  if (!res.ok) throw new Error("Failed to fetch MR list");
   return res.json();
 };
 

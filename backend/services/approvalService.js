@@ -86,7 +86,7 @@ async function getWorkflow(module) {
   const result = await pool.request().input("Module", sql.NVarChar(100), module)
     .query(`
       SELECT TOP 1 Id, Levels, Approvers
-      FROM dbo.ApprovalWorkflows
+      FROM dbo.ApprovalWorkflowsap
       WHERE Module = @Module AND Status = 'Active'
       ORDER BY CreatedAt DESC
     `);

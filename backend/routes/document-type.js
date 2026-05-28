@@ -47,7 +47,7 @@ const MODULE_LINKS = {
   DN: ["Debit Note"],
   WD: ["Work Done"],
   MR: ["Material Request"],
-  ISS: ["Material Issue"],
+  ISS: ["Material Issue"], // further filtered below to exclude ExB-ISS prefixes
 };
 
 // ── GET / — list all doc types, optionally filtered by ?module= ───────────────
@@ -71,6 +71,13 @@ router.get(
           return `t.links_to LIKE @tag${i}`;
         });
         linksWhere = `AND (${conditions.join(" OR ")})`;
+
+        // ISS (plain Material Issue) must NOT include Expense Booking doc types.
+        // ExB-ISS doc types also have links_to containing "Material Issue" so we
+        // explicitly exclude any doc type whose prefix starts with "ExB-".
+        if (module === "ISS") {
+          linksWhere += ` AND COALESCE(t.DocNoPrefix, t.FullPrefix, t.Prefix) NOT LIKE 'ExB-%'`;
+        }
       }
 
       const result = await request.query(`

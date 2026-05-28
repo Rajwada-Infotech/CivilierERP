@@ -1,11 +1,4 @@
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useMemo,
-  useEffect,
-  useRef,
-} from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { TopNavbar } from "./TopNavbar";
@@ -14,34 +7,15 @@ import { MobileNav } from "./MobileNav";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useModule } from "@/contexts/ModuleContext";
 import { useActivityBrowser } from "@/contexts/ActivityBrowserContext";
+import SlowConnectionBanner from "@/components/SlowConnectionBanner";
+import {
+  SidebarContext,
+  NavbarCollapseContext,
+  useSidebarState,
+  useNavbarCollapse,
+} from "./layoutContexts";
 
 // ─── Sidebar Context ──────────────────────────────────────────────────────────
-
-interface SidebarContextType {
-  collapsed: boolean;
-  setCollapsed: (v: boolean) => void;
-}
-
-const SidebarContext = createContext<SidebarContextType>({
-  collapsed: false,
-  setCollapsed: () => {},
-});
-
-export const useSidebarState = () => useContext(SidebarContext);
-
-// ─── Navbar Collapse Context ──────────────────────────────────────────────────
-
-interface NavbarCollapseContextType {
-  navCollapsed: boolean;
-  setNavCollapsed: (v: boolean) => void;
-}
-
-const NavbarCollapseContext = createContext<NavbarCollapseContextType>({
-  navCollapsed: false,
-  setNavCollapsed: () => {},
-});
-
-export const useNavbarCollapse = () => useContext(NavbarCollapseContext);
 
 // ─── Home page detection helper ───────────────────────────────────────────────
 
@@ -178,6 +152,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
               {children}
             </div>
           </main>
+          <SlowConnectionBanner />
         </div>
       </NavbarCollapseContext.Provider>
     </SidebarContext.Provider>

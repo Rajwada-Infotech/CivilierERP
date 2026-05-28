@@ -4,7 +4,7 @@ import { useModule } from "@/contexts/ModuleContext";
 import { useReminders } from "@/hooks/useReminders";
 import { useAppVersion } from "@/hooks/useAppVersion";
 import { useAuth } from "@/contexts/AuthContext";
-import { useSidebarState } from "./AppLayout";
+import { useSidebarState } from "./layoutContexts";
 import {
   BarChart3,
   Calendar,
@@ -184,10 +184,11 @@ export const AppSidebar = () => {
   // ── Pick nav items ──────────────────────────────────────────────────────────
   const getNavItems = (): NavItem[] => {
     if (isHomePage && !isCustomerPage) return [];
-    if (isCustomerPage) return [
-      { label: "My Tickets", icon: MessageSquare, path: "/customer-portal" },
-      { label: "My Profile", icon: User, path: "/user/profile" },
-    ];
+    if (isCustomerPage)
+      return [
+        { label: "My Tickets", icon: MessageSquare, path: "/customer-portal" },
+        { label: "My Profile", icon: User, path: "/user/profile" },
+      ];
     if (isSuperAdminPage) return superAdminNavItems;
     if (isDbaPage) return dbaNavItems;
     if (isUserProfilePage) return userNavItems;
