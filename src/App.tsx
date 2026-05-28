@@ -241,6 +241,7 @@ const TDSReminders = lazy(() => import("./pages/followup/TDSReminders"));
 const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
 const PendingTasksPage = lazy(() => import("./pages/followup/PendingTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
+
 const BookingsPage = lazy(() => import("./pages/followup/Bookings"));
 const FollowupUnitSelection = lazy(
   () => import("./pages/followup/UnitSelection"),
@@ -694,6 +695,7 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/followup/sales/applicants/:id"
         element={
           <ProtectedRoute>
             <ApplicantDetail />
