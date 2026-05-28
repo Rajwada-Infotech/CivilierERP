@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
+  RefreshCw,
   Search,
   X,
   Home,
@@ -22,6 +23,7 @@ import {
   Car,
   Gift,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -480,7 +482,7 @@ export function HandoverPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: result, isLoading } = useQuery({
+  const { data: result, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["handovers", page, search, statusFilter],
     queryFn: () =>
       fetchHandovers({
@@ -705,8 +707,6 @@ export function HandoverPage() {
     <>
       <style>{`
         .ho-page {
-          min-height: 100vh;
-          background: hsl(var(--background));
           font-family: 'DM Sans', 'Segoe UI', sans-serif;
           color: hsl(var(--foreground));
         }
@@ -994,35 +994,44 @@ export function HandoverPage() {
         }
       `}</style>
 
-      <DashboardBackground />
-
-      <div className="ho-page" onClick={() => setOpenMenuId(null)}>
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Closure", path: "/followup/closure/handover" },
+          { label: "Handover", path: "/followup/closure/handover" },
+        ]}
+      />
+      <div className="ho-page relative space-y-8 mt-6" onClick={() => setOpenMenuId(null)}>
         {/* ── Header ── */}
-        <div className="ho-header">
-          <div className="ho-header-top">
-            <div>
-              <Breadcrumbs
-                items={[
-                  { label: "Follow-Up", path: "/followup" },
-                  { label: "Closure", path: "/followup/closure/handover" },
-                  { label: "Handover", path: "/followup/closure/handover" },
-                ]}
-              />
-              <div className="ho-title-row" style={{ marginTop: 8 }}>
-                <div className="ho-icon">
-                  <Home size={20} />
-                </div>
-                <span className="ho-title">Handovers</span>
-                <span className="ho-count">{pagination?.total ?? 0}</span>
-              </div>
+        <div className="flex items-start justify-between gap-4">
+          <div className="ho-title-row">
+            <div className="ho-icon">
+              <Home size={20} />
             </div>
-            <button className="ho-add-btn" onClick={openCreate}>
-              <Plus size={15} /> New Handover
-            </button>
+            <span className="ho-title">Handovers</span>
+            <span className="ho-count">{pagination?.total ?? 0}</span>
           </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              Refresh
+            </button>
+            <Button
+              size="sm"
+              onClick={openCreate}
+              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+            >
+              <Plus size={14} /> New Handover
+            </Button>
+          </div>
+        </div>
 
-          {/* Filter + search */}
-          <div className="ho-filter-bar">
+        {/* Filter + search */}
+        <div className="ho-filter-bar">
             <div className="ho-search-wrap">
               <Search size={14} />
               <input
@@ -1076,24 +1085,23 @@ export function HandoverPage() {
             </div>
           </div>
 
-          {/* Stats bar */}
-          <div className="ho-stats">
-            {[
-              { label: "Total", val: pagination?.total ?? 0, cls: "blue" },
-              { label: "Scheduled", val: stats.scheduled, cls: "" },
-              { label: "Completed", val: stats.completed, cls: "green" },
-              { label: "Delayed", val: stats.delayed, cls: "amber" },
-            ].map(({ label, val, cls }) => (
-              <div key={label} className="ho-stat">
-                <div className={`ho-stat-val ${cls}`}>{val}</div>
-                <div className="ho-stat-label">{label}</div>
-              </div>
-            ))}
-          </div>
+        {/* Stats bar */}
+        <div className="ho-stats">
+          {[
+            { label: "Total", val: pagination?.total ?? 0, cls: "blue" },
+            { label: "Scheduled", val: stats.scheduled, cls: "" },
+            { label: "Completed", val: stats.completed, cls: "green" },
+            { label: "Delayed", val: stats.delayed, cls: "amber" },
+          ].map(({ label, val, cls }) => (
+            <div key={label} className="ho-stat">
+              <div className={`ho-stat-val ${cls}`}>{val}</div>
+              <div className="ho-stat-label">{label}</div>
+            </div>
+          ))}
         </div>
 
         {/* ── Body ── */}
-        <div className="ho-body">
+        <div className="ho-body" style={{ paddingTop: 0, paddingBottom: 0 }}>
           <div className="ho-table-wrap">
             {isLoading ? (
               <table className="ho-table">

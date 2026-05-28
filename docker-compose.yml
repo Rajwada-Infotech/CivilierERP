@@ -1,18 +1,17 @@
-version: "3.9"
-
 services:
   backend:
     build: ./backend
     ports:
       - "5000" # For direct access/debug, remove in prod
+    env_file:
+      - backend/.env # DB creds, JWT, Redis password, health token
     environment:
       - NODE_ENV=production
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-    env_file:
-      - backend/.env # Your DB creds here
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     networks:
       - civilier-network
     restart: unless-stopped
@@ -24,7 +23,7 @@ services:
           "--no-verbose",
           "--tries=1",
           "--spider",
-          "http://localhost:5000/",
+          "http://localhost:5000/health/live",
         ]
       interval: 30s
       timeout: 10s
@@ -33,16 +32,27 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379" # Local access
+    env_file:
+      - backend/.env # Provides REDIS_PASSWORD
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command:
+      [
+        "sh",
+        "-c",
+        "redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD:?REDIS_PASSWORD is required}\"",
+      ]
+    environment:
+      - REDIS_DB=0
     networks:
       - civilier-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli -a \"$${REDIS_PASSWORD}\" --no-auth-warning ping | grep PONG",
+        ]
       interval: 30s
       timeout: 5s
       retries: 5

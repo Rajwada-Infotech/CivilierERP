@@ -33,9 +33,6 @@ module.exports = async (req, res, next) => {
     if (req.headers.authorization?.startsWith("Bearer ")) {
       token = req.headers.authorization.split(" ")[1];
     }
-    if (!token && req.query.token) {
-      token = req.query.token;
-    }
     if (!token) {
       return res.status(401).json({ error: "No token provided" });
     }
