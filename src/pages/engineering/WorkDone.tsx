@@ -13,6 +13,7 @@ import {
   fetchSuppliers,
 } from "@/api/workOrderApi";
 import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
+import { Button } from "@/components/ui/button";
 import {
   Hammer,
   Plus,
@@ -113,26 +114,43 @@ const fmtDate = (d: string | null) =>
 function SummaryCard({
   label,
   value,
-  icon: Icon,
-  iconColor,
-  iconBg,
+  color,
 }: {
   label: string;
   value: string;
-  icon: React.ElementType;
-  iconColor: string;
-  iconBg: string;
+  color: string;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card px-4 py-3 flex items-center gap-3">
-      <div className={`p-2 rounded-lg ${iconBg}`}>
-        <Icon size={15} className={iconColor} />
+    <div
+      style={{
+        background: "hsl(var(--background))",
+        border: "1px solid hsl(var(--border))",
+        borderTop: `3px solid ${color}`,
+        borderRadius: "calc(var(--radius) + 2px)",
+        padding: "14px 16px",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          textTransform: "uppercase",
+          letterSpacing: "0.07em",
+          color: "hsl(var(--muted-foreground))",
+        }}
+      >
+        {label}
       </div>
-      <div>
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-sm font-heading font-bold text-foreground">
-          {value}
-        </p>
+      <div
+        style={{
+          fontSize: 22,
+          fontWeight: 700,
+          marginTop: 4,
+          fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {value}
       </div>
     </div>
   );
@@ -1275,63 +1293,64 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="p-6 space-y-5 max-w-[1600px] mx-auto">
+    <>
+      <Breadcrumbs
+        items={[
+          { label: "Engineering", path: "/engineering" },
+          { label: "Work Done" },
+        ]}
+      />
+      <div className="relative space-y-8 mt-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <Breadcrumbs
-            items={[
-              { label: "Engineering", path: "/engineering" },
-              { label: "Work Done" },
-            ]}
-          />
-          <div className="flex items-center gap-3 mt-1">
-            {view === "form" && (
-              <button
-                onClick={closeForm}
-                className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-              >
-                <ArrowLeft size={16} />
-              </button>
-            )}
-            <div className="p-2 rounded-lg bg-orange-500/10">
-              <Hammer size={18} className="text-orange-600" />
-            </div>
-            <div>
-              <h1 className="text-xl font-heading font-bold text-foreground">
-                {view === "form"
-                  ? editRecord
-                    ? `Edit — ${editRecord.DocNo || "Work Done"}`
-                    : "New Work Done Entry"
-                  : "Work Done"}
-              </h1>
-              <p className="text-xs text-muted-foreground">
-                {view === "form"
-                  ? "Fill in the document details and work information"
-                  : "Record and certify contractor work completion"}
-              </p>
-            </div>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          {view === "form" && (
+            <button
+              onClick={closeForm}
+              className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft size={16} />
+            </button>
+          )}
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-orange-500/10 inline-flex shrink-0">
+                <Hammer size={18} className="text-orange-600" />
+              </span>
+              {view === "form"
+                ? editRecord
+                  ? `Edit — ${editRecord.DocNo || "Work Done"}`
+                  : "New Work Done Entry"
+                : "Work Done"}
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {view === "form"
+                ? "Fill in the document details and work information"
+                : "Record and certify contractor work completion"}
+            </p>
           </div>
         </div>
 
         {view === "list" && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
               <RefreshCw
-                size={12}
+                size={13}
                 className={isFetching ? "animate-spin" : ""}
               />
+              Refresh
             </button>
-            <button
+            <Button
+              size="sm"
               onClick={openNew}
-              className="flex items-center gap-1.5 text-sm bg-violet-600 hover:bg-violet-700 text-white rounded-lg px-4 py-2 font-medium transition-colors"
+              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
             >
               <Plus size={14} /> New Entry
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -1339,34 +1358,26 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
       {view === "list" ? (
         <>
           {/* Summary strip */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <SummaryCard
               label="Total Entries"
               value={String(entries.length)}
-              icon={FileText}
-              iconColor="text-orange-600"
-              iconBg="bg-orange-500/10"
+              color="#3b82f6"
             />
             <SummaryCard
               label="Certified Amount"
               value={fmt(totalCertified)}
-              icon={IndianRupee}
-              iconColor="text-emerald-600"
-              iconBg="bg-emerald-500/10"
+              color="#10b981"
             />
             <SummaryCard
               label="Pending Approval"
               value={String(pendingCount)}
-              icon={Clock}
-              iconColor="text-amber-600"
-              iconBg="bg-amber-500/10"
+              color="#f59e0b"
             />
             <SummaryCard
               label="Approved"
               value={String(approvedCount)}
-              icon={CheckCircle2}
-              iconColor="text-blue-600"
-              iconBg="bg-blue-500/10"
+              color="#8b5cf6"
             />
           </div>
 
@@ -1590,6 +1601,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
