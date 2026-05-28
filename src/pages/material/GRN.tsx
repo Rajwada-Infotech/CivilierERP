@@ -292,6 +292,13 @@ export default function GRN() {
     staleTime: 15_000,
   });
 
+  // Derive the calendar year embedded in PO DocNos from the fin-year string.
+  // e.g. "2025-2026" → "2026"  (the second/end year, which appears in PO-2026-xxxxx)
+  // Falls back to the raw string so "All Years" ("") still passes through.
+  const finYearDocFragment = selectedFinYear
+    ? selectedFinYear.split("-").pop() ?? selectedFinYear
+    : "";
+
   const pos = posData
     .filter((po: PurchaseOrder) => {
       // When editing, always include the GRN's linked PO regardless of fin-year filter
@@ -301,9 +308,9 @@ export default function GRN() {
         String(po.PurchaseOrderID) === formData.poId
       )
         return true;
-      if (!selectedFinYear) return true;
+      if (!finYearDocFragment) return true;
       const docNo = po.PurchaseOrderNo || "";
-      return docNo.includes(selectedFinYear);
+      return docNo.includes(finYearDocFragment);
     })
     .map((po: PurchaseOrder) => {
       const typeTag =
@@ -1555,6 +1562,114 @@ export default function GRN() {
                         </table>
                       </div>
                     </div>
+
+                    {/* GST Breakdown */}
+                    {(() => {
+                      const gst = viewingGrn.ParentGST;
+                      if (!gst) return null;
+
+                      // Normalise to array of { label, rate, amount } rows
+                      const subtotal = items.reduce(
+                        (sum, i) => sum + (Number(i.totalAmount) || 0),
+                        0,
+                      );
+
+                      type GSTRow = { label: string; rate: number; amount: number };
+                      let rows: GSTRow[] = [];
+
+                      if (Array.isArray(gst)) {
+                        // Array form: [{ name, rate }, ...]
+                        rows = gst
+                          .filter((g: any) => Number(g.rate) > 0)
+                          .map((g: any) => ({
+                            label: g.name || g.label || `GST ${g.rate}%`,
+                            rate: Number(g.rate),
+                            amount: (subtotal * Number(g.rate)) / 100,
+                          }));
+                      } else if (typeof gst === "object") {
+                        // Flat object: { cgst, sgst, igst } as rates
+                        const push = (label: string, key: string) => {
+                          const r = Number((gst as any)[key]);
+                          if (r > 0)
+                            rows.push({
+                              label,
+                              rate: r,
+                              amount: (subtotal * r) / 100,
+                            });
+                        };
+                        push("CGST", "cgst");
+                        push("SGST", "sgst");
+                        push("IGST", "igst");
+                        // Fallback: single rate field
+                        if (rows.length === 0 && Number((gst as any).rate) > 0) {
+                          const r = Number((gst as any).rate);
+                          rows.push({
+                            label: `GST ${r}%`,
+                            rate: r,
+                            amount: (subtotal * r) / 100,
+                          });
+                        }
+                      }
+
+                      if (rows.length === 0) return null;
+
+                      const totalGST = rows.reduce((s, r) => s + r.amount, 0);
+                      const grandTotal = subtotal + totalGST;
+
+                      return (
+                        <div>
+                          <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2">
+                            GST Breakdown
+                          </p>
+                          <div className="border border-border rounded-xl overflow-hidden text-sm">
+                            {/* Subtotal row */}
+                            <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20 border-b border-border">
+                              <span className="text-muted-foreground text-xs uppercase tracking-wide">
+                                Subtotal (before GST)
+                              </span>
+                              <span className="font-medium">
+                                ₹{subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                            {/* GST component rows */}
+                            {rows.map((row, idx) => (
+                              <div
+                                key={idx}
+                                className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-b-0"
+                              >
+                                <span className="text-muted-foreground text-xs">
+                                  {row.label}{" "}
+                                  <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded font-mono">
+                                    {row.rate}%
+                                  </span>
+                                </span>
+                                <span className="font-medium text-amber-600 dark:text-amber-400">
+                                  +₹{row.amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                            ))}
+                            {/* Total GST row */}
+                            <div className="flex items-center justify-between px-4 py-2.5 bg-muted/30 border-t border-border">
+                              <span className="text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                                Total GST
+                              </span>
+                              <span className="font-semibold text-amber-600 dark:text-amber-400">
+                                ₹{totalGST.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                            {/* Grand Total with GST row */}
+                            <div className="flex items-center justify-between px-4 py-3 bg-primary/5 border-t-2 border-primary/20">
+                              <span className="text-xs font-heading uppercase tracking-widest font-semibold">
+                                Grand Total (incl. GST)
+                              </span>
+                              <span className="font-bold text-primary text-base">
+                                ₹{grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Remarks */}
                     {viewingGrn.Remarks && (
