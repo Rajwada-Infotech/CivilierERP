@@ -102,7 +102,15 @@ async function apiFetch(url: string, opts?: RequestInit, timeoutMs = 25000) {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? body.message ?? `HTTP ${res.status}`);
+    const details = Array.isArray(body.details)
+      ? body.details
+          .map((d: any) => `${d.field || "?"}: ${d.message}`)
+          .join(" | ")
+      : "";
+    throw new Error(
+      (body.error ?? body.message ?? `HTTP ${res.status}`) +
+        (details ? ` → ${details}` : ""),
+    );
   }
   return res.json();
 }
@@ -1103,7 +1111,12 @@ function DocSelectorPanel({
                         vendorLabel: g.SupplierName,
                         status: g.Status,
                         date: g.GRNDate,
-                        nameLabel: g.Remarks,
+                        nameLabel:
+                          g.Remarks ||
+                          g.SupplierName ||
+                          g.DocNo ||
+                          g.GRNNo ||
+                          "GRN Expense",
                         grnItems: parsedItems,
                         projectId: g.ProjectId,
                         companyId: g.CompanyId,
@@ -1977,6 +1990,11 @@ export default function MaterialExpenseBooking() {
         ? form.billingTerms
         : form.discount,
     );
+    // For GRN bookings, snap net payable to the GRN's exact TotalAmount
+    if (selectedDoc?.kind === "GRN" && selectedDoc.amount != null) {
+      bd.roundOff = selectedDoc.amount - bd.grossAmount;
+      bd.netAmount = selectedDoc.amount;
+    }
 
     let emiForSave = { ...form.emi };
     if (
@@ -2173,6 +2191,13 @@ export default function MaterialExpenseBooking() {
       ? form.billingTerms
       : form.discount,
   );
+  // For GRN bookings, snap net payable exactly to the GRN's TotalAmount
+  // instead of using a generic nearest-rupee round-off.
+  if (selectedDoc?.kind === "GRN" && selectedDoc.amount != null) {
+    const grnTotal = selectedDoc.amount;
+    bd.roundOff = grnTotal - bd.grossAmount;
+    bd.netAmount = grnTotal;
+  }
   const filteredRecords =
     statusFilter && statusFilter !== "All"
       ? records.filter((r) => r.status === statusFilter)
@@ -2971,6 +2996,11 @@ export default function MaterialExpenseBooking() {
                   billingTerms={form.billingTerms}
                   onChange={(d) => set("discount", d)}
                   onChangeBillingTerms={(terms) => set("billingTerms", terms)}
+                  grnNetAmount={
+                    isGRN && selectedDoc?.amount != null
+                      ? selectedDoc.amount
+                      : null
+                  }
                 />
               </div>
 
