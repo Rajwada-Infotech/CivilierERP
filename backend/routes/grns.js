@@ -278,7 +278,6 @@ router.get("/:id", async (req, res) => {
           grn.DocNo,
           grn.TotalAmount,
           s.LHeadName AS SupplierName,
-          s.LGSTState AS VendorState,
           p.PurchaseOrderNo AS PONumber,
           p.POType,
           p.SourceWODocNo,
@@ -286,14 +285,12 @@ router.get("/:id", async (req, res) => {
           p.SourceWDDocNo,
           p.ProjectId,
           p.CompanyId,
-          company.state AS CompanyState,
           p.GST AS ParentGST,
           td.Prefix AS DocTypePrefix,
           td.Description AS DocTypeDescription
         FROM GoodsReceiptNotes grn
         LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
         LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
-        LEFT JOIN dbo.enterprise company ON company.id = p.CompanyId
         LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = grn.DocTypeId
         WHERE grn.GRNID = @GRNID
       `);
@@ -684,6 +681,148 @@ router.put("/:id/reject", async (req, res) => {
     console.error("GRN reject error:", err.message);
     const status = err.message.includes("not authorized") ? 403 : 400;
     res.status(status).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/gst-breakdown ────────────────────────────────────────────────────
+// Returns GRN items enriched with HSN code + CGST/SGST rates from Item_Master_Group.
+// Each item has: itemId, itemName, uom, receivedQty, rate, totalAmountInclGST,
+//               hsnCode, cgstRate, sgstRate, baseAmount, cgstAmount, sgstAmount, gstAmount
+// Totals: totalBase, totalCGST, totalSGST, totalGST, totalInclGST
+router.get("/:id/gst-breakdown", async (req, res) => {
+  const grnId = parseInt(req.params.id, 10);
+  if (isNaN(grnId)) return res.status(400).json({ error: "Invalid GRN ID" });
+
+  try {
+    const pool = await getPool();
+
+    // Fetch GRN row for its items JSON
+    const grnResult = await pool
+      .request()
+      .input("GRNID", sql.Int, grnId)
+      .query("SELECT GRNItems FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID");
+
+    if (!grnResult.recordset.length)
+      return res.status(404).json({ error: "GRN not found" });
+
+    const rawItems = parseGRNItems(grnResult.recordset[0].GRNItems);
+    const receivedItems = rawItems.filter(
+      (it) => Number(it.receivedQty || it.ReceivedQty || 0) > 0,
+    );
+
+    if (receivedItems.length === 0)
+      return res.json({
+        items: [],
+        totals: {
+          totalBase: 0,
+          totalCGST: 0,
+          totalSGST: 0,
+          totalGST: 0,
+          totalInclGST: 0,
+        },
+      });
+
+    // Build itemId list for a single batch lookup against Item_Master_Group
+    const itemIds = receivedItems
+      .map((it) => String(it.itemId || it.ItemId || "").trim())
+      .filter(Boolean);
+
+    let masterMap = {};
+    if (itemIds.length > 0) {
+      // Parameterised IN clause — one param per id
+      const masterReq = pool.request();
+      const placeholders = itemIds
+        .map((id, i) => {
+          masterReq.input(`iid${i}`, sql.NVarChar(100), id);
+          return `@iid${i}`;
+        })
+        .join(",");
+
+      const masterRes = await masterReq.query(`
+        SELECT
+          CONVERT(NVARCHAR(100), M_Id) AS M_Id,
+          M_HSN,
+          ISNULL(M_CGST, 0) AS M_CGST,
+          ISNULL(M_SGST, 0) AS M_SGST
+        FROM dbo.Item_Master_Group
+        WHERE CONVERT(NVARCHAR(100), M_Id) IN (${placeholders})
+      `);
+
+      for (const row of masterRes.recordset) {
+        masterMap[row.M_Id] = {
+          hsnCode: row.M_HSN || "",
+          cgstRate: parseFloat(row.M_CGST) || 0,
+          sgstRate: parseFloat(row.M_SGST) || 0,
+        };
+      }
+    }
+
+    let totalBase = 0,
+      totalCGST = 0,
+      totalSGST = 0,
+      totalInclGST = 0;
+
+    const items = receivedItems.map((it) => {
+      const itemId = String(it.itemId || it.ItemId || "");
+      const receivedQty = Number(it.receivedQty || it.ReceivedQty || 0);
+      const rate = Number(it.rate || it.Rate || 0);
+      // totalAmount stored in GRN = receivedQty × rate (inclusive of GST)
+      const inclGST =
+        Number(it.totalAmount) > 0
+          ? Number(it.totalAmount)
+          : receivedQty * rate;
+
+      const master = masterMap[itemId] || {
+        hsnCode: "",
+        cgstRate: 0,
+        sgstRate: 0,
+      };
+      const totalGSTRate = master.cgstRate + master.sgstRate;
+
+      // Back-calculate base from inclusive amount
+      const baseAmount =
+        totalGSTRate > 0 ? inclGST / (1 + totalGSTRate / 100) : inclGST;
+      const cgstAmount = (baseAmount * master.cgstRate) / 100;
+      const sgstAmount = (baseAmount * master.sgstRate) / 100;
+      const gstAmount = cgstAmount + sgstAmount;
+
+      totalBase += baseAmount;
+      totalCGST += cgstAmount;
+      totalSGST += sgstAmount;
+      totalInclGST += inclGST;
+
+      return {
+        itemId,
+        itemName: it.itemName || it.ItemName || "",
+        uom: it.uom || it.UOM || "",
+        orderedQty: Number(it.orderedQty || 0),
+        receivedQty,
+        remainingQty: Number(it.remainingQty || 0),
+        rate,
+        totalAmountInclGST: Math.round(inclGST * 100) / 100,
+        hsnCode: master.hsnCode,
+        cgstRate: master.cgstRate,
+        sgstRate: master.sgstRate,
+        baseAmount: Math.round(baseAmount * 100) / 100,
+        cgstAmount: Math.round(cgstAmount * 100) / 100,
+        sgstAmount: Math.round(sgstAmount * 100) / 100,
+        gstAmount: Math.round(gstAmount * 100) / 100,
+      };
+    });
+
+    res.json({
+      items,
+      totals: {
+        totalBase: Math.round(totalBase * 100) / 100,
+        totalCGST: Math.round(totalCGST * 100) / 100,
+        totalSGST: Math.round(totalSGST * 100) / 100,
+        totalGST: Math.round((totalCGST + totalSGST) * 100) / 100,
+        totalInclGST: Math.round(totalInclGST * 100) / 100,
+      },
+    });
+  } catch (err) {
+    console.error("GRN GST breakdown error:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
