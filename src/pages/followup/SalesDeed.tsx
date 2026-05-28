@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
+  RefreshCw,
   Search,
   X,
   FileSignature,
@@ -450,7 +451,7 @@ export function SalesDeedPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: result, isLoading } = useQuery({
+  const { data: result, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["sales-deeds", page, search, statusFilter],
     queryFn: () =>
       fetchDeeds({ page, pageSize: PAGE_SIZE, search, status: statusFilter }),
@@ -659,8 +660,6 @@ export function SalesDeedPage() {
       <style>{`
         /* ── All sd-* classes use CSS vars — theme-safe ── */
         .sd-page {
-          min-height: 100vh;
-          background: hsl(var(--background));
           font-family: 'DM Sans', 'Segoe UI', sans-serif;
           color: hsl(var(--foreground));
         }
@@ -922,35 +921,44 @@ export function SalesDeedPage() {
         }
       `}</style>
 
-      <DashboardBackground />
-
-      <div className="sd-page" onClick={() => setOpenMenuId(null)}>
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Closure", path: "/followup/closure/sales-deed" },
+          { label: "Sales Deed", path: "/followup/closure/sales-deed" },
+        ]}
+      />
+      <div className="sd-page relative space-y-8 mt-6" onClick={() => setOpenMenuId(null)}>
         {/* ── Header ── */}
-        <div className="sd-header">
-          <div className="sd-header-top">
-            <div>
-              <Breadcrumbs
-                items={[
-                  { label: "Follow-Up", path: "/followup" },
-                  { label: "Closure", path: "/followup/closure/sales-deed" },
-                  { label: "Sales Deed", path: "/followup/closure/sales-deed" },
-                ]}
-              />
-              <div className="sd-title-row" style={{ marginTop: 8 }}>
-                <div className="sd-icon">
-                  <FileSignature size={20} />
-                </div>
-                <span className="sd-title">Sales Deeds</span>
-                <span className="sd-count">{pagination?.total ?? 0}</span>
-              </div>
+        <div className="flex items-start justify-between gap-4">
+          <div className="sd-title-row">
+            <div className="sd-icon">
+              <FileSignature size={20} />
             </div>
-            <button className="sd-add-btn" onClick={openCreate}>
-              <Plus size={15} /> New Deed
-            </button>
+            <span className="sd-title">Sales Deeds</span>
+            <span className="sd-count">{pagination?.total ?? 0}</span>
           </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              Refresh
+            </button>
+            <Button
+              size="sm"
+              onClick={openCreate}
+              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+            >
+              <Plus size={14} /> New Deed
+            </Button>
+          </div>
+        </div>
 
-          {/* Filter + search */}
-          <div className="sd-filter-bar">
+        {/* Filter + search */}
+        <div className="sd-filter-bar">
             <div className="sd-search-wrap">
               <Search size={14} />
               <input
@@ -1004,24 +1012,23 @@ export function SalesDeedPage() {
             </div>
           </div>
 
-          {/* Stats bar */}
-          <div className="sd-stats">
-            {[
-              { label: "Total", val: pagination?.total ?? 0, cls: "blue" },
-              { label: "Draft", val: stats.draft, cls: "" },
-              { label: "Executed", val: stats.executed, cls: "green" },
-              { label: "Registered", val: stats.registered, cls: "amber" },
-            ].map(({ label, val, cls }) => (
-              <div key={label} className="sd-stat">
-                <div className={`sd-stat-val ${cls}`}>{val}</div>
-                <div className="sd-stat-label">{label}</div>
-              </div>
-            ))}
-          </div>
+        {/* Stats bar */}
+        <div className="sd-stats">
+          {[
+            { label: "Total", val: pagination?.total ?? 0, cls: "blue" },
+            { label: "Draft", val: stats.draft, cls: "" },
+            { label: "Executed", val: stats.executed, cls: "green" },
+            { label: "Registered", val: stats.registered, cls: "amber" },
+          ].map(({ label, val, cls }) => (
+            <div key={label} className="sd-stat">
+              <div className={`sd-stat-val ${cls}`}>{val}</div>
+              <div className="sd-stat-label">{label}</div>
+            </div>
+          ))}
         </div>
 
         {/* ── Body ── */}
-        <div className="sd-body">
+        <div className="sd-body" style={{ paddingTop: 0, paddingBottom: 0 }}>
           <div className="sd-table-wrap">
             {isLoading ? (
               <table className="sd-table">

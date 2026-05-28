@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
+  RefreshCw,
   Search,
   X,
   HardHat,
@@ -437,7 +438,7 @@ export function ConstructionUpdatesPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: result, isLoading } = useQuery({
+  const { data: result, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["construction-updates", page, search, statusFilter],
     queryFn: () =>
       fetchUpdates({ page, pageSize: PAGE_SIZE, search, status: statusFilter }),
@@ -620,8 +621,6 @@ export function ConstructionUpdatesPage() {
     <>
       <style>{`
         .cu-page {
-          min-height: 100vh;
-          background: hsl(var(--background));
           font-family: 'DM Sans', 'Segoe UI', sans-serif;
           color: hsl(var(--foreground));
         }
@@ -879,38 +878,44 @@ export function ConstructionUpdatesPage() {
         }
       `}</style>
 
-      <DashboardBackground />
-
-      <div className="cu-page" onClick={() => setOpenMenuId(null)}>
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Construction", path: "/followup/construction/updates" },
+          { label: "Updates", path: "/followup/construction/updates" },
+        ]}
+      />
+      <div className="cu-page relative space-y-8 mt-6" onClick={() => setOpenMenuId(null)}>
         {/* ── Header ── */}
-        <div className="cu-header">
-          <div className="cu-header-top">
-            <div>
-              <Breadcrumbs
-                items={[
-                  { label: "Follow-Up", path: "/followup" },
-                  {
-                    label: "Construction",
-                    path: "/followup/construction/updates",
-                  },
-                  { label: "Updates", path: "/followup/construction/updates" },
-                ]}
-              />
-              <div className="cu-title-row" style={{ marginTop: 8 }}>
-                <div className="cu-icon">
-                  <HardHat size={20} />
-                </div>
-                <span className="cu-title">Construction Updates</span>
-                <span className="cu-count">{pagination?.total ?? 0}</span>
-              </div>
+        <div className="flex items-start justify-between gap-4">
+          <div className="cu-title-row">
+            <div className="cu-icon">
+              <HardHat size={20} />
             </div>
-            <button className="cu-add-btn" onClick={openCreate}>
-              <Plus size={15} /> New Update
-            </button>
+            <span className="cu-title">Construction Updates</span>
+            <span className="cu-count">{pagination?.total ?? 0}</span>
           </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              Refresh
+            </button>
+            <Button
+              size="sm"
+              onClick={openCreate}
+              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+            >
+              <Plus size={14} /> New Update
+            </Button>
+          </div>
+        </div>
 
-          {/* Filter + search */}
-          <div className="cu-filter-bar">
+        {/* Filter + search */}
+        <div className="cu-filter-bar">
             <div className="cu-search-wrap">
               <Search size={14} />
               <input
@@ -964,24 +969,23 @@ export function ConstructionUpdatesPage() {
             </div>
           </div>
 
-          {/* Stats bar */}
-          <div className="cu-stats">
-            {[
-              { label: "Total", val: pagination?.total ?? 0, cls: "blue" },
-              { label: "Sent", val: stats.sent, cls: "" },
-              { label: "Acknowledged", val: stats.acknowledged, cls: "green" },
-              { label: "Disputed", val: stats.disputed, cls: "red" },
-            ].map(({ label, val, cls }) => (
-              <div key={label} className="cu-stat">
-                <div className={`cu-stat-val ${cls}`}>{val}</div>
-                <div className="cu-stat-label">{label}</div>
-              </div>
-            ))}
-          </div>
+        {/* Stats bar */}
+        <div className="cu-stats">
+          {[
+            { label: "Total", val: pagination?.total ?? 0, cls: "blue" },
+            { label: "Sent", val: stats.sent, cls: "" },
+            { label: "Acknowledged", val: stats.acknowledged, cls: "green" },
+            { label: "Disputed", val: stats.disputed, cls: "red" },
+          ].map(({ label, val, cls }) => (
+            <div key={label} className="cu-stat">
+              <div className={`cu-stat-val ${cls}`}>{val}</div>
+              <div className="cu-stat-label">{label}</div>
+            </div>
+          ))}
         </div>
 
         {/* ── Body ── */}
-        <div className="cu-body">
+        <div className="cu-body" style={{ paddingTop: 0, paddingBottom: 0 }}>
           <div className="cu-table-wrap">
             {isLoading ? (
               <table className="cu-table">

@@ -3,6 +3,7 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { Button } from "@/components/ui/button";
 import {
   BookOpen,
   Plus,
@@ -41,7 +42,6 @@ import {
   Info,
   Check,
 } from "lucide-react";
-import { DashboardBackground } from "@/components/DashboardBackground";
 import { useLookup } from "@/hooks/useLookup";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -1821,53 +1821,44 @@ export default function BookingsPage() {
 
   return (
     <>
-      <DashboardBackground />
-      <div className="relative z-10 p-6 max-w-[1400px] mx-auto space-y-5">
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Sales" },
+          { label: "Bookings", path: "/followup/sales/bookings" },
+        ]}
+      />
+      <div className="relative space-y-8 mt-6">
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <Breadcrumbs
-              items={[
-                { label: "Follow-Up", path: "/followup" },
-                { label: "Sales" },
-                { label: "Bookings", path: "/followup/sales/bookings" },
-              ]}
-            />
-            <div className="flex items-center gap-3 mt-2">
-              <div className="p-2 rounded-xl bg-gradient-to-br from-emerald-500/15 to-emerald-500/5 border border-emerald-500/20">
-                <BookOpen
-                  size={18}
-                  className="text-emerald-600 dark:text-emerald-400"
-                />
-              </div>
-              <div>
-                <h1 className="text-xl font-heading font-bold text-foreground">
-                  Bookings
-                </h1>
-                <p className="text-xs text-muted-foreground">
-                  Unit bookings and sales agreements
-                </p>
-              </div>
-            </div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Bookings
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Unit bookings and sales agreements
+            </p>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
               disabled={isLoading}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-xl px-3 py-2 hover:bg-muted transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
               <RefreshCw
-                size={12}
+                size={13}
                 className={isLoading ? "animate-spin" : ""}
-              />{" "}
+              />
               Refresh
             </button>
-            <button
+            <Button
+              size="sm"
               onClick={openNew}
-              className="flex items-center gap-1.5 text-xs bg-primary text-primary-foreground rounded-xl px-4 py-2 hover:bg-primary/90 transition-colors font-semibold shadow-sm shadow-primary/20"
+              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
             >
-              <Plus size={13} /> New Booking
-            </button>
+              <Plus size={13} />
+              New Booking
+            </Button>
           </div>
         </div>
 
