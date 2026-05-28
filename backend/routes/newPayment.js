@@ -5,6 +5,8 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
+const { validateBody } = require("../middleware/validateRequest");
+const { paymentBodySchema } = require("../validation/financialRouteSchemas");
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -326,7 +328,7 @@ router.post("/deduct-cheque", async (req, res) => {
 });
 
 // ── POST — Create payment ─────────────────────────────────────────────────────
-router.post("/", async (req, res) => {
+router.post("/", validateBody(paymentBodySchema), async (req, res) => {
   const {
     PPaymentName,
     PMode,
@@ -460,7 +462,7 @@ router.post("/", async (req, res) => {
 });
 
 // ── PUT /:id — Update payment ─────────────────────────────────────────────────
-router.put("/:id", async (req, res) => {
+router.put("/:id", validateBody(paymentBodySchema), async (req, res) => {
   const { id } = req.params;
   const {
     PPaymentName,
@@ -473,6 +475,8 @@ router.put("/:id", async (req, res) => {
     PProject,
     PCompany,
     PExpenseRef,
+    parentDocNo,
+    rootExBDocNo,
     // Cheque
     PChequeNo,
     PChequeLotId,

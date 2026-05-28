@@ -5,7 +5,12 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
+const { validateBody } = require("../middleware/validateRequest");
 const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
+const {
+  purchaseOrderBodySchema,
+  purchaseOrderUpdateSchema,
+} = require("../validation/financialRouteSchemas");
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -284,7 +289,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ── POST /  (Create) ──────────────────────────────────────────────────────────
-router.post("/", async (req, res) => {
+router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
   const {
     PurchaseOrderNo: poNoFromClient,
     PODate,
@@ -537,7 +542,7 @@ router.post("/", async (req, res) => {
 });
 
 // ── PUT /:id  (Update) ────────────────────────────────────────────────────────
-router.put("/:id", async (req, res) => {
+router.put("/:id", validateBody(purchaseOrderUpdateSchema), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
   const {
