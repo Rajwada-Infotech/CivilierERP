@@ -324,6 +324,8 @@ interface Props {
   billingTerms?: DiscountConfig[];
   onChange: (d: DiscountConfig) => void;
   onChangeBillingTerms?: (terms: DiscountConfig[]) => void;
+  /** When set (GRN source), snap Net Payable to this exact value instead of generic round-off */
+  grnNetAmount?: number | null;
 }
 
 export function BillingAccordion({
@@ -334,6 +336,7 @@ export function BillingAccordion({
   billingTerms,
   onChange,
   onChangeBillingTerms,
+  grnNetAmount,
 }: Props) {
   const { activeBillingTerms = [] } = useBillingTerms();
   const [open, setOpen] = useState(true);
@@ -386,6 +389,11 @@ export function BillingAccordion({
     setTerms(terms.map((t, i) => (i === idx ? updated : t)));
 
   const bd = computeBreakdown(basicAmount, cgstRate, sgstRate, terms);
+  // For GRN bookings, snap Net Payable to the GRN's exact TotalAmount
+  if (grnNetAmount != null) {
+    bd.roundOff = grnNetAmount - bd.grossAmount;
+    bd.netAmount = grnNetAmount;
+  }
   const hasBase = basicAmount > 0;
   const activeCount = terms.filter((t) => t.applicable).length;
 

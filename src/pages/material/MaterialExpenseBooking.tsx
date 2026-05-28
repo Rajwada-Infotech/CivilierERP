@@ -102,7 +102,15 @@ async function apiFetch(url: string, opts?: RequestInit, timeoutMs = 25000) {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? body.message ?? `HTTP ${res.status}`);
+    const details = Array.isArray(body.details)
+      ? body.details
+          .map((d: any) => `${d.field || "?"}: ${d.message}`)
+          .join(" | ")
+      : "";
+    throw new Error(
+      (body.error ?? body.message ?? `HTTP ${res.status}`) +
+        (details ? ` → ${details}` : ""),
+    );
   }
   return res.json();
 }
@@ -968,9 +976,9 @@ function DocSelectorPanel({
                       docNo,
                       sourceId: po.PurchaseOrderID,
                       nameLabel:
-                          (po.ItemDescription ?? "").trim() ||
-                          po.SupplierName ||
-                          docNo,
+                        (po.ItemDescription ?? "").trim() ||
+                        po.SupplierName ||
+                        docNo,
                       vendorLabel: po.SupplierName,
                       companyId: po.CompanyId,
                       projectId: po.ProjectId,
@@ -1011,10 +1019,10 @@ function DocSelectorPanel({
                       docNo: wd.DocNo || `WD-${wd.ID}`,
                       sourceId: wd.ID,
                       nameLabel:
-                          (wd.DescriptionOfWork ?? "").trim() ||
-                          wd.ContractorName ||
-                          wd.DocNo ||
-                          `WD-${wd.ID}`,
+                        (wd.DescriptionOfWork ?? "").trim() ||
+                        wd.ContractorName ||
+                        wd.DocNo ||
+                        `WD-${wd.ID}`,
                       vendorLabel: wd.ContractorName,
                       companyId: wd.CompanyId,
                       projectId: wd.ProjectId,
@@ -1057,9 +1065,9 @@ function DocSelectorPanel({
                       docNo,
                       sourceId: po.PurchaseOrderID,
                       nameLabel:
-                          (po.ItemDescription ?? "").trim() ||
-                          po.SupplierName ||
-                          docNo,
+                        (po.ItemDescription ?? "").trim() ||
+                        po.SupplierName ||
+                        docNo,
                       vendorLabel: po.SupplierName,
                       companyId: po.CompanyId,
                       projectId: po.ProjectId,
@@ -2055,6 +2063,11 @@ export default function MaterialExpenseBooking() {
         ? form.billingTerms
         : form.discount,
     );
+    // For GRN bookings, snap net payable to the GRN's exact TotalAmount
+    if (selectedDoc?.kind === "GRN" && selectedDoc.amount != null) {
+      bd.roundOff = selectedDoc.amount - bd.grossAmount;
+      bd.netAmount = selectedDoc.amount;
+    }
 
     let emiForSave = { ...form.emi };
     if (
@@ -3140,6 +3153,11 @@ export default function MaterialExpenseBooking() {
                   billingTerms={form.billingTerms}
                   onChange={(d) => set("discount", d)}
                   onChangeBillingTerms={(terms) => set("billingTerms", terms)}
+                  grnNetAmount={
+                    isGRN && selectedDoc?.amount != null
+                      ? selectedDoc.amount
+                      : null
+                  }
                 />
               </div>
 

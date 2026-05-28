@@ -53,11 +53,14 @@ function _fallbackName() {
 // z.coerce.number() on null/undefined produces NaN which still fails .min(0).
 // Convert null/undefined/NaN → 0 here. The frontend blocks save when amount
 // is 0 for GRN, so 0 in the DB just means "not yet computed" for drafts.
-const eAmount = z.preprocess((v) => {
-  if (v === undefined || v === null || v === "") return 0;
-  const n = Number(v);
-  return isNaN(n) ? 0 : n;
-}, z.number().min(0, "Amount must be non-negative"));
+const eAmount = z.preprocess(
+  (v) => {
+    if (v === undefined || v === null || v === "") return 0;
+    const n = Number(v);
+    return isNaN(n) ? 0 : n;
+  },
+  z.number().min(0, "Amount must be non-negative"),
+);
 
 // ─── ESourceType: tolerant enum ───────────────────────────────────────────────
 // Unknown values fall back to null (optional) rather than rejecting the request.
@@ -85,10 +88,16 @@ const expenseBookingBodySchema = z.object({
   EDocNo: optStr(100),
   EEmiPayment: z.coerce.boolean().optional(),
   EEmiData: optJsonPassthrough,
-  EInstallmentCount: z.preprocess((v) => (v === null || v === undefined || v === "" ? undefined : Number(v)), z.number().int().min(1).max(360).optional()),
-  EEmiAmount: z.preprocess((v) => (v === null || v === undefined || v === "" ? undefined : Number(v)), z.number().min(0).optional()),
-  EEmiStartDate: z.preprocess((v) => (v === null || v === undefined || v === "" ? undefined : v), z.coerce.date().optional()),
-  EReminder: z.preprocess((v) => (v === null || v === undefined || v === "" ? undefined : v), z.coerce.date().optional()),
+  EInstallmentCount: z.preprocess(
+    (v) => (v === null || v === undefined || v === "" ? undefined : v),
+    z.coerce.number().int().min(1).max(360).optional(),
+  ),
+  EEmiAmount: z.preprocess(
+    (v) => (v === null || v === undefined || v === "" ? undefined : v),
+    z.coerce.number().min(0).optional(),
+  ),
+  EEmiStartDate: optCoerceDate,
+  EReminder: optCoerceDate,
   ERemarks: optStr(1000),
   EStatus: z.enum(VALID_STATUSES).default("Draft"),
   ECompanyId: z.preprocess((v) => (v === null || v === undefined || v === "" ? undefined : Number(v)), z.number().optional()),
@@ -99,11 +108,21 @@ const expenseBookingBodySchema = z.object({
   EBillingTermId: z.preprocess((v) => (v === null || v === undefined || v === "" ? undefined : Number(v)), z.number().optional()),
   EBillingTermName: optStr(200),
   EBillingTermsData: optJsonPassthrough,
-  ETCId: z.preprocess((v) => (v === null || v === undefined || v === "" ? undefined : Number(v)), z.number().optional()),
+  ETCId: z.preprocess(
+    (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
+    z.number().optional(),
+  ),
   ETCName: optStr(200),
-  ETCText: optStr(4000),
+  ETCText: z.preprocess((v) => {
+    if (v === undefined || v === null) return undefined;
+    const t = String(v).trim();
+    return t === "" ? undefined : t;
+  }, z.string().optional()),
   EVendorInvoiceNo: optStr(100),
-  EVendorInvoiceDate: z.preprocess((v) => (v === null || v === undefined || v === "" ? undefined : v), z.coerce.date().optional()),
+  EVendorInvoiceDate: z.preprocess(
+    (v) => (v === null || v === undefined || v === "" ? undefined : v),
+    z.coerce.date().optional(),
+  ),
   EAdditionalCharges: optJsonPassthrough,
   ECostCenter: optStr(200),
   EGLAccount: optStr(200),
