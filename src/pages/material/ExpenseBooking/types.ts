@@ -163,6 +163,7 @@ export interface PriceBreakdown {
   taxableAmount: number;
   cgstAmount: number;
   sgstAmount: number;
+  igstAmount?: number;
   grossAmount: number;
   roundOff: number;
   netAmount: number;
@@ -170,4 +171,52 @@ export interface PriceBreakdown {
   preGstTerms?: (DiscountConfig & { termType: "Addition" | "Deduction" })[];
   /** Resolved post-GST terms with termType normalised */
   postGstTerms?: (DiscountConfig & { termType: "Addition" | "Deduction" })[];
+}
+
+export interface GrnGstLine {
+  lineNo: number;
+  itemId: string | null;
+  itemName: string;
+  orderedQty: number;
+  receivedQty: number;
+  uom: string;
+  unitRate: number;
+  hsnCode: string | null;
+  gstPercent: number;
+  taxableAmount: number;
+  cgstRate: number;
+  sgstRate: number;
+  igstRate: number;
+  cgstAmount: number;
+  sgstAmount: number;
+  igstAmount: number;
+  gstAmount: number;
+  netAmount: number;
+}
+
+export interface GrnGstData {
+  grnId: number;
+  grnNo: string;
+  poId: number | null;
+  poNo: string | null;
+  supplierId: number | null;
+  supplierName: string | null;
+  companyId: number | null;
+  vendorState: string;
+  companyState: string;
+  taxMode: "cgst_sgst" | "igst";
+  gstPercent: number;
+  cgstRate: number;
+  sgstRate: number;
+  igstRate: number;
+  totals: {
+    taxableAmount: number;
+    cgstAmount: number;
+    sgstAmount: number;
+    igstAmount: number;
+    gstAmount: number;
+    netAmount: number;
+    receivedQty: number;
+  };
+  lines: GrnGstLine[];
 }

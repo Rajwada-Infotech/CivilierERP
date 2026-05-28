@@ -148,15 +148,20 @@ export function PriceBreakdownPanel({
   bd,
   cgstRate,
   sgstRate,
+  igstRate = 0,
   hasDiscount,
 }: {
   bd: PriceBreakdown;
   cgstRate: number;
   sgstRate: number;
+  igstRate?: number;
   hasDiscount: boolean;
 }) {
   const preGstTerms = bd.preGstTerms ?? [];
   const postGstTerms = bd.postGstTerms ?? [];
+  if (igstRate > 0) {
+    bd = { ...bd, cgstAmount: bd.igstAmount ?? 0, sgstAmount: 0 };
+  }
 
   const hasPreGst = preGstTerms.length > 0;
   const hasPostGst = postGstTerms.length > 0;
@@ -212,27 +217,33 @@ export function PriceBreakdownPanel({
 
       {/* GST rows */}
       <BreakdownRow
-        label={`CGST @ ${cgstRate}%`}
-        sublabel="Central GST"
+        label={
+          igstRate > 0 ? `IGST @ ${igstRate}%` : `CGST @ ${cgstRate}%`
+        }
+        sublabel={igstRate > 0 ? "Integrated GST" : "Central GST"}
         value={"₹" + fmt(bd.cgstAmount)}
         variant="tax"
       />
-      <BreakdownRow
+      {igstRate <= 0 && (
+        <BreakdownRow
         label={`SGST @ ${sgstRate}%`}
         sublabel="State GST"
         value={"₹" + fmt(bd.sgstAmount)}
-        variant="tax"
-      />
+          variant="tax"
+        />
+      )}
 
       {/* Gross (before post-GST terms) */}
       <BreakdownRow
         label="Gross Amount"
         sublabel={
-          hasAnyTerms
+          igstRate > 0
             ? hasPreGst
+              ? "Taxable + IGST"
+              : "Basic + IGST"
+            : hasPreGst
               ? "Taxable + CGST + SGST"
               : "Basic + CGST + SGST"
-            : "Basic + CGST + SGST"
         }
         value={"₹" + fmt(bd.taxableAmount + bd.cgstAmount + bd.sgstAmount)}
         variant="subtotal"

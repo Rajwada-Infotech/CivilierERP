@@ -3,6 +3,7 @@ import type {
   EmiConfig,
   EmiScheduleRow,
   ExpenseRecord,
+  GrnGstData,
   PriceBreakdown,
 } from "./types";
 
@@ -39,6 +40,7 @@ export function computeBreakdown(
   cgstRate: number,
   sgstRate: number,
   discount: DiscountConfig | DiscountConfig[],
+  igstRate = 0,
 ): PriceBreakdown {
   // Normalise: support both legacy single config and new array
   const terms = Array.isArray(discount) ? discount : [discount];
@@ -77,7 +79,8 @@ export function computeBreakdown(
   const taxableAmount = Math.max(0, runningBase);
   const cgstAmount = (taxableAmount * cgstRate) / 100;
   const sgstAmount = (taxableAmount * sgstRate) / 100;
-  let grossAmount = taxableAmount + cgstAmount + sgstAmount;
+  const igstAmount = (taxableAmount * igstRate) / 100;
+  let grossAmount = taxableAmount + cgstAmount + sgstAmount + igstAmount;
 
   // Apply post-GST terms sequentially
   for (const d of postGstTerms) {
@@ -102,11 +105,34 @@ export function computeBreakdown(
     taxableAmount,
     cgstAmount,
     sgstAmount,
+    igstAmount,
     grossAmount,
     roundOff,
     netAmount: rounded,
     preGstTerms,
     postGstTerms,
+  };
+}
+
+export function computeGrnGst(grnGst: GrnGstData): PriceBreakdown {
+  const grossAmount =
+    grnGst.totals.taxableAmount +
+    grnGst.totals.cgstAmount +
+    grnGst.totals.sgstAmount +
+    grnGst.totals.igstAmount;
+  const rounded = Math.round(grossAmount);
+  return {
+    basicAmount: grnGst.totals.taxableAmount,
+    discountAmount: 0,
+    taxableAmount: grnGst.totals.taxableAmount,
+    cgstAmount: grnGst.totals.cgstAmount,
+    sgstAmount: grnGst.totals.sgstAmount,
+    igstAmount: grnGst.totals.igstAmount,
+    grossAmount,
+    roundOff: rounded - grossAmount,
+    netAmount: rounded,
+    preGstTerms: [],
+    postGstTerms: [],
   };
 }
 
