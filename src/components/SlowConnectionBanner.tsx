@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useIsFetching } from "@tanstack/react-query";
 
-// How long (ms) a fetch must be in-flight before we show the banner
 const SLOW_THRESHOLD_MS = 4000;
-// How long to keep the banner visible after fetches complete
 const LINGER_MS = 2500;
 
 function useSlowConnection() {
@@ -11,39 +9,47 @@ function useSlowConnection() {
   const [slow, setSlow] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lingerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const slowRef = useRef(false); // track without causing effect re-runs
 
   useEffect(() => {
     if (isFetching > 0) {
-      // Clear any linger timer — fetching is still happening
-      if (lingerRef.current) clearTimeout(lingerRef.current);
-
-      // Start slow timer if not already running
+      // Cancel linger — still fetching
+      if (lingerRef.current) {
+        clearTimeout(lingerRef.current);
+        lingerRef.current = null;
+      }
+      // Start slow timer only once
       if (!timerRef.current) {
         timerRef.current = setTimeout(() => {
-          setSlow(true);
           timerRef.current = null;
+          slowRef.current = true;
+          setSlow(true);
         }, SLOW_THRESHOLD_MS);
       }
     } else {
-      // Fetching done — clear slow timer if it hasn't fired
+      // Done fetching — cancel slow timer if it hadn't fired yet
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
-
-      // If banner is showing, linger a bit before hiding
-      if (slow) {
+      // Linger before hiding
+      if (slowRef.current && !lingerRef.current) {
         lingerRef.current = setTimeout(() => {
-          setSlow(false);
           lingerRef.current = null;
+          slowRef.current = false;
+          setSlow(false);
         }, LINGER_MS);
       }
     }
+  }, [isFetching]); // only isFetching — no slow in deps
 
+  // Cleanup on unmount
+  useEffect(() => {
     return () => {
-      // cleanup on unmount only — don't clear on every effect run
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (lingerRef.current) clearTimeout(lingerRef.current);
     };
-  }, [isFetching, slow]);
+  }, []);
 
   return slow;
 }
@@ -52,19 +58,27 @@ export default function SlowConnectionBanner() {
   const slow = useSlowConnection();
   const [visible, setVisible] = useState(false);
   const [exiting, setExiting] = useState(false);
+  const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (slow) {
+      if (exitTimer.current) {
+        clearTimeout(exitTimer.current);
+        exitTimer.current = null;
+      }
       setExiting(false);
       setVisible(true);
     } else if (visible) {
       setExiting(true);
-      const t = setTimeout(() => {
+      exitTimer.current = setTimeout(() => {
         setVisible(false);
         setExiting(false);
+        exitTimer.current = null;
       }, 500);
-      return () => clearTimeout(t);
     }
+    return () => {
+      if (exitTimer.current) clearTimeout(exitTimer.current);
+    };
   }, [slow]);
 
   if (!visible) return null;
@@ -96,9 +110,6 @@ export default function SlowConnectionBanner() {
           0%, 100% { opacity: 1; }
           50%       { opacity: 0.35; }
         }
-        @keyframes scb-dot1 { 0%,80%,100% { transform:scaleY(0.4); } 40% { transform:scaleY(1); } }
-        @keyframes scb-dot2 { 0%,80%,100% { transform:scaleY(0.4); } 40% { transform:scaleY(1); } }
-        @keyframes scb-dot3 { 0%,80%,100% { transform:scaleY(0.4); } 40% { transform:scaleY(1); } }
       `}</style>
 
       <div
@@ -123,7 +134,7 @@ export default function SlowConnectionBanner() {
           userSelect: "none",
         }}
       >
-        {/* Signal icon with animated bars */}
+        {/* Signal bars */}
         <div
           style={{
             display: "flex",
@@ -154,12 +165,11 @@ export default function SlowConnectionBanner() {
           ))}
         </div>
 
-        {/* Text */}
         <span style={{ color: "rgba(255,255,255,0.85)" }}>
           Slow or spotty connection
         </span>
 
-        {/* Animated ellipsis dots */}
+        {/* Pulsing dots */}
         <div
           style={{
             display: "flex",
