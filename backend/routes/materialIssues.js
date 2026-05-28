@@ -668,13 +668,25 @@ router.get("/prefill/:type/:id", authenticateToken, async (req, res) => {
 
             if (itemId) {
               try {
-                // M_UOM column may not exist on older schemas — derive from StockLedger
+                // Enrich: item name, stock balance, and UOMCode resolution.
+                // GRN JSON stores uom as the display name (e.g. "Bag"), NOT the UOMCode.
+                // We resolve: first try matching UOMMaster by UOMName, then by UOMCode,
+                // then fall back to StockLedger's UOM column.
                 const enrichRes = await pool
                   .request()
-                  .input("itemId", sql.NVarChar(100), itemId).query(`
+                  .input("itemId", sql.NVarChar(100), itemId)
+                  .input("grnUOMRaw", sql.NVarChar(50), grnUOM || "").query(`
                     SELECT
                       img.M_Name,
-                      MAX(sl.UOM) AS DefaultUOM,
+                      -- Prefer UOMCode matched by UOMName (GRN stores display name)
+                      COALESCE(
+                        (SELECT TOP 1 u.UOMCode FROM dbo.UOMMaster u
+                         WHERE u.UOMName = @grnUOMRaw AND @grnUOMRaw <> ''),
+                        (SELECT TOP 1 u.UOMCode FROM dbo.UOMMaster u
+                         WHERE u.UOMCode = @grnUOMRaw AND @grnUOMRaw <> ''),
+                        MAX(sl.UOM),
+                        NULL
+                      ) AS ResolvedUOMCode,
                       ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END),0)
                     - ISNULL(SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END),0)
                       AS AvailableStock
@@ -687,7 +699,7 @@ router.get("/prefill/:type/:id", authenticateToken, async (req, res) => {
                 if (enrichRes.recordset.length > 0) {
                   const row = enrichRes.recordset[0];
                   if (!resolvedName) resolvedName = row.M_Name || "";
-                  if (!resolvedUOM) resolvedUOM = row.DefaultUOM || "";
+                  resolvedUOM = row.ResolvedUOMCode || resolvedUOM || "";
                   availableStock = Number(row.AvailableStock ?? 0);
                 }
               } catch {
