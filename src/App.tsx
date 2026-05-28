@@ -709,7 +709,7 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/followup/sales/applicants"
+        path="/followup/sales/applications"
         element={
           <ProtectedRoute>
             <FollowupApplications />
