@@ -833,10 +833,12 @@ type BookingFilters = {
 
 function FilterBar({
   expenseOptions,
+  companyOptions,
   filters,
   onChange,
 }: {
   expenseOptions: ExpenseOption[];
+  companyOptions: { id: number; label: string }[];
   filters: BookingFilters;
   onChange: (key: keyof BookingFilters, value: string) => void;
 }) {
@@ -856,18 +858,8 @@ function FilterBar({
       .catch(() => {});
   }, []);
 
-  // Company — derived from expenseOptions (already resolved per option)
-  const companies = React.useMemo(
-    () =>
-      Array.from(
-        new Set(
-          expenseOptions
-            .map((o) => o.companyName)
-            .filter((v): v is string => !!v && v.trim() !== ""),
-        ),
-      ).sort(),
-    [expenseOptions],
-  );
+  // Company — from enterprise table (business_type=C)
+  const companies = companyOptions.map((c) => c.label).sort();
 
   const activeCount = Object.values(filters).filter(Boolean).length;
 
@@ -2002,9 +1994,14 @@ const Payment: React.FC = () => {
           parentDocNo,
           rootExBDocNo: parentDocNo,
           project: selectedOption.projectName || "",
-          company:
-            selectedOption.companyName ||
-            String(selectedOption.companyId ?? ""),
+          company: (() => {
+            const name = selectedOption.companyName;
+            if (name && name.trim()) return name.trim();
+            const matched = companyOptions.find(
+              (c) => c.id === selectedOption.companyId,
+            );
+            return matched?.label || String(selectedOption.companyId ?? "");
+          })(),
           amount: selectedOption.amount ?? null,
           docType: `EMI-${padded}`,
         }));
@@ -2037,8 +2034,15 @@ const Payment: React.FC = () => {
           parentDocNo,
           rootExBDocNo,
           project: detail.EProjectName || "",
-          company:
-            (detail as any).ECompanyName || String(detail.ECompanyId ?? ""),
+          company: (() => {
+            const name = (detail as any).ECompanyName;
+            if (name && name.trim()) return name.trim();
+            // Fall back to label from the enterprise options list
+            const matched = companyOptions.find(
+              (c) => c.id === detail.ECompanyId,
+            );
+            return matched?.label || String(detail.ECompanyId ?? "");
+          })(),
           amount: detail.ENetAmount ?? detail.EAmount ?? null,
           docType: detail.DocTypeName || detail.EDocumentType || "",
           baseAmount: detail.EAmount ?? null,
@@ -2398,11 +2402,21 @@ const Payment: React.FC = () => {
                 {!form.expenseRef &&
                   (() => {
                     const filteredOptions = expenseOptions.filter((o) => {
-                      if (
-                        bookingFilters.company &&
-                        (o.companyName ?? "") !== bookingFilters.company
-                      )
-                        return false;
+                      if (bookingFilters.company) {
+                        // bookingFilters.company stores the label; resolve to id for robust matching
+                        const matchedCo = companyOptions.find(
+                          (c) => c.label === bookingFilters.company,
+                        );
+                        const filterCoId = matchedCo?.id;
+                        if (filterCoId && o.companyId !== filterCoId)
+                          return false;
+                        // fallback: string match if id not resolved
+                        if (
+                          !filterCoId &&
+                          (o.companyName ?? "") !== bookingFilters.company
+                        )
+                          return false;
+                      }
                       if (
                         bookingFilters.project &&
                         (o.projectName ?? "") !== bookingFilters.project
@@ -2425,6 +2439,7 @@ const Payment: React.FC = () => {
                       <div className="space-y-3">
                         <FilterBar
                           expenseOptions={expenseOptions}
+                          companyOptions={companyOptions}
                           filters={bookingFilters}
                           onChange={(key, val) =>
                             setBookingFilters((prev) => ({
@@ -2459,7 +2474,20 @@ const Payment: React.FC = () => {
                           className="text-muted-foreground shrink-0"
                         />
                         <ReadOnlyField
-                          value={form.company}
+                          value={(() => {
+                            // form.company may be a raw ID string if ECompanyName was blank
+                            const asNum = parseInt(form.company, 10);
+                            if (
+                              !isNaN(asNum) &&
+                              String(asNum) === form.company.trim()
+                            ) {
+                              return (
+                                companyOptions.find((c) => c.id === asNum)
+                                  ?.label || form.company
+                              );
+                            }
+                            return form.company;
+                          })()}
                           placeholder="From expense booking"
                         />
                       </div>
@@ -2614,12 +2642,17 @@ const Payment: React.FC = () => {
                   </Field>
                   {(form.amount ?? 0) > 0 &&
                     (() => {
-                      const base = form.baseAmount ?? form.amount ?? 0;
+                      const base =
+                        form.baseAmount && form.baseAmount > 0
+                          ? form.baseAmount
+                          : (form.amount ?? 0);
                       const cgstRate = form.cgstRate ?? 0;
                       const sgstRate = form.sgstRate ?? 0;
                       const igstRate = form.igstRate ?? 0;
 
-                      // Parse billing terms
+                      // Parse billing terms — must be an array of term objects.
+                      // EDiscountData is a legacy flat discount object {applicable,type,value}
+                      // and must NOT be treated as billing terms; skip it if not an array.
                       let billingTerms: {
                         masterTermName?: string;
                         type: string;
@@ -2631,10 +2664,17 @@ const Payment: React.FC = () => {
                       try {
                         if (form.billingTermsData) {
                           const parsed = JSON.parse(form.billingTermsData);
-                          const arr = Array.isArray(parsed) ? parsed : [parsed];
-                          billingTerms = arr.filter(
-                            (t: any) => t.applicable !== false,
-                          );
+                          // Only treat as billing terms if it's a proper array
+                          // with items that have an `appliedOn` field (billing term shape).
+                          if (
+                            Array.isArray(parsed) &&
+                            parsed.length > 0 &&
+                            parsed[0].appliedOn !== undefined
+                          ) {
+                            billingTerms = parsed.filter(
+                              (t: any) => t.applicable !== false,
+                            );
+                          }
                         }
                       } catch {
                         /* ignore */

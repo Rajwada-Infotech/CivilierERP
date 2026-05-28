@@ -508,7 +508,10 @@ function DocSelectorPanel({
         kind: "TOD",
         docNo,
         sourceId: tod.TypeOfDocId,
-        nameLabel: tod.Description,
+        nameLabel:
+          (tod.Description ?? "").trim() ||
+          tod.Prefix ||
+          `DOC-${tod.TypeOfDocId}`,
       });
     } catch {
       onTodSelected?.(null);
@@ -970,7 +973,10 @@ function DocSelectorPanel({
                       kind: "PO",
                       docNo,
                       sourceId: po.PurchaseOrderID,
-                      nameLabel: po.ItemDescription,
+                      nameLabel:
+                        (po.ItemDescription ?? "").trim() ||
+                        po.SupplierName ||
+                        docNo,
                       vendorLabel: po.SupplierName,
                       companyId: po.CompanyId,
                       projectId: po.ProjectId,
@@ -1010,7 +1016,11 @@ function DocSelectorPanel({
                       kind: "WORK_DONE",
                       docNo: wd.DocNo || `WD-${wd.ID}`,
                       sourceId: wd.ID,
-                      nameLabel: wd.DescriptionOfWork,
+                      nameLabel:
+                        (wd.DescriptionOfWork ?? "").trim() ||
+                        wd.ContractorName ||
+                        wd.DocNo ||
+                        `WD-${wd.ID}`,
                       vendorLabel: wd.ContractorName,
                       companyId: wd.CompanyId,
                       projectId: wd.ProjectId,
@@ -1052,7 +1062,10 @@ function DocSelectorPanel({
                       kind: "WO_PO",
                       docNo,
                       sourceId: po.PurchaseOrderID,
-                      nameLabel: po.ItemDescription,
+                      nameLabel:
+                        (po.ItemDescription ?? "").trim() ||
+                        po.SupplierName ||
+                        docNo,
                       vendorLabel: po.SupplierName,
                       companyId: po.CompanyId,
                       projectId: po.ProjectId,
@@ -1112,11 +1125,11 @@ function DocSelectorPanel({
                         status: g.Status,
                         date: g.GRNDate,
                         nameLabel:
-                          g.Remarks ||
-                          g.SupplierName ||
-                          g.DocNo ||
+                          (g.Remarks ?? "").trim() ||
                           g.GRNNo ||
-                          "GRN Expense",
+                          g.DocNo ||
+                          g.SupplierName ||
+                          `GRN-${g.GRNID}`,
                         grnItems: parsedItems,
                         projectId: g.ProjectId,
                         companyId: g.CompanyId,
@@ -2021,6 +2034,53 @@ export default function MaterialExpenseBooking() {
       ESourceType: selectedDoc?.kind ?? null,
       ESourceId: selectedDoc?.sourceId ?? null,
     };
+
+    // ── Schema safety guards ─────────────────────────────────────────────────
+    // Belt-and-suspenders: recordToDb already sets EName via fallbackBookingName(),
+    // but guard here too so a future refactor can never silently break the save.
+    if (!body.EName || String(body.EName).trim() === "") {
+      const docNo = (body as any).EDocNo as string | undefined;
+      body.EName =
+        docNo ||
+        form.bookingReference ||
+        form.supplier ||
+        `Expense ${new Date().toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })}`;
+    }
+    // EAmount must be a non-negative number (schema: min(0))
+    if (
+      body.EAmount === undefined ||
+      body.EAmount === null ||
+      isNaN(Number(body.EAmount))
+    ) {
+      body.EAmount = 0;
+    }
+    // ESourceType must be one of the backend enum values or null
+    const VALID_SOURCE_TYPES = [
+      "PO",
+      "WO",
+      "WO_PO",
+      "GRN",
+      "TOD",
+      "WORK_DONE",
+      "Manual",
+    ] as const;
+    if (
+      body.ESourceType !== null &&
+      body.ESourceType !== undefined &&
+      !VALID_SOURCE_TYPES.includes(body.ESourceType as any)
+    ) {
+      console.warn(
+        "[ExpenseBooking] Unknown ESourceType:",
+        body.ESourceType,
+        "→ clearing",
+      );
+      body.ESourceType = null;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
     saveInFlight.current = true;
     setSaving(true);
 
