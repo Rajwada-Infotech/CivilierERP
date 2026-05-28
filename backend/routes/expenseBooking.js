@@ -755,7 +755,21 @@ router.get("/:id/approval-trail", async (req, res) => {
 });
 
 // ─── POST Create ──────────────────────────────────────────────────────────────
-router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
+// ── TEMP DEBUG ───────────────────────────────────────────────────────────────
+router.post(
+  "/",
+  (req, _res, next) => {
+    const result = expenseBookingBodySchema.safeParse(req.body);
+    if (!result.success) {
+      console.error("[ExpenseBooking DEBUG] Zod errors:", JSON.stringify(result.error.issues, null, 2));
+      console.error("[ExpenseBooking DEBUG] Raw body:", JSON.stringify(req.body, null, 2));
+    } else {
+      console.log("[ExpenseBooking DEBUG] Body valid ✓ EName:", result.data.EName, "EAmount:", result.data.EAmount);
+    }
+    next();
+  },
+  validateBody(expenseBookingBodySchema),
+  async (req, res) => {
   const {
     EName,
     EProjectName,
@@ -890,21 +904,34 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
         ? `${prefix}${padded}/${finYear}`
         : `${prefix}${padded}`;
 
-      // The preview endpoint may have already reserved this doc number (RecordId IS NULL).
-      // Reuse it if unassigned; bump if already committed to another record.
-      const existingSeq = await transaction
-        .request()
-        .input("DocNoCheck", sql.NVarChar(100), finalDocNo).query(`
-          SELECT RecordId FROM dbo.DocNumberSequence WHERE DocNo = @DocNoCheck
-        `);
+      // ── Doc number reservation ──────────────────────────────────────────────
+      // Loop until we find a sequence slot we can safely claim.
+      // Handles three cases:
+      //   (a) Row doesn't exist          → INSERT fresh, done.
+      //   (b) Row exists, RecordId NULL  → reserved by a previous failed attempt;
+      //                                    claim it by updating IssuedBy, done.
+      //   (c) Row exists, RecordId set   → already committed; bump seq and retry.
+      // Using MERGE (upsert) inside the loop makes the operation idempotent and
+      // avoids the UNIQUE KEY violation that happened when a prior rollback left
+      // a ghost row with RecordId IS NULL.
 
-      if (existingSeq.recordset.length > 0) {
-        if (existingSeq.recordset[0]?.RecordId) {
-          // Already committed — bump by 1 and insert fresh
-          const bumpPadded = String(nextSeq + 1).padStart(6, "0");
-          finalDocNo = finYear
-            ? `${prefix}${bumpPadded}/${finYear}`
-            : `${prefix}${bumpPadded}`;
+      let seqCandidate = nextSeq;
+      let reserved = false;
+      const MAX_RETRIES = 20;
+
+      for (let attempt = 0; attempt < MAX_RETRIES && !reserved; attempt++) {
+        const candidatePadded = String(seqCandidate).padStart(6, "0");
+        finalDocNo = finYear
+          ? `${prefix}${candidatePadded}/${finYear}`
+          : `${prefix}${candidatePadded}`;
+
+        const existingSeq = await transaction
+          .request()
+          .input("DocNoCheck", sql.NVarChar(100), finalDocNo)
+          .query(`SELECT RecordId FROM dbo.DocNumberSequence WHERE DocNo = @DocNoCheck`);
+
+        if (existingSeq.recordset.length === 0) {
+          // (a) Free slot — insert fresh
           await transaction
             .request()
             .input("TypeOfDocId", sql.Int, typeId)
@@ -915,19 +942,28 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
               INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
               VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
             `);
+          reserved = true;
+        } else if (!existingSeq.recordset[0]?.RecordId) {
+          // (b) Ghost row from a previous rollback — claim it (no INSERT needed)
+          await transaction
+            .request()
+            .input("DocNoCheck", sql.NVarChar(100), finalDocNo)
+            .input("IssuedBy", sql.NVarChar(200), req.user?.email || null)
+            .query(`
+              UPDATE dbo.DocNumberSequence
+              SET IssuedBy = @IssuedBy
+              WHERE DocNo = @DocNoCheck AND RecordId IS NULL
+            `);
+          reserved = true;
+        } else {
+          // (c) Already committed to another record — try next number
+          seqCandidate++;
         }
-        // else: reserved by preview (RecordId IS NULL) — reuse as-is
-      } else {
-        // Not yet reserved — insert fresh
-        await transaction
-          .request()
-          .input("TypeOfDocId", sql.Int, typeId)
-          .input("DocNo", sql.NVarChar(100), finalDocNo)
-          .input("TableName", sql.NVarChar(100), "ExpenseBooking")
-          .input("IssuedBy", sql.NVarChar(200), req.user?.email || null).query(`
-            INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
-            VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
-          `);
+      }
+
+      if (!reserved) {
+        await transaction.rollback();
+        return res.status(500).json({ error: "Could not reserve a document number after multiple attempts." });
       }
     }
 
