@@ -201,9 +201,11 @@ interface GRNItemLine {
   hsnCode?: string;
   cgstRate?: number;
   sgstRate?: number;
+  igstRate?: number;
   baseAmount?: number;
   cgstAmount?: number;
   sgstAmount?: number;
+  igstAmount?: number;
   gstAmount?: number;
   totalAmountInclGST?: number;
 }
@@ -1317,6 +1319,7 @@ export default function MaterialExpenseBooking() {
       totalBase: number;
       totalCGST: number;
       totalSGST: number;
+      totalIGST?: number;
       totalGST: number;
       totalInclGST: number;
     };
@@ -1585,11 +1588,21 @@ export default function MaterialExpenseBooking() {
                   t.totalBase > 0 ? (t.totalCGST / t.totalBase) * 100 : 0;
                 const avgSGST =
                   t.totalBase > 0 ? (t.totalSGST / t.totalBase) * 100 : 0;
+                const avgIGST =
+                  t.totalBase > 0 ? ((t.totalIGST ?? 0) / t.totalBase) * 100 : 0;
+                setSelectedDoc((prev) =>
+                  prev && prev.kind === "GRN" && prev.sourceId === doc.sourceId
+                    ? {
+                        ...prev,
+                        amount: Math.round(t.totalInclGST * 100) / 100,
+                      }
+                    : prev,
+                );
                 setForm((prev) => ({
                   ...prev,
                   bookingReference: canonicalDocNo,
                   basicAmount: Math.round(t.totalBase * 100) / 100,
-                  cgstRate: Math.round(avgCGST * 100) / 100,
+                  cgstRate: Math.round((avgCGST || avgIGST) * 100) / 100,
                   sgstRate: Math.round(avgSGST * 100) / 100,
                 }));
               } else {
@@ -1748,6 +1761,38 @@ export default function MaterialExpenseBooking() {
               supplier: r.SupplierName ?? prev.supplier,
               projectSite: r.ProjectId ? String(r.ProjectId) : prev.projectSite,
             }));
+
+            return apiFetch(`/api/grns/${sourceId}/gst-breakdown`)
+              .then((bd: any) => {
+                setGstBreakdown(bd);
+                const t = bd?.totals;
+                if (!t || !t.totalInclGST) return;
+                const avgCGST =
+                  t.totalBase > 0 ? (t.totalCGST / t.totalBase) * 100 : 0;
+                const avgSGST =
+                  t.totalBase > 0 ? (t.totalSGST / t.totalBase) * 100 : 0;
+                const avgIGST =
+                  t.totalBase > 0
+                    ? ((t.totalIGST ?? 0) / t.totalBase) * 100
+                    : 0;
+                setSelectedDoc((prev) =>
+                  prev && prev.kind === "GRN" && prev.sourceId === sourceId
+                    ? {
+                        ...prev,
+                        amount: Math.round(t.totalInclGST * 100) / 100,
+                      }
+                    : prev,
+                );
+                setForm((prev) => ({
+                  ...prev,
+                  basicAmount: Math.round(t.totalBase * 100) / 100,
+                  cgstRate: Math.round((avgCGST || avgIGST) * 100) / 100,
+                  sgstRate: Math.round(avgSGST * 100) / 100,
+                }));
+              })
+              .catch(() => {
+                setGstBreakdown(null);
+              });
           })
           .catch(() => {})
           .finally(() => setGrnItemsLoading(false));
@@ -1987,7 +2032,22 @@ export default function MaterialExpenseBooking() {
       toast.error("Basic amount is required and must be greater than 0.");
       return;
     }
-    const bd = computeBreakdown(
+    const bd =
+      selectedDoc?.kind === "GRN" && gstBreakdown?.totals.totalInclGST > 0
+        ? {
+            basicAmount: gstBreakdown.totals.totalBase,
+            discountAmount: 0,
+            taxableAmount: gstBreakdown.totals.totalBase,
+            cgstAmount: gstBreakdown.totals.totalCGST,
+            sgstAmount: gstBreakdown.totals.totalSGST,
+            igstAmount: gstBreakdown.totals.totalIGST ?? 0,
+            grossAmount: gstBreakdown.totals.totalInclGST,
+            roundOff: 0,
+            netAmount: gstBreakdown.totals.totalInclGST,
+            preGstTerms: [],
+            postGstTerms: [],
+          }
+        : computeBreakdown(
       form.basicAmount,
       form.cgstRate,
       form.sgstRate,
@@ -2230,7 +2290,7 @@ export default function MaterialExpenseBooking() {
     }
   };
 
-  const bd = computeBreakdown(
+  let bd = computeBreakdown(
     form.basicAmount,
     form.cgstRate,
     form.sgstRate,
@@ -2238,12 +2298,23 @@ export default function MaterialExpenseBooking() {
       ? form.billingTerms
       : form.discount,
   );
-  // For GRN bookings, snap net payable exactly to the GRN's TotalAmount
-  // instead of using a generic nearest-rupee round-off.
-  if (selectedDoc?.kind === "GRN" && selectedDoc.amount != null) {
-    const grnTotal = selectedDoc.amount;
-    bd.roundOff = grnTotal - bd.grossAmount;
-    bd.netAmount = grnTotal;
+  if (selectedDoc?.kind === "GRN" && gstBreakdown?.totals.totalInclGST > 0) {
+    bd = {
+      basicAmount: gstBreakdown.totals.totalBase,
+      discountAmount: 0,
+      taxableAmount: gstBreakdown.totals.totalBase,
+      cgstAmount: gstBreakdown.totals.totalCGST,
+      sgstAmount: gstBreakdown.totals.totalSGST,
+      igstAmount: gstBreakdown.totals.totalIGST ?? 0,
+      grossAmount: gstBreakdown.totals.totalInclGST,
+      roundOff: 0,
+      netAmount: gstBreakdown.totals.totalInclGST,
+      preGstTerms: [],
+      postGstTerms: [],
+    };
+  } else if (selectedDoc?.kind === "GRN" && selectedDoc.amount != null) {
+    bd.roundOff = selectedDoc.amount - bd.grossAmount;
+    bd.netAmount = selectedDoc.amount;
   }
   const filteredRecords =
     statusFilter && statusFilter !== "All"
@@ -2845,6 +2916,9 @@ export default function MaterialExpenseBooking() {
                                 <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-violet-600 dark:text-violet-400 text-[10px]">
                                   SGST
                                 </th>
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-violet-600 dark:text-violet-400 text-[10px]">
+                                  IGST
+                                </th>
                                 <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-orange-600 dark:text-orange-400 text-[10px]">
                                   GST (₹)
                                 </th>
@@ -2927,6 +3001,19 @@ export default function MaterialExpenseBooking() {
                                         "—"
                                       )}
                                     </td>
+                                    <td className="px-3 py-2.5 text-right font-mono text-violet-600 dark:text-violet-400">
+                                      {item.igstRate != null &&
+                                      item.igstAmount != null ? (
+                                        <span className="flex flex-col items-end gap-0.5">
+                                          <span className="text-[10px] text-muted-foreground">
+                                            {item.igstRate}%
+                                          </span>
+                                          <span>₹{fmt(item.igstAmount)}</span>
+                                        </span>
+                                      ) : (
+                                        "—"
+                                      )}
+                                    </td>
                                     <td className="px-3 py-2.5 text-right font-mono font-semibold text-orange-600 dark:text-orange-400">
                                       {item.gstAmount != null
                                         ? `₹${fmt(item.gstAmount)}`
@@ -2977,6 +3064,11 @@ export default function MaterialExpenseBooking() {
                                     ? `₹${fmt(gstBreakdown.totals.totalSGST)}`
                                     : "—"}
                                 </td>
+                                <td className="px-3 py-2.5 text-right font-mono text-xs font-bold text-violet-600 dark:text-violet-400">
+                                  {gstBreakdown
+                                    ? `₹${fmt(gstBreakdown.totals.totalIGST ?? 0)}`
+                                    : "—"}
+                                </td>
                                 <td className="px-3 py-2.5 text-right font-mono text-xs font-bold text-orange-600 dark:text-orange-400">
                                   {gstBreakdown
                                     ? `₹${fmt(gstBreakdown.totals.totalGST)}`
@@ -2990,7 +3082,7 @@ export default function MaterialExpenseBooking() {
 
                       {/* ── GST summary cards ── */}
                       {gstBreakdown && gstBreakdown.totals.totalInclGST > 0 && (
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                           {[
                             {
                               label: "Base Amount",
@@ -3005,6 +3097,11 @@ export default function MaterialExpenseBooking() {
                             {
                               label: "SGST",
                               value: gstBreakdown.totals.totalSGST,
+                              cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
+                            },
+                            {
+                              label: "IGST",
+                              value: gstBreakdown.totals.totalIGST ?? 0,
                               cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
                             },
                             {
