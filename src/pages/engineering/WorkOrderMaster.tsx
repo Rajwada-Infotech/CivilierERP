@@ -4260,9 +4260,13 @@ const WorkOrderMaster: React.FC = () => {
       <Breadcrumbs items={["Engineering", "Work Order"]} />
 
       {/* Page header */}
-      <div className="mb-5 flex items-start justify-between gap-4">
+      <div className="relative space-y-8 mt-6">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
+          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+            <span className="p-1.5 rounded-lg bg-violet-500/10 inline-flex shrink-0">
+              <ClipboardList size={18} className="text-violet-500" />
+            </span>
             Work Order
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5 hidden sm:block">
@@ -4312,7 +4316,7 @@ const WorkOrderMaster: React.FC = () => {
               <button
                 onClick={handleSave}
                 disabled={saving || loadingDropdowns}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity"
+                className="flex items-center gap-2 px-4 py-2 rounded-lg gradient-accent text-white text-sm font-heading font-semibold shadow-sm disabled:opacity-60 transition-opacity"
               >
                 {saving ? (
                   <>
@@ -5002,7 +5006,7 @@ const WorkOrderMaster: React.FC = () => {
             <button
               onClick={handleSave}
               disabled={saving || loadingDropdowns}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg gradient-accent text-white text-sm font-heading font-semibold shadow-sm disabled:opacity-60 transition-opacity"
             >
               {saving ? (
                 <>
@@ -5024,6 +5028,7 @@ const WorkOrderMaster: React.FC = () => {
           </div>
         </>
       )}
+      </div>
     </>
   );
 };
