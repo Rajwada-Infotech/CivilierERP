@@ -344,7 +344,7 @@ router.get(
           eb.Eid                          AS id,
           eb.Eid                          AS value,
           ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))) AS docNo,
-          ISNULL(eb.EProjectName, '')     AS projectName,
+          COALESCE(proj.name, eb.EProjectName, '') AS projectName,
           ISNULL(eb.EName, '')            AS partyName,
           -- GRN-linked supplier name preferred; falls back to EName
           ISNULL(
@@ -360,13 +360,14 @@ router.get(
           CONCAT(
             ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))),
             N' — ',
-            ISNULL(eb.EProjectName,''),
+            COALESCE(proj.name, eb.EProjectName, ''),
             N' (₹',
             CAST(CAST(ISNULL(eb.ENetAmount, ISNULL(eb.EAmount,0)) AS BIGINT) AS NVARCHAR(20)),
             ')'
           ) AS label
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.enterprise e ON e.id = eb.ECompanyId
+        LEFT JOIN dbo.enterprise proj ON proj.id = TRY_CAST(eb.EProjectName AS INT)
         LEFT JOIN dbo.GoodsReceiptNotes grn
           ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = grn.SupplierID
@@ -392,7 +393,7 @@ router.get(
           ei.DueDate                   AS dueDate,
           ei.Amount                    AS amount,
           ei.Status                    AS status,
-          eb.EProjectName              AS projectName,
+          COALESCE(proj2.name, eb.EProjectName, '') AS projectName,
           ISNULL(eb.EName, '')         AS partyName,
           ISNULL(
             CASE WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL
@@ -406,7 +407,7 @@ router.get(
           CONCAT(
             ISNULL(ei.RefNumber, CONCAT('EMI-', RIGHT('00' + CAST(ei.InstallmentNo AS VARCHAR), 2))),
             N' — ',
-            ISNULL(eb.EProjectName, ''),
+            COALESCE(proj2.name, eb.EProjectName, ''),
             N' (₹',
             CAST(CAST(ISNULL(ei.Amount,0) AS BIGINT) AS NVARCHAR(20)),
             N') — Installment #',
@@ -415,6 +416,7 @@ router.get(
         FROM dbo.EmiInstallments ei
         INNER JOIN dbo.ExpenseBooking eb ON eb.Eid = ei.ExpenseBookingId
         LEFT JOIN dbo.enterprise e2 ON e2.id = eb.ECompanyId
+        LEFT JOIN dbo.enterprise proj2 ON proj2.id = TRY_CAST(eb.EProjectName AS INT)
         LEFT JOIN dbo.GoodsReceiptNotes grn2
           ON eb.ESourceType = 'GRN' AND grn2.GRNID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.AccountHeadMaster ahm2 ON ahm2.LHeadId = grn2.SupplierID
