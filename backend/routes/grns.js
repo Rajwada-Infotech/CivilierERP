@@ -754,6 +754,7 @@ router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
     await transaction.commit();
 
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("expense-booking-options");
     await bumpCacheVersion("stock-ledger");
     res.json({ message: "GRN updated successfully" });
   } catch (err) {
@@ -795,6 +796,7 @@ router.delete("/:id", async (req, res) => {
     await transaction.commit();
 
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("expense-booking-options");
     await bumpCacheVersion("stock-ledger");
     res.json({ message: "GRN deleted successfully" });
   } catch (err) {
@@ -822,6 +824,7 @@ router.put("/:id/submit", async (req, res) => {
       req.user?.role,
     );
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("expense-booking-options");
     res.json({ message: "GRN submitted for approval", ...result });
   } catch (err) {
     console.error("GRN submit error:", err.message);
@@ -844,6 +847,7 @@ router.put("/:id/approve", async (req, res) => {
       req.user?.role,
     );
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("expense-booking-options");
     res.json({ message: "GRN approved", ...result });
   } catch (err) {
     console.error("GRN approve error:", err.message);
@@ -869,6 +873,7 @@ router.put("/:id/reject", async (req, res) => {
       note || null,
     );
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("expense-booking-options");
     res.json({ message: "GRN rejected", ...result });
   } catch (err) {
     console.error("GRN reject error:", err.message);
@@ -889,180 +894,227 @@ router.get("/:id/gst-breakdown", async (req, res) => {
   try {
     const pool = await getPool();
 
-    // ── 1. Pull rows directly from GRN_ItemTotals view ───────────────────────
-    // This view already computes receivedQty, remainingQty, Rate, TotalAmount
-    // correctly from the stored JSON + PO line data, so we don't need to parse
-    // raw JSON or guess field names.
-    const itemsResult = await pool
+    // Fetch GRN row for its items JSON
+    const grnResult = await pool
       .request()
       .input("GRNID", sql.Int, grnId)
       .query(`
         SELECT
-          git.itemId,
-          git.itemName,
-          git.uom,
-          git.orderedQty,
-          git.receivedQty,
-          git.remainingQty,
-          git.Rate,
-          git.TotalAmount,
-          grn.SupplierID,
-          s.LGSTState  AS VendorState,
-          e.state      AS CompanyState
-        FROM dbo.GRN_ItemTotals git
-        JOIN dbo.GoodsReceiptNotes grn ON grn.GRNID = git.GRNID
-        LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId  = grn.SupplierID
-        LEFT JOIN dbo.PurchaseOrders    p ON p.PurchaseOrderID = grn.POID
-        LEFT JOIN dbo.enterprise        e ON e.id = p.CompanyId
-        WHERE git.GRNID = @GRNID
+          grn.GRNItems,
+          p.POItems,
+          p.GST AS ParentGST,
+          s.LGSTState AS VendorState,
+          company.state AS CompanyState
+        FROM dbo.GoodsReceiptNotes grn
+        LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId = grn.SupplierID
+        LEFT JOIN dbo.PurchaseOrders p ON p.PurchaseOrderID = grn.POID
+        LEFT JOIN dbo.enterprise company ON company.id = p.CompanyId
+        WHERE grn.GRNID = @GRNID
       `);
 
-    // GRN not found or no items
-    if (itemsResult.recordset.length === 0) {
-      // Check if GRN itself exists (might just have no items)
-      const grnCheck = await pool.request().input("GRNID", sql.Int, grnId)
-        .query("SELECT GRNID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID");
-      if (!grnCheck.recordset.length)
-        return res.status(404).json({ error: "GRN not found" });
+    if (!grnResult.recordset.length)
+      return res.status(404).json({ error: "GRN not found" });
+
+    const rawItems = parseGRNItems(grnResult.recordset[0].GRNItems);
+    const poItems = parseGRNItems(grnResult.recordset[0].POItems);
+    const parentGst = (() => {
+      const raw = grnResult.recordset[0].ParentGST;
+      if (!raw) return null;
+      if (typeof raw === "object") return raw;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    })();
+    const parentGstRate =
+      Array.isArray(parentGst)
+        ? parentGst.reduce((sum, row) => sum + Number(row?.rate || 0), 0)
+        : parentGst && typeof parentGst === "object"
+        ? Number(parentGst.rate) ||
+          Number(parentGst.igst) ||
+          Number(parentGst.cgst || 0) + Number(parentGst.sgst || 0)
+        : 0;
+    const receivedItems = rawItems.filter(
+      (it) => Number(it.receivedQty || it.ReceivedQty || 0) > 0,
+    );
+
+    if (receivedItems.length === 0)
       return res.json({
         items: [],
-        totals: { totalBase: 0, totalCGST: 0, totalSGST: 0, totalIGST: 0, totalGST: 0, totalInclGST: 0 },
+        totals: {
+          totalBase: 0,
+          totalCGST: 0,
+          totalSGST: 0,
+          totalGST: 0,
+          totalInclGST: 0,
+        },
       });
-    }
 
-    // ── 2. Tax mode from first row (all rows share the same GRN/supplier) ────
-    const firstRow    = itemsResult.recordset[0];
-    const vendorState  = String(firstRow.VendorState  || "").trim().toLowerCase();
-    const companyState = String(firstRow.CompanyState || "").trim().toLowerCase();
-    // Default to intra-state when state data is absent — avoids zeroing all rates
-    const isIntraState = !vendorState || !companyState || vendorState === companyState;
+    // Build itemId list for a single batch lookup against Item_Master_Group
+    const itemIds = receivedItems
+      .map((it) => String(it.itemId || it.ItemId || "").trim())
+      .filter(Boolean);
 
-    // ── 3. Batch-fetch GST rates from Item_Master_Group ───────────────────────
-    const allItemIds = [
-      ...new Set(
-        itemsResult.recordset
-          .map(r => String(r.itemId || "").trim())
-          .filter(Boolean)
-      )
-    ];
+    const vendorState = String(grnResult.recordset[0].VendorState || "")
+      .trim()
+      .toLowerCase();
+    const companyState = String(grnResult.recordset[0].CompanyState || "")
+      .trim()
+      .toLowerCase();
+    // Default to intra-state (CGST+SGST) when state info is missing —
+    // most Indian construction bookings are intra-state.
+    const isIntraState =
+      !vendorState || !companyState
+        ? true  // unknown states → assume intra-state
+        : vendorState === companyState;
 
+    const poItemMap = new Map();
+    poItems.forEach((item) => {
+      const keys = [
+        item.itemId,
+        item.ItemId,
+        item.itemName,
+        item.ItemName,
+        item.itemDescription,
+        item.description,
+      ];
+      keys
+        .filter(Boolean)
+        .forEach((key) => poItemMap.set(String(key).trim(), item));
+    });
+
+    // Use ItemMaster (same table as /grn-gst-data) — has GSTPercent as a single
+    // authoritative field. Item_Master_Group + HSN join often returns 0 when
+    // HSN codes are missing or M_Id format doesn't match stored itemId strings.
     let masterMap = {};
-    if (allItemIds.length > 0) {
-      const mReq = pool.request();
-      const placeholders = allItemIds.map((id, i) => {
-        mReq.input(`iid${i}`, sql.NVarChar(100), id);
-        return `@iid${i}`;
-      }).join(",");
+    if (itemIds.length > 0) {
+      const masterReq = pool.request();
+      const placeholders = itemIds
+        .map((id, i) => {
+          masterReq.input(`iid${i}`, sql.NVarChar(100), id);
+          return `@iid${i}`;
+        })
+        .join(",");
 
-      const mRes = await mReq.query(`
+      const masterRes = await masterReq.query(`
         SELECT
           CONVERT(NVARCHAR(100), M_Id) AS M_Id,
-          M_HSN,
-          ISNULL(M_CGST, 0) AS M_CGST,
-          ISNULL(M_SGST, 0) AS M_SGST,
-          ISNULL(M_IGST, 0) AS M_IGST
+          ISNULL(M_HSN, '') AS HSNCode,
+          ISNULL(M_CGST, 0) + ISNULL(M_SGST, 0) AS GSTPercent
         FROM dbo.Item_Master_Group
         WHERE CONVERT(NVARCHAR(100), M_Id) IN (${placeholders})
       `);
 
-      for (const row of mRes.recordset) {
-        masterMap[row.M_Id.toUpperCase()] = {
-          hsnCode:  row.M_HSN  || "",
-          cgstRate: Number(row.M_CGST) || 0,
-          sgstRate: Number(row.M_SGST) || 0,
-          igstRate: Number(row.M_IGST) || 0,
+      for (const row of masterRes.recordset) {
+        const gst = parseFloat(row.GSTPercent) || 0;
+        masterMap[row.M_Id] = {
+          hsnCode: row.HSNCode || "",
+          gstPercent: gst,
+          cgstRate: gst / 2,
+          sgstRate: gst / 2,
+          igstRate: gst,
         };
       }
     }
 
-    console.log("[gst-breakdown] GRN:", grnId,
-      "| isIntraState:", isIntraState,
-      "| itemIds:", allItemIds,
-      "| masterMap keys:", Object.keys(masterMap));
+    let totalBase = 0,
+      totalCGST = 0,
+      totalSGST = 0,
+      totalIGST = 0,
+      totalInclGST = 0;
 
-    // ── 4. Per-line calculation ───────────────────────────────────────────────
-    // GRN amounts are INCLUSIVE of GST (the supplier bills incl. tax).
-    // Back-calculate base: base = inclGST / (1 + totalGSTRate/100)
+    const items = receivedItems.map((it) => {
+      const itemId = String(it.itemId || it.ItemId || "");
+      const poItem =
+        poItemMap.get(itemId) ||
+        poItemMap.get(String(it.itemName || it.ItemName || "").trim()) ||
+        {};
+      const receivedQty = Number(it.receivedQty || it.ReceivedQty || 0);
+      const rate = Number(it.rate || it.Rate || 0);
+      // totalAmount stored in GRN = receivedQty × rate (inclusive of GST)
+      // totalAmount in GRN = receivedQty × rate — stored INCLUSIVE of GST.
+      // We back-calculate the true base (exclusive) using the HSN slab.
+      const inclFromGrn =
+        Number(it.totalAmount) > 0
+          ? Number(it.totalAmount)
+          : receivedQty * rate;
 
-    let totalBase = 0, totalCGST = 0, totalSGST = 0, totalIGST = 0, totalInclGST = 0;
+      const master = masterMap[itemId] || {
+        hsnCode: "",
+        gstPercent: 0,
+        cgstRate: 0,
+        sgstRate: 0,
+        igstRate: 0,
+      };
 
-    const items = itemsResult.recordset
-      .filter(r => Number(r.receivedQty) > 0)          // only received lines
-      .map(r => {
-        const itemId     = String(r.itemId || "").trim().toUpperCase();
-        const receivedQty = Number(r.receivedQty) || 0;
-        const unitRate    = Number(r.Rate)         || 0;
+      // Resolve GST% — priority: ItemMaster → stored on item → parentGST from PO
+      const resolvedGstPct =
+        master.gstPercent ||
+        Number(it.gstPercent ?? it.gstRate ?? it.tax ?? 0) ||
+        parentGstRate ||
+        0;
 
-        // inclGST = what was actually received, incl. tax
-        const inclGST = receivedQty * unitRate;
+      const totalGSTRate = resolvedGstPct;
 
-        const master = masterMap[itemId] || { hsnCode: "", cgstRate: 0, sgstRate: 0, igstRate: 0 };
+      const cgstRate = isIntraState ? totalGSTRate / 2 : 0;
+      const sgstRate = isIntraState ? totalGSTRate / 2 : 0;
+      const igstRate = isIntraState ? 0 : totalGSTRate;
 
-        const cgstRate = isIntraState ? master.cgstRate : 0;
-        const sgstRate = isIntraState ? master.sgstRate : 0;
-        const igstRate = isIntraState ? 0               : master.igstRate;
-        const totalGSTRate = cgstRate + sgstRate + igstRate;
+      // Back-calculate exclusive base from the inclusive amount
+      const effectiveGSTRate = cgstRate + sgstRate + igstRate; // e.g. 18
+      const baseAmount =
+        effectiveGSTRate > 0
+          ? inclFromGrn / (1 + effectiveGSTRate / 100)
+          : inclFromGrn;
 
-        // Back-calculate pre-tax base from incl. amount
-        const baseAmount  = totalGSTRate > 0 ? inclGST / (1 + totalGSTRate / 100) : inclGST;
-        const cgstAmount  = (baseAmount * cgstRate) / 100;
-        const sgstAmount  = (baseAmount * sgstRate) / 100;
-        const igstAmount  = (baseAmount * igstRate) / 100;
-        const gstAmount   = cgstAmount + sgstAmount + igstAmount;
+      const cgstAmount = (baseAmount * cgstRate) / 100;
+      const sgstAmount = (baseAmount * sgstRate) / 100;
+      const igstAmount = (baseAmount * igstRate) / 100;
+      const gstAmount = cgstAmount + sgstAmount + igstAmount;
+      const inclGST = baseAmount + gstAmount; // should equal inclFromGrn
 
-        totalBase      += baseAmount;
-        totalCGST      += cgstAmount;
-        totalSGST      += sgstAmount;
-        totalIGST      += igstAmount;
-        totalInclGST   += inclGST;
+      totalBase += baseAmount;
+      totalCGST += cgstAmount;
+      totalSGST += sgstAmount;
+      totalIGST += igstAmount;
+      totalInclGST += inclGST;
 
-        console.log("[gst-breakdown] item:", r.itemName,
-          "| itemId:", itemId,
-          "| masterFound:", !!masterMap[itemId],
-          "| receivedQty:", receivedQty, "× rate:", unitRate,
-          "| inclGST:", inclGST.toFixed(2),
-          "| cgstRate:", cgstRate, "sgstRate:", sgstRate,
-          "| base:", baseAmount.toFixed(2),
-          "| cgst:", cgstAmount.toFixed(2), "sgst:", sgstAmount.toFixed(2));
-
-        return {
-          itemId: r.itemId,
-          itemName:       r.itemName   || "",
-          uom:            r.uom        || "",
-          orderedQty:     Number(r.orderedQty)   || 0,
-          receivedQty,
-          remainingQty:   Number(r.remainingQty) || 0,
-          unitRate,
-          hsnCode:        master.hsnCode,
-          gstPercent:     totalGSTRate,
-          cgstRate,
-          sgstRate,
-          igstRate,
-          totalAmountInclGST: Math.round(inclGST   * 100) / 100,
-          baseAmount:         Math.round(baseAmount * 100) / 100,
-          cgstAmount:         Math.round(cgstAmount * 100) / 100,
-          sgstAmount:         Math.round(sgstAmount * 100) / 100,
-          igstAmount:         Math.round(igstAmount * 100) / 100,
-          gstAmount:          Math.round(gstAmount  * 100) / 100,
-        };
-      });
-
-    const round2 = v => Math.round(v * 100) / 100;
-
-    return res.json({
-      items,
-      totals: {
-        totalBase:    round2(totalBase),
-        totalCGST:    round2(totalCGST),
-        totalSGST:    round2(totalSGST),
-        totalIGST:    round2(totalIGST),
-        totalGST:     round2(totalCGST + totalSGST + totalIGST),
-        totalInclGST: round2(totalInclGST),
-      },
+      return {
+        itemId,
+        itemName: it.itemName || it.ItemName || "",
+        uom: it.uom || it.UOM || "",
+        orderedQty: Number(it.orderedQty || 0),
+        receivedQty,
+        remainingQty: Number(it.remainingQty || 0),
+        rate,
+        totalAmountInclGST: Math.round(inclGST * 100) / 100,
+        hsnCode: master.hsnCode || it.hsnCode || it.HSNCode || "",
+        gstPercent: totalGSTRate,
+        cgstRate,
+        sgstRate,
+        igstRate,
+        baseAmount: Math.round(baseAmount * 100) / 100,
+        cgstAmount: Math.round(cgstAmount * 100) / 100,
+        sgstAmount: Math.round(sgstAmount * 100) / 100,
+        igstAmount: Math.round(igstAmount * 100) / 100,
+        gstAmount: Math.round(gstAmount * 100) / 100,
+      };
     });
 
+    res.json({
+      items,
+      totals: {
+        totalBase: Math.round(totalBase * 100) / 100,
+        totalCGST: Math.round(totalCGST * 100) / 100,
+        totalSGST: Math.round(totalSGST * 100) / 100,
+        totalIGST: Math.round(totalIGST * 100) / 100,
+        totalGST: Math.round((totalCGST + totalSGST + totalIGST) * 100) / 100,
+        totalInclGST: Math.round(totalInclGST * 100) / 100,
+      },
+    });
   } catch (err) {
-    console.error("[gst-breakdown] ERROR:", err.message, err.stack);
+    console.error("GRN GST breakdown error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
