@@ -204,9 +204,11 @@ interface GRNItemLine {
   hsnCode?: string;
   cgstRate?: number;
   sgstRate?: number;
+  igstRate?: number;
   baseAmount?: number;
   cgstAmount?: number;
   sgstAmount?: number;
+  igstAmount?: number;
   gstAmount?: number;
   totalAmountInclGST?: number;
 }
@@ -229,10 +231,14 @@ interface SelectedDoc {
 interface GRNItem {
   GRNID: number;
   GRNNo: string;
+  DocNo?: string;
   GRNDate: string;
   SupplierName?: string;
   PONumber?: string;
   POID?: number;
+  CompanyId?: number;
+  ProjectId?: number;
+  FinYear?: string;
   Status?: string;
   TotalItems?: number;
   Remarks?: string;
