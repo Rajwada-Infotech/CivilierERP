@@ -541,97 +541,230 @@ router.delete("/:id", authenticateToken, async (req, res) => {
   }
 });
 
+// ── GET /reference-list/grn ───────────────────────────────────────────────────
+router.get("/reference-list/grn", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT TOP 100
+        grn.GRNID AS id,
+        COALESCE(grn.DocNo, grn.GRNNo) AS docNo
+      FROM dbo.GoodsReceiptNotes grn
+      ORDER BY grn.CreatedDate DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /reference-list/mr ────────────────────────────────────────────────────
+router.get("/reference-list/mr", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT TOP 100
+        mr.MRId  AS id,
+        mr.DocNo AS docNo,
+        mr.Status
+      FROM dbo.MaterialRequests mr
+      ORDER BY mr.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /prefill/:type/:id ────────────────────────────────────────────────────
-// Returns items pre-filled from a GRN, MR, or Work Done record so the
-// Issues form can auto-populate the cart.
-//   type = 'GRN' | 'MR' | 'WORK_DONE'
-//   id   = numeric DB id of the source record
+// Returns items pre-filled from a GRN, MR, or Work Done record.
+// :id can be a numeric DB id OR a doc number string (e.g. GRN-2026-00004)
 router.get("/prefill/:type/:id", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const type = (req.params.type || "").toUpperCase();
-    const id = parseInt(req.params.id, 10);
-    if (!Number.isFinite(id) || id <= 0)
-      return res.status(400).json({ error: "Invalid source id" });
+    const raw = (req.params.id || "").trim();
+    if (!raw) return res.status(400).json({ error: "Invalid source id" });
+
+    const numericId = parseInt(raw, 10);
+    const byDocNo = !Number.isFinite(numericId) || numericId <= 0;
 
     if (type === "GRN") {
-      // Fetch GRN header + accepted items with current stock
-      const hdr = await pool.request().input("id", sql.Int, id).query(`
-        SELECT grn.GRNID, grn.GRNNo, grn.GRNDate,
-               po.CompanyId, po.ProjectId,
-               s.LHeadName AS SupplierName
-        FROM dbo.GoodsReceiptNotes grn
-        LEFT JOIN dbo.PurchaseOrders po ON grn.POID = po.PurchaseOrderID
-        LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
-        WHERE grn.GRNID = @id
+      // GRN items are stored as JSON in the GRNItems column on GoodsReceiptNotes
+      // CompanyId/ProjectId come from the linked PurchaseOrder
+      const hdrReq = pool.request();
+      let hdrWhere;
+      if (byDocNo) {
+        hdrReq.input("docNo", sql.NVarChar(100), raw);
+        hdrWhere = "(grn.GRNNo = @docNo OR grn.DocNo = @docNo)";
+      } else {
+        hdrReq.input("id", sql.Int, numericId);
+        hdrWhere = "grn.GRNID = @id";
+      }
+
+      const hdr = await hdrReq.query(`
+        SELECT grn.GRNID, grn.GRNNo, grn.DocNo, grn.GRNItems, grn.GRNDate,
+               p.CompanyId, p.ProjectId,
+               -- Resolve the FinYearId from the GRN date via the FinYear table
+               (SELECT TOP 1 fy.FId
+                FROM dbo.FinYear fy
+                WHERE grn.GRNDate >= fy.FStartDate
+                  AND grn.GRNDate <= fy.FEndDate) AS FinYearId
+        FROM   dbo.GoodsReceiptNotes grn
+        LEFT JOIN dbo.PurchaseOrders p ON grn.POID = p.PurchaseOrderID
+        WHERE  ${hdrWhere}
       `);
       if (!hdr.recordset.length)
         return res.status(404).json({ error: "GRN not found" });
 
-      const items = await pool.request().input("id", sql.Int, id).query(`
-        SELECT gi.ItemCode AS ItemId, gi.ItemName, gi.AcceptedQty AS Quantity,
-               gi.UOM AS UOMCode,
-               ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END),0)
-             - ISNULL(SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END),0)
-               AS AvailableStock
-        FROM dbo.GRNItems gi
-        LEFT JOIN dbo.StockLedger sl
-          ON CONVERT(NVARCHAR(100), sl.ItemID) = gi.ItemCode
-        WHERE gi.GRNID = @id AND gi.AcceptedQty > 0
-        GROUP BY gi.ItemCode, gi.ItemName, gi.AcceptedQty, gi.UOM
-      `);
-
       const h = hdr.recordset[0];
+
+      // Parse GRNItems JSON column
+      let rawItems = [];
+      try {
+        rawItems =
+          typeof h.GRNItems === "string"
+            ? JSON.parse(h.GRNItems)
+            : h.GRNItems || [];
+      } catch {
+        rawItems = [];
+      }
+
+      // GRN JSON items are stored camelCase: { itemId, itemName, receivedQty, uom }
+      // Support both camelCase (current app) and PascalCase (legacy) field names
+      const items = await Promise.all(
+        rawItems
+          .filter((it) => {
+            const qty = Number(
+              it.receivedQty ??
+                it.acceptedQty ??
+                it.AcceptedQty ??
+                it.ReceivedQty ??
+                it.Quantity ??
+                it.quantity ??
+                0,
+            );
+            return qty > 0;
+          })
+          .map(async (it) => {
+            const itemId = String(
+              it.itemId ?? it.ItemCode ?? it.ItemId ?? it.M_Id ?? "",
+            );
+            const qty = Number(
+              it.receivedQty ??
+                it.acceptedQty ??
+                it.AcceptedQty ??
+                it.ReceivedQty ??
+                it.Quantity ??
+                it.quantity ??
+                0,
+            );
+            const grnUOM = it.uom || it.UOM || it.UOMCode || "";
+
+            let availableStock = 0;
+            let resolvedName =
+              it.itemName || it.ItemName || it.M_Name || it.Description || "";
+            let resolvedUOM = grnUOM;
+
+            if (itemId) {
+              try {
+                // M_UOM column may not exist on older schemas — derive from StockLedger
+                const enrichRes = await pool
+                  .request()
+                  .input("itemId", sql.NVarChar(100), itemId).query(`
+                    SELECT
+                      img.M_Name,
+                      MAX(sl.UOM) AS DefaultUOM,
+                      ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END),0)
+                    - ISNULL(SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END),0)
+                      AS AvailableStock
+                    FROM dbo.Item_Master_Group img
+                    LEFT JOIN dbo.StockLedger sl
+                      ON CONVERT(NVARCHAR(100), sl.ItemID) = CONVERT(NVARCHAR(100), img.M_Id)
+                    WHERE CONVERT(NVARCHAR(100), img.M_Id) = @itemId
+                    GROUP BY img.M_Name
+                  `);
+                if (enrichRes.recordset.length > 0) {
+                  const row = enrichRes.recordset[0];
+                  if (!resolvedName) resolvedName = row.M_Name || "";
+                  if (!resolvedUOM) resolvedUOM = row.DefaultUOM || "";
+                  availableStock = Number(row.AvailableStock ?? 0);
+                }
+              } catch {
+                /* leave defaults */
+              }
+            }
+            return {
+              ItemId: itemId,
+              ItemName: resolvedName,
+              UOMCode: resolvedUOM,
+              Quantity: String(qty),
+              AvailableStock: availableStock,
+            };
+          }),
+      );
+
       return res.json({
         referenceType: "GRN",
         referenceId: h.GRNID,
-        referenceDocNo: h.GRNNo,
+        referenceDocNo: h.DocNo || h.GRNNo,
         companyId: h.CompanyId,
         projectId: h.ProjectId,
-        items: items.recordset.map((r) => ({
-          ItemId: String(r.ItemId),
-          ItemName: r.ItemName,
-          UOMCode: r.UOMCode || "",
-          Quantity: "", // user fills qty; we show max = AvailableStock
-          AvailableStock: Number(r.AvailableStock),
-        })),
+        finYearId: h.FinYearId || null, // derived from GRN date matched against FinYear table
+        items,
       });
     }
 
     if (type === "MR") {
-      const hdr = await pool.request().input("id", sql.Int, id).query(`
-        SELECT mr.MRId, mr.MRDocNo, mr.CompanyId, mr.ProjectId
-        FROM dbo.MaterialRequests mr
-        WHERE mr.MRId = @id AND mr.MRStatus = 'Approved'
+      const mrReq = pool.request();
+      let mrWhere;
+      if (byDocNo) {
+        mrReq.input("docNo", sql.NVarChar(100), raw);
+        mrWhere = "UPPER(mr.DocNo) = UPPER(@docNo)";
+      } else {
+        mrReq.input("id", sql.Int, numericId);
+        mrWhere = "mr.MRId = @id";
+      }
+
+      const hdr = await mrReq.query(`
+        SELECT mr.MRId, mr.DocNo, mr.CompanyId, mr.ProjectId, mr.Status, mr.FinYearId
+        FROM   dbo.MaterialRequests mr
+        WHERE  ${mrWhere}
       `);
       if (!hdr.recordset.length)
-        return res.status(404).json({ error: "Approved MR not found" });
-
-      const items = await pool.request().input("id", sql.Int, id).query(`
-        SELECT mri.ItemCode AS ItemId, img.M_Name AS ItemName,
-               mri.Quantity, mri.UOM AS UOMCode,
-               ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END),0)
-             - ISNULL(SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END),0)
-               AS AvailableStock
-        FROM dbo.MaterialRequestItems mri
-        LEFT JOIN dbo.Item_Master_Group img
-          ON CONVERT(NVARCHAR(100), img.M_Id) = mri.ItemCode
-        LEFT JOIN dbo.StockLedger sl
-          ON CONVERT(NVARCHAR(100), sl.ItemID) = mri.ItemCode
-        WHERE mri.MRId = @id
-        GROUP BY mri.ItemCode, img.M_Name, mri.Quantity, mri.UOM
-      `);
+        return res.status(404).json({ error: "Material Request not found" });
+      // No approval gate on prefill — approval enforced at PO creation
 
       const h = hdr.recordset[0];
+      // MR items are PascalCase in dbo.MaterialRequestItems (ItemId, ItemName, UOMCode, Quantity).
+      // Join Item_Master_Group to fill gaps in name/UOM and get current stock.
+      const items = await pool.request().input("mrId", sql.Int, h.MRId).query(`
+        SELECT
+          mri.ItemId,
+          mri.Quantity,
+          COALESCE(NULLIF(mri.ItemName, ''), img.M_Name, '')             AS ItemName,
+          COALESCE(NULLIF(mri.UOMCode,  ''), MAX(sl.UOM), '')           AS UOMCode,
+          ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END),0)
+        - ISNULL(SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END),0) AS AvailableStock
+        FROM   dbo.MaterialRequestItems mri
+        LEFT JOIN dbo.Item_Master_Group img
+          ON CONVERT(NVARCHAR(100), img.M_Id) = CONVERT(NVARCHAR(100), mri.ItemId)
+        LEFT JOIN dbo.StockLedger sl
+          ON CONVERT(NVARCHAR(100), sl.ItemID) = CONVERT(NVARCHAR(100), mri.ItemId)
+        WHERE  mri.MRId = @mrId
+        GROUP BY mri.ItemId, mri.ItemName, mri.UOMCode, mri.Quantity, img.M_Name
+      `);
+
       return res.json({
         referenceType: "MR",
         referenceId: h.MRId,
-        referenceDocNo: h.MRDocNo,
+        referenceDocNo: h.DocNo,
         companyId: h.CompanyId,
         projectId: h.ProjectId,
+        finYearId: h.FinYearId || null, // carry over fin year from the MR
         items: items.recordset.map((r) => ({
           ItemId: String(r.ItemId),
-          ItemName: r.ItemName,
+          ItemName: r.ItemName || "",
           UOMCode: r.UOMCode || "",
           Quantity: String(r.Quantity || ""),
           AvailableStock: Number(r.AvailableStock),
@@ -639,31 +772,7 @@ router.get("/prefill/:type/:id", authenticateToken, async (req, res) => {
       });
     }
 
-    if (type === "WORK_DONE") {
-      const hdr = await pool.request().input("id", sql.Int, id).query(`
-        SELECT wd.ID, wd.DocNo, wd.CompanyId, wd.ProjectId
-        FROM dbo.WorkDone wd
-        WHERE wd.ID = @id AND wd.Status = 'Approved'
-      `);
-      if (!hdr.recordset.length)
-        return res.status(404).json({ error: "Approved Work Done not found" });
-
-      // Work Done has no explicit materials lines table in current schema;
-      // return header only so the form pre-fills reference + company/project.
-      const h = hdr.recordset[0];
-      return res.json({
-        referenceType: "WORK_DONE",
-        referenceId: h.ID,
-        referenceDocNo: h.DocNo,
-        companyId: h.CompanyId,
-        projectId: h.ProjectId,
-        items: [],
-      });
-    }
-
-    return res
-      .status(400)
-      .json({ error: "type must be GRN, MR, or WORK_DONE" });
+    return res.status(400).json({ error: "type must be GRN or MR" });
   } catch (err) {
     console.error("Issue prefill error:", err.message);
     res.status(500).json({ error: err.message });

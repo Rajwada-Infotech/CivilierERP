@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import * as issuesApi from "@/api/issuesApi";
-import type { IssuePrefill } from "@/api/issuesApi";
+import type { IssuePrefill, ReferenceListItem } from "@/api/issuesApi";
 import {
   CalendarDays,
   FileText,
@@ -71,7 +71,7 @@ interface IssueHeader {
   date: string;
   reason: string;
   remarks: string;
-  referenceType: "" | "GRN" | "MR" | "WORK_DONE";
+  referenceType: "" | "GRN" | "MR";
   docTypeId: number | null;
   docNoPreview: string;
   referenceId: string;
@@ -251,6 +251,20 @@ export default function Issues() {
     queryFn: () => issuesApi.getIssues({ page, limit, search }),
   });
 
+  // Reference list queries — only fire when that reference type is selected
+  const { data: grnList = [], isLoading: loadingGrnList } = useQuery<ReferenceListItem[]>({
+    queryKey: ["issues-grn-list"],
+    queryFn: issuesApi.getGrnList,
+    enabled: header.referenceType === "GRN",
+    staleTime: 60_000,
+  });
+  const { data: mrList = [], isLoading: loadingMrList } = useQuery<ReferenceListItem[]>({
+    queryKey: ["issues-mr-list"],
+    queryFn: issuesApi.getMrList,
+    enabled: header.referenceType === "MR",
+    staleTime: 60_000,
+  });
+
   // ── Auto-select active fin year ──────────────────────────────────────────
 
   useEffect(() => {
@@ -403,33 +417,49 @@ export default function Issues() {
     setH("referenceType", refType as IssueHeader["referenceType"]);
     setH("referenceId", "");
     setH("referenceDocNo", "");
+    setCart([blankCartItem()]);
   };
 
-  const handleLoadPrefill = async () => {
-    if (!header.referenceType || !header.referenceId) return;
+  // Called when user selects a doc from the GRN or MR dropdown.
+  // Auto-fires the prefill request and populates company, project, fin year, and cart.
+  const handleReferenceDocSelect = async (selectedId: string, selectedDocNo: string) => {
+    if (!selectedId || !header.referenceType) return;
+    setH("referenceId", selectedId);
+    setH("referenceDocNo", selectedDocNo);
     setLoadingPrefill(true);
     try {
       const prefill: IssuePrefill = await issuesApi.getIssuePrefill(
-        header.referenceType as "GRN" | "MR" | "WORK_DONE",
-        Number(header.referenceId),
+        header.referenceType as "GRN" | "MR",
+        selectedDocNo,
       );
-      setH("referenceDocNo", prefill.referenceDocNo);
+      // Populate header fields — company, project, and fin year from parent doc
+      setH("referenceDocNo", prefill.referenceDocNo || selectedDocNo);
       if (prefill.companyId) setH("companyId", String(prefill.companyId));
       if (prefill.projectId) setH("projectId", String(prefill.projectId));
+      if (prefill.finYearId) setH("finYearId", String(prefill.finYearId));
+      // Populate cart — items are already enriched with UOMCode + AvailableStock by backend
       if (prefill.items.length > 0) {
         const newCart: CartItem[] = prefill.items.map((it) => ({
           _key: crypto.randomUUID(),
-          ItemId: it.ItemId,
-          UOMCode: it.UOMCode,
-          Quantity: it.Quantity,
+          ItemId: String(it.ItemId),
+          UOMCode: it.UOMCode || "",
+          Quantity: it.Quantity || "",
           Remarks: "",
-          ItemName: it.ItemName,
-          AvailableStock: it.AvailableStock,
+          ItemName: it.ItemName || "",
+          AvailableStock: Number(it.AvailableStock ?? 0),
+          DefaultUOM: it.UOMCode || "",
         }));
         setCart(newCart);
+        toast.success(
+          `Loaded ${prefill.items.length} item${prefill.items.length !== 1 ? "s" : ""} from ${prefill.referenceDocNo || selectedDocNo}`,
+        );
+      } else {
+        toast.info("Reference loaded — no items found (add manually)");
       }
     } catch (err: any) {
       toast.error("Prefill failed: " + (err?.message ?? "Unknown error"));
+      setH("referenceId", "");
+      setH("referenceDocNo", "");
     } finally {
       setLoadingPrefill(false);
     }
@@ -453,7 +483,7 @@ export default function Issues() {
       date: record.Date ? String(record.Date).slice(0, 10) : defaultHeader.date,
       reason: record.Reason ?? "",
       remarks: record.Remarks ?? "",
-      referenceType: record.ReferenceType ?? "",
+      referenceType: (record.ReferenceType ?? "") as IssueHeader["referenceType"],
       referenceId: String(record.ReferenceId ?? ""),
       referenceDocNo: record.ReferenceDocNo ?? "",
       docTypeId: record.DocTypeId ?? null,
@@ -800,6 +830,105 @@ export default function Issues() {
               )}
             </div>
 
+            {/* Reference Source row */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Field label="Reference Source">
+                <Select
+                  value={header.referenceType || "__none__"}
+                  onValueChange={handleReferenceTypeChange}
+                >
+                  <SelectTrigger className="h-9 gap-2">
+                    <FileText size={13} className="text-muted-foreground shrink-0" />
+                    <SelectValue placeholder="None (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None</SelectItem>
+                    <SelectItem value="GRN">GRN (Goods Receipt Note)</SelectItem>
+                    <SelectItem value="MR">MR (Material Request)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              {header.referenceType ? (
+                <Field label={header.referenceType === "GRN" ? "Select GRN" : "Select Material Request"}>
+                  {loadingPrefill ? (
+                    <div className="flex items-center gap-2 h-9 px-3 rounded-md border border-border bg-muted/30 text-sm text-muted-foreground">
+                      <RefreshCw size={13} className="animate-spin" />
+                      Loading details…
+                    </div>
+                  ) : (
+                    <Select
+                      value={header.referenceId}
+                      onValueChange={(val) => {
+                        const sep = val.indexOf("||");
+                        const selId = val.slice(0, sep);
+                        const selDocNo = val.slice(sep + 2);
+                        handleReferenceDocSelect(selId, selDocNo);
+                      }}
+                    >
+                      <SelectTrigger className="h-9 gap-2">
+                        <FileText size={13} className="text-muted-foreground shrink-0" />
+                        <SelectValue
+                          placeholder={
+                            header.referenceType === "GRN"
+                              ? (loadingGrnList ? "Loading GRNs…" : "Select a GRN")
+                              : (loadingMrList ? "Loading MRs…" : "Select a Material Request")
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-64">
+                        {header.referenceType === "GRN" && (
+                          grnList.length === 0
+                            ? <div className="px-3 py-2 text-xs text-muted-foreground">No GRNs found</div>
+                            : grnList.map((g) => (
+                                <SelectItem key={g.id} value={`${g.id}||${g.docNo}`}>
+                                  <span className="font-mono text-xs">{g.docNo || `GRN #${g.id}`}</span>
+                                </SelectItem>
+                              ))
+                        )}
+                        {header.referenceType === "MR" && (
+                          mrList.length === 0
+                            ? <div className="px-3 py-2 text-xs text-muted-foreground">No MRs found</div>
+                            : mrList.map((m) => (
+                                <SelectItem key={m.id} value={`${m.id}||${m.docNo}`}>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono text-xs">{m.docNo || `MR #${m.id}`}</span>
+                                    {m.status && (
+                                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                        m.status === "Approved"
+                                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                                          : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                                      }`}>
+                                        {m.status}
+                                      </span>
+                                    )}
+                                  </div>
+                                </SelectItem>
+                              ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {header.referenceDocNo && !loadingPrefill && (
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-medium flex items-center gap-1">
+                      <CheckCircle2 size={11} /> Loaded: {header.referenceDocNo}
+                    </p>
+                  )}
+                </Field>
+              ) : (
+                <div />
+              )}
+
+              <Field label="Issued To (Dept / Employee / Project)">
+                <Input
+                  value={header.issuedTo}
+                  onChange={(e) => setH("issuedTo", e.target.value)}
+                  className="h-9 text-sm"
+                  placeholder="Department, employee, or project name…"
+                />
+              </Field>
+            </div>
+
             {/* Row 1: Company | Project | Fin Year | Date */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
               <Field label="Company" required>
@@ -919,78 +1048,6 @@ export default function Issues() {
                   rows={2}
                   className="resize-none text-sm"
                   placeholder="Optional notes…"
-                />
-              </Field>
-            </div>
-
-            {/* Row 3: Reference Source */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Field label="Reference Source">
-                <Select
-                  value={header.referenceType || "__none__"}
-                  onValueChange={handleReferenceTypeChange}
-                >
-                  <SelectTrigger className="h-9 gap-2">
-                    <FileText
-                      size={13}
-                      className="text-muted-foreground shrink-0"
-                    />
-                    <SelectValue placeholder="None (optional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">None</SelectItem>
-                    <SelectItem value="GRN">
-                      GRN (Goods Receipt Note)
-                    </SelectItem>
-                    <SelectItem value="MR">MR (Material Request)</SelectItem>
-                    <SelectItem value="WORK_DONE">Work Done</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-
-              {header.referenceType ? (
-                <Field
-                  label={`${header.referenceType === "GRN" ? "GRN" : header.referenceType === "MR" ? "MR" : "Work Done"} ID / Doc No`}
-                >
-                  <div className="flex gap-2">
-                    <Input
-                      value={header.referenceId}
-                      onChange={(e) => setH("referenceId", e.target.value)}
-                      className="h-9 text-sm font-mono"
-                      placeholder="Enter numeric ID…"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-9 gap-1.5 shrink-0"
-                      disabled={!header.referenceId || loadingPrefill}
-                      onClick={handleLoadPrefill}
-                    >
-                      {loadingPrefill ? (
-                        <RefreshCw size={13} className="animate-spin" />
-                      ) : (
-                        <Search size={13} />
-                      )}
-                      Load
-                    </Button>
-                  </div>
-                  {header.referenceDocNo && (
-                    <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-medium">
-                      ✓ Loaded: {header.referenceDocNo}
-                    </p>
-                  )}
-                </Field>
-              ) : (
-                <div />
-              )}
-
-              <Field label="Issued To (Dept / Employee / Project)">
-                <Input
-                  value={header.issuedTo}
-                  onChange={(e) => setH("issuedTo", e.target.value)}
-                  className="h-9 text-sm"
-                  placeholder="Department, employee, or project name…"
                 />
               </Field>
             </div>
