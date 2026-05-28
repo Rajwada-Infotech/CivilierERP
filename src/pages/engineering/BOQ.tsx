@@ -2421,28 +2421,43 @@ export default function BOQ() {
 
       {/* ── List page ── */}
       {!showForm && !viewRecord && (
-        <div className="space-y-6">
+        <div className="relative space-y-8 mt-6">
           {/* Page header */}
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+          <div className="flex items-start justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold flex items-center gap-2">
-                <FileText size={22} className="text-primary" />
+              <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-primary/10 inline-flex shrink-0">
+                  <FileText size={18} className="text-primary" />
+                </span>
                 Bill of Quantities
               </h1>
-              <p className="text-sm text-muted-foreground mt-1">
+              <p className="text-xs text-muted-foreground mt-0.5">
                 Manage material items and work activities with structured cost
                 estimation
               </p>
             </div>
-            <Button
-              onClick={() => {
-                setEditRecord(null);
-                setShowForm(true);
-              }}
-              className="gap-2"
-            >
-              <Plus size={15} /> New BOQ
-            </Button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => loadList()}
+                disabled={loading}
+                className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                <RefreshCw
+                  size={13}
+                  className={loading ? "animate-spin" : ""}
+                />
+                Refresh
+              </button>
+              <Button
+                onClick={() => {
+                  setEditRecord(null);
+                  setShowForm(true);
+                }}
+                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+              >
+                <Plus size={15} /> New BOQ
+              </Button>
+            </div>
           </div>
 
           {/* Stat cards */}
