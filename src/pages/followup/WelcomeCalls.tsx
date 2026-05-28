@@ -2,11 +2,11 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft,
   Phone,
   PhoneMissed,
   PhoneCall,
   Plus,
+  RefreshCw,
   Search,
   X,
   Clock,
@@ -19,7 +19,6 @@ import {
 import { toast } from "sonner";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { DashboardBackground } from "@/components/DashboardBackground";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import {
@@ -377,7 +376,7 @@ export function WelcomeCallsPage() {
   const [applOpen, setApplOpen] = useState(false);
   const [applSearch, setApplSearch] = useState("");
 
-  const { data: entries = [], isLoading } = useQuery({
+  const { data: entries = [], isLoading, isFetching, refetch } = useQuery({
     queryKey: ["welcome-calls"],
     queryFn: fetchCalls,
   });
@@ -968,53 +967,61 @@ export function WelcomeCallsPage() {
         .wc-combobox-empty { padding: 20px; text-align: center; font-size: 13px; color: hsl(var(--muted-foreground)); }
       `}</style>
 
-      <DashboardBackground />
-      <div className="relative z-10 wc-page">
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Welcome Calls", path: "/followup/sales/welcome-calls" },
+        ]}
+      />
+      <div className="relative space-y-8 mt-6">
         {/* ── Header ── */}
-        <div className="wc-header">
-          <div className="wc-header-top">
-            <div>
-              <div className="wc-breadcrumb">
-                <button onClick={() => navigate("/followup")}>
-                  <ArrowLeft style={{ width: 12, height: 12 }} /> Follow-Up
-                </button>
-                <span className="wc-breadcrumb-sep">›</span>
-                <span className="wc-breadcrumb-cur">Welcome Calls</span>
-              </div>
-              <div className="wc-title-row">
-                <div className="wc-title-icon">
-                  <Phone style={{ width: 18, height: 18 }} />
-                </div>
-                <span className="wc-title">Welcome Calls</span>
-                <span className="wc-count">{entries.length}</span>
-              </div>
-            </div>
-            <button className="wc-log-btn" onClick={() => setDialogOpen(true)}>
-              <Plus style={{ width: 15, height: 15 }} />
-              Log Call
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Welcome Calls
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Log and track welcome call outcomes for applicants
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
+              />
+              Refresh
             </button>
+            <Button
+              size="sm"
+              onClick={() => setDialogOpen(true)}
+              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+            >
+              <Plus size={14} />
+              Log Call
+            </Button>
           </div>
+        </div>
 
-          {/* Stats strip */}
-          <div className="wc-stats">
-            {[
-              { label: "Total", value: stats.total, dot: "#94a3b8" },
-              { label: "Connected", value: stats.connected, dot: "#10b981" },
-              { label: "No Answer", value: stats.noAnswer, dot: "#f87171" },
-              { label: "Callback", value: stats.callback, dot: "#3b82f6" },
-              {
-                label: "Connect Rate",
-                value: `${stats.rate}%`,
-                dot: "#8b5cf6",
-              },
-            ].map(({ label, value, dot }) => (
-              <div key={label} className="wc-stat">
-                <div className="wc-stat-dot" style={{ background: dot }} />
-                <div className="wc-stat-value">{value}</div>
-                <div className="wc-stat-label">{label}</div>
-              </div>
-            ))}
-          </div>
+        {/* Stats strip */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          {[
+            { label: "Total", value: stats.total, dot: "bg-slate-400" },
+            { label: "Connected", value: stats.connected, dot: "bg-emerald-500" },
+            { label: "No Answer", value: stats.noAnswer, dot: "bg-red-400" },
+            { label: "Callback", value: stats.callback, dot: "bg-blue-500" },
+            { label: "Connect Rate", value: `${stats.rate}%`, dot: "bg-violet-500" },
+          ].map(({ label, value, dot }) => (
+            <div key={label} className="rounded-xl border border-border bg-card p-4">
+              <div className={`w-2 h-2 rounded-full ${dot} mb-3`} />
+              <p className="text-2xl font-bold font-heading text-foreground leading-none">{value}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">{label}</p>
+            </div>
+          ))}
         </div>
 
         {/* ── Filter bar ── */}

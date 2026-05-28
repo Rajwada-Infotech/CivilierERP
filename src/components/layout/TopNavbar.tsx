@@ -8,7 +8,7 @@ import {
   type Module,
 } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { useNavbarCollapse } from "./AppLayout";
+import { useNavbarCollapse } from "./layoutContexts";
 import { ReminderBell } from "@/components/navbar/ReminderBell";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
 import {
@@ -973,11 +973,16 @@ export const TopNavbar = () => {
     },
   ];
 
-  const engineerModules: NonNullable<Module>[] = ["followup", "engineering", "ticket"];
+  const engineerModules: NonNullable<Module>[] = [
+    "followup",
+    "engineering",
+    "ticket",
+  ];
 
-  const moduleOptions = currentUser?.role === "engineer"
-    ? allModuleOptions.filter((m) => engineerModules.includes(m.id))
-    : allModuleOptions;
+  const moduleOptions =
+    currentUser?.role === "engineer"
+      ? allModuleOptions.filter((m) => engineerModules.includes(m.id))
+      : allModuleOptions;
 
   // Close mobile menu on route change
   useEffect(() => {}, [location.pathname]);

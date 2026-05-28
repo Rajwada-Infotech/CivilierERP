@@ -18,7 +18,6 @@ import { toast } from "sonner";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { DashboardBackground } from "@/components/DashboardBackground";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -782,39 +781,29 @@ export function UnitSelectionPage() {
 
   return (
     <>
-      <DashboardBackground />
-      <div className="relative z-10 p-6 space-y-6 max-w-[1400px] mx-auto">
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Unit Selection", path: "/followup/sales/unit-selection" },
+        ]}
+      />
+      <div className="relative space-y-8 mt-6">
         {/* ── Page header ── */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <Breadcrumbs
-              items={[
-                { label: "Follow-Up", path: "/followup" },
-                {
-                  label: "Unit Selection",
-                  path: "/followup/sales/unit-selection",
-                },
-              ]}
-            />
-            <div className="flex items-center gap-3 mt-1.5">
-              <div className="p-2.5 rounded-xl bg-primary/10">
-                <Home size={20} className="text-primary" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-heading font-bold text-foreground">
-                  Unit Selection
-                </h1>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Manage unit bookings and applicant selections
-                </p>
-              </div>
-            </div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Unit Selection
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Manage unit bookings and applicant selections
+            </p>
           </div>
           <Button
+            size="sm"
             onClick={openCreate}
-            className="bg-primary hover:bg-primary/90 text-primary-foreground gap-2 rounded-xl px-5 mt-1"
+            className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
           >
-            <Plus className="w-4 h-4" /> New Selection
+            <Plus size={14} /> New Selection
           </Button>
         </div>
 
