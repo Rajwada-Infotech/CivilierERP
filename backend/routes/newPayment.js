@@ -24,6 +24,11 @@ const requireUserEmail = (req, res) => {
   return email;
 };
 
+function normalizeBankId(value) {
+  const bankId = Number(value);
+  return Number.isFinite(bankId) && bankId > 0 ? bankId : null;
+}
+
 // ── syncBillStatus — recalculate and persist EBillStatus on ExpenseBooking ────
 // Called after any payment is created or approved against an expense booking.
 // Matches via PExpenseRef = EDocNo (approved payments only).
@@ -388,7 +393,7 @@ router.post("/", validateBody(paymentBodySchema), async (req, res) => {
       .input("PAmount", sql.Decimal(18, 2), PAmount || null)
       .input("PDocType", sql.VarChar, PDocType || "N/A")
       .input("PDate", sql.Date, PDate || null)
-      .input("PBankID", sql.Int, PBankID || null)
+      .input("PBankID", sql.Int, normalizeBankId(PBankID))
       .input("PBankName", sql.VarChar, PBankName || "N/A")
       .input("PProject", sql.VarChar, PProject || "")
       .input("PCompany", sql.VarChar, PCompany || "")
@@ -505,7 +510,7 @@ router.put("/:id", validateBody(paymentBodySchema), async (req, res) => {
       .input("PAmount", sql.Decimal(18, 2), PAmount || null)
       .input("PDocType", sql.VarChar, PDocType || "N/A")
       .input("PDate", sql.Date, PDate || null)
-      .input("PBankID", sql.Int, PBankID || null)
+      .input("PBankID", sql.Int, normalizeBankId(PBankID))
       .input("PBankName", sql.VarChar, PBankName || "N/A")
       .input("PProject", sql.VarChar, PProject || "")
       .input("PCompany", sql.VarChar, PCompany || "")
