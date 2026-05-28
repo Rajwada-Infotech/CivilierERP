@@ -420,7 +420,13 @@ router.get(
                  THEN ahm.LHeadName ELSE NULL END,
             ISNULL(eb.EName, '')
           )                               AS supplierName,
-          ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS amount,
+          -- For GRN-linked bookings use the live GRN total (incl. GST);
+          -- it is always up-to-date whereas ENetAmount may be stale.
+          CASE
+            WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
+            THEN grn.TotalAmount
+            ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
+          END                             AS amount,
           ISNULL(eb.ECompanyId, 0)        AS companyId,
           ISNULL(e.name, '')              AS companyName,
           ISNULL(eb.EFinYear, '')         AS financialYear,
@@ -430,7 +436,13 @@ router.get(
             N' — ',
             COALESCE(proj.name, eb.EProjectName, ''),
             N' (₹',
-            CAST(CAST(ISNULL(eb.ENetAmount, ISNULL(eb.EAmount,0)) AS BIGINT) AS NVARCHAR(20)),
+            CAST(CAST(
+              CASE
+                WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
+                THEN grn.TotalAmount
+                ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
+              END
+            AS BIGINT) AS NVARCHAR(20)),
             ')'
           ) AS label
         FROM dbo.ExpenseBooking eb
