@@ -244,7 +244,12 @@ export default function MaterialRequest() {
       viewMode === "form" &&
       !editingId
     ) {
-      const active = (finYears as any[]).find((f) => f.isActive);
+      const today = new Date().toISOString().slice(0, 10);
+      const current = (finYears as any[]).find(
+        (f) => f.isActive && f.startDate <= today && f.endDate >= today,
+      );
+      const fallback = (finYears as any[]).find((f) => f.isActive);
+      const active = current ?? fallback;
       if (active) setH("finYearId", String(active.id));
     }
   }, [finYears, viewMode, editingId]);
