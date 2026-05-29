@@ -9,11 +9,26 @@ const optStr = (max) =>
     return t === "" ? undefined : t;
   }, z.string().max(max).optional());
 
-const optCoerceNumber = z.coerce.number().optional();
-const optCoerceDate = z.coerce.date().optional();
+const optCoerceNumber = z.preprocess(
+  (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
+  z.number().optional(),
+);
+const optCoerceDate = z.preprocess(
+  (v) => (v === null || v === undefined || v === "" ? undefined : v),
+  z.coerce.date().optional(),
+);
 const optJsonPassthrough = z.any().optional(); // JSON blobs validated downstream
 
-const VALID_STATUSES = ["Draft", "Submitted", "Approved", "Rejected", "Paid"];
+const VALID_STATUSES = [
+  "Draft",
+  "Pending",
+  "Submitted",
+  "Approved",
+  "Rejected",
+  "Paid",
+  "Booked",
+  "Hold",
+];
 const VALID_SOURCE_TYPES = [
   "PO",
   "WO",
@@ -74,9 +89,12 @@ const expenseBookingBodySchema = z.object({
   EDocumentType: optStr(100),
   EDocDate: optCoerceDate,
   EAmount: eAmount,
-  ENetAmount: z.coerce.number().min(0).optional(),
-  ECgstRate: z.coerce.number().min(0).max(100).optional(),
-  ESgstRate: z.coerce.number().min(0).max(100).optional(),
+  ENetAmount: z.preprocess(
+    (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
+    z.number().min(0).optional(),
+  ),
+  ECgstRate: optCoerceNumber.pipe(z.number().min(0).max(100).optional()),
+  ESgstRate: optCoerceNumber.pipe(z.number().min(0).max(100).optional()),
   EDiscountData: optJsonPassthrough,
   EDocNo: optStr(100),
   EEmiPayment: z.coerce.boolean().optional(),
