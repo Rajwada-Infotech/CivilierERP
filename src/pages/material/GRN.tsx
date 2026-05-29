@@ -384,7 +384,9 @@ export default function GRN() {
   const limit = 10;
 
   const activeFinYear =
-    finYears.find((fy) => fy.status === "Active")?.year || undefined;
+    finYears.find((fy) => fy.status === "Active")?.year ||
+    [...finYears].sort((a, b) => b.year.localeCompare(a.year))[0]?.year ||
+    undefined;
 
   const buildEmptyForm = () => ({
     grnNo: "",
@@ -406,15 +408,6 @@ export default function GRN() {
 
   const [formData, setFormData] = useState(buildEmptyForm());
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const didAutoSelectFinYear = React.useRef(false);
-  useEffect(() => {
-    if (activeFinYear && !didAutoSelectFinYear.current) {
-      didAutoSelectFinYear.current = true;
-      setSelectedFinYear(activeFinYear);
-      setFormData((prev) => ({ ...prev, finYear: activeFinYear }));
-    }
-  }, [activeFinYear]);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
   const { data: grnsPage, isLoading: loadingGrns } = useQuery({
@@ -652,7 +645,7 @@ export default function GRN() {
       supplierName: formData.supplierName,
       poNumber: formData.poNumber,
       docNo: "",
-      finYear: selectedFinYear || formData.finYear || null,
+      finYear: formData.finYear || null,
       parentDocNo: formData.parentDocNo || null,
       rootExBDocNo: formData.rootExBDocNo || null,
       projectId: formData.projectId ? Number(formData.projectId) : null,
@@ -733,10 +726,10 @@ export default function GRN() {
       }),
     );
 
-    const grnFinYear = fullGrn.FinYear || activeFinYear || "";
+    const grnFinYear = fullGrn.FinYear || "";
 
-    // Sync the fin-year filter so the PO dropdown includes the GRN's PO
-    setSelectedFinYear(grnFinYear);
+    // Reset fin-year filter so all POs are visible when editing
+    setSelectedFinYear("");
 
     setFormData({
       grnNo: fullGrn.GRNNo || "",
@@ -826,17 +819,18 @@ export default function GRN() {
                         docNo: "",
                         parentDocNo: "",
                         rootExBDocNo: "",
-                        finYear: e.target.value,
                       }));
                     }}
                     className={inp}
                   >
                     <option value="">All Years</option>
-                    {finYears.map((fy) => (
-                      <option key={fy.id} value={fy.year}>
-                        {fy.year}
-                      </option>
-                    ))}
+                    {[...finYears]
+                      .sort((a, b) => b.year.localeCompare(a.year))
+                      .map((fy) => (
+                        <option key={fy.id} value={fy.year}>
+                          {fy.year}
+                        </option>
+                      ))}
                   </select>
                 </div>
 
@@ -869,20 +863,16 @@ export default function GRN() {
                   >
                     <option value="">— All Projects —</option>
                     {(projectsData as any[]).map((p: any) => (
-                      <option
-                        key={p.ProjectId ?? p.id}
-                        value={String(p.ProjectId ?? p.id)}
-                      >
-                        {p.ProjectName ?? p.name}
+                      <option key={p.id} value={String(p.id)}>
+                        {p.name}
                       </option>
                     ))}
                   </select>
                   {formData.projectId && (
                     <p className="text-[10px] text-muted-foreground mt-1 truncate">
                       {(projectsData as any[]).find(
-                        (p: any) =>
-                          String(p.ProjectId ?? p.id) === formData.projectId,
-                      )?.ProjectCode ?? ""}
+                        (p: any) => String(p.id) === formData.projectId,
+                      )?.short_name ?? ""}
                     </p>
                   )}
                 </div>
