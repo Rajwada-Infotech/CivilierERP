@@ -1,6 +1,8 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import {
@@ -23,6 +25,10 @@ import {
   deleteRole,
   type RoleRecord,
 } from "@/api/roleApi";
+import {
+  roleMasterSchema,
+  type RoleMasterForm,
+} from "@/schemas/roleMasterSchema";
 
 // ─── Local form types ────────────────────────────────────────────────────────
 interface FormState {
@@ -167,7 +173,16 @@ const RoleMaster: React.FC = () => {
 
   const [form, setForm] = useState<FormState>(EMPTY);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const {
+    reset,
+    setValue,
+    trigger,
+    clearErrors,
+    formState: { errors },
+  } = useForm<RoleMasterForm>({
+    resolver: zodResolver(roleMasterSchema),
+    defaultValues: EMPTY,
+  });
   const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [viewRecord, setViewRecord] = useState<RoleRecord | null>(null);
@@ -180,15 +195,15 @@ const RoleMaster: React.FC = () => {
 
   const setField = (k: keyof FormState, v: string) => {
     setForm((p) => ({ ...p, [k]: v }));
-    if (errors[k as string]) setErrors((e) => ({ ...e, [k as string]: false }));
+    if (k === "RName" || k === "RDesc") {
+      setValue(k, v, { shouldValidate: !!errors[k] });
+    }
   };
 
-  const validate = useCallback(() => {
-    const e: Record<string, boolean> = {};
-    if (!form.RName.trim()) e.RName = true;
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  }, [form.RName]);
+  const validate = async () => {
+    reset({ RName: form.RName, RDesc: form.RDesc });
+    return trigger();
+  };
 
   const toPayload = () => ({
     RName: form.RName.trim(),
@@ -196,11 +211,13 @@ const RoleMaster: React.FC = () => {
   });
 
   const handleEdit = (item: RoleRecord) => {
-    setForm({
+    const nextForm = {
       RName: item.RName,
       RCode: item.RCode || "",
       RDesc: item.RDesc || "",
-    });
+    };
+    setForm(nextForm);
+    reset({ RName: nextForm.RName, RDesc: nextForm.RDesc });
     setEditingId(item.RId);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -214,6 +231,7 @@ const RoleMaster: React.FC = () => {
       if (editingId === id) {
         setEditingId(null);
         setForm(EMPTY);
+        reset(EMPTY);
       }
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
@@ -235,7 +253,7 @@ const RoleMaster: React.FC = () => {
   );
 
   const handleSave = async () => {
-    if (!validate()) return;
+    if (!(await validate())) return;
 
     try {
       if (editingId) {
@@ -247,6 +265,7 @@ const RoleMaster: React.FC = () => {
       }
       await queryClient.invalidateQueries({ queryKey: ["roles"] });
       setForm(EMPTY);
+      reset(EMPTY);
       setEditingId(null);
     } catch (err: any) {
       toast.error("Failed: " + err.message);
@@ -256,7 +275,8 @@ const RoleMaster: React.FC = () => {
   const handleReset = () => {
     setForm(EMPTY);
     setEditingId(null);
-    setErrors({});
+    reset(EMPTY);
+    clearErrors();
   };
 
   const filtered = dbRoles.filter((role) => {
