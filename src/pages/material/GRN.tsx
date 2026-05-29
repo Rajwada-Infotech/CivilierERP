@@ -18,8 +18,10 @@ import {
   CheckCircle2,
   AlertCircle,
   ArrowRight,
+  FolderOpen,
 } from "lucide-react";
 import * as grnApi from "@/api/grnApi";
+import { getProjects } from "@/api/issuesApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -399,6 +401,7 @@ export default function GRN() {
     parentDocNo: "",
     rootExBDocNo: "",
     finYear: activeFinYear || "",
+    projectId: "" as string,
   });
 
   const [formData, setFormData] = useState(buildEmptyForm());
@@ -439,6 +442,11 @@ export default function GRN() {
     staleTime: 15_000,
   });
 
+  const { data: projectsData = [] } = useQuery({
+    queryKey: ["projects"],
+    queryFn: getProjects,
+  });
+
   // Derive the calendar year embedded in PO DocNos from the fin-year string.
   // e.g. "2025-2026" → "2026"  (the second/end year, which appears in PO-2026-xxxxx)
   // Falls back to the raw string so "All Years" ("") still passes through.
@@ -448,16 +456,24 @@ export default function GRN() {
 
   const pos = posData
     .filter((po: PurchaseOrder) => {
-      // When editing, always include the GRN's linked PO regardless of fin-year filter
+      // When editing, always include the GRN's linked PO regardless of any filter
       if (
         editingId &&
         formData.poId &&
         String(po.PurchaseOrderID) === formData.poId
       )
         return true;
-      if (!finYearDocFragment) return true;
-      const docNo = po.PurchaseOrderNo || "";
-      return docNo.includes(finYearDocFragment);
+      // Fin-year filter
+      if (finYearDocFragment) {
+        const docNo = po.PurchaseOrderNo || "";
+        if (!docNo.includes(finYearDocFragment)) return false;
+      }
+      // Project filter — PurchaseOrder carries ProjectId from the backend SELECT
+      if (formData.projectId) {
+        if (String((po as any).ProjectId ?? "") !== formData.projectId)
+          return false;
+      }
+      return true;
     })
     .map((po: PurchaseOrder) => {
       const typeTag =
@@ -639,6 +655,7 @@ export default function GRN() {
       finYear: selectedFinYear || formData.finYear || null,
       parentDocNo: formData.parentDocNo || null,
       rootExBDocNo: formData.rootExBDocNo || null,
+      projectId: formData.projectId ? Number(formData.projectId) : null,
     };
 
     if (editingId) {
@@ -736,6 +753,7 @@ export default function GRN() {
       parentDocNo: fullGrn.ParentDocNo || "",
       rootExBDocNo: fullGrn.RootExBDocNo || "",
       finYear: grnFinYear,
+      projectId: String(fullGrn.ProjectId || ""),
     });
 
     setEditingId(String(fullGrn.GRNID));
@@ -786,8 +804,8 @@ export default function GRN() {
             </div>
 
             <div className="p-4 sm:p-6 space-y-8">
-              {/* ── Row 1: Fin Year + Purchase Order ── */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {/* ── Row 1: Fin Year + Project + Purchase Order ── */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
                 {/* Fin Year selector */}
                 <div>
                   <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-2">
@@ -822,7 +840,54 @@ export default function GRN() {
                   </select>
                 </div>
 
-                {/* Purchase Order — filtered by fin year */}
+                {/* Project selector */}
+                <div>
+                  <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-2">
+                    <span className="inline-flex items-center gap-1">
+                      <FolderOpen size={11} />
+                      Project
+                    </span>
+                  </label>
+                  <select
+                    value={formData.projectId}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        projectId: e.target.value,
+                        // Reset PO when project changes so a stale PO from
+                        // a different project isn't accidentally submitted
+                        poId: "",
+                        poNumber: "",
+                        supplierId: "",
+                        supplierName: "",
+                        items: [createEmptyItem()],
+                        parentDocNo: "",
+                        rootExBDocNo: "",
+                      }))
+                    }
+                    className={inp}
+                  >
+                    <option value="">— All Projects —</option>
+                    {(projectsData as any[]).map((p: any) => (
+                      <option
+                        key={p.ProjectId ?? p.id}
+                        value={String(p.ProjectId ?? p.id)}
+                      >
+                        {p.ProjectName ?? p.name}
+                      </option>
+                    ))}
+                  </select>
+                  {formData.projectId && (
+                    <p className="text-[10px] text-muted-foreground mt-1 truncate">
+                      {(projectsData as any[]).find(
+                        (p: any) =>
+                          String(p.ProjectId ?? p.id) === formData.projectId,
+                      )?.ProjectCode ?? ""}
+                    </p>
+                  )}
+                </div>
+
+                {/* Purchase Order — filtered by fin year, spans 2 cols */}
                 <div className="md:col-span-2">
                   <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-2">
                     Purchase Order <span className="text-destructive">*</span>

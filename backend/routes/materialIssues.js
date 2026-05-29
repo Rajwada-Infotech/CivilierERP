@@ -97,20 +97,45 @@ router.get("/fin-years", authenticateToken, async (req, res) => {
   }
 });
 
+// ── GET /godowns ──────────────────────────────────────────────────────────────
+router.get("/godowns", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT GodownID AS id, GodownName AS name, GodownCode AS code,
+             ShortDesc AS shortDesc, IsMain AS isMain
+      FROM   dbo.Godowns
+      WHERE  IsDeleted = 0
+      ORDER  BY IsMain DESC, GodownName
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch godowns" });
+  }
+});
+
 // ── GET /item-options ─────────────────────────────────────────────────────────
+// Optional ?godownId=N filters stock to that godown only.
 router.get("/item-options", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
+    const godownId = req.query.godownId
+      ? parseInt(req.query.godownId, 10)
+      : null;
 
-    // M_UOM column was added in a later migration — check before referencing it
-    // (mirrors the same guard used in itemMaster.js)
     const colCheck = await pool.request().query(`
       SELECT COUNT(1) AS cnt FROM sys.columns
       WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_UOM'
     `);
     const hasUOM = colCheck.recordset[0].cnt > 0;
 
-    const result = await pool.request().query(`
+    const req2 = pool.request();
+    const godownFilter = godownId
+      ? (req2.input("GodownID", sql.Int, godownId),
+        "AND sl.GodownID = @GodownID")
+      : "";
+
+    const result = await req2.query(`
       SELECT img.M_Id, img.M_Name, img.M_Group,
              ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END), 0)
            - ISNULL(SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END), 0)
@@ -119,6 +144,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
       FROM   dbo.Item_Master_Group img
       LEFT JOIN dbo.StockLedger sl
         ON  CONVERT(NVARCHAR(50), sl.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
+        ${godownFilter}
       WHERE  (img.Parent_Id IS NOT NULL OR img.M_IdentityCode = 1)
       GROUP  BY img.M_Id, img.M_Name, img.M_Group${hasUOM ? ", img.M_UOM" : ""}
       ORDER  BY img.M_Name
@@ -202,7 +228,7 @@ router.get(
         mi.ProjectId, p.name AS ProjectName,
         mi.FinYearId, fy.FName AS FinYearName,
         mi.Date, mi.Reason, mi.Remarks, mi.CreatedAt,
-        mi.ReferenceType, mi.ReferenceId, mi.ReferenceDocNo,
+        mi.GodownId, g.GodownName, g.GodownCode,
         mi.IssuedTo, mi.CostCenter, mi.Purpose,
         (SELECT COUNT(*) FROM dbo.MaterialIssueItems mii WHERE mii.IssueId = mi.IssueId) AS ItemCount,
         (SELECT ISNULL(SUM(mii.Quantity),0) FROM dbo.MaterialIssueItems mii WHERE mii.IssueId = mi.IssueId) AS TotalQty,
@@ -211,6 +237,7 @@ router.get(
       LEFT JOIN dbo.enterprise c  ON mi.CompanyId = c.id
       LEFT JOIN dbo.enterprise p  ON mi.ProjectId = p.id
       LEFT JOIN dbo.FinYear    fy ON mi.FinYearId = fy.FId
+      LEFT JOIN dbo.Godowns    g  ON mi.GodownId  = g.GodownID
       ${whereClause}
       ORDER BY mi.CreatedAt DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
@@ -243,12 +270,13 @@ router.get("/:id", authenticateToken, async (req, res) => {
 
     const headerResult = await pool.request().input("id", sql.Int, id).query(`
       SELECT mi.*, c.name AS CompanyName, p.name AS ProjectName, fy.FName AS FinYearName,
-             mi.ReferenceType, mi.ReferenceId, mi.ReferenceDocNo,
+             mi.GodownId, g.GodownName, g.GodownCode,
              mi.IssuedTo, mi.CostCenter, mi.Purpose
       FROM dbo.MaterialIssues mi
       LEFT JOIN dbo.enterprise c  ON mi.CompanyId = c.id
       LEFT JOIN dbo.enterprise p  ON mi.ProjectId = p.id
       LEFT JOIN dbo.FinYear    fy ON mi.FinYearId = fy.FId
+      LEFT JOIN dbo.Godowns    g  ON mi.GodownId  = g.GodownID
       WHERE mi.IssueId = @id
     `);
 
@@ -300,6 +328,7 @@ router.post("/", authenticateToken, async (req, res) => {
       IssuedTo = null,
       CostCenter = null,
       Purpose = null,
+      GodownId = null,
       DocTypeId: clientDocTypeId = null,
     } = req.body;
 
@@ -315,6 +344,11 @@ router.post("/", authenticateToken, async (req, res) => {
 
     const userId = req.user?.id || null;
     const issuedBy = req.user?.email || null;
+
+    // Resolve the godown: use the one sent from the client, else fall back to main godown
+    const resolvedGodownId = GodownId
+      ? parseInt(GodownId, 10)
+      : await resolveMainGodownId(pool);
 
     const docTypeId = clientDocTypeId
       ? parseInt(clientDocTypeId, 10)
@@ -347,17 +381,7 @@ router.post("/", authenticateToken, async (req, res) => {
     headerReq.input("Reason", sql.NVarChar(sql.MAX), Reason);
     headerReq.input("Remarks", sql.NVarChar(sql.MAX), Remarks || null);
     headerReq.input("CreatedBy", sql.Int, userId);
-    headerReq.input("ReferenceType", sql.NVarChar(20), ReferenceType || null);
-    headerReq.input(
-      "ReferenceId",
-      sql.Int,
-      ReferenceId ? parseInt(ReferenceId, 10) : null,
-    );
-    headerReq.input(
-      "ReferenceDocNo",
-      sql.NVarChar(100),
-      ReferenceDocNo || null,
-    );
+    headerReq.input("GodownId", sql.Int, resolvedGodownId);
     headerReq.input("IssuedTo", sql.NVarChar(200), IssuedTo || null);
     headerReq.input("CostCenter", sql.NVarChar(200), CostCenter || null);
     headerReq.input("Purpose", sql.NVarChar(500), Purpose || null);
@@ -368,22 +392,18 @@ router.post("/", authenticateToken, async (req, res) => {
          ParentDocNo, RootExBDocNo,
          CompanyId, ProjectId, FinYearId, Date,
          Reason, Remarks, CreatedBy,
-         ReferenceType, ReferenceId, ReferenceDocNo,
-         IssuedTo, CostCenter, Purpose)
+         GodownId, IssuedTo, CostCenter, Purpose)
       OUTPUT INSERTED.*
       VALUES
         (@IssueNo, @DocNo, @DocTypeId, @DocYear, @DocSerial,
          @ParentDocNo, @RootExBDocNo,
          @CompanyId, @ProjectId, @FinYearId, @Date,
          @Reason, @Remarks, @CreatedBy,
-         @ReferenceType, @ReferenceId, @ReferenceDocNo,
-         @IssuedTo, @CostCenter, @Purpose)
+         @GodownId, @IssuedTo, @CostCenter, @Purpose)
     `);
 
     const newRecord = headerResult.recordset[0];
     const issueId = newRecord.IssueId;
-
-    const mainGodownId = await resolveMainGodownId(pool);
 
     for (const it of items) {
       const qty = Number(it.Quantity);
@@ -410,7 +430,7 @@ router.post("/", authenticateToken, async (req, res) => {
         .input("RefType", sql.NVarChar(20), "ISS")
         .input("RefID", sql.Int, issueId)
         .input("DocNo", sql.NVarChar(100), docNo)
-        .input("GodownID", sql.Int, mainGodownId).query(`
+        .input("GodownID", sql.Int, resolvedGodownId).query(`
           INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, GodownID, CreatedDate)
           VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, @GodownID, GETDATE())
         `);
@@ -440,9 +460,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
       Reason,
       Remarks,
       items = [],
-      ReferenceType = null,
-      ReferenceId = null,
-      ReferenceDocNo = null,
+      GodownId = null,
       IssuedTo = null,
       CostCenter = null,
       Purpose = null,
@@ -460,6 +478,10 @@ router.put("/:id", authenticateToken, async (req, res) => {
 
     const docNo = existing.recordset[0].DocNo;
 
+    const resolvedGodownId = GodownId
+      ? parseInt(GodownId, 10)
+      : await resolveMainGodownId(pool);
+
     await pool
       .request()
       .input("Id", sql.Int, id)
@@ -469,21 +491,14 @@ router.put("/:id", authenticateToken, async (req, res) => {
       .input("Date", sql.Date, IssueDate)
       .input("Reason", sql.NVarChar(sql.MAX), Reason)
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
-      .input("ReferenceType", sql.NVarChar(20), ReferenceType || null)
-      .input(
-        "ReferenceId",
-        sql.Int,
-        ReferenceId ? parseInt(ReferenceId, 10) : null,
-      )
-      .input("ReferenceDocNo", sql.NVarChar(100), ReferenceDocNo || null)
+      .input("GodownId", sql.Int, resolvedGodownId)
       .input("IssuedTo", sql.NVarChar(200), IssuedTo || null)
       .input("CostCenter", sql.NVarChar(200), CostCenter || null)
       .input("Purpose", sql.NVarChar(500), Purpose || null).query(`
         UPDATE dbo.MaterialIssues
         SET CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
             Date=@Date, Reason=@Reason, Remarks=@Remarks, UpdatedAt=GETDATE(),
-            ReferenceType=@ReferenceType, ReferenceId=@ReferenceId,
-            ReferenceDocNo=@ReferenceDocNo,
+            GodownId=@GodownId,
             IssuedTo=@IssuedTo, CostCenter=@CostCenter, Purpose=@Purpose
         WHERE IssueId=@Id
       `);
@@ -496,8 +511,6 @@ router.put("/:id", authenticateToken, async (req, res) => {
       .request()
       .input("Id", sql.Int, id)
       .query("DELETE FROM dbo.StockLedger WHERE RefType='ISS' AND RefID=@Id");
-
-    const mainGodownId = await resolveMainGodownId(pool);
 
     for (const it of items) {
       const qty = Number(it.Quantity);
@@ -524,7 +537,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
         .input("RefType", sql.NVarChar(20), "ISS")
         .input("RefID", sql.Int, id)
         .input("DocNo", sql.NVarChar(100), docNo)
-        .input("GodownID", sql.Int, mainGodownId).query(`
+        .input("GodownID", sql.Int, resolvedGodownId).query(`
           INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, GodownID, CreatedDate)
           VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, @GodownID, GETDATE())
         `);
