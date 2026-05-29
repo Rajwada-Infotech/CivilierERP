@@ -20,8 +20,23 @@ export const getFinYears = async () => {
   return res.json();
 };
 
-export const getItemOptions = async () => {
-  const res = await fetchWithAuth(`${BASE}/item-options`);
+export const getGodowns = async () => {
+  const res = await fetchWithAuth(`${BASE}/godowns`);
+  if (!res.ok) throw new Error("Failed to fetch godowns");
+  return res.json() as Promise<
+    {
+      id: number;
+      name: string;
+      code: string;
+      shortDesc: string;
+      isMain: boolean;
+    }[]
+  >;
+};
+
+export const getItemOptions = async (godownId?: number | null) => {
+  const q = godownId ? `?godownId=${godownId}` : "";
+  const res = await fetchWithAuth(`${BASE}/item-options${q}`);
   if (!res.ok) throw new Error("Failed to fetch items");
   return res.json();
 };
@@ -108,54 +123,6 @@ export const deleteIssue = async (id: number) => {
   return res.json();
 };
 
-export interface IssuePrefill {
-  referenceType: "GRN" | "MR";
-  referenceId: number;
-  referenceDocNo: string;
-  companyId?: number | null;
-  projectId?: number | null;
-  finYearId?: number | null;
-  items: {
-    ItemId: string;
-    ItemName?: string;
-    UOMCode: string;
-    Quantity: string;
-    AvailableStock: number;
-  }[];
-}
-
-export const getIssuePrefill = async (
-  type: "GRN" | "MR",
-  id: string | number,
-): Promise<IssuePrefill> => {
-  const res = await fetchWithAuth(`${BASE}/prefill/${type}/${id}`);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error((err as any).error || "Failed to fetch prefill data");
-  }
-  return res.json();
-};
-
-// ── Reference list fetchers (for dropdown menus) ──────────────────────────────
-
-export interface ReferenceListItem {
-  id: number;
-  docNo: string;
-  status?: string;
-}
-
-export const getGrnList = async (): Promise<ReferenceListItem[]> => {
-  const res = await fetchWithAuth(`${BASE}/reference-list/grn`);
-  if (!res.ok) throw new Error("Failed to fetch GRN list");
-  return res.json();
-};
-
-export const getMrList = async (): Promise<ReferenceListItem[]> => {
-  const res = await fetchWithAuth(`${BASE}/reference-list/mr`);
-  if (!res.ok) throw new Error("Failed to fetch MR list");
-  return res.json();
-};
-
-// Legacy compatibility exports
+// Legacy compatibility
 export const getCompanyOptions = getCompanies;
 export const getProjectOptions = getProjects;

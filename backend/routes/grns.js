@@ -67,7 +67,26 @@ function normaliseGRNRow(row) {
   return row;
 }
 
-async function insertStockLedgerEntries(transaction, grnId, grnItems, docNo) {
+async function resolveMainGodownId(pool) {
+  try {
+    const res = await pool
+      .request()
+      .query(
+        "SELECT TOP 1 GodownID FROM dbo.Godowns WHERE IsMain = 1 AND IsDeleted = 0 ORDER BY GodownID",
+      );
+    return res.recordset[0]?.GodownID || null;
+  } catch {
+    return null;
+  }
+}
+
+async function insertStockLedgerEntries(
+  transaction,
+  grnId,
+  grnItems,
+  docNo,
+  godownId,
+) {
   const items = parseGRNItems(grnItems);
 
   for (const item of items) {
@@ -80,13 +99,227 @@ async function insertStockLedgerEntries(transaction, grnId, grnItems, docNo) {
         .input("Type", sql.NVarChar(10), "IN")
         .input("RefType", sql.NVarChar(20), "GRN")
         .input("RefID", sql.Int, grnId)
-        .input("DocNo", sql.NVarChar(100), docNo || null).query(`
-          INSERT INTO StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, CreatedDate)
-          VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, GETDATE())
+        .input("DocNo", sql.NVarChar(100), docNo || null)
+        .input("GodownID", sql.Int, godownId || null).query(`
+          INSERT INTO StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, GodownID, CreatedDate)
+          VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, @GodownID, GETDATE())
         `);
     }
   }
 }
+
+// GET /grn-gst-data?grnId=<id>
+// Returns a fully computed GST breakdown for an Expense Booking against a GRN.
+// Reads receivedQty + rate from GRNItems JSON, HSN/GST% from ItemMaster,
+// vendor/company states from the linked PO + supplier + enterprise tables.
+// Must be declared before /:id to avoid being swallowed by the param route.
+router.get("/grn-gst-data", async (req, res) => {
+  const grnId = parseInt(req.query.grnId, 10);
+  if (isNaN(grnId)) return res.status(400).json({ error: "grnId is required" });
+
+  try {
+    const pool = await getPool();
+
+    // ── 1. Fetch GRN header + linked PO/supplier/company context ────────────
+    const headerResult = await pool.request().input("GRNID", sql.Int, grnId)
+      .query(`
+        SELECT
+          grn.GRNID,
+          grn.GRNNo,
+          grn.GRNItems,
+          grn.POID,
+          grn.SupplierID,
+          p.PurchaseOrderNo  AS PONo,
+          s.LHeadName        AS SupplierName,
+          s.LGSTState        AS VendorState,
+          company.state      AS CompanyState,
+          p.CompanyId
+        FROM GoodsReceiptNotes grn
+        LEFT JOIN PurchaseOrders        p       ON p.PurchaseOrderID = grn.POID
+        LEFT JOIN dbo.AccountHeadMaster s       ON s.LHeadId        = grn.SupplierID
+        LEFT JOIN dbo.enterprise        company ON company.id        = p.CompanyId
+        WHERE grn.GRNID = @GRNID
+      `);
+
+    if (headerResult.recordset.length === 0)
+      return res.status(404).json({ error: "GRN not found" });
+
+    const hdr = headerResult.recordset[0];
+    const grnItems = parseGRNItems(hdr.GRNItems);
+
+    if (grnItems.length === 0)
+      return res.json({
+        grnId,
+        grnNo: hdr.GRNNo,
+        poId: hdr.POID || null,
+        poNo: hdr.PONo || null,
+        supplierId: hdr.SupplierID || null,
+        supplierName: hdr.SupplierName || null,
+        companyId: hdr.CompanyId || null,
+        vendorState: hdr.VendorState || "",
+        companyState: hdr.CompanyState || "",
+        taxMode: "cgst_sgst",
+        gstPercent: 0,
+        cgstRate: 0,
+        sgstRate: 0,
+        igstRate: 0,
+        totals: {
+          taxableAmount: 0,
+          cgstAmount: 0,
+          sgstAmount: 0,
+          igstAmount: 0,
+          gstAmount: 0,
+          netAmount: 0,
+          receivedQty: 0,
+        },
+        lines: [],
+      });
+
+    // ── 2. Determine tax mode (intra vs inter state) ─────────────────────────
+    const vendorState = (hdr.VendorState || "").trim().toLowerCase();
+    const companyState = (hdr.CompanyState || "").trim().toLowerCase();
+    const taxMode =
+      vendorState && companyState && vendorState === companyState
+        ? "cgst_sgst"
+        : "igst";
+
+    // ── 3. Fetch HSN/GST% for every itemId present in GRN items ─────────────
+    //    Items store GST% directly when saved, but we re-fetch from ItemMaster
+    //    as the authoritative source for accuracy.
+    const itemIds = [...new Set(grnItems.map((i) => i.itemId).filter(Boolean))];
+
+    let hsnMap = {}; // itemId → { hsnCode, gstPercent }
+    if (itemIds.length > 0) {
+      // Build parameterised list  @p0, @p1, …
+      const req2 = pool.request();
+      const placeholders = itemIds.map((id, idx) => {
+        req2.input(`p${idx}`, sql.NVarChar(50), String(id));
+        return `@p${idx}`;
+      });
+      const hsnResult = await req2.query(`
+        SELECT ItemId, HSNCode, GSTPercent
+        FROM   dbo.ItemMaster
+        WHERE  ItemId IN (${placeholders.join(",")})
+      `);
+      for (const row of hsnResult.recordset) {
+        hsnMap[String(row.ItemId)] = {
+          hsnCode: row.HSNCode || null,
+          gstPercent: Number(row.GSTPercent) || 0,
+        };
+      }
+    }
+
+    // ── 4. Compute per-line GST ──────────────────────────────────────────────
+    let dominantGstPct = 0;
+    const lines = grnItems.map((item, idx) => {
+      const receivedQty = Number(item.receivedQty || item.quantity || 0);
+      const orderedQty = Number(item.orderedQty || item.quantity || 0);
+      const unitRate = Number(item.unitRate || item.rate || 0);
+      const itemId = item.itemId ? String(item.itemId) : null;
+
+      // GST%: prefer ItemMaster lookup; fall back to what was saved on the item
+      const hsnInfo = itemId ? hsnMap[itemId] || {} : {};
+      const gstPercent = Number(hsnInfo.gstPercent ?? item.gstPercent ?? 0);
+      const hsnCode = hsnInfo.hsnCode ?? item.hsnCode ?? null;
+
+      if (gstPercent > dominantGstPct) dominantGstPct = gstPercent;
+
+      const taxableAmount = receivedQty * unitRate;
+      const gstAmount = taxableAmount * (gstPercent / 100);
+
+      let cgstRate = 0,
+        sgstRate = 0,
+        igstRate = 0;
+      let cgstAmount = 0,
+        sgstAmount = 0,
+        igstAmount = 0;
+
+      if (taxMode === "cgst_sgst") {
+        cgstRate = gstPercent / 2;
+        sgstRate = gstPercent / 2;
+        cgstAmount = gstAmount / 2;
+        sgstAmount = gstAmount / 2;
+      } else {
+        igstRate = gstPercent;
+        igstAmount = gstAmount;
+      }
+
+      const netAmount = taxableAmount + gstAmount;
+
+      return {
+        lineNo: idx + 1,
+        itemId,
+        itemName: item.itemName || item.name || `Item ${idx + 1}`,
+        orderedQty,
+        receivedQty,
+        uom: item.uom || "",
+        unitRate,
+        hsnCode,
+        gstPercent,
+        taxableAmount: Math.round(taxableAmount * 100) / 100,
+        cgstRate,
+        sgstRate,
+        igstRate,
+        cgstAmount: Math.round(cgstAmount * 100) / 100,
+        sgstAmount: Math.round(sgstAmount * 100) / 100,
+        igstAmount: Math.round(igstAmount * 100) / 100,
+        gstAmount: Math.round(gstAmount * 100) / 100,
+        netAmount: Math.round(netAmount * 100) / 100,
+      };
+    });
+
+    // ── 5. Aggregate totals ──────────────────────────────────────────────────
+    const totals = lines.reduce(
+      (acc, l) => ({
+        taxableAmount: acc.taxableAmount + l.taxableAmount,
+        cgstAmount: acc.cgstAmount + l.cgstAmount,
+        sgstAmount: acc.sgstAmount + l.sgstAmount,
+        igstAmount: acc.igstAmount + l.igstAmount,
+        gstAmount: acc.gstAmount + l.gstAmount,
+        netAmount: acc.netAmount + l.netAmount,
+        receivedQty: acc.receivedQty + l.receivedQty,
+      }),
+      {
+        taxableAmount: 0,
+        cgstAmount: 0,
+        sgstAmount: 0,
+        igstAmount: 0,
+        gstAmount: 0,
+        netAmount: 0,
+        receivedQty: 0,
+      },
+    );
+    // Round totals
+    for (const k of Object.keys(totals))
+      totals[k] = Math.round(totals[k] * 100) / 100;
+
+    const halfGst = dominantGstPct / 2;
+
+    return res.json({
+      grnId,
+      grnNo: hdr.GRNNo,
+      poId: hdr.POID || null,
+      poNo: hdr.PONo || null,
+      supplierId: hdr.SupplierID || null,
+      supplierName: hdr.SupplierName || null,
+      companyId: hdr.CompanyId || null,
+      vendorState: hdr.VendorState || "",
+      companyState: hdr.CompanyState || "",
+      taxMode,
+      gstPercent: dominantGstPct,
+      cgstRate: taxMode === "cgst_sgst" ? halfGst : 0,
+      sgstRate: taxMode === "cgst_sgst" ? halfGst : 0,
+      igstRate: taxMode === "igst" ? dominantGstPct : 0,
+      totals,
+      lines,
+    });
+  } catch (err) {
+    console.error("GET /grn-gst-data ERROR:", err);
+    res
+      .status(500)
+      .json({ error: "Failed to compute GRN GST data", message: err.message });
+  }
+});
 
 // GET all GRNs
 // GET suppliers list for GRN filtering.
@@ -405,7 +638,14 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
 
     await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
 
-    await insertStockLedgerEntries(transaction, grnId, grnItems, finalDocNo);
+    const mainGodownId = await resolveMainGodownId(pool);
+    await insertStockLedgerEntries(
+      transaction,
+      grnId,
+      grnItems,
+      finalDocNo,
+      mainGodownId,
+    );
 
     await transaction.commit();
 
@@ -441,18 +681,19 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
             (s, i) => s + Number(i.quantity || 0) * Number(i.rate || 0),
             0,
           );
+          // Only promote PO to "Received" when all items are fully received.
+          // Never write "Partially Received" back to PO — that belongs on GRN.
           const newPOStatus =
             poRow.GRNCount > 0 &&
             totalOrdered > 0 &&
             poRow.TotalReceived >= totalOrdered
               ? "Received"
-              : poRow.GRNCount > 0
-                ? "Partially Received"
-                : poRow.POStatus;
+              : null;
 
           if (
+            newPOStatus &&
             newPOStatus !== poRow.POStatus &&
-            ["Approved", "Partially Received"].includes(poRow.POStatus)
+            ["Approved"].includes(poRow.POStatus)
           ) {
             await pool
               .request()
@@ -473,6 +714,7 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
       }
     }
     await bumpCacheVersion("stock-ledger");
+    await bumpCacheVersion("grns");
 
     res.status(201).json({
       message: "GRN created successfully",
@@ -557,10 +799,18 @@ router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
         "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
       );
 
-    await insertStockLedgerEntries(transaction, grnId, grnItems, docNo);
+    const mainGodownId = await resolveMainGodownId(pool);
+    await insertStockLedgerEntries(
+      transaction,
+      grnId,
+      grnItems,
+      docNo,
+      mainGodownId,
+    );
     await transaction.commit();
 
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("expense-booking-options");
     await bumpCacheVersion("stock-ledger");
     res.json({ message: "GRN updated successfully" });
   } catch (err) {
@@ -602,6 +852,7 @@ router.delete("/:id", async (req, res) => {
     await transaction.commit();
 
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("expense-booking-options");
     await bumpCacheVersion("stock-ledger");
     res.json({ message: "GRN deleted successfully" });
   } catch (err) {
@@ -629,6 +880,7 @@ router.put("/:id/submit", async (req, res) => {
       req.user?.role,
     );
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("expense-booking-options");
     res.json({ message: "GRN submitted for approval", ...result });
   } catch (err) {
     console.error("GRN submit error:", err.message);
@@ -651,6 +903,7 @@ router.put("/:id/approve", async (req, res) => {
       req.user?.role,
     );
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("expense-booking-options");
     res.json({ message: "GRN approved", ...result });
   } catch (err) {
     console.error("GRN approve error:", err.message);
@@ -676,6 +929,7 @@ router.put("/:id/reject", async (req, res) => {
       note || null,
     );
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("expense-booking-options");
     res.json({ message: "GRN rejected", ...result });
   } catch (err) {
     console.error("GRN reject error:", err.message);
@@ -729,7 +983,6 @@ router.get("/:id/gst-breakdown", async (req, res) => {
 
     let masterMap = {};
     if (itemIds.length > 0) {
-      // Parameterised IN clause — one param per id
       const masterReq = pool.request();
       const placeholders = itemIds
         .map((id, i) => {
@@ -749,6 +1002,7 @@ router.get("/:id/gst-breakdown", async (req, res) => {
       `);
 
       for (const row of masterRes.recordset) {
+        const gst = parseFloat(row.GSTPercent) || 0;
         masterMap[row.M_Id] = {
           hsnCode: row.M_HSN || "",
           cgstRate: parseFloat(row.M_CGST) || 0,
@@ -774,6 +1028,7 @@ router.get("/:id/gst-breakdown", async (req, res) => {
 
       const master = masterMap[itemId] || {
         hsnCode: "",
+        gstPercent: 0,
         cgstRate: 0,
         sgstRate: 0,
       };

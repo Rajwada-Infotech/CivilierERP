@@ -9,6 +9,7 @@ import {
   useTransform,
   useSpring,
 } from "framer-motion";
+import { toast } from "sonner";
 
 const ROLE_HINTS = import.meta.env.DEV
   ? [
@@ -1092,7 +1093,8 @@ export default function Login() {
         setError(result.error || "Invalid email or password.");
         setIsLoading(false);
       }
-    } catch {
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
       setError(
         "Unable to connect. Please check your connection and try again.",
       );

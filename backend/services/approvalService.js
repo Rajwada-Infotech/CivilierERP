@@ -54,8 +54,7 @@ async function validateApprovalModuleMap(log = console) {
   for (const [module, linkLabel] of Object.entries(MODULE_DOC_LINKS)) {
     const result = await pool
       .request()
-      .input("LinkLabel", sql.NVarChar(100), `%${linkLabel}%`)
-      .query(`
+      .input("LinkLabel", sql.NVarChar(100), `%${linkLabel}%`).query(`
         SELECT TOP 1 TypeOfDocId
         FROM dbo.TypeOfDoc
         WHERE IsActive = 1
@@ -86,7 +85,7 @@ async function getWorkflow(module) {
   const result = await pool.request().input("Module", sql.NVarChar(100), module)
     .query(`
       SELECT TOP 1 Id, Levels, Approvers
-      FROM dbo.ApprovalWorkflowsap
+      FROM dbo.ApprovalWorkflows
       WHERE Module = @Module AND Status = 'Active'
       ORDER BY CreatedAt DESC
     `);

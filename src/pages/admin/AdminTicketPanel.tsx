@@ -200,7 +200,7 @@ function TicketDetailDialog({
 }) {
   const queryClient = useQueryClient();
   const { currentUser } = useAuth();
-  const [assigneeId, setAssigneeId] = useState("");
+  const [assigneeId, setAssigneeId] = useState<string | undefined>(undefined);
   const [resolutionNote, setResolutionNote] = useState("");
   const [showResolve, setShowResolve] = useState(false);
 

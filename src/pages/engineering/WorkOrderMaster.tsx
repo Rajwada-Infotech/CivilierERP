@@ -3866,7 +3866,9 @@ const WorkOrderMaster: React.FC = () => {
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
   const finYearOptions = finYears.filter((fy) => fy.status === "Active");
-  const [selectedFinYear, setSelectedFinYear] = useState("");
+  const [selectedFinYear, setSelectedFinYear] = useState<string | undefined>(
+    undefined,
+  );
 
   useEffect(() => {
     if (!selectedFinYear && activeFinYear) {
@@ -4602,9 +4604,9 @@ const WorkOrderMaster: React.FC = () => {
                       <SelectSkeleton />
                     ) : (
                       <select
-                        value={selectedFinYear}
+                        value={selectedFinYear ?? ""}
                         onChange={(e) => {
-                          const nextFinYear = e.target.value;
+                          const nextFinYear = e.target.value || undefined;
                           setSelectedFinYear(nextFinYear);
                           if (woDocTypeId)
                             void refreshWoDocNumber(woDocTypeId, nextFinYear);

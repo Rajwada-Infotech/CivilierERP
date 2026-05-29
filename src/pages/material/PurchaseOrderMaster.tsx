@@ -326,7 +326,9 @@ const PurchaseOrderMaster: React.FC = () => {
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
   const finYearOptions = finYears.filter((fy) => fy.status === "Active");
-  const [selectedFinYear, setSelectedFinYear] = useState("");
+  const [selectedFinYear, setSelectedFinYear] = useState<string | undefined>(
+    undefined,
+  );
 
   useEffect(() => {
     if (!selectedFinYear && activeFinYear) setSelectedFinYear(activeFinYear);
@@ -1131,6 +1133,7 @@ const PurchaseOrderMaster: React.FC = () => {
     if (!form.poNumber && !hasBackendNumbering) e.poNumber = true;
     if (!form.poDate) e.poDate = true;
     if (!form.supplierId) e.supplierId = true;
+    if (!form.companyId) e.companyId = true;
     if (!form.projectId) e.projectId = true;
     if (lineItems.every((li) => !li.itemName && !li.quantity))
       e.lineItems = true;
@@ -1275,19 +1278,22 @@ const PurchaseOrderMaster: React.FC = () => {
       queryClient.setQueriesData<any>(
         { queryKey: ["purchase-orders"] },
         (old: any) => {
-          if (!old?.data) return old;
-          return {
-            ...old,
-            data: old.data.map((row: any) =>
-              String(row.PurchaseOrderID) === recordId
-                ? { ...row, Status: nextStatus }
-                : row,
-            ),
-          };
+          if (!old) return old;
+          // handle both raw-array and { data: [] } response shapes
+          const rows: any[] = Array.isArray(old) ? old : (old?.data ?? []);
+          const updated = rows.map((row: any) =>
+            String(row.PurchaseOrderID) === recordId
+              ? { ...row, Status: nextStatus }
+              : row,
+          );
+          return Array.isArray(old) ? updated : { ...old, data: updated };
         },
       );
     }
 
+    // Small delay to let the server-side cache version bump propagate
+    // across workers before the refetch hits Redis.
+    await new Promise((r) => setTimeout(r, 400));
     // Then invalidate so the server state syncs in the background.
     await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
   };
@@ -1879,9 +1885,9 @@ const PurchaseOrderMaster: React.FC = () => {
                 <FieldLabel>Financial Year</FieldLabel>
                 <div className="relative">
                   <select
-                    value={selectedFinYear}
+                    value={selectedFinYear ?? ""}
                     onChange={(e) => {
-                      const nextFinYear = e.target.value;
+                      const nextFinYear = e.target.value || undefined;
                       setSelectedFinYear(nextFinYear);
                       if (poDocTypeId)
                         void refreshPoDocNumber(poDocTypeId, nextFinYear);
@@ -1964,7 +1970,7 @@ const PurchaseOrderMaster: React.FC = () => {
                   <select
                     value={form.companyId}
                     onChange={(e) => setField("companyId", e.target.value)}
-                    className={selectCls}
+                    className={`${selectCls} ${errors.companyId ? "border-red-400" : ""}`}
                   >
                     <option value="">— Select Company —</option>
                     {companies.map((c) => (
@@ -1975,6 +1981,11 @@ const PurchaseOrderMaster: React.FC = () => {
                   </select>
                   <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                 </div>
+              )}
+              {errors.companyId && (
+                <p className="text-xs text-destructive mt-1">
+                  Company is required
+                </p>
               )}
             </div>
 
@@ -1991,7 +2002,7 @@ const PurchaseOrderMaster: React.FC = () => {
                   <select
                     value={form.projectId}
                     onChange={(e) => setField("projectId", e.target.value)}
-                    className={selectCls}
+                    className={`${selectCls} ${errors.projectId ? "border-red-400" : ""}`}
                   >
                     <option value="">— Select Project —</option>
                     {allProjects.map((p) => (
@@ -2002,6 +2013,11 @@ const PurchaseOrderMaster: React.FC = () => {
                   </select>
                   <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                 </div>
+              )}
+              {errors.projectId && (
+                <p className="text-xs text-destructive mt-1">
+                  Project is required
+                </p>
               )}
             </div>
 
@@ -2106,8 +2122,16 @@ const PurchaseOrderMaster: React.FC = () => {
             )}
           </div>
 
+          {errors.lineItems && (
+            <p className="px-5 pb-2 text-xs text-destructive">
+              Add at least one line item
+            </p>
+          )}
+
           {/* Table header */}
-          <div className="overflow-x-auto">
+          <div
+            className={`overflow-x-auto ${errors.lineItems ? "border-t border-red-400" : ""}`}
+          >
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/10">

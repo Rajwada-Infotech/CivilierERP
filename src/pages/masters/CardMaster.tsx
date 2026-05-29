@@ -1,6 +1,8 @@
 import React, { useState, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import {
@@ -35,6 +37,10 @@ import {
   type BankOption,
   type CompanyOption,
 } from "@/api/cardMasterApi";
+import {
+  cardMasterSchema,
+  type CardMasterForm,
+} from "@/schemas/cardMasterSchema";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface CardRecord {
@@ -453,7 +459,16 @@ const CardMaster: React.FC = () => {
 
   const [form, setForm] = useState<FormState>(EMPTY);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const {
+    reset,
+    setValue,
+    trigger,
+    clearErrors,
+    formState: { errors },
+  } = useForm<CardMasterForm>({
+    resolver: zodResolver(cardMasterSchema),
+    defaultValues: EMPTY,
+  });
   const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
@@ -478,7 +493,7 @@ const CardMaster: React.FC = () => {
 
   const setField = (k: keyof FormState, v: unknown) => {
     setForm((p) => ({ ...p, [k]: v }));
-    if (errors[k as string]) setErrors((p) => ({ ...p, [k as string]: false }));
+    setValue(k, v as never, { shouldValidate: !!errors[k] });
   };
 
   // ── Bank dropdown handler — auto-fills account number & IFSC ──────────────
@@ -491,7 +506,10 @@ const CardMaster: React.FC = () => {
       accountNumber: bank?.accountNumber || "",
       ifscCode: bank?.ifscCode || "",
     }));
-    if (errors.bankId) setErrors((e) => ({ ...e, bankId: false }));
+    setValue("bankId", bankId, { shouldValidate: !!errors.bankId });
+    setValue("bankName", bank?.label || "");
+    setValue("accountNumber", bank?.accountNumber || "");
+    setValue("ifscCode", bank?.ifscCode || "");
   };
 
   const handleExpiry = (val: string) => {
@@ -500,26 +518,21 @@ const CardMaster: React.FC = () => {
     setField("expiryDate", v);
     if (v.length === 5) {
       const [m, y] = v.split("/");
+      const expiryMonth = parseInt(m);
+      const expiryYear = 2000 + parseInt(y);
       setForm((p) => ({
         ...p,
-        expiryMonth: parseInt(m),
-        expiryYear: 2000 + parseInt(y),
+        expiryMonth,
+        expiryYear,
       }));
+      setValue("expiryMonth", expiryMonth);
+      setValue("expiryYear", expiryYear);
     }
   };
 
-  const validate = () => {
-    const e: Record<string, boolean> = {};
-    if (!form.bankId) e.bankId = true;
-    if (!form.cardNumber || form.cardNumber.replace(/\D/g, "").length < 13)
-      e.cardNumber = true;
-    if (!form.cvv || form.cvv.length < 3) e.cvv = true;
-    if (!form.expiryDate || !/^\d{2}\/\d{2}$/.test(form.expiryDate))
-      e.expiryDate = true;
-    if (form.reminderEnabled && (!form.reminderDays || form.reminderDays < 1))
-      e.reminderDays = true;
-    setErrors(e);
-    return Object.keys(e).length === 0;
+  const validate = async () => {
+    reset(form);
+    return trigger();
   };
 
   const toPayload = (f: FormState) => ({
@@ -540,7 +553,7 @@ const CardMaster: React.FC = () => {
   });
 
   const handleSave = async () => {
-    if (!validate()) return;
+    if (!(await validate())) return;
     try {
       if (editingId) {
         await updateCard(editingId, toPayload(form));
@@ -555,6 +568,7 @@ const CardMaster: React.FC = () => {
       }
       await queryClient.invalidateQueries({ queryKey: ["cards"] });
       setForm(EMPTY);
+      reset(EMPTY);
       setEditingId(null);
       setShowCvc(false);
     } catch (err: any) {
@@ -565,7 +579,7 @@ const CardMaster: React.FC = () => {
   const handleEdit = (id: string) => {
     const r = cards.find((x) => x._id === id);
     if (!r) return;
-    setForm({
+    const nextForm = {
       companyName: r.companyName,
       bankId: r.bankId,
       bankName: r.bankName,
@@ -582,7 +596,9 @@ const CardMaster: React.FC = () => {
       reminderEnabled: r.reminderEnabled,
       reminderDays: r.reminderDays,
       status: r.status,
-    });
+    };
+    setForm(nextForm);
+    reset(nextForm);
     setEditingId(id);
     setShowCvc(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -597,6 +613,7 @@ const CardMaster: React.FC = () => {
       if (editingId === id) {
         setEditingId(null);
         setForm(EMPTY);
+        reset(EMPTY);
       }
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
@@ -625,7 +642,8 @@ const CardMaster: React.FC = () => {
   const handleReset = () => {
     setForm(EMPTY);
     setEditingId(null);
-    setErrors({});
+    reset(EMPTY);
+    clearErrors();
     setShowCvc(false);
   };
 

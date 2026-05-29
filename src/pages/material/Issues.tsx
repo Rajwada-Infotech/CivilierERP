@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import * as issuesApi from "@/api/issuesApi";
-import type { IssuePrefill, ReferenceListItem } from "@/api/issuesApi";
 import {
   CalendarDays,
   FileText,
@@ -14,14 +13,12 @@ import {
   Plus,
   RefreshCw,
   X,
-  PackageMinus,
   Edit3,
   Building2,
   FolderOpen,
   Box,
   Ruler,
   Hash,
-  ChevronDown,
   AlertTriangle,
   TrendingDown,
   BarChart3,
@@ -29,6 +26,13 @@ import {
   Package,
   CheckCircle2,
   Calendar,
+  Warehouse,
+  ArrowDownToLine,
+  User,
+  Layers,
+  PackageX,
+  TrendingUp,
+  Activity,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -53,12 +57,11 @@ import { Badge } from "@/components/ui/badge";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CartItem {
-  _key: string; // local unique key for React
+  _key: string;
   ItemId: string;
   UOMCode: string;
   Quantity: string;
   Remarks: string;
-  // derived from item master
   ItemName?: string;
   AvailableStock?: number;
   DefaultUOM?: string;
@@ -71,11 +74,9 @@ interface IssueHeader {
   date: string;
   reason: string;
   remarks: string;
-  referenceType: "" | "GRN" | "MR";
+  godownId: string;
   docTypeId: number | null;
   docNoPreview: string;
-  referenceId: string;
-  referenceDocNo: string;
   issuedTo: string;
   costCenter: string;
   purpose: string;
@@ -88,11 +89,9 @@ const defaultHeader: IssueHeader = {
   date: new Date().toISOString().slice(0, 10),
   reason: "",
   remarks: "",
-  referenceType: "",
+  godownId: "",
   docTypeId: null,
   docNoPreview: "",
-  referenceId: "",
-  referenceDocNo: "",
   issuedTo: "",
   costCenter: "",
   purpose: "",
@@ -106,50 +105,7 @@ const blankCartItem = (): CartItem => ({
   Remarks: "",
 });
 
-// ─── Stock badge ──────────────────────────────────────────────────────────────
-
-function StockPill({
-  available,
-  requested,
-  uomSymbol,
-}: {
-  available: number;
-  requested: number;
-  uomSymbol?: string;
-}) {
-  const remaining = available - requested;
-  const isOver = remaining < 0;
-  const isWarn = remaining >= 0 && remaining < available * 0.1;
-
-  return (
-    <div className="flex flex-col gap-0.5">
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <BarChart3 size={11} />
-        <span>
-          Available:{" "}
-          <span className="font-semibold text-foreground">
-            {available.toFixed(2)} {uomSymbol}
-          </span>
-        </span>
-      </div>
-      {requested > 0 && (
-        <div
-          className={`flex items-center gap-1 text-xs font-semibold ${isOver ? "text-destructive" : isWarn ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}
-        >
-          {isOver ? <AlertTriangle size={11} /> : <TrendingDown size={11} />}
-          After: {remaining.toFixed(2)} {uomSymbol}
-          {isOver && (
-            <span className="ml-1 text-destructive font-bold">
-              EXCEEDS STOCK
-            </span>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Field wrapper ────────────────────────────────────────────────────────────
+// ─── Small sub-components ─────────────────────────────────────────────────────
 
 const Field = ({
   label,
@@ -186,6 +142,231 @@ const DetailRow = ({
   </div>
 );
 
+// ─── Godown stock badge shown in the header ───────────────────────────────────
+
+function GodownBadge({
+  name,
+  code,
+  isMain,
+}: {
+  name: string;
+  code?: string;
+  isMain?: boolean;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary/10 text-primary text-xs font-semibold border border-primary/20">
+      <Warehouse size={11} />
+      {name}
+      {code && (
+        <span className="font-mono text-[10px] text-primary/70">({code})</span>
+      )}
+      {isMain && (
+        <span className="px-1 py-0 rounded bg-primary/20 text-[9px] font-bold uppercase tracking-wider">
+          Main
+        </span>
+      )}
+    </span>
+  );
+}
+
+// ─── Godown stock stat card ───────────────────────────────────────────────────
+
+function GodownStockStats({
+  items,
+  loading,
+  godownName,
+}: {
+  items: any[];
+  loading: boolean;
+  godownName?: string;
+}) {
+  const stats = useMemo(() => {
+    if (!items.length) return null;
+    const inStock = items.filter((it) => Number(it.AvailableStock) > 0);
+    const outOfStock = items.filter((it) => Number(it.AvailableStock) <= 0);
+    const totalQty = items.reduce(
+      (s, it) => s + Number(it.AvailableStock ?? 0),
+      0,
+    );
+    const top5 = [...items]
+      .filter((it) => Number(it.AvailableStock) > 0)
+      .sort((a, b) => Number(b.AvailableStock) - Number(a.AvailableStock))
+      .slice(0, 5);
+    const maxQty = top5[0] ? Number(top5[0].AvailableStock) : 1;
+    return { inStock, outOfStock, totalQty, top5, maxQty, total: items.length };
+  }, [items]);
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-border bg-muted/20 p-4 flex items-center justify-center gap-2 text-sm text-muted-foreground h-24">
+        <RefreshCw size={14} className="animate-spin" />
+        Loading stock levels…
+      </div>
+    );
+  }
+
+  if (!stats) return null;
+
+  const inStockPct =
+    stats.total > 0 ? (stats.inStock.length / stats.total) * 100 : 0;
+
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      {/* Header strip */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/20">
+        <div className="flex items-center gap-2">
+          <BarChart3 size={14} className="text-primary" />
+          <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            Godown Stock Levels
+          </span>
+          {godownName && (
+            <span className="text-xs text-foreground font-medium">
+              — {godownName}
+            </span>
+          )}
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {stats.total} SKUs
+        </span>
+      </div>
+
+      <div className="p-4 grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-4">
+        {/* ── Left: 3 stat tiles ── */}
+        <div className="grid grid-cols-3 sm:grid-cols-1 gap-2 sm:w-40">
+          {/* Total qty */}
+          <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 flex flex-col gap-0.5">
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <Activity size={11} />
+              <span className="text-[10px] font-semibold uppercase tracking-wider">
+                Total Qty
+              </span>
+            </div>
+            <span className="font-mono font-bold text-lg leading-tight text-foreground">
+              {stats.totalQty.toLocaleString("en-IN", {
+                maximumFractionDigits: 2,
+              })}
+            </span>
+          </div>
+
+          {/* In stock */}
+          <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2.5 flex flex-col gap-0.5">
+            <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+              <TrendingUp size={11} />
+              <span className="text-[10px] font-semibold uppercase tracking-wider">
+                In Stock
+              </span>
+            </div>
+            <div className="flex items-end gap-1">
+              <span className="font-mono font-bold text-lg leading-tight text-emerald-700 dark:text-emerald-300">
+                {stats.inStock.length}
+              </span>
+              <span className="text-[10px] text-emerald-600/70 dark:text-emerald-400/70 pb-0.5">
+                items
+              </span>
+            </div>
+          </div>
+
+          {/* Out of stock */}
+          <div
+            className={`rounded-lg border px-3 py-2.5 flex flex-col gap-0.5 ${
+              stats.outOfStock.length > 0
+                ? "border-destructive/30 bg-destructive/5"
+                : "border-border bg-muted/20"
+            }`}
+          >
+            <div
+              className={`flex items-center gap-1.5 ${
+                stats.outOfStock.length > 0
+                  ? "text-destructive"
+                  : "text-muted-foreground"
+              }`}
+            >
+              <PackageX size={11} />
+              <span className="text-[10px] font-semibold uppercase tracking-wider">
+                Out of Stock
+              </span>
+            </div>
+            <div className="flex items-end gap-1">
+              <span
+                className={`font-mono font-bold text-lg leading-tight ${
+                  stats.outOfStock.length > 0
+                    ? "text-destructive"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {stats.outOfStock.length}
+              </span>
+              <span className="text-[10px] text-muted-foreground pb-0.5">
+                items
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Right: top-5 horizontal bar chart ── */}
+        <div className="min-w-0">
+          <div className="flex items-center justify-between mb-2.5">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              Top items by available qty
+            </span>
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-emerald-500 transition-all"
+                  style={{ width: `${inStockPct}%` }}
+                />
+              </div>
+              <span>{Math.round(inStockPct)}% available</span>
+            </div>
+          </div>
+
+          {stats.top5.length === 0 ? (
+            <div className="flex items-center justify-center h-16 text-xs text-muted-foreground gap-1.5">
+              <PackageX size={13} />
+              No stock in this godown
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {stats.top5.map((item) => {
+                const qty = Number(item.AvailableStock);
+                const pct = stats.maxQty > 0 ? (qty / stats.maxQty) * 100 : 0;
+                const barColor =
+                  pct > 60
+                    ? "bg-emerald-500"
+                    : pct > 25
+                      ? "bg-amber-500"
+                      : "bg-orange-500";
+                return (
+                  <div key={item.M_Id} className="flex items-center gap-2.5">
+                    <span
+                      className="text-xs text-foreground font-medium truncate shrink-0"
+                      style={{ width: "38%" }}
+                      title={item.M_Name}
+                    >
+                      {item.M_Name}
+                    </span>
+                    <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${barColor}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <span className="font-mono text-xs font-semibold text-foreground shrink-0 w-16 text-right">
+                      {qty.toLocaleString("en-IN", {
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function Issues() {
@@ -197,15 +378,13 @@ export default function Issues() {
   const [search, setSearch] = useState("");
   const limit = 10;
 
-  // Header form
   const [header, setHeader] = useState<IssueHeader>(defaultHeader);
   const { finYears } = useFinYear();
   const activeYear = finYears.find((y) => y.status === "Active") ?? null;
   const finYearStr = activeYear
     ? `${String(activeYear.startDate).slice(2, 4)}-${String(activeYear.endDate).slice(2, 4)}`
     : undefined;
-  const [loadingPrefill, setLoadingPrefill] = useState(false);
-  // Cart
+
   const [cart, setCart] = useState<CartItem[]>([blankCartItem()]);
 
   const setH = <K extends keyof IssueHeader>(k: K, v: IssueHeader[K]) =>
@@ -225,17 +404,26 @@ export default function Issues() {
     staleTime: 5 * 60_000,
   });
 
+  const { data: godowns = [], isLoading: loadingGodowns } = useQuery({
+    queryKey: ["issues-godowns"],
+    queryFn: issuesApi.getGodowns,
+    staleTime: 5 * 60_000,
+  });
+
+  // Items re-fetched whenever the selected godown changes
+  const selectedGodownId = header.godownId ? Number(header.godownId) : null;
+
   const { data: itemOptions = [], isLoading: loadingItems } = useQuery({
-    queryKey: ["issues-items"],
-    queryFn: issuesApi.getItemOptions,
+    queryKey: ["issues-items", selectedGodownId],
+    queryFn: () => issuesApi.getItemOptions(selectedGodownId),
     staleTime: 60_000,
+    enabled: viewMode === "form",
   });
 
   const { data: uoms = [], isLoading: loadingUoms } = useQuery({
     queryKey: ["issues-uoms"],
     queryFn: async () => {
       const data = await issuesApi.getUomOptions();
-      // Normalize IsActive from MSSQL 1/0 (or boolean) to a strict boolean at the boundary.
       return (Array.isArray(data) ? data : [])
         .map((u: any) => ({
           ...u,
@@ -251,36 +439,41 @@ export default function Issues() {
     queryFn: () => issuesApi.getIssues({ page, limit, search }),
   });
 
-  // Reference list queries — only fire when that reference type is selected
-  const { data: grnList = [], isLoading: loadingGrnList } = useQuery<
-    ReferenceListItem[]
-  >({
-    queryKey: ["issues-grn-list"],
-    queryFn: issuesApi.getGrnList,
-    enabled: header.referenceType === "GRN",
-    staleTime: 60_000,
-  });
-  const { data: mrList = [], isLoading: loadingMrList } = useQuery<
-    ReferenceListItem[]
-  >({
-    queryKey: ["issues-mr-list"],
-    queryFn: issuesApi.getMrList,
-    enabled: header.referenceType === "MR",
-    staleTime: 60_000,
-  });
-
   // ── Auto-select active fin year ──────────────────────────────────────────
 
   useEffect(() => {
     if (finYears.length > 0 && !header.finYearId && viewMode === "form") {
-      const active = (finYears as any[]).find(
+      const today = new Date().toISOString().slice(0, 10);
+      const current = (finYears as any[]).find(
+        (f) =>
+          (f.status === "Active" || f.isActive === true || f.isActive === 1) &&
+          f.startDate <= today &&
+          f.endDate >= today,
+      );
+      const fallback = (finYears as any[]).find(
         (f) => f.status === "Active" || f.isActive === true || f.isActive === 1,
       );
-      if (active) setH("finYearId", String(active.id));
+      const chosen = current ?? fallback;
+      if (chosen) setH("finYearId", String(chosen.id));
     }
   }, [finYears, viewMode, header.finYearId]);
 
-  // ── Item lookup helpers ──────────────────────────────────────────────────
+  // ── Auto-select main godown ──────────────────────────────────────────────
+
+  useEffect(() => {
+    if (
+      (godowns as any[]).length > 0 &&
+      !header.godownId &&
+      viewMode === "form"
+    ) {
+      const main = (godowns as any[]).find((g) => g.isMain);
+      const first = (godowns as any[])[0];
+      const chosen = main ?? first;
+      if (chosen) setH("godownId", String(chosen.id));
+    }
+  }, [godowns, viewMode, header.godownId]);
+
+  // ── Item & UOM lookup helpers ────────────────────────────────────────────
 
   const itemMap = useMemo(() => {
     const m: Record<string, any> = {};
@@ -293,6 +486,11 @@ export default function Issues() {
     for (const u of uoms as any[]) m[u.UOMCode] = u;
     return m;
   }, [uoms]);
+
+  const selectedGodown = useMemo(
+    () => (godowns as any[]).find((g) => String(g.id) === header.godownId),
+    [godowns, header.godownId],
+  );
 
   // ── Cart helpers ─────────────────────────────────────────────────────────
 
@@ -310,7 +508,6 @@ export default function Issues() {
   const pickItem = useCallback(
     (cartKey: string, itemId: string) => {
       const found = itemMap[itemId];
-      // Use DefaultUOM from item master; if absent, fall back to first available UOM
       const defaultUom =
         found?.DefaultUOM || (uoms as any[]).find(Boolean)?.UOMCode || "";
       setCart((prev) =>
@@ -331,14 +528,18 @@ export default function Issues() {
     [itemMap, uoms],
   );
 
+  // When godown changes, reset cart items (stock values no longer valid)
+  const handleGodownChange = (val: string) => {
+    setH("godownId", val);
+    setCart([blankCartItem()]);
+  };
+
   const addCartRow = () => setCart((p) => [...p, blankCartItem()]);
   const removeCartRow = (key: string) =>
     setCart((p) => (p.length > 1 ? p.filter((i) => i._key !== key) : p));
 
-  // Realtime stock including already-issued qty for other rows in the same item
   const getStockForRow = (cartKey: string, itemId: string): number => {
     const base = Number(itemMap[itemId]?.AvailableStock ?? 0);
-    // subtract qty from other cart rows with same item
     const otherQty = cart
       .filter((ci) => ci._key !== cartKey && ci.ItemId === itemId)
       .reduce((s, ci) => s + (Number(ci.Quantity) || 0), 0);
@@ -368,7 +569,8 @@ export default function Issues() {
         header.projectId &&
         header.finYearId &&
         header.date &&
-        header.reason.trim(),
+        header.reason.trim() &&
+        header.godownId,
       ),
     [header],
   );
@@ -411,64 +613,6 @@ export default function Issues() {
 
   const isSaving = createMutation.isPending || updateMutation.isPending;
 
-  // ── Reference source prefill ─────────────────────────────────────────────
-
-  const handleReferenceTypeChange = (val: string) => {
-    const refType = val === "__none__" ? "" : val;
-    setH("referenceType", refType as IssueHeader["referenceType"]);
-    setH("referenceId", "");
-    setH("referenceDocNo", "");
-    setCart([blankCartItem()]);
-  };
-
-  // Called when user selects a doc from the GRN or MR dropdown.
-  // Auto-fires the prefill request and populates company, project, fin year, and cart.
-  const handleReferenceDocSelect = async (
-    selectedId: string,
-    selectedDocNo: string,
-  ) => {
-    if (!selectedId || !header.referenceType) return;
-    setH("referenceId", selectedId);
-    setH("referenceDocNo", selectedDocNo);
-    setLoadingPrefill(true);
-    try {
-      const prefill: IssuePrefill = await issuesApi.getIssuePrefill(
-        header.referenceType as "GRN" | "MR",
-        selectedDocNo,
-      );
-      // Populate header fields — company, project, and fin year from parent doc
-      setH("referenceDocNo", prefill.referenceDocNo || selectedDocNo);
-      if (prefill.companyId) setH("companyId", String(prefill.companyId));
-      if (prefill.projectId) setH("projectId", String(prefill.projectId));
-      if (prefill.finYearId) setH("finYearId", String(prefill.finYearId));
-      // Populate cart — items are already enriched with UOMCode + AvailableStock by backend
-      if (prefill.items.length > 0) {
-        const newCart: CartItem[] = prefill.items.map((it) => ({
-          _key: crypto.randomUUID(),
-          ItemId: String(it.ItemId),
-          UOMCode: it.UOMCode || "",
-          Quantity: it.Quantity || "",
-          Remarks: "",
-          ItemName: it.ItemName || "",
-          AvailableStock: Number(it.AvailableStock ?? 0),
-          DefaultUOM: it.UOMCode || "",
-        }));
-        setCart(newCart);
-        toast.success(
-          `Loaded ${prefill.items.length} item${prefill.items.length !== 1 ? "s" : ""} from ${prefill.referenceDocNo || selectedDocNo}`,
-        );
-      } else {
-        toast.info("Reference loaded — no items found (add manually)");
-      }
-    } catch (err: any) {
-      toast.error("Prefill failed: " + (err?.message ?? "Unknown error"));
-      setH("referenceId", "");
-      setH("referenceDocNo", "");
-    } finally {
-      setLoadingPrefill(false);
-    }
-  };
-
   // ── Navigation helpers ───────────────────────────────────────────────────
 
   const goToList = () => {
@@ -487,17 +631,13 @@ export default function Issues() {
       date: record.Date ? String(record.Date).slice(0, 10) : defaultHeader.date,
       reason: record.Reason ?? "",
       remarks: record.Remarks ?? "",
-      referenceType: (record.ReferenceType ??
-        "") as IssueHeader["referenceType"],
-      referenceId: String(record.ReferenceId ?? ""),
-      referenceDocNo: record.ReferenceDocNo ?? "",
+      godownId: record.GodownId ? String(record.GodownId) : "",
       docTypeId: record.DocTypeId ?? null,
       docNoPreview: "",
       issuedTo: record.IssuedTo ?? "",
       costCenter: record.CostCenter ?? "",
       purpose: record.Purpose ?? "",
     });
-    // Map child items to cart
     const items: CartItem[] = (record.items || []).map((it: any) => ({
       _key: crypto.randomUUID(),
       ItemId: String(it.ItemId ?? ""),
@@ -513,11 +653,11 @@ export default function Issues() {
   };
 
   const handleView = async (record: any) => {
-    // Fetch full record with items
     try {
       const full = await issuesApi.getIssue(record.IssueId);
       setViewingRecord(full);
-    } catch {
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
       setViewingRecord(record);
     }
     setViewMode("view");
@@ -528,7 +668,7 @@ export default function Issues() {
       if (!headerIsValid) toast.error("Fill all required header fields");
       else
         toast.error(
-          "Each cart item needs item, UOM, and valid quantity ≤ available stock",
+          "Each item needs item, UOM, and valid quantity ≤ available stock",
         );
       return;
     }
@@ -539,9 +679,7 @@ export default function Issues() {
       Date: header.date,
       Reason: header.reason,
       Remarks: header.remarks || null,
-      ReferenceType: header.referenceType || null,
-      ReferenceId: header.referenceId ? Number(header.referenceId) : null,
-      ReferenceDocNo: header.referenceDocNo || null,
+      GodownId: header.godownId ? Number(header.godownId) : null,
       DocTypeId: header.docTypeId || null,
       IssuedTo: header.issuedTo || null,
       CostCenter: header.costCenter || null,
@@ -593,13 +731,24 @@ export default function Issues() {
       ),
     },
     {
-      accessorKey: "FinYearName",
-      header: "Fin Year",
-      cell: ({ getValue }) => (
-        <span className="text-xs font-medium text-muted-foreground">
-          {String(getValue() || "—")}
-        </span>
-      ),
+      accessorKey: "GodownName",
+      header: "Godown",
+      cell: ({ row, getValue }) => {
+        const name = getValue() as string;
+        return name ? (
+          <div className="flex items-center gap-1.5 text-sm">
+            <Warehouse size={12} className="text-primary/70 shrink-0" />
+            <span>{name}</span>
+            {row.original.GodownCode && (
+              <span className="text-xs text-muted-foreground font-mono">
+                ({row.original.GodownCode})
+              </span>
+            )}
+          </div>
+        ) : (
+          <span className="text-muted-foreground text-sm">—</span>
+        );
+      },
     },
     {
       accessorKey: "ItemCount",
@@ -782,6 +931,11 @@ export default function Issues() {
         Number(ci.Quantity) > getStockForRow(ci._key, ci.ItemId),
     );
 
+    // Low-stock items in this godown (for warning banner)
+    const lowStockItems = (itemOptions as any[]).filter(
+      (it) => Number(it.AvailableStock) <= 0,
+    ).length;
+
     return (
       <div className="space-y-5">
         {/* ── Header card ── */}
@@ -791,7 +945,7 @@ export default function Issues() {
               {editingId ? (
                 <Edit3 size={15} className="text-primary" />
               ) : (
-                <FileText size={15} className="text-primary" />
+                <ArrowDownToLine size={15} className="text-primary" />
               )}
               {editingId ? "Edit Material Issue" : "New Material Issue"}
             </CardTitle>
@@ -806,7 +960,7 @@ export default function Issues() {
           </CardHeader>
 
           <CardContent className="p-5 space-y-4">
-            {/* Doc number / Type of Doc */}
+            {/* Doc number */}
             <div className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3">
               <FileText size={13} className="text-muted-foreground shrink-0" />
               <span className="text-xs text-muted-foreground font-medium uppercase tracking-widest mr-2 whitespace-nowrap">
@@ -835,140 +989,98 @@ export default function Issues() {
               )}
             </div>
 
-            {/* Reference Source row */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Field label="Reference Source">
-                <Select
-                  value={header.referenceType || "__none__"}
-                  onValueChange={handleReferenceTypeChange}
-                >
-                  <SelectTrigger className="h-9 gap-2">
-                    <FileText
-                      size={13}
-                      className="text-muted-foreground shrink-0"
-                    />
-                    <SelectValue placeholder="None (optional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">None</SelectItem>
-                    <SelectItem value="GRN">
-                      GRN (Goods Receipt Note)
-                    </SelectItem>
-                    <SelectItem value="MR">MR (Material Request)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
+            {/* ── Godown selector — prominent, full-width banner ── */}
+            <div className="rounded-xl border-2 border-primary/20 bg-gradient-to-r from-primary/5 to-primary/10 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Warehouse size={16} className="text-primary" />
+                <span className="text-sm font-semibold text-foreground">
+                  Source Godown
+                </span>
+                <span className="text-destructive text-sm">*</span>
+                <span className="text-xs text-muted-foreground ml-1">
+                  Stock will be deducted from this godown
+                </span>
+              </div>
 
-              {header.referenceType ? (
-                <Field
-                  label={
-                    header.referenceType === "GRN"
-                      ? "Select GRN"
-                      : "Select Material Request"
-                  }
-                >
-                  {loadingPrefill ? (
-                    <div className="flex items-center gap-2 h-9 px-3 rounded-md border border-border bg-muted/30 text-sm text-muted-foreground">
-                      <RefreshCw size={13} className="animate-spin" />
-                      Loading details…
+              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                <div className="flex-1 min-w-0">
+                  <Select
+                    value={header.godownId}
+                    onValueChange={handleGodownChange}
+                  >
+                    <SelectTrigger className="h-10 bg-background border-primary/30 focus:ring-primary/30 gap-2 text-sm font-medium">
+                      <Warehouse size={14} className="text-primary shrink-0" />
+                      <SelectValue
+                        placeholder={
+                          loadingGodowns ? "Loading godowns…" : "Select godown"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(godowns as any[]).map((g) => (
+                        <SelectItem key={g.id} value={String(g.id)}>
+                          <div className="flex items-center gap-2">
+                            <Warehouse size={12} className="text-primary/70" />
+                            <span className="font-medium">{g.name}</span>
+                            {g.code && (
+                              <span className="font-mono text-xs text-muted-foreground">
+                                ({g.code})
+                              </span>
+                            )}
+                            {g.isMain && (
+                              <span className="px-1.5 py-0 rounded bg-primary/15 text-primary text-[10px] font-bold uppercase tracking-wider">
+                                Main
+                              </span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Stock summary for selected godown */}
+                {selectedGodown && !loadingItems && (
+                  <div className="flex items-center gap-3 shrink-0 text-xs">
+                    <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-background border border-border">
+                      <Layers size={12} className="text-muted-foreground" />
+                      <span className="text-muted-foreground">Items:</span>
+                      <span className="font-semibold text-foreground">
+                        {(itemOptions as any[]).length}
+                      </span>
                     </div>
-                  ) : (
-                    <Select
-                      value={header.referenceId}
-                      onValueChange={(val) => {
-                        const sep = val.indexOf("||");
-                        const selId = val.slice(0, sep);
-                        const selDocNo = val.slice(sep + 2);
-                        handleReferenceDocSelect(selId, selDocNo);
-                      }}
-                    >
-                      <SelectTrigger className="h-9 gap-2">
-                        <FileText
-                          size={13}
-                          className="text-muted-foreground shrink-0"
+                    {lowStockItems > 0 && (
+                      <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                        <AlertTriangle
+                          size={12}
+                          className="text-amber-600 dark:text-amber-400"
                         />
-                        <SelectValue
-                          placeholder={
-                            header.referenceType === "GRN"
-                              ? loadingGrnList
-                                ? "Loading GRNs…"
-                                : "Select a GRN"
-                              : loadingMrList
-                                ? "Loading MRs…"
-                                : "Select a Material Request"
-                          }
-                        />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-64">
-                        {header.referenceType === "GRN" &&
-                          (grnList.length === 0 ? (
-                            <div className="px-3 py-2 text-xs text-muted-foreground">
-                              No GRNs found
-                            </div>
-                          ) : (
-                            grnList.map((g) => (
-                              <SelectItem
-                                key={g.id}
-                                value={`${g.id}||${g.docNo}`}
-                              >
-                                <span className="font-mono text-xs">
-                                  {g.docNo || `GRN #${g.id}`}
-                                </span>
-                              </SelectItem>
-                            ))
-                          ))}
-                        {header.referenceType === "MR" &&
-                          (mrList.length === 0 ? (
-                            <div className="px-3 py-2 text-xs text-muted-foreground">
-                              No MRs found
-                            </div>
-                          ) : (
-                            mrList.map((m) => (
-                              <SelectItem
-                                key={m.id}
-                                value={`${m.id}||${m.docNo}`}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono text-xs">
-                                    {m.docNo || `MR #${m.id}`}
-                                  </span>
-                                  {m.status && (
-                                    <span
-                                      className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                                        m.status === "Approved"
-                                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                                          : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                                      }`}
-                                    >
-                                      {m.status}
-                                    </span>
-                                  )}
-                                </div>
-                              </SelectItem>
-                            ))
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  {header.referenceDocNo && !loadingPrefill && (
-                    <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-medium flex items-center gap-1">
-                      <CheckCircle2 size={11} /> Loaded: {header.referenceDocNo}
-                    </p>
-                  )}
-                </Field>
-              ) : (
-                <div />
-              )}
+                        <span className="text-amber-700 dark:text-amber-400 font-medium">
+                          {lowStockItems} out of stock
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
-              <Field label="Issued To (Dept / Employee / Project)">
-                <Input
-                  value={header.issuedTo}
-                  onChange={(e) => setH("issuedTo", e.target.value)}
-                  className="h-9 text-sm"
-                  placeholder="Department, employee, or project name…"
-                />
-              </Field>
+              {/* Hint: changing godown resets cart */}
+              {cart.some((ci) => ci.ItemId) && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-2 flex items-center gap-1">
+                  <AlertTriangle size={10} />
+                  Changing the godown will reset all added items
+                </p>
+              )}
             </div>
+
+            {/* ── Godown stock stat card — visible once a godown is chosen ── */}
+            {header.godownId && (
+              <GodownStockStats
+                items={itemOptions as any[]}
+                loading={loadingItems}
+                godownName={selectedGodown?.name}
+              />
+            )}
 
             {/* Row 1: Company | Project | Fin Year | Date */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -1071,7 +1183,43 @@ export default function Issues() {
               </Field>
             </div>
 
-            {/* Row 2: Reason | Remarks */}
+            {/* Row 2: Issued To | Cost Center | Purpose */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Field label="Issued To (Dept / Employee)">
+                <div className="relative">
+                  <User
+                    size={13}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <Input
+                    value={header.issuedTo}
+                    onChange={(e) => setH("issuedTo", e.target.value)}
+                    className="pl-9 h-9 text-sm"
+                    placeholder="Dept, employee, or project name…"
+                  />
+                </div>
+              </Field>
+
+              <Field label="Cost Center / GL Account">
+                <Input
+                  value={header.costCenter}
+                  onChange={(e) => setH("costCenter", e.target.value)}
+                  className="h-9 text-sm"
+                  placeholder="Cost centre or GL code…"
+                />
+              </Field>
+
+              <Field label="Purpose of Consumption">
+                <Input
+                  value={header.purpose}
+                  onChange={(e) => setH("purpose", e.target.value)}
+                  className="h-9 text-sm"
+                  placeholder="Brief purpose or work order ref…"
+                />
+              </Field>
+            </div>
+
+            {/* Row 3: Reason | Remarks */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field label="Reason for Issue" required>
                 <Textarea
@@ -1092,30 +1240,10 @@ export default function Issues() {
                 />
               </Field>
             </div>
-
-            {/* Row 4: Cost Center | Purpose */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="Cost Center / GL Account">
-                <Input
-                  value={header.costCenter}
-                  onChange={(e) => setH("costCenter", e.target.value)}
-                  className="h-9 text-sm"
-                  placeholder="Cost centre or GL code…"
-                />
-              </Field>
-              <Field label="Purpose of Consumption">
-                <Input
-                  value={header.purpose}
-                  onChange={(e) => setH("purpose", e.target.value)}
-                  className="h-9 text-sm"
-                  placeholder="Brief purpose or work order reference…"
-                />
-              </Field>
-            </div>
           </CardContent>
         </Card>
 
-        {/* ── Cart card ── */}
+        {/* ── Items cart card ── */}
         <Card className="border-border shadow-sm">
           <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -1124,6 +1252,14 @@ export default function Issues() {
               <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-semibold">
                 {cart.length}
               </span>
+              {/* Godown pill — reminds user which godown stock is from */}
+              {selectedGodown && (
+                <GodownBadge
+                  name={selectedGodown.name}
+                  code={selectedGodown.code}
+                  isMain={selectedGodown.isMain}
+                />
+              )}
               {hasStockError && (
                 <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-destructive/10 text-destructive text-xs font-semibold">
                   <AlertTriangle size={10} /> Stock exceeded
@@ -1135,235 +1271,278 @@ export default function Issues() {
               variant="outline"
               size="sm"
               onClick={addCartRow}
+              disabled={!header.godownId}
               className="gap-1.5 h-8 text-xs"
+              title={!header.godownId ? "Select a godown first" : undefined}
             >
               <Plus size={13} /> Add Item
             </Button>
           </CardHeader>
 
           <CardContent className="p-4 space-y-3">
-            {cart.map((ci, idx) => {
-              const availStock = getStockForRow(ci._key, ci.ItemId);
-              const reqQty = Number(ci.Quantity) || 0;
-              const isOver = reqQty > 0 && reqQty > availStock;
-              const uomObj = uomMap[ci.UOMCode];
-              const stockPct =
-                availStock > 0 ? Math.min((reqQty / availStock) * 100, 100) : 0;
-
-              return (
-                <div
-                  key={ci._key}
-                  className={`rounded-lg border transition-colors ${
-                    isOver
-                      ? "border-destructive/50 bg-destructive/5"
-                      : "border-border bg-muted/10 hover:bg-muted/20"
-                  }`}
-                >
-                  {/* Row top: index + item select + remove */}
-                  <div className="flex items-center gap-3 px-3 pt-3 pb-2">
-                    <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">
-                      {idx + 1}
-                    </span>
-
-                    <div className="flex-1 min-w-0">
-                      <Select
-                        value={ci.ItemId}
-                        onValueChange={(v) => pickItem(ci._key, v)}
-                      >
-                        <SelectTrigger
-                          className={`h-9 ${isOver ? "border-destructive" : ""}`}
-                        >
-                          <div className="flex items-center gap-2 min-w-0 text-sm">
-                            <Box
-                              size={12}
-                              className="text-muted-foreground shrink-0"
-                            />
-                            <SelectValue
-                              placeholder={
-                                loadingItems ? "Loading…" : "Select item"
-                              }
-                            />
-                          </div>
-                        </SelectTrigger>
-                        <SelectContent className="max-h-64">
-                          {(itemOptions as any[]).map((item) => (
-                            <SelectItem
-                              key={item.M_Id}
-                              value={String(item.M_Id)}
-                            >
-                              <div className="flex flex-col">
-                                <span>{item.M_Name}</span>
-                                <span
-                                  className={`text-xs ${Number(item.AvailableStock) <= 0 ? "text-destructive" : "text-muted-foreground"}`}
-                                >
-                                  Stock:{" "}
-                                  {Number(item.AvailableStock).toFixed(2)}
-                                  {item.M_Group && ` · ${item.M_Group}`}
-                                </span>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => removeCartRow(ci._key)}
-                      disabled={cart.length === 1}
-                      title="Remove"
-                      className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-
-                  {/* Row bottom: UOM + Qty + stock status */}
-                  <div className="grid grid-cols-2 gap-3 px-3 pb-3">
-                    {/* UOM */}
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                        Unit (UOM) *
-                      </label>
-                      <Select
-                        value={ci.UOMCode}
-                        onValueChange={(v) =>
-                          updateCartItem(ci._key, "UOMCode", v)
-                        }
-                      >
-                        <SelectTrigger className="h-9">
-                          <div className="flex items-center gap-2 min-w-0 text-sm">
-                            <Ruler
-                              size={12}
-                              className="text-muted-foreground shrink-0"
-                            />
-                            <SelectValue
-                              placeholder={
-                                loadingUoms ? "Loading…" : "Select UOM"
-                              }
-                            />
-                          </div>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(uoms as any[]).map((u) => (
-                            <SelectItem key={u.UOMCode} value={u.UOMCode}>
-                              {u.UOMName}
-                              {u.Symbol && (
-                                <span className="text-muted-foreground ml-1">
-                                  ({u.Symbol})
-                                </span>
-                              )}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* Quantity */}
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                        Quantity *
-                      </label>
-                      <div className="relative">
-                        <Hash
-                          size={12}
-                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                        />
-                        <Input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={ci.Quantity}
-                          onChange={(e) =>
-                            updateCartItem(ci._key, "Quantity", e.target.value)
-                          }
-                          className={`pl-8 h-9 font-mono text-sm ${isOver ? "border-destructive text-destructive focus-visible:ring-destructive" : ""}`}
-                          placeholder="0.00"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Stock bar + remarks — only when item selected */}
-                  {ci.ItemId && (
-                    <div className="border-t border-border/60 mx-3 pt-2.5 pb-3 space-y-2">
-                      {/* Stock indicator */}
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground flex items-center gap-1">
-                          <BarChart3 size={10} />
-                          Available:{" "}
-                          <span className="font-semibold text-foreground ml-0.5">
-                            {availStock.toFixed(2)}{" "}
-                            {uomObj?.Symbol || ci.UOMCode}
-                          </span>
-                        </span>
-                        {isOver ? (
-                          <span className="flex items-center gap-1 font-semibold text-destructive">
-                            <AlertTriangle size={10} /> Exceeds stock
-                          </span>
-                        ) : reqQty > 0 ? (
-                          <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                            Remaining: {(availStock - reqQty).toFixed(2)}{" "}
-                            {uomObj?.Symbol || ci.UOMCode}
-                          </span>
-                        ) : null}
-                      </div>
-                      {/* Progress bar */}
-                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all ${
-                            isOver
-                              ? "bg-destructive"
-                              : stockPct > 80
-                                ? "bg-amber-500"
-                                : "bg-emerald-500"
-                          }`}
-                          style={{ width: `${isOver ? 100 : stockPct}%` }}
-                        />
-                      </div>
-                      {/* Remarks */}
-                      <Input
-                        value={ci.Remarks}
-                        onChange={(e) =>
-                          updateCartItem(ci._key, "Remarks", e.target.value)
-                        }
-                        placeholder="Line remarks (optional)"
-                        className="h-8 text-xs"
-                      />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-
-            {/* Footer summary */}
-            {cart.some((ci) => ci.ItemId && ci.Quantity) && (
-              <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-4 py-2.5 text-sm">
-                <div className="flex items-center gap-3 text-muted-foreground">
-                  <Package size={13} />
-                  <span>
-                    <span className="font-semibold text-foreground">
-                      {cart.filter((ci) => ci.ItemId).length}
-                    </span>{" "}
-                    item{cart.filter((ci) => ci.ItemId).length !== 1 ? "s" : ""}{" "}
-                    ·{" "}
-                    <span className="font-semibold text-foreground font-mono">
-                      {totalCartQty.toFixed(2)}
-                    </span>{" "}
-                    units total
-                  </span>
-                </div>
-                {hasStockError ? (
-                  <span className="flex items-center gap-1.5 text-destructive font-medium">
-                    <AlertTriangle size={13} /> Stock limit exceeded
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
-                    <CheckCircle2 size={13} /> Within stock limits
-                  </span>
-                )}
+            {/* Prompt if no godown selected */}
+            {!header.godownId && (
+              <div className="flex flex-col items-center justify-center py-10 gap-3 text-center">
+                <Warehouse size={32} className="text-muted-foreground/40" />
+                <p className="text-sm text-muted-foreground">
+                  Select a source godown above to load available items
+                </p>
               </div>
             )}
+
+            {header.godownId && loadingItems && (
+              <div className="flex items-center justify-center h-24 gap-2 text-muted-foreground text-sm">
+                <RefreshCw size={14} className="animate-spin" />
+                Loading stock from {selectedGodown?.name ?? "godown"}…
+              </div>
+            )}
+
+            {header.godownId &&
+              !loadingItems &&
+              cart.map((ci, idx) => {
+                const availStock = getStockForRow(ci._key, ci.ItemId);
+                const reqQty = Number(ci.Quantity) || 0;
+                const isOver = reqQty > 0 && reqQty > availStock;
+                const uomObj = uomMap[ci.UOMCode];
+                const stockPct =
+                  availStock > 0
+                    ? Math.min((reqQty / availStock) * 100, 100)
+                    : 0;
+
+                return (
+                  <div
+                    key={ci._key}
+                    className={`rounded-lg border transition-colors ${
+                      isOver
+                        ? "border-destructive/50 bg-destructive/5"
+                        : "border-border bg-muted/10 hover:bg-muted/20"
+                    }`}
+                  >
+                    {/* Row top: index + item select + remove */}
+                    <div className="flex items-center gap-3 px-3 pt-3 pb-2">
+                      <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">
+                        {idx + 1}
+                      </span>
+
+                      <div className="flex-1 min-w-0">
+                        <Select
+                          value={ci.ItemId}
+                          onValueChange={(v) => pickItem(ci._key, v)}
+                        >
+                          <SelectTrigger
+                            className={`h-9 ${isOver ? "border-destructive" : ""}`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0 text-sm">
+                              <Box
+                                size={12}
+                                className="text-muted-foreground shrink-0"
+                              />
+                              <SelectValue
+                                placeholder={
+                                  loadingItems ? "Loading…" : "Select item"
+                                }
+                              />
+                            </div>
+                          </SelectTrigger>
+                          <SelectContent className="max-h-64">
+                            {(itemOptions as any[]).length === 0 ? (
+                              <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                                No items found in{" "}
+                                {selectedGodown?.name ?? "this godown"}
+                              </div>
+                            ) : (
+                              (itemOptions as any[]).map((item) => (
+                                <SelectItem
+                                  key={item.M_Id}
+                                  value={String(item.M_Id)}
+                                >
+                                  <div className="flex flex-col">
+                                    <span>{item.M_Name}</span>
+                                    <span
+                                      className={`text-xs ${
+                                        Number(item.AvailableStock) <= 0
+                                          ? "text-destructive"
+                                          : "text-muted-foreground"
+                                      }`}
+                                    >
+                                      Stock:{" "}
+                                      {Number(item.AvailableStock).toFixed(2)}
+                                      {item.M_Group && ` · ${item.M_Group}`}
+                                    </span>
+                                  </div>
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => removeCartRow(ci._key)}
+                        disabled={cart.length === 1}
+                        title="Remove"
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+
+                    {/* Row bottom: UOM + Qty */}
+                    <div className="grid grid-cols-2 gap-3 px-3 pb-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                          Unit (UOM) *
+                        </label>
+                        <Select
+                          value={ci.UOMCode}
+                          onValueChange={(v) =>
+                            updateCartItem(ci._key, "UOMCode", v)
+                          }
+                        >
+                          <SelectTrigger className="h-9">
+                            <div className="flex items-center gap-2 min-w-0 text-sm">
+                              <Ruler
+                                size={12}
+                                className="text-muted-foreground shrink-0"
+                              />
+                              <SelectValue
+                                placeholder={
+                                  loadingUoms ? "Loading…" : "Select UOM"
+                                }
+                              />
+                            </div>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(uoms as any[]).map((u) => (
+                              <SelectItem key={u.UOMCode} value={u.UOMCode}>
+                                {u.UOMName}
+                                {u.Symbol && (
+                                  <span className="text-muted-foreground ml-1">
+                                    ({u.Symbol})
+                                  </span>
+                                )}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                          Quantity *
+                        </label>
+                        <div className="relative">
+                          <Hash
+                            size={12}
+                            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                          />
+                          <Input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={ci.Quantity}
+                            onChange={(e) =>
+                              updateCartItem(
+                                ci._key,
+                                "Quantity",
+                                e.target.value,
+                              )
+                            }
+                            className={`pl-8 h-9 font-mono text-sm ${
+                              isOver
+                                ? "border-destructive text-destructive focus-visible:ring-destructive"
+                                : ""
+                            }`}
+                            placeholder="0.00"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Stock bar + remarks — only when item selected */}
+                    {ci.ItemId && (
+                      <div className="border-t border-border/60 mx-3 pt-2.5 pb-3 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground flex items-center gap-1">
+                            <BarChart3 size={10} />
+                            Available in{" "}
+                            <span className="font-medium text-foreground mx-0.5">
+                              {selectedGodown?.name}
+                            </span>
+                            :{" "}
+                            <span className="font-semibold text-foreground ml-0.5">
+                              {availStock.toFixed(2)}{" "}
+                              {uomObj?.Symbol || ci.UOMCode}
+                            </span>
+                          </span>
+                          {isOver ? (
+                            <span className="flex items-center gap-1 font-semibold text-destructive">
+                              <AlertTriangle size={10} /> Exceeds stock
+                            </span>
+                          ) : reqQty > 0 ? (
+                            <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                              Remaining: {(availStock - reqQty).toFixed(2)}{" "}
+                              {uomObj?.Symbol || ci.UOMCode}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${
+                              isOver
+                                ? "bg-destructive"
+                                : stockPct > 80
+                                  ? "bg-amber-500"
+                                  : "bg-emerald-500"
+                            }`}
+                            style={{ width: `${isOver ? 100 : stockPct}%` }}
+                          />
+                        </div>
+                        <Input
+                          value={ci.Remarks}
+                          onChange={(e) =>
+                            updateCartItem(ci._key, "Remarks", e.target.value)
+                          }
+                          placeholder="Line remarks (optional)"
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+            {/* Footer summary */}
+            {header.godownId &&
+              !loadingItems &&
+              cart.some((ci) => ci.ItemId && ci.Quantity) && (
+                <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-4 py-2.5 text-sm">
+                  <div className="flex items-center gap-3 text-muted-foreground">
+                    <Package size={13} />
+                    <span>
+                      <span className="font-semibold text-foreground">
+                        {cart.filter((ci) => ci.ItemId).length}
+                      </span>{" "}
+                      item
+                      {cart.filter((ci) => ci.ItemId).length !== 1 ? "s" : ""} ·{" "}
+                      <span className="font-semibold text-foreground font-mono">
+                        {totalCartQty.toFixed(2)}
+                      </span>{" "}
+                      units total
+                    </span>
+                  </div>
+                  {hasStockError ? (
+                    <span className="flex items-center gap-1.5 text-destructive font-medium">
+                      <AlertTriangle size={13} /> Stock limit exceeded
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
+                      <CheckCircle2 size={13} /> Within stock limits
+                    </span>
+                  )}
+                </div>
+              )}
           </CardContent>
         </Card>
 
@@ -1392,7 +1571,9 @@ export default function Issues() {
           {!canSave && (
             <span className="text-xs text-muted-foreground">
               {!headerIsValid
-                ? "Fill required header fields"
+                ? !header.godownId
+                  ? "Select a source godown"
+                  : "Fill all required header fields"
                 : "Fix cart errors above"}
             </span>
           )}
@@ -1437,8 +1618,8 @@ export default function Issues() {
               </Button>
             </div>
           </CardHeader>
-          <CardContent className="p-5">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-5 mb-5">
+          <CardContent className="p-5 space-y-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
               <DetailRow
                 label="Doc No"
                 value={
@@ -1469,18 +1650,19 @@ export default function Issues() {
                 label="Status"
                 value={<StatusBadge status={viewingRecord.Status || "Draft"} />}
               />
-              {viewingRecord.ReferenceType && (
-                <DetailRow
-                  label="Reference"
-                  value={
-                    <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded">
-                      {viewingRecord.ReferenceType}:{" "}
-                      {viewingRecord.ReferenceDocNo ||
-                        viewingRecord.ReferenceId}
-                    </span>
-                  }
-                />
-              )}
+              <DetailRow
+                label="Source Godown"
+                value={
+                  viewingRecord.GodownName ? (
+                    <GodownBadge
+                      name={viewingRecord.GodownName}
+                      code={viewingRecord.GodownCode}
+                    />
+                  ) : (
+                    "—"
+                  )
+                }
+              />
               {viewingRecord.IssuedTo && (
                 <DetailRow label="Issued To" value={viewingRecord.IssuedTo} />
               )}
@@ -1488,6 +1670,13 @@ export default function Issues() {
                 <DetailRow
                   label="Cost Center"
                   value={viewingRecord.CostCenter}
+                />
+              )}
+              {viewingRecord.Purpose && (
+                <DetailRow
+                  label="Purpose"
+                  value={viewingRecord.Purpose}
+                  className="col-span-2"
                 />
               )}
             </div>
@@ -1509,16 +1698,6 @@ export default function Issues() {
                 </div>
               </div>
             </div>
-            {viewingRecord.Purpose && (
-              <div>
-                <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
-                  Purpose of Consumption
-                </p>
-                <div className="bg-muted/40 border border-border rounded-lg p-3 text-sm">
-                  {viewingRecord.Purpose}
-                </div>
-              </div>
-            )}
           </CardContent>
         </Card>
 
@@ -1531,6 +1710,14 @@ export default function Issues() {
               <Badge variant="secondary" className="text-xs">
                 {items.length}
               </Badge>
+              {viewingRecord.GodownName && (
+                <span className="ml-1">
+                  <GodownBadge
+                    name={viewingRecord.GodownName}
+                    code={viewingRecord.GodownCode}
+                  />
+                </span>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
@@ -1538,7 +1725,7 @@ export default function Issues() {
               <span>Item</span>
               <span>UOM</span>
               <span>Quantity</span>
-              <span>Current Stock</span>
+              <span>Balance After</span>
               <span>Remarks</span>
             </div>
             <div className="divide-y divide-border">
@@ -1569,7 +1756,11 @@ export default function Issues() {
                       {Number(it.Quantity).toFixed(2)}
                     </span>
                     <span
-                      className={`font-mono text-xs font-semibold ${Number(it.CurrentBalance) < 0 ? "text-destructive" : "text-emerald-600 dark:text-emerald-400"}`}
+                      className={`font-mono text-xs font-semibold ${
+                        Number(it.CurrentBalance) < 0
+                          ? "text-destructive"
+                          : "text-emerald-600 dark:text-emerald-400"
+                      }`}
                     >
                       {Number(it.CurrentBalance).toFixed(2)} {it.UOMSymbol}
                     </span>
@@ -1603,14 +1794,13 @@ export default function Issues() {
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "Issues"]} />
       <div className="relative space-y-8 mt-6">
-        {/* ── Page header ── */}
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-xl font-heading font-bold text-foreground">
               Material Issues
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Issue stock items to projects with real-time availability
+              Issue stock items from a godown with real-time availability
               tracking.
             </p>
           </div>
@@ -1633,7 +1823,6 @@ export default function Issues() {
         {viewMode === "form" && IssueForm()}
         {viewMode === "view" && IssueView()}
       </div>
-      {/* end space-y-8 */}
     </>
   );
 }
