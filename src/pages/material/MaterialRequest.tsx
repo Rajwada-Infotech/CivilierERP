@@ -872,11 +872,11 @@ export default function MaterialRequest() {
                   size={13}
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                 />
-                <Input
+                <input
                   type="date"
                   value={header.requestDate}
                   onChange={(e) => setH("requestDate", e.target.value)}
-                  className="pl-9 h-9"
+                  className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                 />
               </div>
             </Field>
@@ -886,11 +886,11 @@ export default function MaterialRequest() {
                   size={13}
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                 />
-                <Input
+                <input
                   type="date"
                   value={header.requiredByDate}
                   onChange={(e) => setH("requiredByDate", e.target.value)}
-                  className="pl-9 h-9"
+                  className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                 />
               </div>
             </Field>
@@ -1149,19 +1149,11 @@ export default function MaterialRequest() {
       </Card>
 
       {/* Save bar */}
-      <div className="flex items-center gap-3 pt-1">
-        <Button
-          variant="outline"
-          onClick={goToList}
-          disabled={isSaving}
-          className="px-6"
-        >
-          Cancel
-        </Button>
+      <div className="flex items-center justify-center gap-3 pt-1">
         <Button
           onClick={onSave}
           disabled={!canSave || isSaving}
-          className="gradient-accent px-6 gap-2"
+          className="gradient-accent px-5 py-2 text-sm h-auto font-semibold text-white gap-2"
         >
           {isSaving ? (
             <RefreshCw size={14} className="animate-spin" />
@@ -1170,13 +1162,14 @@ export default function MaterialRequest() {
           )}
           {isSaving ? "Saving…" : editingId ? "Update Request" : "Save Request"}
         </Button>
-        {!canSave && (
-          <span className="text-xs text-muted-foreground">
-            {!headerIsValid
-              ? "Fill required header fields"
-              : "Complete all cart items"}
-          </span>
-        )}
+        <Button
+          variant="outline"
+          onClick={goToList}
+          disabled={isSaving}
+          className="px-5 py-2 text-sm h-auto font-semibold"
+        >
+          Cancel
+        </Button>
       </div>
     </div>
   );
@@ -1399,7 +1392,7 @@ export default function MaterialRequest() {
           {viewMode === "list" && (
             <Button
               onClick={() => setViewMode("form")}
-              className="gradient-accent gap-1.5 shrink-0"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               <Plus size={15} /> New Request
             </Button>

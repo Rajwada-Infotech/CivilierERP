@@ -64,6 +64,8 @@ import {
   Link2,
   Printer,
   Receipt,
+  ChevronDown,
+  CalendarDays,
 } from "lucide-react";
 
 // ─── PO Chain Status Hook ─────────────────────────────────────────────────────
@@ -224,13 +226,13 @@ const inputCls =
   "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer";
 
 const selectCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none";
+  "w-full text-sm rounded-lg border border-border px-3 py-2.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none";
 
 const cellInput =
   "w-full text-sm rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
 
 const cellSelect =
-  "w-full text-sm rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none";
+  "w-full text-sm rounded-md border border-border px-2.5 py-1.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none";
 
 const FieldLabel: React.FC<{
   children: React.ReactNode;
@@ -1507,7 +1509,7 @@ const PurchaseOrderMaster: React.FC = () => {
           </div>
           <button
             onClick={goToCreate}
-            className="gradient-accent inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition shrink-0"
+            className="gradient-accent inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition shrink-0"
           >
             <Plus size={16} />
             New Purchase Order
@@ -1785,14 +1787,14 @@ const PurchaseOrderMaster: React.FC = () => {
                 project and financial year.
               </p>
               <div className="flex items-start gap-2">
-                <div className="flex-1">
+                <div className="flex-1 relative">
                   <select
                     value={mrDropdownValue}
                     onChange={(e) =>
                       void handleMRDropdownSelect(e.target.value)
                     }
                     disabled={approvedMRsLoading || mrDropdownLoading}
-                    className={`${inputCls} ${mrDropdownError ? "border-red-400" : ""}`}
+                    className={`${inputCls} pr-8 appearance-none ${mrDropdownError ? "border-red-400" : ""}`}
                   >
                     <option value="">
                       {approvedMRsLoading
@@ -1809,6 +1811,7 @@ const PurchaseOrderMaster: React.FC = () => {
                       </option>
                     ))}
                   </select>
+                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                   {mrDropdownError && (
                     <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
                       <AlertCircle size={11} />
@@ -1880,23 +1883,26 @@ const PurchaseOrderMaster: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <FieldLabel>Financial Year</FieldLabel>
-                <select
-                  value={selectedFinYear ?? ""}
-                  onChange={(e) => {
-                    const nextFinYear = e.target.value || undefined;
-                    setSelectedFinYear(nextFinYear);
-                    if (poDocTypeId)
-                      void refreshPoDocNumber(poDocTypeId, nextFinYear);
-                  }}
-                  className={selectCls}
-                >
-                  <option value="">Select Fin Year…</option>
-                  {finYearOptions.map((fy) => (
-                    <option key={fy.id} value={fy.year}>
-                      {fy.year}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <select
+                    value={selectedFinYear ?? ""}
+                    onChange={(e) => {
+                      const nextFinYear = e.target.value || undefined;
+                      setSelectedFinYear(nextFinYear);
+                      if (poDocTypeId)
+                        void refreshPoDocNumber(poDocTypeId, nextFinYear);
+                    }}
+                    className={selectCls}
+                  >
+                    <option value="">Select Fin Year…</option>
+                    {finYearOptions.map((fy) => (
+                      <option key={fy.id} value={fy.year}>
+                        {fy.year}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                </div>
               </div>
               <div>
                 <FieldLabel>Document Type &amp; Number</FieldLabel>
@@ -1960,18 +1966,21 @@ const PurchaseOrderMaster: React.FC = () => {
                   {companies.find((c) => c.id === form.companyId)?.name || "—"}
                 </div>
               ) : (
-                <select
-                  value={form.companyId}
-                  onChange={(e) => setField("companyId", e.target.value)}
-                  className={`${selectCls} ${errors.companyId ? "border-red-400" : ""}`}
-                >
-                  <option value="">— Select Company —</option>
-                  {companies.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <select
+                    value={form.companyId}
+                    onChange={(e) => setField("companyId", e.target.value)}
+                    className={`${selectCls} ${errors.companyId ? "border-red-400" : ""}`}
+                  >
+                    <option value="">— Select Company —</option>
+                    {companies.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                </div>
               )}
               {errors.companyId && (
                 <p className="text-xs text-destructive mt-1">
@@ -1989,18 +1998,21 @@ const PurchaseOrderMaster: React.FC = () => {
                     "—"}
                 </div>
               ) : (
-                <select
-                  value={form.projectId}
-                  onChange={(e) => setField("projectId", e.target.value)}
-                  className={`${selectCls} ${errors.projectId ? "border-red-400" : ""}`}
-                >
-                  <option value="">— Select Project —</option>
-                  {allProjects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <select
+                    value={form.projectId}
+                    onChange={(e) => setField("projectId", e.target.value)}
+                    className={`${selectCls} ${errors.projectId ? "border-red-400" : ""}`}
+                  >
+                    <option value="">— Select Project —</option>
+                    {allProjects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                </div>
               )}
               {errors.projectId && (
                 <p className="text-xs text-destructive mt-1">
@@ -2017,18 +2029,21 @@ const PurchaseOrderMaster: React.FC = () => {
                   {suppliers.find((s) => s.id === form.supplierId)?.name || "—"}
                 </div>
               ) : (
-                <select
-                  value={form.supplierId}
-                  onChange={(e) => setField("supplierId", e.target.value)}
-                  className={`${selectCls} ${errors.supplierId ? "border-red-400" : ""}`}
-                >
-                  <option value="">— Select Supplier —</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <select
+                    value={form.supplierId}
+                    onChange={(e) => setField("supplierId", e.target.value)}
+                    className={`${selectCls} ${errors.supplierId ? "border-red-400" : ""}`}
+                  >
+                    <option value="">— Select Supplier —</option>
+                    {suppliers.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                </div>
               )}
             </div>
 
@@ -2057,25 +2072,31 @@ const PurchaseOrderMaster: React.FC = () => {
             {/* PO Date */}
             <div>
               <FieldLabel required>PO Date</FieldLabel>
-              <input
-                type="date"
-                value={form.poDate}
-                onChange={(e) => setField("poDate", e.target.value)}
-                readOnly={isReadOnly}
-                className={`${inputCls} ${errors.poDate ? "border-red-400" : ""} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
-              />
+              <div className="relative">
+                <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                <input
+                  type="date"
+                  value={form.poDate}
+                  onChange={(e) => setField("poDate", e.target.value)}
+                  readOnly={isReadOnly}
+                  className={`${inputCls} pl-8 ${errors.poDate ? "border-red-400" : ""} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+                />
+              </div>
             </div>
 
             {/* Expected Delivery */}
             <div>
               <FieldLabel>Expected Delivery</FieldLabel>
-              <input
-                type="date"
-                value={form.expectedDate}
-                onChange={(e) => setField("expectedDate", e.target.value)}
-                readOnly={isReadOnly}
-                className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
-              />
+              <div className="relative">
+                <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                <input
+                  type="date"
+                  value={form.expectedDate}
+                  onChange={(e) => setField("expectedDate", e.target.value)}
+                  readOnly={isReadOnly}
+                  className={`${inputCls} pl-8 ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -2159,20 +2180,23 @@ const PurchaseOrderMaster: React.FC = () => {
                           {li.itemName || "—"}
                         </span>
                       ) : (
-                        <select
-                          value={li.itemId}
-                          onChange={(e) =>
-                            handleItemSelect(idx, e.target.value)
-                          }
-                          className={cellSelect}
-                        >
-                          <option value="">— Select Item —</option>
-                          {items.map((item) => (
-                            <option key={item.id} value={item.id}>
-                              {item.name}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="relative">
+                          <select
+                            value={li.itemId}
+                            onChange={(e) =>
+                              handleItemSelect(idx, e.target.value)
+                            }
+                            className={cellSelect}
+                          >
+                            <option value="">— Select Item —</option>
+                            {items.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                        </div>
                       )}
                     </td>
 
@@ -2222,35 +2246,38 @@ const PurchaseOrderMaster: React.FC = () => {
                           {li.unit || "—"}
                         </span>
                       ) : (
-                        <select
-                          value={
-                            li.uomId ??
-                            uoms.find(
-                              (u) =>
-                                u.name.toLowerCase() ===
-                                  li.unit.toLowerCase() ||
-                                u.code.toLowerCase() === li.unit.toLowerCase(),
-                            )?.id ??
-                            ""
-                          }
-                          onChange={(e) => {
-                            const uom = uoms.find(
-                              (u) => u.id === Number(e.target.value),
-                            );
-                            updateLine(idx, {
-                              uomId: uom?.id ?? null,
-                              unit: uom?.name ?? "",
-                            });
-                          }}
-                          className={cellSelect}
-                        >
-                          <option value="">— UOM —</option>
-                          {uoms.map((u) => (
-                            <option key={u.id} value={u.id}>
-                              {u.name}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="relative">
+                          <select
+                            value={
+                              li.uomId ??
+                              uoms.find(
+                                (u) =>
+                                  u.name.toLowerCase() ===
+                                    li.unit.toLowerCase() ||
+                                  u.code.toLowerCase() === li.unit.toLowerCase(),
+                              )?.id ??
+                              ""
+                            }
+                            onChange={(e) => {
+                              const uom = uoms.find(
+                                (u) => u.id === Number(e.target.value),
+                              );
+                              updateLine(idx, {
+                                uomId: uom?.id ?? null,
+                                unit: uom?.name ?? "",
+                              });
+                            }}
+                            className={cellSelect}
+                          >
+                            <option value="">— UOM —</option>
+                            {uoms.map((u) => (
+                              <option key={u.id} value={u.id}>
+                                {u.name}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                        </div>
                       )}
                     </td>
 
@@ -2684,7 +2711,7 @@ const PurchaseOrderMaster: React.FC = () => {
           <div className="flex items-center justify-end gap-3 pb-6">
             <button
               onClick={goToList}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition"
             >
               <RotateCcw size={14} />
               Cancel
@@ -2692,7 +2719,7 @@ const PurchaseOrderMaster: React.FC = () => {
             <button
               onClick={handleSave}
               disabled={saving || saved}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-60 transition shadow-sm"
+              className="gradient-accent inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold disabled:opacity-60 transition shadow-sm"
             >
               {saved ? (
                 <Check size={14} />

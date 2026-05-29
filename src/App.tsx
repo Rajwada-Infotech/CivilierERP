@@ -92,16 +92,16 @@ function PageSkeleton() {
 
 // ─── Lazy Pages ───────────────────────────────────────────────────────────────
 // Main Pages
-const FinanceDashboard = lazy(() => import("./pages/FinanceDashboard"));
+const FinanceDashboard = lazy(() => import("./pages/finance/FinanceDashboard"));
 const Reports = lazy(() => import("./pages/Reports"));
 const Widgets = lazy(() => import("./pages/Widgets"));
 const CommandCenter = lazy(() => import("./pages/CommandCenter"));
 const Tasks = lazy(() => import("./pages/Tasks"));
-const Transactions = lazy(() => import("./pages/Transactions"));
-const Payment = lazy(() => import("./pages/Payment"));
-const Brs = lazy(() => import("./pages/Brs"));
-const Records = lazy(() => import("./pages/Records"));
-const ReceivedPayment = lazy(() => import("./pages/ReceivedPayment"));
+const Transactions = lazy(() => import("./pages/finance/Transactions"));
+const Payment = lazy(() => import("./pages/finance/Payment"));
+const Brs = lazy(() => import("./pages/finance/Brs"));
+const Records = lazy(() => import("./pages/finance/Records"));
+const ReceivedPayment = lazy(() => import("./pages/finance/ReceivedPayment"));
 
 // Task Detail
 const TaskDetail = lazy(() => import("./pages/tasks/TaskDetail"));

@@ -375,9 +375,9 @@ export default function TicketDashboard() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => navigate("/ticket/create")}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+              className="flex items-center gap-2 h-9 px-4 text-sm rounded-lg gradient-accent text-white shadow-sm font-heading font-semibold"
             >
-              <Plus size={13} />
+              <Plus size={15} />
               New Ticket
             </button>
             <button
