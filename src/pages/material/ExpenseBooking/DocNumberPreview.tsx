@@ -147,11 +147,20 @@ export function DocNumberPreview({
   const [generating, setGenerating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Load doc type list whenever the module filter changes
+  // Load doc type list whenever the module filter changes.
+  // Auto-select the first (and usually only) type when none is selected yet.
   useEffect(() => {
     setDocTypesLoading(true);
     fetchDocTypes(module)
-      .then(setDocTypes)
+      .then((types) => {
+        setDocTypes(types);
+        if (!readOnly && !selectedDocTypeId && types.length > 0) {
+          const first = types[0];
+          fetchNextDocNumber(first.TypeOfDocId, finYear).then((next) => {
+            onSelect(first.TypeOfDocId, next);
+          });
+        }
+      })
       .finally(() => setDocTypesLoading(false));
   }, [module]);
 
@@ -251,7 +260,9 @@ export function DocNumberPreview({
                       {docTypeLabel(dt)}
                     </span>
                     <span className="text-xs opacity-40 shrink-0">·</span>
-                    <span className="text-xs opacity-80 truncate">{dt.Description}</span>
+                    <span className="text-xs opacity-80 truncate">
+                      {dt.Description}
+                    </span>
                     {dt.EntryType && (
                       <span className="text-[10px] opacity-40 ml-auto pl-3 shrink-0">
                         {dt.EntryType}
@@ -283,19 +294,13 @@ export function DocNumberPreview({
         <div className="flex items-center gap-1.5 px-1 min-w-0 overflow-hidden">
           {isSpinning ? (
             <p className="text-xs text-muted-foreground animate-pulse truncate">
-              {generating ? "Generating" : "Refreshing"} next number
-              {finYear ? ` · FY ${finYear}` : ""}…
+              {generating ? "Generating" : "Refreshing"} next number …
             </p>
           ) : preview ? (
             <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
               <span className="font-mono text-sm font-bold text-primary tracking-wider truncate min-w-0">
                 {preview}
               </span>
-              {finYear && (
-                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading shrink-0 whitespace-nowrap">
-                  FY {finYear}
-                </span>
-              )}
             </div>
           ) : null}
         </div>

@@ -36,6 +36,19 @@ async function resolveIssueDocTypeId(pool, rootExBDocNo) {
   return resolveDocTypeId(pool, sql, prefix);
 }
 
+async function resolveMainGodownId(pool) {
+  try {
+    const res = await pool
+      .request()
+      .query(
+        "SELECT TOP 1 GodownID FROM dbo.Godowns WHERE IsMain = 1 AND IsDeleted = 0 ORDER BY GodownID",
+      );
+    return res.recordset[0]?.GodownID || null;
+  } catch {
+    return null;
+  }
+}
+
 // ── GET /companies ────────────────────────────────────────────────────────────
 router.get("/companies", authenticateToken, async (req, res) => {
   try {
@@ -370,6 +383,8 @@ router.post("/", authenticateToken, async (req, res) => {
     const newRecord = headerResult.recordset[0];
     const issueId = newRecord.IssueId;
 
+    const mainGodownId = await resolveMainGodownId(pool);
+
     for (const it of items) {
       const qty = Number(it.Quantity);
       const itemId = String(it.ItemId);
@@ -394,9 +409,10 @@ router.post("/", authenticateToken, async (req, res) => {
         .input("Type", sql.NVarChar(10), "OUT")
         .input("RefType", sql.NVarChar(20), "ISS")
         .input("RefID", sql.Int, issueId)
-        .input("DocNo", sql.NVarChar(100), docNo).query(`
-          INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, CreatedDate)
-          VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, GETDATE())
+        .input("DocNo", sql.NVarChar(100), docNo)
+        .input("GodownID", sql.Int, mainGodownId).query(`
+          INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, GodownID, CreatedDate)
+          VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, @GodownID, GETDATE())
         `);
     }
 
@@ -481,6 +497,8 @@ router.put("/:id", authenticateToken, async (req, res) => {
       .input("Id", sql.Int, id)
       .query("DELETE FROM dbo.StockLedger WHERE RefType='ISS' AND RefID=@Id");
 
+    const mainGodownId = await resolveMainGodownId(pool);
+
     for (const it of items) {
       const qty = Number(it.Quantity);
       const itemId = String(it.ItemId);
@@ -505,9 +523,10 @@ router.put("/:id", authenticateToken, async (req, res) => {
         .input("Type", sql.NVarChar(10), "OUT")
         .input("RefType", sql.NVarChar(20), "ISS")
         .input("RefID", sql.Int, id)
-        .input("DocNo", sql.NVarChar(100), docNo).query(`
-          INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, CreatedDate)
-          VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, GETDATE())
+        .input("DocNo", sql.NVarChar(100), docNo)
+        .input("GodownID", sql.Int, mainGodownId).query(`
+          INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, GodownID, CreatedDate)
+          VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, @GodownID, GETDATE())
         `);
     }
 
