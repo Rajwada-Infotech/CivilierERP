@@ -1320,15 +1320,6 @@ export default function MaterialExpenseBooking() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const saveInFlight = useRef(false);
-  const [remainingBookingDialog, setRemainingBookingDialog] = useState<{
-    grnDocNo: string;
-    grnSourceId: number;
-    remainingItems: GRNItemLine[];
-    remainingTotal: number;
-    savedFormSnapshot: Omit<ExpenseRecord, "id">;
-  } | null>(null);
-  const [creatingRemainingBooking, setCreatingRemainingBooking] =
-    useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [approvalTrail, setApprovalTrail] =
     useState<ExpenseRecord["approvalTrail"]>(undefined);
@@ -1541,7 +1532,8 @@ export default function MaterialExpenseBooking() {
               ? rawDocNo
               : `GRN-${rawDocNo}`
             : rawDocNo;
-          const grnTotal = parseFloat(r.TotalAmount) || 0;
+          const grnTotal =
+            Math.round((parseFloat(r.TotalAmount) || 0) * 100) / 100;
           setSelectedDoc((prev) =>
             prev && prev.kind === "GRN" && prev.sourceId === doc.sourceId
               ? {
@@ -1565,6 +1557,12 @@ export default function MaterialExpenseBooking() {
                   t.totalBase > 0 ? (t.totalCGST / t.totalBase) * 100 : 0;
                 const avgSGST =
                   t.totalBase > 0 ? (t.totalSGST / t.totalBase) * 100 : 0;
+                const cleanTotal = Math.round(t.totalInclGST * 100) / 100;
+                setSelectedDoc((prev) =>
+                  prev && prev.kind === "GRN"
+                    ? { ...prev, amount: cleanTotal }
+                    : prev,
+                );
                 setForm((prev) => ({
                   ...prev,
                   bookingReference: canonicalDocNo,
@@ -1713,7 +1711,7 @@ export default function MaterialExpenseBooking() {
               status: r.Status,
               date: r.GRNDate?.slice(0, 10),
               grnItems: items,
-              amount: parseFloat(r.TotalAmount) || 0,
+              amount: Math.round((parseFloat(r.TotalAmount) || 0) * 100) / 100,
               gst: parsedParentGST,
             });
             setForm((prev) => ({
@@ -1968,8 +1966,9 @@ export default function MaterialExpenseBooking() {
         : form.discount,
     );
     if (selectedDoc?.kind === "GRN" && selectedDoc.amount != null) {
-      bd.roundOff = selectedDoc.amount - bd.grossAmount;
-      bd.netAmount = selectedDoc.amount;
+      const exactGrnTotal = Math.round(selectedDoc.amount * 100) / 100;
+      bd.roundOff = exactGrnTotal - bd.grossAmount;
+      bd.netAmount = exactGrnTotal;
     }
 
     let emiForSave = { ...form.emi };
@@ -2037,23 +2036,85 @@ export default function MaterialExpenseBooking() {
             (i) => Number(i.remainingQty) > 0,
           );
           if (remainingItems.length > 0) {
-            const remainingTotal = remainingItems.reduce((s, i) => {
-              const amt =
-                Number(i.totalAmount) > 0
-                  ? Number(i.totalAmount)
-                  : Number(i.rate || 0) * Number(i.remainingQty || 0);
-              return s + amt;
-            }, 0);
-            setRemainingBookingDialog({
-              grnDocNo: selectedDoc.docNo,
-              grnSourceId: selectedDoc.sourceId,
-              remainingItems,
-              remainingTotal,
-              savedFormSnapshot: { ...form },
-            });
-            await fetchRecords(page);
-            fetchBookedSources();
-            return;
+            // Auto-create a draft booking for remaining items using the same GRN source
+            try {
+              const remainingTotal = remainingItems.reduce((s, i) => {
+                const amt =
+                  Number(i.totalAmount) > 0
+                    ? Number(i.totalAmount)
+                    : Number(i.rate || 0) * Number(i.remainingQty || 0);
+                return s + amt;
+              }, 0);
+              const itemList = remainingItems
+                .map(
+                  (i) =>
+                    `${i.itemName || "Item"} (${i.remainingQty} remaining)`,
+                )
+                .join(", ");
+              const remarks = (() => {
+                const full = `Auto-created for remaining items from GRN ${selectedDoc.docNo}. Items: ${itemList}`;
+                return full.length > 990 ? full.slice(0, 987) + "…" : full;
+              })();
+              const remainingBody = {
+                EName: form.bookingName
+                  ? `[Remaining] ${form.bookingName}`
+                  : `Remaining items – ${selectedDoc.docNo}`,
+                EProjectName: form.projectSite || null,
+                EDocumentType: "GRN",
+                EDocDate: form.bookingDate || null,
+                EAmount: remainingTotal,
+                ENetAmount: remainingTotal,
+                ECgstRate: 0,
+                ESgstRate: 0,
+                EDiscountData: JSON.stringify(form.discount),
+                EBillingTermsData: JSON.stringify(form.billingTerms ?? []),
+                EDocNo: null,
+                EDocTypeId: null,
+                EFinYear: form.financialYear || null,
+                EEmiPayment: false,
+                EEmiData: JSON.stringify({
+                  enabled: false,
+                  installmentCount: 0,
+                  emiAmount: 0,
+                  startDate: "",
+                  schedule: [],
+                }),
+                EInstallmentCount: null,
+                EEmiAmount: null,
+                EEmiStartDate: null,
+                EReminder: form.dueDate || null,
+                ERemarks: remarks,
+                EStatus: "Draft",
+                ECompanyId: form.companyId ?? null,
+                EBillingTermId: null,
+                EBillingTermName: null,
+                ETCId: form.tcId ?? null,
+                ETCName: form.tcName || null,
+                ETCText: form.tcText || null,
+                EVendorInvoiceNo: null,
+                EVendorInvoiceDate: null,
+                EAdditionalCharges: null,
+                ECostCenter: form.costCenter || null,
+                EGLAccount: form.glAccount || null,
+                EWorkDoneRef: null,
+                ESourceType: "GRN",
+                ESourceId: selectedDoc.sourceId,
+              };
+              const remainingResult = await apiFetch(
+                API,
+                { method: "POST", body: JSON.stringify(remainingBody) },
+                30000,
+              );
+              toast.info(
+                `Draft booking ${remainingResult?.docNo || ""} auto-created for ${remainingItems.length} remaining item(s) from the same GRN.`,
+                { duration: 6000 },
+              );
+            } catch (remErr: any) {
+              toast.warning(
+                "Main booking saved. Could not auto-create remaining items draft: " +
+                  remErr.message,
+              );
+            }
           }
         }
 
@@ -2069,7 +2130,9 @@ export default function MaterialExpenseBooking() {
     }
   };
 
-  const handleCreateRemainingBooking = async () => {
+  const _unused_handleCreateRemainingBooking = async () => {
+    // removed — remaining bookings are now auto-created silently in handleSave
+    const remainingBookingDialog = null;
     if (!remainingBookingDialog) return;
     const {
       grnDocNo,
@@ -2077,7 +2140,7 @@ export default function MaterialExpenseBooking() {
       remainingItems,
       remainingTotal,
       savedFormSnapshot,
-    } = remainingBookingDialog;
+    } = remainingBookingDialog as any;
 
     setCreatingRemainingBooking(true);
     try {
@@ -2163,7 +2226,7 @@ export default function MaterialExpenseBooking() {
       : form.discount,
   );
   if (selectedDoc?.kind === "GRN" && selectedDoc.amount != null) {
-    const grnTotal = selectedDoc.amount;
+    const grnTotal = Math.round(selectedDoc.amount * 100) / 100;
     bd.roundOff = grnTotal - bd.grossAmount;
     bd.netAmount = grnTotal;
   }
@@ -2689,54 +2752,36 @@ export default function MaterialExpenseBooking() {
                             ₹{fmt(gstBreakdown.totals.totalBase)}
                           </p>
                         </div>
-                        {gstBreakdown.items
-                          .filter((it) => it.cgstAmount > 0)
-                          .map((it, i) => (
-                            <div
-                              key={`cgst-${i}`}
-                              className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]"
-                            >
-                              <div>
-                                <p className="text-xs text-muted-foreground">
-                                  CGST{" "}
-                                  <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                                    {it.cgstRate}%
-                                  </span>{" "}
-                                  · {it.itemName}
-                                </p>
-                                <p className="text-[10px] text-muted-foreground">
-                                  Central GST
-                                </p>
-                              </div>
-                              <p className="font-mono text-sm text-foreground/80">
-                                + ₹{fmt(it.cgstAmount)}
+                        {gstBreakdown.totals.totalCGST > 0 && (
+                          <div className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]">
+                            <div>
+                              <p className="text-xs text-muted-foreground">
+                                CGST
+                              </p>
+                              <p className="text-[10px] text-muted-foreground">
+                                Central GST
                               </p>
                             </div>
-                          ))}
-                        {gstBreakdown.items
-                          .filter((it) => it.sgstAmount > 0)
-                          .map((it, i) => (
-                            <div
-                              key={`sgst-${i}`}
-                              className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]"
-                            >
-                              <div>
-                                <p className="text-xs text-muted-foreground">
-                                  SGST{" "}
-                                  <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                                    {it.sgstRate}%
-                                  </span>{" "}
-                                  · {it.itemName}
-                                </p>
-                                <p className="text-[10px] text-muted-foreground">
-                                  State GST
-                                </p>
-                              </div>
-                              <p className="font-mono text-sm text-foreground/80">
-                                + ₹{fmt(it.sgstAmount)}
+                            <p className="font-mono text-sm text-foreground/80">
+                              + ₹{fmt(gstBreakdown.totals.totalCGST)}
+                            </p>
+                          </div>
+                        )}
+                        {gstBreakdown.totals.totalSGST > 0 && (
+                          <div className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]">
+                            <div>
+                              <p className="text-xs text-muted-foreground">
+                                SGST
+                              </p>
+                              <p className="text-[10px] text-muted-foreground">
+                                State GST
                               </p>
                             </div>
-                          ))}
+                            <p className="font-mono text-sm text-foreground/80">
+                              + ₹{fmt(gstBreakdown.totals.totalSGST)}
+                            </p>
+                          </div>
+                        )}
                         <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20">
                           <div>
                             <p className="text-xs font-medium">Gross Amount</p>
@@ -3374,7 +3419,7 @@ export default function MaterialExpenseBooking() {
                                   {rec.sgstRate}%
                                 </TableCell>
                                 <TableCell className="font-mono text-xs font-semibold text-right py-2.5">
-                                  ₹{fmt(rbd.netAmount)}
+                                  ₹{fmt(rec.netAmount ?? rbd.netAmount)}
                                 </TableCell>
                                 <TableCell className="hidden lg:table-cell py-2.5">
                                   <GRNChainBadge bookingId={rec.id} />
@@ -3522,152 +3567,7 @@ export default function MaterialExpenseBooking() {
         onEdit={(record) => openEdit(record)}
       />
 
-      {/* Remaining GRN Items — Split Booking Dialog */}
-      <Dialog
-        open={!!remainingBookingDialog}
-        onOpenChange={(open) => {
-          if (!open && !creatingRemainingBooking) {
-            setRemainingBookingDialog(null);
-            cancelForm();
-          }
-        }}
-      >
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Package size={16} className="text-amber-500 shrink-0" />
-              Remaining Items Detected
-            </DialogTitle>
-            <DialogDescription>
-              The booking was saved. Some items in{" "}
-              <span className="font-mono font-semibold text-foreground">
-                {remainingBookingDialog?.grnDocNo}
-              </span>{" "}
-              still have quantities pending billing. Would you like to create a
-              separate{" "}
-              <span className="font-semibold text-foreground">Draft</span>{" "}
-              booking for them now?
-            </DialogDescription>
-          </DialogHeader>
-
-          {remainingBookingDialog && (
-            <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 overflow-hidden my-1">
-              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-amber-500/20 bg-amber-500/8">
-                <Clock size={12} className="text-amber-500 shrink-0" />
-                <span className="text-xs font-heading font-semibold text-amber-600 dark:text-amber-400">
-                  Items with remaining quantities
-                </span>
-                <span className="ml-auto text-[10px] text-muted-foreground">
-                  {remainingBookingDialog.remainingItems.length}{" "}
-                  {remainingBookingDialog.remainingItems.length === 1
-                    ? "item"
-                    : "items"}
-                </span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="bg-muted/20 border-b border-amber-500/15">
-                      <th className="px-4 py-2 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
-                        Item
-                      </th>
-                      <th className="px-4 py-2 text-right font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400 text-[10px]">
-                        Remaining Qty
-                      </th>
-                      <th className="px-4 py-2 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
-                        UOM
-                      </th>
-                      <th className="px-4 py-2 text-right font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
-                        Est. Amount (₹)
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-amber-500/10">
-                    {remainingBookingDialog.remainingItems.map((item, idx) => {
-                      const estAmt =
-                        Number(item.totalAmount) > 0
-                          ? Number(item.totalAmount)
-                          : Number(item.rate || 0) *
-                            Number(item.remainingQty || 0);
-                      return (
-                        <tr
-                          key={idx}
-                          className="hover:bg-amber-500/5 transition-colors"
-                        >
-                          <td className="px-4 py-2 font-medium text-foreground max-w-[160px] truncate">
-                            {item.itemName || `Item ${idx + 1}`}
-                          </td>
-                          <td className="px-4 py-2 text-right font-mono font-semibold text-amber-600 dark:text-amber-400">
-                            {Number(item.remainingQty)}
-                          </td>
-                          <td className="px-4 py-2 text-muted-foreground">
-                            {item.uom || "—"}
-                          </td>
-                          <td className="px-4 py-2 text-right font-mono text-foreground">
-                            {estAmt > 0 ? `₹${fmt(estAmt)}` : "—"}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot className="border-t border-amber-500/20 bg-muted/10">
-                    <tr>
-                      <td
-                        colSpan={3}
-                        className="px-4 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground"
-                      >
-                        Estimated Total
-                      </td>
-                      <td className="px-4 py-2 text-right font-mono text-xs font-bold text-foreground">
-                        ₹{fmt(remainingBookingDialog.remainingTotal)}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-              <div className="px-4 py-2.5 border-t border-amber-500/15 bg-amber-500/5">
-                <p className="text-[10px] text-muted-foreground">
-                  The new booking will be created as a{" "}
-                  <span className="font-semibold">Draft</span> linked to the
-                  same GRN. You can edit the invoice amount, add GST, and submit
-                  it for approval separately.
-                </p>
-              </div>
-            </div>
-          )}
-
-          <DialogFooter className="flex-col-reverse sm:flex-row gap-2 mt-1">
-            <Button
-              variant="outline"
-              className="w-full sm:w-auto"
-              disabled={creatingRemainingBooking}
-              onClick={() => {
-                setRemainingBookingDialog(null);
-                cancelForm();
-              }}
-            >
-              Skip for Now
-            </Button>
-            <Button
-              className="gradient-accent gap-1.5 w-full sm:w-auto"
-              disabled={creatingRemainingBooking}
-              onClick={handleCreateRemainingBooking}
-            >
-              {creatingRemainingBooking ? (
-                <>
-                  <Loader2 size={13} className="animate-spin" />
-                  Creating…
-                </>
-              ) : (
-                <>
-                  <Plus size={13} />
-                  Create Remaining Booking
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Remaining GRN Items — auto-created silently on save */}
     </>
   );
 }
