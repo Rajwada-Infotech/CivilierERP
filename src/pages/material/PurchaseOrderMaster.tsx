@@ -1276,19 +1276,22 @@ const PurchaseOrderMaster: React.FC = () => {
       queryClient.setQueriesData<any>(
         { queryKey: ["purchase-orders"] },
         (old: any) => {
-          if (!old?.data) return old;
-          return {
-            ...old,
-            data: old.data.map((row: any) =>
-              String(row.PurchaseOrderID) === recordId
-                ? { ...row, Status: nextStatus }
-                : row,
-            ),
-          };
+          if (!old) return old;
+          // handle both raw-array and { data: [] } response shapes
+          const rows: any[] = Array.isArray(old) ? old : (old?.data ?? []);
+          const updated = rows.map((row: any) =>
+            String(row.PurchaseOrderID) === recordId
+              ? { ...row, Status: nextStatus }
+              : row,
+          );
+          return Array.isArray(old) ? updated : { ...old, data: updated };
         },
       );
     }
 
+    // Small delay to let the server-side cache version bump propagate
+    // across workers before the refetch hits Redis.
+    await new Promise((r) => setTimeout(r, 400));
     // Then invalidate so the server state syncs in the background.
     await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
   };
