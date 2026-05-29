@@ -39,6 +39,15 @@ export const useFinYear = () => {
   return ctx;
 };
 
+/** Convert a Date object or ISO string to a local YYYY-MM-DD string without UTC shift. */
+function toLocalDateStr(val: string | Date): string {
+  const d = val instanceof Date ? val : new Date(val);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 const QUERY_KEY = ["fin-years"];
 
 export const FinYearProvider = ({ children }: { children: ReactNode }) => {
@@ -56,8 +65,8 @@ export const FinYearProvider = ({ children }: { children: ReactNode }) => {
     ? dbData.map((item: any) => ({
         id: String(item.FId),
         year: item.FName || "",
-        startDate: item.FStartDate ? item.FStartDate.split("T")[0] : "",
-        endDate: item.FEndDate ? item.FEndDate.split("T")[0] : "",
+        startDate: item.FStartDate ? toLocalDateStr(item.FStartDate) : "",
+        endDate: item.FEndDate ? toLocalDateStr(item.FEndDate) : "",
         status: item.FStatus ? "Active" : "Closed",
         locked: !!item.FisLocked,
       }))
