@@ -3,7 +3,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import * as z from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
+import { useForm, type UseFormReturn } from "react-hook-form";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -122,9 +122,10 @@ const formSchema = z.object({
   description: z.string().optional(),
 });
 
-type FormData = z.infer<typeof formSchema>;
+type FormInput = z.input<typeof formSchema>;
+type FormData = z.output<typeof formSchema>;
 
-const defaultFormValues: z.input<typeof formSchema> = {
+const defaultFormValues: FormInput = {
   name: "",
   module: "",
   levels: 1,
@@ -163,13 +164,13 @@ export default function ApprovalSetup() {
     refetchOnWindowFocus: false, // stop refetching every tab switch
   });
 
-  const createForm = useForm<z.input<typeof formSchema>>({
-    resolver: zodResolver(formSchema) as any,
+  const createForm = useForm<FormInput, unknown, FormData>({
+    resolver: zodResolver(formSchema),
     defaultValues: defaultFormValues,
   });
 
-  const editForm = useForm<z.input<typeof formSchema>>({
-    resolver: zodResolver(formSchema) as any,
+  const editForm = useForm<FormInput, unknown, FormData>({
+    resolver: zodResolver(formSchema),
     defaultValues: defaultFormValues,
   });
 
@@ -260,7 +261,7 @@ export default function ApprovalSetup() {
   );
 
   // ── Shared form fields ─────────────────────────────────────────────────────────
-  const renderFormFields = (form: typeof createForm) => (
+  const renderFormFields = (form: UseFormReturn<FormInput, unknown, FormData>) => (
     <>
       <FormField
         control={form.control}
@@ -421,7 +422,7 @@ export default function ApprovalSetup() {
           </DialogHeader>
           <Form {...createForm}>
             <form
-              onSubmit={createForm.handleSubmit(onCreateSubmit as any)}
+              onSubmit={createForm.handleSubmit(onCreateSubmit)}
               className="space-y-4"
             >
               {renderFormFields(createForm)}
@@ -450,7 +451,7 @@ export default function ApprovalSetup() {
           </DialogHeader>
           <Form {...editForm}>
             <form
-              onSubmit={editForm.handleSubmit(onEditSubmit as any)}
+              onSubmit={editForm.handleSubmit(onEditSubmit)}
               className="space-y-4"
             >
               {renderFormFields(editForm)}

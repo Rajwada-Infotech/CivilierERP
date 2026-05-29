@@ -517,7 +517,8 @@ export default function Issues() {
     try {
       const full = await issuesApi.getIssue(record.IssueId);
       setViewingRecord(full);
-    } catch {
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
       setViewingRecord(record);
     }
     setViewMode("view");

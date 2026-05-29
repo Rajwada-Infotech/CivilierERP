@@ -3,6 +3,7 @@ import { useTask, TaskPriority, QualityCriteria } from "@/contexts/TaskContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { X, Plus, Trash2 } from "lucide-react";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
 
 export default function TaskFormModal({ onClose, editTask }: { onClose: () => void; editTask?: any }) {
   const { addTask, updateTask } = useTask();
@@ -19,6 +20,7 @@ export default function TaskFormModal({ onClose, editTask }: { onClose: () => vo
   });
   const [criteria, setCriteria] = useState<QualityCriteria[]>(editTask?.qualityCriteria || []);
   const [newCriteria, setNewCriteria] = useState("");
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
   const handleAssign = (userId: string) => {
     const user = allUsers.find(u => u.id === userId);
@@ -33,7 +35,11 @@ export default function TaskFormModal({ onClose, editTask }: { onClose: () => vo
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.title || !form.assignedTo || !form.dueDate) return;
+    if (!form.title.trim() || !form.assignedTo || !form.dueDate) {
+      setSubmitAttempted(true);
+      toast.error("Please fill all required fields");
+      return;
+    }
     if (editTask) {
       updateTask(editTask.id, { ...form, qualityCriteria: criteria });
     } else {
@@ -55,12 +61,15 @@ export default function TaskFormModal({ onClose, editTask }: { onClose: () => vo
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors"><X size={16} /></button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} noValidate className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
           <div>
             <label className="block text-xs font-heading text-muted-foreground mb-1">Task Title *</label>
             <input value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} required
               placeholder="e.g. Review supplier invoices"
-              className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
+              className={`w-full px-3 py-2 rounded-lg text-sm bg-muted border text-foreground focus:outline-none focus:ring-2 focus:ring-primary ${submitAttempted && !form.title.trim() ? "border-destructive" : "border-border"}`} />
+            {submitAttempted && !form.title.trim() && (
+              <p className="mt-1 text-xs text-destructive">Task title is required</p>
+            )}
           </div>
 
           <div>
@@ -83,17 +92,23 @@ export default function TaskFormModal({ onClose, editTask }: { onClose: () => vo
             <div>
               <label className="block text-xs font-heading text-muted-foreground mb-1">Due Date *</label>
               <input type="date" value={form.dueDate} onChange={e => setForm(p => ({ ...p, dueDate: e.target.value }))} required
-                className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
+                className={`w-full px-3 py-2 rounded-lg text-sm bg-muted border text-foreground focus:outline-none focus:ring-2 focus:ring-primary ${submitAttempted && !form.dueDate ? "border-destructive" : "border-border"}`} />
+              {submitAttempted && !form.dueDate && (
+                <p className="mt-1 text-xs text-destructive">Due date is required</p>
+              )}
             </div>
           </div>
 
           <div>
             <label className="block text-xs font-heading text-muted-foreground mb-1">Assign To *</label>
             <select value={form.assignedTo} onChange={e => handleAssign(e.target.value)} required
-              className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
+              className={`w-full px-3 py-2 rounded-lg text-sm bg-muted border text-foreground focus:outline-none focus:ring-2 focus:ring-primary ${submitAttempted && !form.assignedTo ? "border-destructive" : "border-border"}`}>
               <option value="">Select user...</option>
               {allUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
+            {submitAttempted && !form.assignedTo && (
+              <p className="mt-1 text-xs text-destructive">Assignee is required</p>
+            )}
           </div>
 
           <div>
