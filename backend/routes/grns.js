@@ -681,18 +681,19 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
             (s, i) => s + Number(i.quantity || 0) * Number(i.rate || 0),
             0,
           );
+          // Only promote PO to "Received" when all items are fully received.
+          // Never write "Partially Received" back to PO — that belongs on GRN.
           const newPOStatus =
             poRow.GRNCount > 0 &&
             totalOrdered > 0 &&
             poRow.TotalReceived >= totalOrdered
               ? "Received"
-              : poRow.GRNCount > 0
-                ? "Partially Received"
-                : poRow.POStatus;
+              : null;
 
           if (
+            newPOStatus &&
             newPOStatus !== poRow.POStatus &&
-            ["Approved", "Partially Received"].includes(poRow.POStatus)
+            ["Approved"].includes(poRow.POStatus)
           ) {
             await pool
               .request()
@@ -713,6 +714,7 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
       }
     }
     await bumpCacheVersion("stock-ledger");
+    await bumpCacheVersion("grns");
 
     res.status(201).json({
       message: "GRN created successfully",
