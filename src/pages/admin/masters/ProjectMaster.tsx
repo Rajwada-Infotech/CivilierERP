@@ -615,8 +615,8 @@ export default function ProjectMaster() {
         tan: d.TAN ?? "",
         tradeLicenseNo: d.TradeLicenseNo ?? "",
       }));
-    } catch {
-      toast.error("Could not fetch company compliance data");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setComplianceLoading(false);
     }

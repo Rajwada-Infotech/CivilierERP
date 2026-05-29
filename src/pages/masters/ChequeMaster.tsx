@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import {
@@ -36,6 +38,10 @@ import {
   type BankOption,
   type CompanyOption,
 } from "@/api/chequeMasterApi";
+import {
+  chequeMasterSchema,
+  type ChequeMasterForm,
+} from "@/schemas/chequeMasterSchema";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FormState {
@@ -232,7 +238,16 @@ const ChequeMaster: React.FC = () => {
 
   const [form, setForm] = useState<FormState>(EMPTY);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const {
+    reset,
+    setValue,
+    trigger,
+    clearErrors,
+    formState: { errors },
+  } = useForm<ChequeMasterForm>({
+    resolver: zodResolver(chequeMasterSchema),
+    defaultValues: EMPTY as ChequeMasterForm,
+  });
   const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [viewRow, setViewRow] = useState<DbCheque | null>(null);
@@ -273,30 +288,20 @@ const ChequeMaster: React.FC = () => {
       accountNumber: bank?.accountNumber || "",
       ifscCode: bank?.ifscCode || "",
     }));
-    if (errors.bankId) setErrors((e) => ({ ...e, bankId: false }));
+    setValue("bankId", bankId, { shouldValidate: !!errors.bankId });
+    setValue("bankName", bank?.label || "");
+    setValue("accountNumber", bank?.accountNumber || "");
+    setValue("ifscCode", bank?.ifscCode || "");
   };
 
   const setField = (k: keyof FormState, v: unknown) => {
     setForm((p) => ({ ...p, [k]: v }));
-    if (errors[k]) setErrors((e) => ({ ...e, [k]: false }));
+    setValue(k, v as never, { shouldValidate: !!errors[k] });
   };
 
-  const validate = () => {
-    const e: Record<string, boolean> = {};
-    if (!form.companyId) e.companyId = true;
-    if (!form.bankId) e.bankId = true;
-    if (!form.accountNumber.trim()) e.accountNumber = true;
-    if (!form.lotNumber.trim()) e.lotNumber = true;
-    if (form.chqStart === "" || isNaN(Number(form.chqStart))) e.chqStart = true;
-    if (form.chqEnd === "" || isNaN(Number(form.chqEnd))) e.chqEnd = true;
-    if (
-      form.chqStart !== "" &&
-      form.chqEnd !== "" &&
-      Number(form.chqEnd) < Number(form.chqStart)
-    )
-      e.chqEnd = true;
-    setErrors(e);
-    return Object.keys(e).length === 0;
+  const validate = async () => {
+    reset(form as ChequeMasterForm);
+    return trigger();
   };
 
   const toPayload = (f: FormState) => ({
@@ -314,7 +319,7 @@ const ChequeMaster: React.FC = () => {
 
   const handleEdit = (item: DbCheque) => {
     const bank = dbBanks.find((b) => b.id === item.BankId);
-    setForm({
+    const nextForm: FormState = {
       companyId: item.CompanyId ? String(item.CompanyId) : "",
       bankId: item.BankId ? String(item.BankId) : "",
       bankName: bank?.label || "",
@@ -326,7 +331,9 @@ const ChequeMaster: React.FC = () => {
       totalCheques: item.TotalCheques ?? 0,
       remarks: item.Remarks || "",
       status: item.Status,
-    });
+    };
+    setForm(nextForm);
+    reset(nextForm as ChequeMasterForm);
     setEditingId(String(item.CId));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -340,6 +347,7 @@ const ChequeMaster: React.FC = () => {
       if (editingId === id) {
         setEditingId(null);
         setForm(EMPTY);
+        reset(EMPTY as ChequeMasterForm);
       }
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
@@ -347,7 +355,7 @@ const ChequeMaster: React.FC = () => {
   };
 
   const handleSave = async () => {
-    if (!validate()) return;
+    if (!(await validate())) return;
     try {
       if (editingId) {
         await updateCheque(editingId, toPayload(form));
@@ -358,6 +366,7 @@ const ChequeMaster: React.FC = () => {
       }
       await queryClient.invalidateQueries({ queryKey: ["cheques"] });
       setForm(EMPTY);
+      reset(EMPTY as ChequeMasterForm);
       setEditingId(null);
     } catch (err: any) {
       toast.error("Failed: " + err.message);
@@ -367,7 +376,8 @@ const ChequeMaster: React.FC = () => {
   const handleReset = () => {
     setForm(EMPTY);
     setEditingId(null);
-    setErrors({});
+    reset(EMPTY as ChequeMasterForm);
+    clearErrors();
   };
 
   const columns = useMemo(
@@ -387,7 +397,11 @@ const ChequeMaster: React.FC = () => {
 
   // Auto-recalculate total
   useEffect(() => {
-    setForm((p) => ({ ...p, totalCheques: calcTotal(p.chqStart, p.chqEnd) }));
+    setForm((p) => {
+      const totalCheques = calcTotal(p.chqStart, p.chqEnd);
+      setValue("totalCheques", totalCheques);
+      return { ...p, totalCheques };
+    });
   }, [form.chqStart, form.chqEnd]);
 
   const filtered = dbCheques.filter((r) => {

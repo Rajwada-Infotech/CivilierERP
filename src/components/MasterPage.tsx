@@ -208,7 +208,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
           .then((opts) => {
             setAsyncOptionsCache((prev) => ({ ...prev, [field.name]: opts }));
           })
-          .catch(() => {});
+          .catch(() => {
+            toast.error(`Failed to load options for ${field.label}`);
+          });
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -346,8 +348,10 @@ export const MasterPage: React.FC<MasterPageProps> = ({
         });
         return;
       }
-    } catch {
-      // Page-level handlers already raise the most useful toast message.
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save. Please try again.",
+      );
     }
   };
 

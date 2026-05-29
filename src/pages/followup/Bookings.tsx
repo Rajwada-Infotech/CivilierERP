@@ -1639,8 +1639,12 @@ const PAGE_SIZE = 20;
 export default function BookingsPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [projectFilter, setProjectFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string | undefined>(
+    undefined,
+  );
+  const [projectFilter, setProjectFilter] = useState<string | undefined>(
+    undefined,
+  );
   const [showForm, setShowForm] = useState(false);
   const [editBooking, setEditBooking] = useState<Booking | null>(null);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
@@ -1899,7 +1903,7 @@ export default function BookingsPage() {
           <div className="flex items-center gap-1.5 flex-wrap">
             <button
               onClick={() => {
-                setStatusFilter("");
+                setStatusFilter(undefined);
                 setPage(1);
               }}
               className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-all ${!statusFilter ? "bg-foreground text-background border-foreground shadow-sm" : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
@@ -1912,7 +1916,7 @@ export default function BookingsPage() {
                 <button
                   key={s}
                   onClick={() => {
-                    setStatusFilter(statusFilter === s ? "" : s);
+                    setStatusFilter(statusFilter === s ? undefined : s);
                     setPage(1);
                   }}
                   className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-all ${statusFilter === s ? `${cfg.pill} border-current shadow-sm` : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
@@ -1923,7 +1927,7 @@ export default function BookingsPage() {
                 <button
                   key={s}
                   onClick={() => {
-                    setStatusFilter(statusFilter === s ? "" : s);
+                    setStatusFilter(statusFilter === s ? undefined : s);
                     setPage(1);
                   }}
                   className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-all
@@ -1963,8 +1967,8 @@ export default function BookingsPage() {
             </div>
             <select
               className="px-3 py-2 border border-border rounded-xl text-sm bg-card text-muted-foreground outline-none cursor-pointer focus:border-primary/60 min-w-[130px]"
-              value={projectFilter}
-              onChange={(e) => setProjectFilter(e.target.value)}
+              value={projectFilter ?? ""}
+              onChange={(e) => setProjectFilter(e.target.value || undefined)}
             >
               <option value="">All Projects</option>
               {projects.map((p) => (
@@ -1977,8 +1981,8 @@ export default function BookingsPage() {
               <button
                 onClick={() => {
                   setSearch("");
-                  setStatusFilter("");
-                  setProjectFilter("");
+                  setStatusFilter(undefined);
+                  setProjectFilter(undefined);
                   setPage(1);
                 }}
                 className="flex items-center gap-1 px-3 py-2 border border-red-400/30 bg-red-500/5 text-red-500 rounded-xl text-xs font-semibold hover:bg-red-500/10 transition-colors"

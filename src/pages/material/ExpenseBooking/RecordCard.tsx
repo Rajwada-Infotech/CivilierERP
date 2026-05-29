@@ -26,6 +26,8 @@ export function RecordCard({
     rec.sgstRate,
     rec.discount,
   );
+  const displayNet =
+    rec.netAmount && rec.netAmount > 0 ? rec.netAmount : rbd.netAmount;
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 space-y-3">
@@ -81,7 +83,7 @@ export function RecordCard({
         <div>
           <p className="text-[10px] text-muted-foreground">Net Payable</p>
           <p className="text-sm font-mono font-semibold text-foreground">
-            Rs.{fmt(rbd.netAmount)}
+            Rs.{fmt(displayNet)}
           </p>
         </div>
         <div className="flex gap-1.5 items-center">

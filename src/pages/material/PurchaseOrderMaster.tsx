@@ -324,7 +324,9 @@ const PurchaseOrderMaster: React.FC = () => {
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
   const finYearOptions = finYears.filter((fy) => fy.status === "Active");
-  const [selectedFinYear, setSelectedFinYear] = useState("");
+  const [selectedFinYear, setSelectedFinYear] = useState<string | undefined>(
+    undefined,
+  );
 
   useEffect(() => {
     if (!selectedFinYear && activeFinYear) setSelectedFinYear(activeFinYear);
@@ -1129,6 +1131,7 @@ const PurchaseOrderMaster: React.FC = () => {
     if (!form.poNumber && !hasBackendNumbering) e.poNumber = true;
     if (!form.poDate) e.poDate = true;
     if (!form.supplierId) e.supplierId = true;
+    if (!form.companyId) e.companyId = true;
     if (!form.projectId) e.projectId = true;
     if (lineItems.every((li) => !li.itemName && !li.quantity))
       e.lineItems = true;
@@ -1875,9 +1878,9 @@ const PurchaseOrderMaster: React.FC = () => {
               <div>
                 <FieldLabel>Financial Year</FieldLabel>
                 <select
-                  value={selectedFinYear}
+                  value={selectedFinYear ?? ""}
                   onChange={(e) => {
-                    const nextFinYear = e.target.value;
+                    const nextFinYear = e.target.value || undefined;
                     setSelectedFinYear(nextFinYear);
                     if (poDocTypeId)
                       void refreshPoDocNumber(poDocTypeId, nextFinYear);
@@ -1957,7 +1960,7 @@ const PurchaseOrderMaster: React.FC = () => {
                 <select
                   value={form.companyId}
                   onChange={(e) => setField("companyId", e.target.value)}
-                  className={selectCls}
+                  className={`${selectCls} ${errors.companyId ? "border-red-400" : ""}`}
                 >
                   <option value="">— Select Company —</option>
                   {companies.map((c) => (
@@ -1966,6 +1969,11 @@ const PurchaseOrderMaster: React.FC = () => {
                     </option>
                   ))}
                 </select>
+              )}
+              {errors.companyId && (
+                <p className="text-xs text-destructive mt-1">
+                  Company is required
+                </p>
               )}
             </div>
 
@@ -1981,7 +1989,7 @@ const PurchaseOrderMaster: React.FC = () => {
                 <select
                   value={form.projectId}
                   onChange={(e) => setField("projectId", e.target.value)}
-                  className={selectCls}
+                  className={`${selectCls} ${errors.projectId ? "border-red-400" : ""}`}
                 >
                   <option value="">— Select Project —</option>
                   {allProjects.map((p) => (
@@ -1990,6 +1998,11 @@ const PurchaseOrderMaster: React.FC = () => {
                     </option>
                   ))}
                 </select>
+              )}
+              {errors.projectId && (
+                <p className="text-xs text-destructive mt-1">
+                  Project is required
+                </p>
               )}
             </div>
 
@@ -2085,8 +2098,16 @@ const PurchaseOrderMaster: React.FC = () => {
             )}
           </div>
 
+          {errors.lineItems && (
+            <p className="px-5 pb-2 text-xs text-destructive">
+              Add at least one line item
+            </p>
+          )}
+
           {/* Table header */}
-          <div className="overflow-x-auto">
+          <div
+            className={`overflow-x-auto ${errors.lineItems ? "border-t border-red-400" : ""}`}
+          >
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/10">

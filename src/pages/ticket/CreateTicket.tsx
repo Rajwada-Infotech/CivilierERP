@@ -109,7 +109,7 @@ function Combobox({
   error,
 }: {
   options: { value: string; label: string; sub?: string }[];
-  value: string;
+  value?: string;
   onSelect: (value: string, label: string) => void;
   placeholder: string;
   loading?: boolean;
@@ -242,9 +242,9 @@ const CreateTicket = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [companyId, setCompanyId] = useState("");
-  const [projectId, setProjectId] = useState("");
-  const [customerId, setCustomerId] = useState("");
+  const [companyId, setCompanyId] = useState<string | undefined>(undefined);
+  const [projectId, setProjectId] = useState<string | undefined>(undefined);
+  const [customerId, setCustomerId] = useState<string | undefined>(undefined);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [priority, setPriority] = useState<
