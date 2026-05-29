@@ -420,6 +420,35 @@ const fetchCompanyOptions = async (): Promise<
   return res.json();
 };
 
+const fetchProjectOptions = async (): Promise<
+  { id: number; label: string }[]
+> => {
+  const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
+  if (!res.ok) return [];
+  return res.json();
+};
+
+const fetchSupplierOptions = async (): Promise<
+  { id: number; label: string }[]
+> => {
+  const res = await fetchWithAuth("/api/account-head/options?type=S");
+  if (!res.ok) return [];
+  return res.json();
+};
+
+const fetchFinYearOptions = async (): Promise<
+  { id: number; label: string }[]
+> => {
+  const res = await fetchWithAuth("/api/fin-year");
+  if (!res.ok) return [];
+  const data = await res.json();
+  const rows: any[] = Array.isArray(data) ? data : (data?.data ?? []);
+  return rows
+    .filter((r: any) => r.FStatus === 1 || r.FStatus === true)
+    .map((r: any) => ({ id: r.FId, label: r.FName }))
+    .sort((a: any, b: any) => b.label.localeCompare(a.label));
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function blankForm(): Omit<PaymentRecord, "id"> {
@@ -834,56 +863,24 @@ type BookingFilters = {
 };
 
 function FilterBar({
-  expenseOptions,
   companyOptions,
+  projectOptions,
+  supplierOptions,
+  finYearOptions,
   filters,
   onChange,
 }: {
-  expenseOptions: ExpenseOption[];
   companyOptions: { id: number; label: string }[];
+  projectOptions: { id: number; label: string }[];
+  supplierOptions: { id: number; label: string }[];
+  finYearOptions: { id: number; label: string }[];
   filters: BookingFilters;
   onChange: (key: keyof BookingFilters, value: string) => void;
 }) {
-  // Derive all filter options directly from the loaded expenseOptions so that
-  // the dropdown values are guaranteed to exactly match what the filter compares.
-  // Previously these were fetched from separate master endpoints, causing
-  // mismatches (e.g. EProjectName stored as raw ID, or EName vs LHeadName).
-  const companies = React.useMemo(
-    () =>
-      [
-        ...new Set(expenseOptions.map((o) => o.companyName).filter(Boolean)),
-      ].sort(),
-    [expenseOptions],
-  );
-  const projects = React.useMemo(
-    () =>
-      [
-        ...new Set(
-          expenseOptions.map((o) => o.projectName ?? "").filter(Boolean),
-        ),
-      ].sort(),
-    [expenseOptions],
-  );
-  const finYears = React.useMemo(
-    () =>
-      [
-        ...new Set(
-          expenseOptions.map((o) => o.financialYear ?? "").filter(Boolean),
-        ),
-      ]
-        .sort()
-        .reverse(),
-    [expenseOptions],
-  );
-  const suppliers = React.useMemo(
-    () =>
-      [
-        ...new Set(
-          expenseOptions.map((o) => o.supplierName ?? "").filter(Boolean),
-        ),
-      ].sort(),
-    [expenseOptions],
-  );
+  const companies = companyOptions.map((o) => o.label);
+  const projects = projectOptions.map((o) => o.label);
+  const finYears = finYearOptions.map((o) => o.label);
+  const suppliers = supplierOptions.map((o) => o.label);
 
   const activeCount = Object.values(filters).filter(Boolean).length;
 
@@ -1882,26 +1879,31 @@ const Payment: React.FC = () => {
   // Companies fetched with business_type=C from enterprise table
   const companyOptions = enterprises;
 
+  const { data: projectOptions = [] } = useQuery<
+    { id: number; label: string }[]
+  >({
+    queryKey: ["project-options-payment-filter"],
+    queryFn: fetchProjectOptions,
+  });
+
+  const { data: supplierOptions = [] } = useQuery<
+    { id: number; label: string }[]
+  >({
+    queryKey: ["supplier-options-payment-filter"],
+    queryFn: fetchSupplierOptions,
+  });
+
+  const { data: finYearOptions = [] } = useQuery<
+    { id: number; label: string }[]
+  >({
+    queryKey: ["fin-year-options-payment-filter"],
+    queryFn: fetchFinYearOptions,
+  });
+
   const dbItems: DbPayment[] = Array.isArray(dbData?.data) ? dbData.data : [];
   const totalPages: number = dbData?.totalPages ?? 1;
   const totalRecords: number = dbData?.total ?? 0;
   const records: PaymentRecord[] = dbItems.map(dbToRecord);
-
-  // Derive unique project names and fin-years from all loaded records for filter dropdowns
-  const projectOptions: string[] = Array.from(
-    new Set(
-      dbItems
-        .map((p) => p.PProject)
-        .filter((v): v is string => !!v && v.trim() !== ""),
-    ),
-  ).sort();
-
-  // Generate financial year options: current year ± 3, formatted as "YYYY"
-  const currentYear = new Date().getFullYear();
-  const finYearOptions: number[] = Array.from(
-    { length: 7 },
-    (_, i) => currentYear - 3 + i,
-  );
 
   // Fetch full detail (name + logo + address) for the selected company — used in PDF export
   const { data: selectedCompanyDetail = null } = useQuery<CompanyDetail | null>(
@@ -2511,8 +2513,10 @@ const Payment: React.FC = () => {
                     return (
                       <div className="space-y-3">
                         <FilterBar
-                          expenseOptions={expenseOptions}
                           companyOptions={companyOptions}
+                          projectOptions={projectOptions}
+                          supplierOptions={supplierOptions}
+                          finYearOptions={finYearOptions}
                           filters={bookingFilters}
                           onChange={(key, val) =>
                             setBookingFilters((prev) => ({
@@ -3506,8 +3510,8 @@ const Payment: React.FC = () => {
                             >
                               <option value="">All Projects</option>
                               {projectOptions.map((p) => (
-                                <option key={p} value={p}>
-                                  {p}
+                                <option key={p.id} value={p.label}>
+                                  {p.label}
                                 </option>
                               ))}
                             </select>
@@ -3534,8 +3538,8 @@ const Payment: React.FC = () => {
                             >
                               <option value="">All Fin Years</option>
                               {finYearOptions.map((y) => (
-                                <option key={y} value={String(y)}>
-                                  {y}–{y + 1}
+                                <option key={y.id} value={y.label}>
+                                  {y.label}
                                 </option>
                               ))}
                             </select>
@@ -3681,7 +3685,7 @@ const Payment: React.FC = () => {
                       {finYearFilter && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-amber-500/10 text-amber-600 border border-amber-500/20">
                           <CalendarDays size={9} />
-                          FY {finYearFilter}–{parseInt(finYearFilter) + 1}
+                          FY {finYearFilter}
                           <button
                             onClick={() => {
                               setFinYearFilter("");

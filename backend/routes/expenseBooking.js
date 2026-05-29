@@ -374,11 +374,11 @@ router.get(
           ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))) AS docNo,
           COALESCE(proj.name, eb.EProjectName, '') AS projectName,
           ISNULL(eb.EName, '')            AS partyName,
-          -- Supplier name: GRN -> account head name, PO/WO_PO/WORK_DONE -> EName (party), TOD -> empty
+          -- Supplier name: GRN -> account head name, PO/WO_PO/WORK_DONE -> EName (party), fallback -> EName
           CASE
-            WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm.LHeadName, '')
+            WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm.LHeadName, ISNULL(eb.EName, ''))
             WHEN eb.ESourceType IN ('PO','WO_PO','WORK_DONE') THEN ISNULL(eb.EName, '')
-            ELSE ''
+            ELSE ISNULL(eb.EName, '')
           END                             AS supplierName,
           -- For GRN-linked bookings use the live GRN total (incl. GST);
           -- it is always up-to-date whereas ENetAmount may be stale.
@@ -435,11 +435,11 @@ router.get(
           ei.Status                    AS status,
           COALESCE(proj2.name, eb.EProjectName, '') AS projectName,
           ISNULL(eb.EName, '')         AS partyName,
-          -- Supplier name: GRN -> account head name, PO/WO_PO/WORK_DONE -> EName, TOD -> empty
+          -- Supplier name: GRN -> account head name, PO/WO_PO/WORK_DONE -> EName, fallback -> EName
           CASE
-            WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm2.LHeadName, '')
+            WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm2.LHeadName, ISNULL(eb.EName, ''))
             WHEN eb.ESourceType IN ('PO','WO_PO','WORK_DONE') THEN ISNULL(eb.EName, '')
-            ELSE ''
+            ELSE ISNULL(eb.EName, '')
           END                          AS supplierName,
           eb.ECompanyId                AS companyId,
           ISNULL(e2.name, '')          AS companyName,
