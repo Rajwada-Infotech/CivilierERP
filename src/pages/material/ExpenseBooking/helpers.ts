@@ -363,7 +363,7 @@ export function recordToDb(
     EDocDate: form.bookingDate || null,
     /** Prevent NULL being sent to NOT NULL column */
     EAmount: Number(form.basicAmount) || 0,
-    ENetAmount: Number(netAmount) || 0,
+    ENetAmount: Math.round((Number(netAmount) || 0) * 100) / 100,
     ECgstRate: Number(form.cgstRate) || 0,
     ESgstRate: Number(form.sgstRate) || 0,
     EDiscountData: JSON.stringify(form.discount),

@@ -13,6 +13,11 @@ import {
   Calendar,
   FileText,
   Eye,
+  Receipt,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  ArrowRight,
 } from "lucide-react";
 import * as grnApi from "@/api/grnApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -86,7 +91,149 @@ function GRNChainBadge({ grnId }: { grnId: number }) {
   );
 }
 
-// queryClient is hoisted so column cell closures can reference it
+// ─── Linked Expense Bookings (shown inside GRN view modal) ───────────────────
+interface LinkedBooking {
+  Eid: number;
+  EDocNo: string | null;
+  EStatus: string;
+  ENetAmount: number;
+  ERemarks: string | null;
+  EDocDate: string | null;
+  EName: string | null;
+}
+
+function LinkedExpenseBookings({ grnId }: { grnId: number }) {
+  const [bookings, setBookings] = useState<LinkedBooking[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchWithAuth(
+      `/api/expense-booking/by-source?sourceType=GRN&sourceId=${grnId}`,
+    )
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setBookings(Array.isArray(data) ? data : []))
+      .catch(() => setBookings([]))
+      .finally(() => setLoading(false));
+  }, [grnId]);
+
+  const statusColor = (s: string) => {
+    switch (s) {
+      case "Approved":
+        return "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400";
+      case "Pending":
+        return "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400";
+      case "Rejected":
+        return "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400";
+      case "Booked":
+        return "bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-400";
+      case "Draft":
+        return "bg-muted border-border text-muted-foreground";
+      default:
+        return "bg-muted border-border text-muted-foreground";
+    }
+  };
+
+  const StatusIcon = (s: string) => {
+    if (s === "Approved" || s === "Booked") return <CheckCircle2 size={10} />;
+    if (s === "Pending") return <Clock size={10} />;
+    if (s === "Rejected") return <AlertCircle size={10} />;
+    return <Receipt size={10} />;
+  };
+
+  const isAutoSplit = (b: LinkedBooking) =>
+    (b.ERemarks ?? "").startsWith("Auto-created for remaining items from GRN");
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
+        <div className="w-3 h-3 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+        Loading linked bookings…
+      </div>
+    );
+  }
+
+  if (bookings.length === 0) {
+    return (
+      <div className="text-xs text-muted-foreground italic py-2">
+        No expense bookings linked to this GRN yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {bookings.map((b) => (
+        <div
+          key={b.Eid}
+          className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${
+            isAutoSplit(b)
+              ? "border-amber-500/30 bg-amber-500/5"
+              : "border-border bg-muted/20"
+          }`}
+        >
+          <div
+            className={`shrink-0 p-1.5 rounded-lg ${isAutoSplit(b) ? "bg-amber-500/10" : "bg-primary/10"}`}
+          >
+            <Receipt
+              size={13}
+              className={
+                isAutoSplit(b)
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-primary"
+              }
+            />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-mono text-xs font-bold text-foreground">
+                {b.EDocNo ?? `Draft #${b.Eid}`}
+              </span>
+              {isAutoSplit(b) && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/20 font-medium">
+                  Pending split
+                </span>
+              )}
+              <span
+                className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border font-semibold ${statusColor(b.EStatus)}`}
+              >
+                {StatusIcon(b.EStatus)}
+                {b.EStatus}
+              </span>
+            </div>
+            {b.EName && !isAutoSplit(b) && (
+              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                {b.EName}
+              </p>
+            )}
+            {isAutoSplit(b) && (
+              <p className="text-[10px] text-amber-600 dark:text-amber-500 mt-0.5">
+                Remaining items — open Expense Booking to review &amp; submit
+              </p>
+            )}
+          </div>
+          <div className="shrink-0 text-right">
+            {b.ENetAmount > 0 && (
+              <p className="font-mono text-xs font-semibold text-foreground">
+                ₹
+                {Number(b.ENetAmount).toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </p>
+            )}
+            {b.EDocDate && (
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                {new Date(b.EDocDate).toLocaleDateString("en-IN")}
+              </p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 let queryClient: ReturnType<typeof useQueryClient>;
 let onEdit: (grn: any) => void;
 let onView: (grn: any) => void;
@@ -296,7 +443,7 @@ export default function GRN() {
   // e.g. "2025-2026" → "2026"  (the second/end year, which appears in PO-2026-xxxxx)
   // Falls back to the raw string so "All Years" ("") still passes through.
   const finYearDocFragment = selectedFinYear
-    ? selectedFinYear.split("-").pop() ?? selectedFinYear
+    ? (selectedFinYear.split("-").pop() ?? selectedFinYear)
     : "";
 
   const pos = posData
@@ -1576,7 +1723,11 @@ export default function GRN() {
                         0,
                       );
 
-                      type GSTRow = { label: string; rate: number; amount: number };
+                      type GSTRow = {
+                        label: string;
+                        rate: number;
+                        amount: number;
+                      };
                       let rows: GSTRow[] = [];
 
                       if (Array.isArray(gst)) {
@@ -1603,7 +1754,10 @@ export default function GRN() {
                         push("SGST", "sgst");
                         push("IGST", "igst");
                         // Fallback: single rate field
-                        if (rows.length === 0 && Number((gst as any).rate) > 0) {
+                        if (
+                          rows.length === 0 &&
+                          Number((gst as any).rate) > 0
+                        ) {
                           const r = Number((gst as any).rate);
                           rows.push({
                             label: `GST ${r}%`,
@@ -1630,7 +1784,11 @@ export default function GRN() {
                                 Subtotal (before GST)
                               </span>
                               <span className="font-medium">
-                                ₹{subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                ₹
+                                {subtotal.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
                               </span>
                             </div>
                             {/* GST component rows */}
@@ -1646,7 +1804,11 @@ export default function GRN() {
                                   </span>
                                 </span>
                                 <span className="font-medium text-amber-600 dark:text-amber-400">
-                                  +₹{row.amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  +₹
+                                  {row.amount.toLocaleString("en-IN", {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
                                 </span>
                               </div>
                             ))}
@@ -1656,7 +1818,11 @@ export default function GRN() {
                                 Total GST
                               </span>
                               <span className="font-semibold text-amber-600 dark:text-amber-400">
-                                ₹{totalGST.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                ₹
+                                {totalGST.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
                               </span>
                             </div>
                             {/* Grand Total with GST row */}
@@ -1665,13 +1831,26 @@ export default function GRN() {
                                 Grand Total (incl. GST)
                               </span>
                               <span className="font-bold text-primary text-base">
-                                ₹{grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                ₹
+                                {grandTotal.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
                               </span>
                             </div>
                           </div>
                         </div>
                       );
                     })()}
+
+                    {/* Linked Expense Bookings */}
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                        <Receipt size={11} className="text-primary" />
+                        Linked Expense Bookings
+                      </p>
+                      <LinkedExpenseBookings grnId={viewingGrn.GRNID} />
+                    </div>
 
                     {/* Remarks */}
                     {viewingGrn.Remarks && (

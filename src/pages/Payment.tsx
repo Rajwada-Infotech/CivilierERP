@@ -292,7 +292,34 @@ const fetchChequeLots = async (
 const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
   const res = await fetchWithAuth("/api/expense-booking/options");
   if (!res.ok) return [];
-  return res.json();
+  const raw = await res.json();
+  const items: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+  return items.map((o: any) => ({
+    ...o,
+    companyName:
+      o.companyName ||
+      o.ECompanyName ||
+      o.company_name ||
+      o.CompanyName ||
+      null,
+    projectName:
+      o.projectName ||
+      o.EProjectDisplayName ||
+      o.EProjectName ||
+      o.project_name ||
+      o.ProjectName ||
+      null,
+    financialYear:
+      o.financialYear || o.EFinYear || o.fin_year || o.FinYear || null,
+    supplierName:
+      o.supplierName ||
+      o.ESupplierName ||
+      o.supplier_name ||
+      o.SupplierName ||
+      o.partyName ||
+      o.EName ||
+      null,
+  }));
 };
 
 const fetchExpenseDetail = async (
@@ -393,7 +420,34 @@ const fetchCompanyOptions = async (): Promise<
   return res.json();
 };
 
+const fetchProjectOptions = async (): Promise<
+  { id: number; label: string }[]
+> => {
+  const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
+  if (!res.ok) return [];
+  return res.json();
+};
 
+const fetchSupplierOptions = async (): Promise<
+  { id: number; label: string }[]
+> => {
+  const res = await fetchWithAuth("/api/account-head/options?type=S");
+  if (!res.ok) return [];
+  return res.json();
+};
+
+const fetchFinYearOptions = async (): Promise<
+  { id: number; label: string }[]
+> => {
+  const res = await fetchWithAuth("/api/fin-year");
+  if (!res.ok) return [];
+  const data = await res.json();
+  const rows: any[] = Array.isArray(data) ? data : (data?.data ?? []);
+  return rows
+    .filter((r: any) => r.FStatus === 1 || r.FStatus === true)
+    .map((r: any) => ({ id: r.FId, label: r.FName }))
+    .sort((a: any, b: any) => b.label.localeCompare(a.label));
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -809,40 +863,24 @@ type BookingFilters = {
 };
 
 function FilterBar({
-  expenseOptions,
   companyOptions,
+  projectOptions,
+  supplierOptions,
+  finYearOptions,
   filters,
   onChange,
 }: {
-  expenseOptions: ExpenseOption[];
   companyOptions: { id: number; label: string }[];
+  projectOptions: { id: number; label: string }[];
+  supplierOptions: { id: number; label: string }[];
+  finYearOptions: { id: number; label: string }[];
   filters: BookingFilters;
   onChange: (key: keyof BookingFilters, value: string) => void;
 }) {
-  // Derive all filter options directly from the loaded expenseOptions so that
-  // the dropdown values are guaranteed to exactly match what the filter compares.
-  // Previously these were fetched from separate master endpoints, causing
-  // mismatches (e.g. EProjectName stored as raw ID, or EName vs LHeadName).
-  const companies = React.useMemo(
-    () =>
-      [...new Set(expenseOptions.map((o) => o.companyName).filter(Boolean))].sort(),
-    [expenseOptions],
-  );
-  const projects = React.useMemo(
-    () =>
-      [...new Set(expenseOptions.map((o) => o.projectName ?? "").filter(Boolean))].sort(),
-    [expenseOptions],
-  );
-  const finYears = React.useMemo(
-    () =>
-      [...new Set(expenseOptions.map((o) => o.financialYear ?? "").filter(Boolean))].sort().reverse(),
-    [expenseOptions],
-  );
-  const suppliers = React.useMemo(
-    () =>
-      [...new Set(expenseOptions.map((o) => o.supplierName ?? "").filter(Boolean))].sort(),
-    [expenseOptions],
-  );
+  const companies = companyOptions.map((o) => o.label);
+  const projects = projectOptions.map((o) => o.label);
+  const finYears = finYearOptions.map((o) => o.label);
+  const suppliers = supplierOptions.map((o) => o.label);
 
   const activeCount = Object.values(filters).filter(Boolean).length;
 
@@ -1768,14 +1806,24 @@ const Payment: React.FC = () => {
   const [linkedGRNs, setLinkedGRNs] = useState<GRNRef[]>([]);
   const [grnGstBreakdown, setGrnGstBreakdown] = useState<{
     items: {
-      itemName: string; hsnCode: string; gstPercent: number;
-      receivedQty: number; totalAmountInclGST: number;
-      baseAmount: number; cgstRate: number; cgstAmount: number;
-      sgstRate: number; sgstAmount: number; gstAmount: number;
+      itemName: string;
+      hsnCode: string;
+      gstPercent: number;
+      receivedQty: number;
+      totalAmountInclGST: number;
+      baseAmount: number;
+      cgstRate: number;
+      cgstAmount: number;
+      sgstRate: number;
+      sgstAmount: number;
+      gstAmount: number;
     }[];
     totals: {
-      totalBase: number; totalCGST: number; totalSGST: number;
-      totalGST: number; totalInclGST: number;
+      totalBase: number;
+      totalCGST: number;
+      totalSGST: number;
+      totalGST: number;
+      totalInclGST: number;
     };
   } | null>(null);
   const [supplierBookingFilter, setSupplierBookingFilter] = useState("");
@@ -1831,26 +1879,31 @@ const Payment: React.FC = () => {
   // Companies fetched with business_type=C from enterprise table
   const companyOptions = enterprises;
 
+  const { data: projectOptions = [] } = useQuery<
+    { id: number; label: string }[]
+  >({
+    queryKey: ["project-options-payment-filter"],
+    queryFn: fetchProjectOptions,
+  });
+
+  const { data: supplierOptions = [] } = useQuery<
+    { id: number; label: string }[]
+  >({
+    queryKey: ["supplier-options-payment-filter"],
+    queryFn: fetchSupplierOptions,
+  });
+
+  const { data: finYearOptions = [] } = useQuery<
+    { id: number; label: string }[]
+  >({
+    queryKey: ["fin-year-options-payment-filter"],
+    queryFn: fetchFinYearOptions,
+  });
+
   const dbItems: DbPayment[] = Array.isArray(dbData?.data) ? dbData.data : [];
   const totalPages: number = dbData?.totalPages ?? 1;
   const totalRecords: number = dbData?.total ?? 0;
   const records: PaymentRecord[] = dbItems.map(dbToRecord);
-
-  // Derive unique project names and fin-years from all loaded records for filter dropdowns
-  const projectOptions: string[] = Array.from(
-    new Set(
-      dbItems
-        .map((p) => p.PProject)
-        .filter((v): v is string => !!v && v.trim() !== ""),
-    ),
-  ).sort();
-
-  // Generate financial year options: current year ± 3, formatted as "YYYY"
-  const currentYear = new Date().getFullYear();
-  const finYearOptions: number[] = Array.from(
-    { length: 7 },
-    (_, i) => currentYear - 3 + i,
-  );
 
   // Fetch full detail (name + logo + address) for the selected company — used in PDF export
   const { data: selectedCompanyDetail = null } = useQuery<CompanyDetail | null>(
@@ -2066,7 +2119,9 @@ const Payment: React.FC = () => {
         // If this expense is linked to a GRN, fetch the per-item GST breakdown
         if (detail.ESourceType === "GRN" && detail.ESourceId) {
           try {
-            const bdRes = await fetchWithAuth(`/api/grns/${detail.ESourceId}/gst-breakdown`);
+            const bdRes = await fetchWithAuth(
+              `/api/grns/${detail.ESourceId}/gst-breakdown`,
+            );
             if (bdRes.ok) {
               const bd = await bdRes.json();
               setGrnGstBreakdown(bd);
@@ -2075,11 +2130,13 @@ const Payment: React.FC = () => {
               if (bd?.totals?.totalInclGST > 0) {
                 const t = bd.totals;
                 const inclTotal = Math.round(t.totalInclGST * 100) / 100;
-                const avgCGST = t.totalBase > 0 ? (t.totalCGST / t.totalBase) * 100 : 0;
-                const avgSGST = t.totalBase > 0 ? (t.totalSGST / t.totalBase) * 100 : 0;
+                const avgCGST =
+                  t.totalBase > 0 ? (t.totalCGST / t.totalBase) * 100 : 0;
+                const avgSGST =
+                  t.totalBase > 0 ? (t.totalSGST / t.totalBase) * 100 : 0;
                 setForm((prev) => ({
                   ...prev,
-                  amount: inclTotal,                                      // sync Amount field
+                  amount: inclTotal, // sync Amount field
                   baseAmount: Math.round(t.totalBase * 100) / 100,
                   cgstRate: Math.round(avgCGST * 100) / 100,
                   sgstRate: Math.round(avgSGST * 100) / 100,
@@ -2087,7 +2144,9 @@ const Payment: React.FC = () => {
                 }));
               }
             }
-          } catch { /* non-fatal */ }
+          } catch {
+            /* non-fatal */
+          }
         } else {
           setGrnGstBreakdown(null);
         }
@@ -2334,7 +2393,6 @@ const Payment: React.FC = () => {
               {
                 label: "Total Paid",
                 value: formatINR(totalAmount),
-                sub: "all payments",
                 icon: Banknote,
                 ring: "ring-primary/20",
                 bg: "bg-primary/10",
@@ -2343,7 +2401,6 @@ const Payment: React.FC = () => {
               {
                 label: "By Cheque",
                 value: String(chequeCount),
-                sub: "cheque payments",
                 icon: Clock,
                 ring: "ring-amber-500/20",
                 bg: "bg-amber-500/10",
@@ -2352,13 +2409,12 @@ const Payment: React.FC = () => {
               {
                 label: "By Cash",
                 value: String(cashCount),
-                sub: "cash payments",
                 icon: CheckCircle2,
                 ring: "ring-emerald-500/20",
                 bg: "bg-emerald-500/10",
                 color: "text-emerald-500",
               },
-            ].map(({ label, value, sub, icon: Icon, ring, bg, color }) => (
+            ].map(({ label, value, icon: Icon, ring, bg, color }) => (
               <div
                 key={label}
                 className={`glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 ${ring}`}
@@ -2372,9 +2428,6 @@ const Payment: React.FC = () => {
                   </p>
                   <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
                     {label}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
-                    {sub}
                   </p>
                 </div>
               </div>
@@ -2454,8 +2507,10 @@ const Payment: React.FC = () => {
                     return (
                       <div className="space-y-3">
                         <FilterBar
-                          expenseOptions={expenseOptions}
                           companyOptions={companyOptions}
+                          projectOptions={projectOptions}
+                          supplierOptions={supplierOptions}
+                          finYearOptions={finYearOptions}
                           filters={bookingFilters}
                           onChange={(key, val) =>
                             setBookingFilters((prev) => ({
@@ -2637,8 +2692,8 @@ const Payment: React.FC = () => {
                       grnGstBreakdown
                         ? "Auto-filled from GRN item totals (incl. GST) — editable if needed."
                         : form.expenseRef
-                        ? "Net amount from expense booking — editable if needed."
-                        : undefined
+                          ? "Net amount from expense booking — editable if needed."
+                          : undefined
                     }
                   >
                     <div className="relative">
@@ -2662,14 +2717,25 @@ const Payment: React.FC = () => {
                     (() => {
                       // Only render a breakdown when we have reliable GST data:
                       // either a GRN item-level breakdown OR explicit GST rates on the booking.
-                      const hasGrnBreakdown = !!(grnGstBreakdown && grnGstBreakdown.totals.totalInclGST > 0);
-                      const hasExplicitGst = (form.cgstRate ?? 0) > 0 || (form.sgstRate ?? 0) > 0 || (form.igstRate ?? 0) > 0;
-                      const hasBaseAmount = !!(form.baseAmount && form.baseAmount > 0);
+                      const hasGrnBreakdown = !!(
+                        grnGstBreakdown &&
+                        grnGstBreakdown.totals.totalInclGST > 0
+                      );
+                      const hasExplicitGst =
+                        (form.cgstRate ?? 0) > 0 ||
+                        (form.sgstRate ?? 0) > 0 ||
+                        (form.igstRate ?? 0) > 0;
+                      const hasBaseAmount = !!(
+                        form.baseAmount && form.baseAmount > 0
+                      );
 
                       // Don't render if we can't compute a meaningful breakdown
-                      if (!hasGrnBreakdown && !hasExplicitGst && !hasBaseAmount) return null;
+                      if (!hasGrnBreakdown && !hasExplicitGst && !hasBaseAmount)
+                        return null;
 
-                      const base = hasBaseAmount ? form.baseAmount! : (form.amount ?? 0);
+                      const base = hasBaseAmount
+                        ? form.baseAmount!
+                        : (form.amount ?? 0);
                       const cgstRate = form.cgstRate ?? 0;
                       const sgstRate = form.sgstRate ?? 0;
                       const igstRate = form.igstRate ?? 0;
@@ -2802,87 +2868,105 @@ const Payment: React.FC = () => {
                       return (
                         <div className="rounded-xl bg-primary/5 border border-primary/20 px-4 py-3 space-y-2">
                           <div className="flex items-center gap-2">
-                            <TrendingUp size={13} className="text-primary shrink-0" />
+                            <TrendingUp
+                              size={13}
+                              className="text-primary shrink-0"
+                            />
                             <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
                               Payment Breakdown
                             </p>
                           </div>
 
-                          {/* ── GRN item-level GST breakdown ── */}
-                          {grnGstBreakdown && grnGstBreakdown.totals.totalInclGST > 0 && (
-                            <div className="rounded-lg border border-blue-500/20 bg-blue-500/[0.03] overflow-hidden mb-2">
-                              <div className="flex items-center gap-2 px-3 py-2 border-b border-blue-500/15 bg-blue-500/5">
-                                <Truck size={11} className="text-blue-500 shrink-0" />
-                                <span className="text-[10px] font-heading font-semibold text-blue-700 dark:text-blue-300">
-                                  GST Breakdown by Item (Incl. → Base + Tax)
-                                </span>
-                              </div>
-                              <div className="overflow-x-auto">
-                                <table className="w-full text-[11px]">
-                                  <thead>
-                                    <tr className="border-b border-blue-500/10 bg-muted/10">
-                                      <th className="px-2 py-1.5 text-left text-muted-foreground font-heading uppercase tracking-wider text-[9px]">Item</th>
-                                      <th className="px-2 py-1.5 text-right text-muted-foreground font-heading uppercase tracking-wider text-[9px]">GST%</th>
-                                      <th className="px-2 py-1.5 text-right text-muted-foreground font-heading uppercase tracking-wider text-[9px]">Qty</th>
-                                      <th className="px-2 py-1.5 text-right text-foreground font-heading uppercase tracking-wider text-[9px]">Incl.</th>
-                                      <th className="px-2 py-1.5 text-right text-blue-600 dark:text-blue-400 font-heading uppercase tracking-wider text-[9px]">Base</th>
-                                      <th className="px-2 py-1.5 text-right text-violet-600 dark:text-violet-400 font-heading uppercase tracking-wider text-[9px]">CGST</th>
-                                      <th className="px-2 py-1.5 text-right text-violet-600 dark:text-violet-400 font-heading uppercase tracking-wider text-[9px]">SGST</th>
-                                      <th className="px-2 py-1.5 text-right text-orange-600 dark:text-orange-400 font-heading uppercase tracking-wider text-[9px]">Tax</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-blue-500/8">
-                                    {grnGstBreakdown.items.map((item, idx) => (
-                                      <tr key={idx} className="hover:bg-blue-500/5">
-                                        <td className="px-2 py-1.5 font-medium text-foreground max-w-[100px] truncate">{item.itemName || `Item ${idx+1}`}</td>
-                                        <td className="px-2 py-1.5 text-right font-mono text-muted-foreground">{item.gstPercent > 0 ? `${item.gstPercent}%` : "—"}</td>
-                                        <td className="px-2 py-1.5 text-right font-mono text-foreground">{item.receivedQty}</td>
-                                        <td className="px-2 py-1.5 text-right font-mono font-semibold text-foreground">{formatINR(item.totalAmountInclGST)}</td>
-                                        <td className="px-2 py-1.5 text-right font-mono font-semibold text-blue-600 dark:text-blue-400">{formatINR(item.baseAmount)}</td>
-                                        <td className="px-2 py-1.5 text-right font-mono text-violet-600 dark:text-violet-400">
-                                          <span className="flex flex-col items-end">
-                                            <span className="text-[8px] text-muted-foreground">{item.cgstRate}%</span>
-                                            <span>{formatINR(item.cgstAmount)}</span>
-                                          </span>
-                                        </td>
-                                        <td className="px-2 py-1.5 text-right font-mono text-violet-600 dark:text-violet-400">
-                                          <span className="flex flex-col items-end">
-                                            <span className="text-[8px] text-muted-foreground">{item.sgstRate}%</span>
-                                            <span>{formatINR(item.sgstAmount)}</span>
-                                          </span>
-                                        </td>
-                                        <td className="px-2 py-1.5 text-right font-mono font-semibold text-orange-600 dark:text-orange-400">{formatINR(item.gstAmount)}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                  <tfoot className="border-t-2 border-blue-500/20 bg-muted/10">
-                                    <tr>
-                                      <td colSpan={3} className="px-2 py-1.5 text-[9px] font-heading uppercase text-muted-foreground">Totals</td>
-                                      <td className="px-2 py-1.5 text-right font-mono text-xs font-bold text-foreground">{formatINR(grnGstBreakdown.totals.totalInclGST)}</td>
-                                      <td className="px-2 py-1.5 text-right font-mono text-xs font-bold text-blue-600 dark:text-blue-400">{formatINR(grnGstBreakdown.totals.totalBase)}</td>
-                                      <td className="px-2 py-1.5 text-right font-mono text-xs font-bold text-violet-600 dark:text-violet-400">{formatINR(grnGstBreakdown.totals.totalCGST)}</td>
-                                      <td className="px-2 py-1.5 text-right font-mono text-xs font-bold text-violet-600 dark:text-violet-400">{formatINR(grnGstBreakdown.totals.totalSGST)}</td>
-                                      <td className="px-2 py-1.5 text-right font-mono text-xs font-bold text-orange-600 dark:text-orange-400">{formatINR(grnGstBreakdown.totals.totalGST)}</td>
-                                    </tr>
-                                  </tfoot>
-                                </table>
-                              </div>
-                              {/* Equation */}
-                              <div className="px-3 py-2 border-t border-blue-500/10 flex flex-wrap gap-1 text-[10px] font-mono">
-                                <span className="text-blue-600 dark:text-blue-400 font-semibold">{formatINR(grnGstBreakdown.totals.totalBase)}</span>
-                                <span className="text-muted-foreground">base +</span>
-                                <span className="text-violet-600 dark:text-violet-400 font-semibold">{formatINR(grnGstBreakdown.totals.totalCGST)}</span>
-                                <span className="text-muted-foreground">CGST +</span>
-                                <span className="text-violet-600 dark:text-violet-400 font-semibold">{formatINR(grnGstBreakdown.totals.totalSGST)}</span>
-                                <span className="text-muted-foreground">SGST =</span>
-                                <span className="text-foreground font-bold">{formatINR(grnGstBreakdown.totals.totalInclGST)}</span>
-                              </div>
-                            </div>
-                          )}
+                          {/* ── GST Summary Cards (cumulative) ── */}
+                          {grnGstBreakdown &&
+                            grnGstBreakdown.totals.totalInclGST > 0 && (
+                              <>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+                                  {[
+                                    {
+                                      label: "Base Amount",
+                                      value: grnGstBreakdown.totals.totalBase,
+                                      cls: "border-blue-500/30 bg-blue-500/5 text-blue-700 dark:text-blue-300",
+                                    },
+                                    {
+                                      label: "CGST",
+                                      value: grnGstBreakdown.totals.totalCGST,
+                                      cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
+                                    },
+                                    {
+                                      label: "SGST",
+                                      value: grnGstBreakdown.totals.totalSGST,
+                                      cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
+                                    },
+                                    {
+                                      label: "Total GST",
+                                      value: grnGstBreakdown.totals.totalGST,
+                                      cls: "border-orange-500/30 bg-orange-500/5 text-orange-700 dark:text-orange-300",
+                                    },
+                                  ].map(({ label, value, cls }) => (
+                                    <div
+                                      key={label}
+                                      className={`rounded-lg border px-3 py-2 ${cls}`}
+                                    >
+                                      <div className="text-[10px] font-heading uppercase tracking-wider opacity-70">
+                                        {label}
+                                      </div>
+                                      <div className="text-sm font-mono font-bold mt-1">
+                                        {formatINR(value)}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="px-4 py-2.5 bg-muted/10 border border-blue-500/10 rounded-lg flex flex-wrap items-center gap-1.5 text-[11px] font-mono mb-2">
+                                  <span className="text-blue-600 dark:text-blue-400 font-semibold">
+                                    {formatINR(
+                                      grnGstBreakdown.totals.totalBase,
+                                    )}
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    (base)
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    +
+                                  </span>
+                                  <span className="text-violet-600 dark:text-violet-400 font-semibold">
+                                    {formatINR(
+                                      grnGstBreakdown.totals.totalCGST,
+                                    )}
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    (CGST)
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    +
+                                  </span>
+                                  <span className="text-violet-600 dark:text-violet-400 font-semibold">
+                                    {formatINR(
+                                      grnGstBreakdown.totals.totalSGST,
+                                    )}
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    (SGST)
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    =
+                                  </span>
+                                  <span className="text-foreground font-bold">
+                                    {formatINR(
+                                      grnGstBreakdown.totals.totalInclGST,
+                                    )}
+                                  </span>
+                                </div>
+                              </>
+                            )}
 
                           <div className="space-y-1.5">
                             {/* Base */}
-                            <Row label="Basic Amount" sub={grnGstBreakdown ? "Excl. GST" : undefined} value={formatINR(base)} />
+                            <Row
+                              label="Basic Amount"
+                              sub={grnGstBreakdown ? "Excl. GST" : undefined}
+                              value={formatINR(base)}
+                            />
 
                             {/* Pre-GST billing terms */}
                             {preGstRows.map(({ term, amt }, i) => {
@@ -2922,24 +3006,26 @@ const Payment: React.FC = () => {
                                   <div className="border-t border-border/40 pt-1" />
                                 )}
                                 {grnGstBreakdown ? (
-                                  /* Per-item GST rows — correct slab per item */
+                                  /* Cumulative GST totals */
                                   <>
-                                    {grnGstBreakdown.items.map((item, i) => item.cgstAmount > 0 && (
+                                    {grnGstBreakdown.totals.totalCGST > 0 && (
                                       <Row
-                                        key={`cgst-${i}`}
-                                        label={`CGST [${item.cgstRate}%] · ${item.itemName}`}
-                                        value={formatINR(item.cgstAmount)}
+                                        label="CGST"
+                                        value={formatINR(
+                                          grnGstBreakdown.totals.totalCGST,
+                                        )}
                                         color="text-primary"
                                       />
-                                    ))}
-                                    {grnGstBreakdown.items.map((item, i) => item.sgstAmount > 0 && (
+                                    )}
+                                    {grnGstBreakdown.totals.totalSGST > 0 && (
                                       <Row
-                                        key={`sgst-${i}`}
-                                        label={`SGST [${item.sgstRate}%] · ${item.itemName}`}
-                                        value={formatINR(item.sgstAmount)}
+                                        label="SGST"
+                                        value={formatINR(
+                                          grnGstBreakdown.totals.totalSGST,
+                                        )}
                                         color="text-primary"
                                       />
-                                    ))}
+                                    )}
                                   </>
                                 ) : (
                                   /* Non-GRN: single averaged rate is the actual rate */
@@ -3033,62 +3119,7 @@ const Payment: React.FC = () => {
                 </div>
               </div>
 
-              {/* ── 3. Bank Account ── */}
-              <div className="space-y-3">
-                <SectionHeader icon={Landmark} label="Bank Account" />
-                <Field
-                  label="Bank"
-                  required={isChequeMode || isDigitalMode}
-                  hint={
-                    isChequeMode
-                      ? "Required — used to filter cheque lots."
-                      : isDigitalMode
-                        ? "Bank account from which the transfer was made."
-                        : "Optional for cash payments."
-                  }
-                >
-                  <div className="relative">
-                    <Landmark
-                      size={13}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                    <select
-                      value={form.bankId ? String(form.bankId) : ""}
-                      onChange={(e) => handleBankSelect(e.target.value)}
-                      className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                    >
-                      <option value="">— Select bank account —</option>
-                      {banks.map((b) => (
-                        <option key={b.id} value={String(b.id)}>
-                          {b.label}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={14}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
-                  {form.bankId &&
-                    (() => {
-                      const selected = banks.find((b) => b.id === form.bankId);
-                      if (!selected) return null;
-                      const details = [
-                        selected.ifscCode && `IFSC: ${selected.ifscCode}`,
-                        selected.branch && `Branch: ${selected.branch}`,
-                        selected.accountType && `Type: ${selected.accountType}`,
-                      ].filter(Boolean);
-                      if (!details.length) return null;
-                      return (
-                        <p className="text-[11px] text-muted-foreground/70 mt-1 pl-1">
-                          {details.join(" · ")}
-                        </p>
-                      );
-                    })()}
-                </Field>
-              </div>
-
-              {/* ── 4. Payment Mode ── */}
+              {/* ── 3. Payment Mode ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Wallet} label="Payment Mode" />
                 <Field label="Mode" required>
@@ -3124,6 +3155,68 @@ const Payment: React.FC = () => {
                 </Field>
 
                 {form.mode && <ModeInfoBanner mode={form.mode} />}
+              </div>
+
+              {/* ── 4. Bank Account ── */}
+              <div className="space-y-3">
+                <SectionHeader icon={Landmark} label="Bank Account" />
+                <Field
+                  label="Bank"
+                  required={isChequeMode || isDigitalMode}
+                  hint={
+                    !form.mode
+                      ? "Select a payment mode first."
+                      : isCashMode
+                        ? "Not applicable for cash payments."
+                        : isChequeMode
+                          ? "Required — used to filter cheque lots."
+                          : "Bank account from which the transfer was made."
+                  }
+                >
+                  <div
+                    className={`relative ${isCashMode || !form.mode ? "opacity-40 pointer-events-none" : ""}`}
+                  >
+                    <Landmark
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    <select
+                      value={form.bankId ? String(form.bankId) : ""}
+                      onChange={(e) => handleBankSelect(e.target.value)}
+                      disabled={isCashMode || !form.mode}
+                      className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed"
+                    >
+                      <option value="">— Select bank account —</option>
+                      {banks.map((b) => (
+                        <option key={b.id} value={String(b.id)}>
+                          {b.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={14}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                  {!isCashMode &&
+                    !!form.mode &&
+                    form.bankId &&
+                    (() => {
+                      const selected = banks.find((b) => b.id === form.bankId);
+                      if (!selected) return null;
+                      const details = [
+                        selected.ifscCode && `IFSC: ${selected.ifscCode}`,
+                        selected.branch && `Branch: ${selected.branch}`,
+                        selected.accountType && `Type: ${selected.accountType}`,
+                      ].filter(Boolean);
+                      if (!details.length) return null;
+                      return (
+                        <p className="text-[11px] text-muted-foreground/70 mt-1 pl-1">
+                          {details.join(" · ")}
+                        </p>
+                      );
+                    })()}
+                </Field>
               </div>
 
               {/* ── 5. Mode-specific section ── */}
@@ -3289,7 +3382,9 @@ const Payment: React.FC = () => {
                                 const val = e.target.value;
                                 setCompanyFilter(val);
                                 const label = val
-                                  ? (companyOptions.find((c) => String(c.id) === val)?.label ?? val)
+                                  ? (companyOptions.find(
+                                      (c) => String(c.id) === val,
+                                    )?.label ?? val)
                                   : "";
                                 setCompanyNameFilter(label);
                                 setPage(1);
@@ -3326,8 +3421,8 @@ const Payment: React.FC = () => {
                             >
                               <option value="">All Projects</option>
                               {projectOptions.map((p) => (
-                                <option key={p} value={p}>
-                                  {p}
+                                <option key={p.id} value={p.label}>
+                                  {p.label}
                                 </option>
                               ))}
                             </select>
@@ -3354,8 +3449,8 @@ const Payment: React.FC = () => {
                             >
                               <option value="">All Fin Years</option>
                               {finYearOptions.map((y) => (
-                                <option key={y} value={String(y)}>
-                                  {y}–{y + 1}
+                                <option key={y.id} value={y.label}>
+                                  {y.label}
                                 </option>
                               ))}
                             </select>
@@ -3501,7 +3596,7 @@ const Payment: React.FC = () => {
                       {finYearFilter && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-amber-500/10 text-amber-600 border border-amber-500/20">
                           <CalendarDays size={9} />
-                          FY {finYearFilter}–{parseInt(finYearFilter) + 1}
+                          FY {finYearFilter}
                           <button
                             onClick={() => {
                               setFinYearFilter("");
