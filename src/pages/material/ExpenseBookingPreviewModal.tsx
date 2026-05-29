@@ -58,14 +58,23 @@ export function ExpenseBookingPreviewModal({
   // GRN item-level GST breakdown (fetched when eSourceType === 'GRN')
   const [grnBreakdown, setGrnBreakdown] = useState<{
     items: {
-      itemName: string; gstPercent: number; receivedQty: number;
-      totalAmountInclGST: number; baseAmount: number;
-      cgstRate: number; cgstAmount: number;
-      sgstRate: number; sgstAmount: number; gstAmount: number;
+      itemName: string;
+      gstPercent: number;
+      receivedQty: number;
+      totalAmountInclGST: number;
+      baseAmount: number;
+      cgstRate: number;
+      cgstAmount: number;
+      sgstRate: number;
+      sgstAmount: number;
+      gstAmount: number;
     }[];
     totals: {
-      totalBase: number; totalCGST: number; totalSGST: number;
-      totalGST: number; totalInclGST: number;
+      totalBase: number;
+      totalCGST: number;
+      totalSGST: number;
+      totalGST: number;
+      totalInclGST: number;
     };
   } | null>(null);
 
@@ -74,7 +83,9 @@ export function ExpenseBookingPreviewModal({
     if (previewRecord?.eSourceType === "GRN" && previewRecord?.eSourceId) {
       fetchWithAuth(`/api/grns/${previewRecord.eSourceId}/gst-breakdown`)
         .then((r) => (r.ok ? r.json() : null))
-        .then((data) => { if (data?.totals?.totalInclGST > 0) setGrnBreakdown(data); })
+        .then((data) => {
+          if (data?.totals?.totalInclGST > 0) setGrnBreakdown(data);
+        })
         .catch(() => {});
     }
   }, [previewRecord?.id]);
@@ -118,7 +129,7 @@ export function ExpenseBookingPreviewModal({
 
   return (
     <Dialog open={!!previewRecord} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[calc(100vw-1rem)] max-w-5xl max-h-[96vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Expense Booking Preview</DialogTitle>
           <DialogDescription>
@@ -258,158 +269,199 @@ export function ExpenseBookingPreviewModal({
                     <table className="w-full text-[11px]">
                       <thead>
                         <tr className="border-b border-blue-500/10 bg-muted/10">
-                          <th className="px-3 py-1.5 text-left text-muted-foreground font-heading uppercase tracking-wider text-[9px]">Item</th>
-                          <th className="px-3 py-1.5 text-right text-muted-foreground font-heading uppercase tracking-wider text-[9px]">GST%</th>
-                          <th className="px-3 py-1.5 text-right text-muted-foreground font-heading uppercase tracking-wider text-[9px]">Qty</th>
-                          <th className="px-3 py-1.5 text-right text-foreground font-heading uppercase tracking-wider text-[9px]">Incl.</th>
-                          <th className="px-3 py-1.5 text-right text-blue-600 dark:text-blue-400 font-heading uppercase tracking-wider text-[9px]">Base</th>
-                          <th className="px-3 py-1.5 text-right text-violet-600 dark:text-violet-400 font-heading uppercase tracking-wider text-[9px]">CGST</th>
-                          <th className="px-3 py-1.5 text-right text-violet-600 dark:text-violet-400 font-heading uppercase tracking-wider text-[9px]">SGST</th>
-                          <th className="px-3 py-1.5 text-right text-orange-600 dark:text-orange-400 font-heading uppercase tracking-wider text-[9px]">Tax</th>
+                          <th className="px-3 py-1.5 text-left text-muted-foreground font-heading uppercase tracking-wider text-[9px]">
+                            Item
+                          </th>
+                          <th className="px-3 py-1.5 text-right text-muted-foreground font-heading uppercase tracking-wider text-[9px]">
+                            Qty
+                          </th>
+                          <th className="px-3 py-1.5 text-right text-foreground font-heading uppercase tracking-wider text-[9px]">
+                            Incl.
+                          </th>
+                          <th className="px-3 py-1.5 text-right text-blue-600 dark:text-blue-400 font-heading uppercase tracking-wider text-[9px]">
+                            Base
+                          </th>
+                          <th className="px-3 py-1.5 text-right text-orange-600 dark:text-orange-400 font-heading uppercase tracking-wider text-[9px]">
+                            Tax
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-blue-500/8">
                         {grnBreakdown.items.map((item, idx) => (
                           <tr key={idx} className="hover:bg-blue-500/5">
-                            <td className="px-3 py-1.5 font-medium text-foreground max-w-[90px] truncate">{item.itemName || `Item ${idx + 1}`}</td>
-                            <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{item.gstPercent > 0 ? `${item.gstPercent}%` : "—"}</td>
-                            <td className="px-3 py-1.5 text-right font-mono text-foreground">{item.receivedQty}</td>
-                            <td className="px-3 py-1.5 text-right font-mono font-semibold text-foreground">₹{fmt(item.totalAmountInclGST)}</td>
-                            <td className="px-3 py-1.5 text-right font-mono font-semibold text-blue-600 dark:text-blue-400">₹{fmt(item.baseAmount)}</td>
-                            <td className="px-3 py-1.5 text-right font-mono text-violet-600 dark:text-violet-400">
-                              <span className="flex flex-col items-end">
-                                <span className="text-[8px] text-muted-foreground">{item.cgstRate}%</span>
-                                <span>₹{fmt(item.cgstAmount)}</span>
-                              </span>
+                            <td className="px-3 py-1.5 font-medium text-foreground max-w-[120px] truncate">
+                              {item.itemName || `Item ${idx + 1}`}
                             </td>
-                            <td className="px-3 py-1.5 text-right font-mono text-violet-600 dark:text-violet-400">
-                              <span className="flex flex-col items-end">
-                                <span className="text-[8px] text-muted-foreground">{item.sgstRate}%</span>
-                                <span>₹{fmt(item.sgstAmount)}</span>
-                              </span>
+                            <td className="px-3 py-1.5 text-right font-mono text-foreground">
+                              {item.receivedQty}
                             </td>
-                            <td className="px-3 py-1.5 text-right font-mono font-semibold text-orange-600 dark:text-orange-400">₹{fmt(item.gstAmount)}</td>
+                            <td className="px-3 py-1.5 text-right font-mono font-semibold text-foreground">
+                              ₹{fmt(item.totalAmountInclGST)}
+                            </td>
+                            <td className="px-3 py-1.5 text-right font-mono font-semibold text-blue-600 dark:text-blue-400">
+                              ₹{fmt(item.baseAmount)}
+                            </td>
+                            <td className="px-3 py-1.5 text-right font-mono font-semibold text-orange-600 dark:text-orange-400">
+                              ₹{fmt(item.gstAmount)}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                       <tfoot className="border-t-2 border-blue-500/20 bg-muted/10">
                         <tr>
-                          <td colSpan={3} className="px-3 py-1.5 text-[9px] font-heading uppercase text-muted-foreground">Totals</td>
-                          <td className="px-3 py-1.5 text-right font-mono text-xs font-bold text-foreground">₹{fmt(grnBreakdown.totals.totalInclGST)}</td>
-                          <td className="px-3 py-1.5 text-right font-mono text-xs font-bold text-blue-600 dark:text-blue-400">₹{fmt(grnBreakdown.totals.totalBase)}</td>
-                          <td className="px-3 py-1.5 text-right font-mono text-xs font-bold text-violet-600 dark:text-violet-400">₹{fmt(grnBreakdown.totals.totalCGST)}</td>
-                          <td className="px-3 py-1.5 text-right font-mono text-xs font-bold text-violet-600 dark:text-violet-400">₹{fmt(grnBreakdown.totals.totalSGST)}</td>
-                          <td className="px-3 py-1.5 text-right font-mono text-xs font-bold text-orange-600 dark:text-orange-400">₹{fmt(grnBreakdown.totals.totalGST)}</td>
+                          <td
+                            colSpan={2}
+                            className="px-3 py-1.5 text-[9px] font-heading uppercase text-muted-foreground"
+                          >
+                            Totals
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono text-xs font-bold text-foreground">
+                            ₹{fmt(grnBreakdown.totals.totalInclGST)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono text-xs font-bold text-blue-600 dark:text-blue-400">
+                            ₹{fmt(grnBreakdown.totals.totalBase)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono text-xs font-bold text-orange-600 dark:text-orange-400">
+                            ₹{fmt(grnBreakdown.totals.totalGST)}
+                          </td>
                         </tr>
                       </tfoot>
                     </table>
                   </div>
-                  <div className="px-3 py-2 border-t border-blue-500/10 flex flex-wrap gap-1 text-[10px] font-mono">
-                    <span className="text-blue-600 dark:text-blue-400 font-semibold">₹{fmt(grnBreakdown.totals.totalBase)}</span>
-                    <span className="text-muted-foreground">base +</span>
-                    <span className="text-violet-600 dark:text-violet-400 font-semibold">₹{fmt(grnBreakdown.totals.totalCGST)}</span>
-                    <span className="text-muted-foreground">CGST +</span>
-                    <span className="text-violet-600 dark:text-violet-400 font-semibold">₹{fmt(grnBreakdown.totals.totalSGST)}</span>
-                    <span className="text-muted-foreground">SGST =</span>
-                    <span className="text-foreground font-bold">₹{fmt(grnBreakdown.totals.totalInclGST)}</span>
-                  </div>
                 </div>
-                <div className="flex items-center justify-between px-4 py-3 bg-primary/10 border border-primary/20 rounded-xl">
-                  <p className="text-xs font-heading font-bold text-primary uppercase tracking-wider">Net Payable</p>
-                  <p className="font-mono text-base font-bold text-primary">₹{fmt(grnBreakdown.totals.totalInclGST)}</p>
-                </div>
-              </div>
-            ) : (
-
-            /* ── Standard breakdown (non-GRN) ── */
-            <div className="rounded-xl border border-border overflow-hidden">
-              <div className="divide-y divide-border/60">
-                <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
-                  <p className="text-xs text-muted-foreground">Basic Amount</p>
-                  <p className="font-mono text-sm font-semibold">
-                    ₹{fmt(previewRecord.basicAmount)}
-                  </p>
-                </div>
-                {!hasIgst && (previewRecord.cgstRate || 0) > 0 && (
-                  <div className="flex items-center justify-between px-4 py-2.5">
-                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                      <BadgePercent size={10} className="text-amber-500" />
-                      CGST{" "}
-                      <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                        {previewRecord.cgstRate}%
-                      </span>
-                    </p>
-                    <p className="font-mono text-sm text-foreground/80">
-                      + ₹{fmt(cgstAmt)}
+                {/* Cumulative GST summary */}
+                <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-sm">
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
+                    <div>
+                      <p className="text-xs font-medium">Basic Amount</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Pre-tax value (excl. GST)
+                      </p>
+                    </div>
+                    <p className="font-mono text-sm font-semibold">
+                      ₹{fmt(grnBreakdown.totals.totalBase)}
                     </p>
                   </div>
-                )}
-                {!hasIgst && (previewRecord.sgstRate || 0) > 0 && (
-                  <div className="flex items-center justify-between px-4 py-2.5">
-                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                      <BadgePercent size={10} className="text-amber-500" />
-                      SGST{" "}
-                      <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                        {previewRecord.sgstRate}%
-                      </span>
-                    </p>
-                    <p className="font-mono text-sm text-foreground/80">
-                      + ₹{fmt(sgstAmt)}
-                    </p>
-                  </div>
-                )}
-                {hasIgst && (
-                  <div className="flex items-center justify-between px-4 py-2.5">
-                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                      <BadgePercent size={10} className="text-amber-500" />
-                      IGST{" "}
-                      <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                        {previewRecord.igstRate}%
-                      </span>
-                    </p>
-                    <p className="font-mono text-sm text-foreground/80">
-                      + ₹{fmt(igstAmt)}
-                    </p>
-                  </div>
-                )}
-                {!hasIgst &&
-                  (previewRecord.cgstRate || 0) === 0 &&
-                  (previewRecord.sgstRate || 0) === 0 && (
+                  {grnBreakdown.totals.totalCGST > 0 && (
                     <div className="flex items-center justify-between px-4 py-2.5">
-                      <p className="text-xs text-muted-foreground">GST</p>
-                      <p className="text-xs text-muted-foreground">
-                        Not applicable
+                      <div>
+                        <p className="text-xs text-muted-foreground">CGST</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Central GST
+                        </p>
+                      </div>
+                      <p className="font-mono text-sm text-foreground/80">
+                        + ₹{fmt(grnBreakdown.totals.totalCGST)}
                       </p>
                     </div>
                   )}
-                {hasDiscount && (
-                  <div className="flex items-center justify-between px-4 py-2.5 bg-red-500/5">
-                    <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1.5">
-                      <TrendingUp size={10} />
-                      Discount
-                      {previewRecord.discount?.type === "percentage" &&
-                      previewRecord.discount?.value ? (
-                        <span className="font-mono text-[10px] bg-red-500/10 px-1.5 py-0.5 rounded">
-                          {previewRecord.discount.value}%
-                        </span>
-                      ) : null}
-                    </p>
-                    <p className="font-mono text-sm text-red-500 dark:text-red-400">
-                      − ₹{fmt((rbd as any).discountAmount)}
+                  {grnBreakdown.totals.totalSGST > 0 && (
+                    <div className="flex items-center justify-between px-4 py-2.5">
+                      <div>
+                        <p className="text-xs text-muted-foreground">SGST</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          State GST
+                        </p>
+                      </div>
+                      <p className="font-mono text-sm text-foreground/80">
+                        + ₹{fmt(grnBreakdown.totals.totalSGST)}
+                      </p>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20">
+                    <div>
+                      <p className="text-xs font-medium">Gross Amount</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Basic + CGST + SGST
+                      </p>
+                    </div>
+                    <p className="font-mono text-sm font-semibold">
+                      ₹{fmt(grnBreakdown.totals.totalInclGST)}
                     </p>
                   </div>
-                )}
+                </div>
+                <div className="flex items-center justify-between px-4 py-3 bg-primary/10 border border-primary/20 rounded-xl">
+                  <p className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
+                    Net Payable
+                  </p>
+                  <p className="font-mono text-base font-bold text-primary">
+                    ₹{fmt(grnBreakdown.totals.totalInclGST)}
+                  </p>
+                </div>
               </div>
-              <div className="flex items-center justify-between px-4 py-3 bg-primary/10 border-t border-primary/20">
-                <p className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
-                  Net Payable
-                </p>
-                <p className="font-mono text-base font-bold text-primary">
-                  ₹{fmt(displayNetAmount)}
-                </p>
+            ) : (
+              /* ── Standard breakdown (non-GRN) ── */
+              <div className="rounded-xl border border-border overflow-hidden">
+                <div className="divide-y divide-border/60">
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
+                    <p className="text-xs text-muted-foreground">
+                      Basic Amount
+                    </p>
+                    <p className="font-mono text-sm font-semibold">
+                      ₹{fmt(previewRecord.basicAmount)}
+                    </p>
+                  </div>
+                  {!hasIgst && (previewRecord.cgstRate || 0) > 0 && (
+                    <div className="flex items-center justify-between px-4 py-2.5">
+                      <p className="text-xs text-muted-foreground">CGST</p>
+                      <p className="font-mono text-sm text-foreground/80">
+                        + ₹{fmt(cgstAmt)}
+                      </p>
+                    </div>
+                  )}
+                  {!hasIgst && (previewRecord.sgstRate || 0) > 0 && (
+                    <div className="flex items-center justify-between px-4 py-2.5">
+                      <p className="text-xs text-muted-foreground">SGST</p>
+                      <p className="font-mono text-sm text-foreground/80">
+                        + ₹{fmt(sgstAmt)}
+                      </p>
+                    </div>
+                  )}
+                  {hasIgst && (
+                    <div className="flex items-center justify-between px-4 py-2.5">
+                      <p className="text-xs text-muted-foreground">IGST</p>
+                      <p className="font-mono text-sm text-foreground/80">
+                        + ₹{fmt(igstAmt)}
+                      </p>
+                    </div>
+                  )}
+                  {!hasIgst &&
+                    (previewRecord.cgstRate || 0) === 0 &&
+                    (previewRecord.sgstRate || 0) === 0 && (
+                      <div className="flex items-center justify-between px-4 py-2.5">
+                        <p className="text-xs text-muted-foreground">GST</p>
+                        <p className="text-xs text-muted-foreground">
+                          Not applicable
+                        </p>
+                      </div>
+                    )}
+                  {hasDiscount && (
+                    <div className="flex items-center justify-between px-4 py-2.5 bg-red-500/5">
+                      <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1.5">
+                        <TrendingUp size={10} />
+                        Discount
+                        {previewRecord.discount?.type === "percentage" &&
+                        previewRecord.discount?.value ? (
+                          <span className="font-mono text-[10px] bg-red-500/10 px-1.5 py-0.5 rounded">
+                            {previewRecord.discount.value}%
+                          </span>
+                        ) : null}
+                      </p>
+                      <p className="font-mono text-sm text-red-500 dark:text-red-400">
+                        − ₹{fmt((rbd as any).discountAmount)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center justify-between px-4 py-3 bg-primary/10 border-t border-primary/20">
+                  <p className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
+                    Net Payable
+                  </p>
+                  <p className="font-mono text-base font-bold text-primary">
+                    ₹{fmt(displayNetAmount)}
+                  </p>
+                </div>
               </div>
-            </div>
-
             )}
           </div>
 
@@ -679,7 +731,7 @@ export function ExpenseBookingPreviewModal({
                       </p>
                     </div>
                   )}
-                  {(displayRemainingAmount) > 0 && (
+                  {displayRemainingAmount > 0 && (
                     <div className="flex items-center justify-between px-4 py-2.5 bg-amber-500/5">
                       <p className="text-xs text-amber-600 dark:text-amber-400">
                         Remaining
