@@ -2381,7 +2381,7 @@ export default function BOQ() {
 
   return (
     <>
-      <Breadcrumbs items={["Engineering", "BOQ"]} />
+      <Breadcrumbs items={["Engineering", "Transaction", "BOQ"]} />
 
       {/* ── Inline Form (create / edit) ── */}
       {showForm && (
