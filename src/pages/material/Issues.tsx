@@ -273,10 +273,19 @@ export default function Issues() {
 
   useEffect(() => {
     if (finYears.length > 0 && !header.finYearId && viewMode === "form") {
-      const active = (finYears as any[]).find(
+      const today = new Date().toISOString().slice(0, 10);
+      // Prefer the fin year whose date range contains today; fall back to first Active
+      const current = (finYears as any[]).find(
+        (f) =>
+          (f.status === "Active" || f.isActive === true || f.isActive === 1) &&
+          f.startDate <= today &&
+          f.endDate >= today,
+      );
+      const fallback = (finYears as any[]).find(
         (f) => f.status === "Active" || f.isActive === true || f.isActive === 1,
       );
-      if (active) setH("finYearId", String(active.id));
+      const chosen = current ?? fallback;
+      if (chosen) setH("finYearId", String(chosen.id));
     }
   }, [finYears, viewMode, header.finYearId]);
 
