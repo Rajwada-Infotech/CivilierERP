@@ -23,6 +23,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps
@@ -53,6 +54,7 @@ jobs:
       - name: Check backend JavaScript syntax
         run: |
           find backend \
-            -path backend/node_modules -prune -o \
-            -name '*.js' -print0 |
-          xargs -0 -n1 node --check
+            -path "backend/node_modules" -prune -o \
+            -name "*.js" -print0 | \
+          xargs -0 -r -n1 node --check
+        continue-on-error: false
