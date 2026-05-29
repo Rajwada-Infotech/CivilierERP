@@ -67,7 +67,26 @@ function normaliseGRNRow(row) {
   return row;
 }
 
-async function insertStockLedgerEntries(transaction, grnId, grnItems, docNo) {
+async function resolveMainGodownId(pool) {
+  try {
+    const res = await pool
+      .request()
+      .query(
+        "SELECT TOP 1 GodownID FROM dbo.Godowns WHERE IsMain = 1 AND IsDeleted = 0 ORDER BY GodownID",
+      );
+    return res.recordset[0]?.GodownID || null;
+  } catch {
+    return null;
+  }
+}
+
+async function insertStockLedgerEntries(
+  transaction,
+  grnId,
+  grnItems,
+  docNo,
+  godownId,
+) {
   const items = parseGRNItems(grnItems);
 
   for (const item of items) {
@@ -80,9 +99,10 @@ async function insertStockLedgerEntries(transaction, grnId, grnItems, docNo) {
         .input("Type", sql.NVarChar(10), "IN")
         .input("RefType", sql.NVarChar(20), "GRN")
         .input("RefID", sql.Int, grnId)
-        .input("DocNo", sql.NVarChar(100), docNo || null).query(`
-          INSERT INTO StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, CreatedDate)
-          VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, GETDATE())
+        .input("DocNo", sql.NVarChar(100), docNo || null)
+        .input("GodownID", sql.Int, godownId || null).query(`
+          INSERT INTO StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, GodownID, CreatedDate)
+          VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, @GodownID, GETDATE())
         `);
     }
   }
@@ -101,9 +121,7 @@ router.get("/grn-gst-data", async (req, res) => {
     const pool = await getPool();
 
     // ── 1. Fetch GRN header + linked PO/supplier/company context ────────────
-    const headerResult = await pool
-      .request()
-      .input("GRNID", sql.Int, grnId)
+    const headerResult = await pool.request().input("GRNID", sql.Int, grnId)
       .query(`
         SELECT
           grn.GRNID,
@@ -145,23 +163,30 @@ router.get("/grn-gst-data", async (req, res) => {
         cgstRate: 0,
         sgstRate: 0,
         igstRate: 0,
-        totals: { taxableAmount: 0, cgstAmount: 0, sgstAmount: 0, igstAmount: 0, gstAmount: 0, netAmount: 0, receivedQty: 0 },
+        totals: {
+          taxableAmount: 0,
+          cgstAmount: 0,
+          sgstAmount: 0,
+          igstAmount: 0,
+          gstAmount: 0,
+          netAmount: 0,
+          receivedQty: 0,
+        },
         lines: [],
       });
 
     // ── 2. Determine tax mode (intra vs inter state) ─────────────────────────
-    const vendorState   = (hdr.VendorState   || "").trim().toLowerCase();
-    const companyState  = (hdr.CompanyState  || "").trim().toLowerCase();
-    const taxMode       = vendorState && companyState && vendorState === companyState
-      ? "cgst_sgst"
-      : "igst";
+    const vendorState = (hdr.VendorState || "").trim().toLowerCase();
+    const companyState = (hdr.CompanyState || "").trim().toLowerCase();
+    const taxMode =
+      vendorState && companyState && vendorState === companyState
+        ? "cgst_sgst"
+        : "igst";
 
     // ── 3. Fetch HSN/GST% for every itemId present in GRN items ─────────────
     //    Items store GST% directly when saved, but we re-fetch from ItemMaster
     //    as the authoritative source for accuracy.
-    const itemIds = [...new Set(
-      grnItems.map(i => i.itemId).filter(Boolean)
-    )];
+    const itemIds = [...new Set(grnItems.map((i) => i.itemId).filter(Boolean))];
 
     let hsnMap = {}; // itemId → { hsnCode, gstPercent }
     if (itemIds.length > 0) {
@@ -178,7 +203,7 @@ router.get("/grn-gst-data", async (req, res) => {
       `);
       for (const row of hsnResult.recordset) {
         hsnMap[String(row.ItemId)] = {
-          hsnCode:    row.HSNCode    || null,
+          hsnCode: row.HSNCode || null,
           gstPercent: Number(row.GSTPercent) || 0,
         };
       }
@@ -187,43 +212,47 @@ router.get("/grn-gst-data", async (req, res) => {
     // ── 4. Compute per-line GST ──────────────────────────────────────────────
     let dominantGstPct = 0;
     const lines = grnItems.map((item, idx) => {
-      const receivedQty  = Number(item.receivedQty  || item.quantity || 0);
-      const orderedQty   = Number(item.orderedQty   || item.quantity || 0);
-      const unitRate     = Number(item.unitRate || item.rate || 0);
-      const itemId       = item.itemId ? String(item.itemId) : null;
+      const receivedQty = Number(item.receivedQty || item.quantity || 0);
+      const orderedQty = Number(item.orderedQty || item.quantity || 0);
+      const unitRate = Number(item.unitRate || item.rate || 0);
+      const itemId = item.itemId ? String(item.itemId) : null;
 
       // GST%: prefer ItemMaster lookup; fall back to what was saved on the item
-      const hsnInfo   = itemId ? (hsnMap[itemId] || {}) : {};
+      const hsnInfo = itemId ? hsnMap[itemId] || {} : {};
       const gstPercent = Number(hsnInfo.gstPercent ?? item.gstPercent ?? 0);
-      const hsnCode    = hsnInfo.hsnCode ?? item.hsnCode ?? null;
+      const hsnCode = hsnInfo.hsnCode ?? item.hsnCode ?? null;
 
       if (gstPercent > dominantGstPct) dominantGstPct = gstPercent;
 
       const taxableAmount = receivedQty * unitRate;
-      const gstAmount     = taxableAmount * (gstPercent / 100);
+      const gstAmount = taxableAmount * (gstPercent / 100);
 
-      let cgstRate = 0, sgstRate = 0, igstRate = 0;
-      let cgstAmount = 0, sgstAmount = 0, igstAmount = 0;
+      let cgstRate = 0,
+        sgstRate = 0,
+        igstRate = 0;
+      let cgstAmount = 0,
+        sgstAmount = 0,
+        igstAmount = 0;
 
       if (taxMode === "cgst_sgst") {
-        cgstRate   = gstPercent / 2;
-        sgstRate   = gstPercent / 2;
+        cgstRate = gstPercent / 2;
+        sgstRate = gstPercent / 2;
         cgstAmount = gstAmount / 2;
         sgstAmount = gstAmount / 2;
       } else {
-        igstRate   = gstPercent;
+        igstRate = gstPercent;
         igstAmount = gstAmount;
       }
 
       const netAmount = taxableAmount + gstAmount;
 
       return {
-        lineNo:        idx + 1,
+        lineNo: idx + 1,
         itemId,
-        itemName:      item.itemName || item.name || `Item ${idx + 1}`,
+        itemName: item.itemName || item.name || `Item ${idx + 1}`,
         orderedQty,
         receivedQty,
-        uom:           item.uom || "",
+        uom: item.uom || "",
         unitRate,
         hsnCode,
         gstPercent,
@@ -231,11 +260,11 @@ router.get("/grn-gst-data", async (req, res) => {
         cgstRate,
         sgstRate,
         igstRate,
-        cgstAmount:    Math.round(cgstAmount * 100) / 100,
-        sgstAmount:    Math.round(sgstAmount * 100) / 100,
-        igstAmount:    Math.round(igstAmount * 100) / 100,
-        gstAmount:     Math.round(gstAmount   * 100) / 100,
-        netAmount:     Math.round(netAmount    * 100) / 100,
+        cgstAmount: Math.round(cgstAmount * 100) / 100,
+        sgstAmount: Math.round(sgstAmount * 100) / 100,
+        igstAmount: Math.round(igstAmount * 100) / 100,
+        gstAmount: Math.round(gstAmount * 100) / 100,
+        netAmount: Math.round(netAmount * 100) / 100,
       };
     });
 
@@ -243,41 +272,52 @@ router.get("/grn-gst-data", async (req, res) => {
     const totals = lines.reduce(
       (acc, l) => ({
         taxableAmount: acc.taxableAmount + l.taxableAmount,
-        cgstAmount:    acc.cgstAmount    + l.cgstAmount,
-        sgstAmount:    acc.sgstAmount    + l.sgstAmount,
-        igstAmount:    acc.igstAmount    + l.igstAmount,
-        gstAmount:     acc.gstAmount     + l.gstAmount,
-        netAmount:     acc.netAmount     + l.netAmount,
-        receivedQty:   acc.receivedQty   + l.receivedQty,
+        cgstAmount: acc.cgstAmount + l.cgstAmount,
+        sgstAmount: acc.sgstAmount + l.sgstAmount,
+        igstAmount: acc.igstAmount + l.igstAmount,
+        gstAmount: acc.gstAmount + l.gstAmount,
+        netAmount: acc.netAmount + l.netAmount,
+        receivedQty: acc.receivedQty + l.receivedQty,
       }),
-      { taxableAmount: 0, cgstAmount: 0, sgstAmount: 0, igstAmount: 0, gstAmount: 0, netAmount: 0, receivedQty: 0 }
+      {
+        taxableAmount: 0,
+        cgstAmount: 0,
+        sgstAmount: 0,
+        igstAmount: 0,
+        gstAmount: 0,
+        netAmount: 0,
+        receivedQty: 0,
+      },
     );
     // Round totals
-    for (const k of Object.keys(totals)) totals[k] = Math.round(totals[k] * 100) / 100;
+    for (const k of Object.keys(totals))
+      totals[k] = Math.round(totals[k] * 100) / 100;
 
     const halfGst = dominantGstPct / 2;
 
     return res.json({
       grnId,
-      grnNo:         hdr.GRNNo,
-      poId:          hdr.POID          || null,
-      poNo:          hdr.PONo          || null,
-      supplierId:    hdr.SupplierID    || null,
-      supplierName:  hdr.SupplierName  || null,
-      companyId:     hdr.CompanyId     || null,
-      vendorState:   hdr.VendorState   || "",
-      companyState:  hdr.CompanyState  || "",
+      grnNo: hdr.GRNNo,
+      poId: hdr.POID || null,
+      poNo: hdr.PONo || null,
+      supplierId: hdr.SupplierID || null,
+      supplierName: hdr.SupplierName || null,
+      companyId: hdr.CompanyId || null,
+      vendorState: hdr.VendorState || "",
+      companyState: hdr.CompanyState || "",
       taxMode,
-      gstPercent:    dominantGstPct,
-      cgstRate:      taxMode === "cgst_sgst" ? halfGst : 0,
-      sgstRate:      taxMode === "cgst_sgst" ? halfGst : 0,
-      igstRate:      taxMode === "igst"      ? dominantGstPct : 0,
+      gstPercent: dominantGstPct,
+      cgstRate: taxMode === "cgst_sgst" ? halfGst : 0,
+      sgstRate: taxMode === "cgst_sgst" ? halfGst : 0,
+      igstRate: taxMode === "igst" ? dominantGstPct : 0,
       totals,
       lines,
     });
   } catch (err) {
     console.error("GET /grn-gst-data ERROR:", err);
-    res.status(500).json({ error: "Failed to compute GRN GST data", message: err.message });
+    res
+      .status(500)
+      .json({ error: "Failed to compute GRN GST data", message: err.message });
   }
 });
 
@@ -598,7 +638,14 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
 
     await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
 
-    await insertStockLedgerEntries(transaction, grnId, grnItems, finalDocNo);
+    const mainGodownId = await resolveMainGodownId(pool);
+    await insertStockLedgerEntries(
+      transaction,
+      grnId,
+      grnItems,
+      finalDocNo,
+      mainGodownId,
+    );
 
     await transaction.commit();
 
@@ -750,7 +797,14 @@ router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
         "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
       );
 
-    await insertStockLedgerEntries(transaction, grnId, grnItems, docNo);
+    const mainGodownId = await resolveMainGodownId(pool);
+    await insertStockLedgerEntries(
+      transaction,
+      grnId,
+      grnItems,
+      docNo,
+      mainGodownId,
+    );
     await transaction.commit();
 
     await bumpCacheVersion("grns");
