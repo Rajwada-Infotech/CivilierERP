@@ -153,32 +153,66 @@ const grnBodySchema = z
   .passthrough();
 
 const paymentBodySchema = z
-  .object({
-    PPaymentName: optStr(200),
-    PMode: reqStr(50, "Payment mode is required"),
-    PAmount: reqNonNegativeNumber("Amount must be non-negative"),
-    PDocType: optStr(50),
-    PDate: optDate,
-    PBankID: optInt,
-    PBankName: optStr(200),
-    PProject: optStr(200),
-    PCompany: optStr(200),
-    PExpenseRef: optStr(100),
-    parentDocNo: optStr(100),
-    rootExBDocNo: optStr(100),
-    PChequeNo: optStr(50),
-    PChequeLotId: optInt,
-    PChequeLotNumber: optStr(100),
-    PChequeDate: optDate,
-    PChequeAccountNumber: optStr(50),
-    PChequeIfsc: optStr(20),
-    PIsPostDated: z.coerce.boolean().optional(),
-    PNeftNumber: optStr(50),
-    PUpiTransactionId: optStr(100),
-    PRtgsReference: optStr(100),
-    PImpsReference: optStr(100),
-  })
-  .passthrough();
+  .preprocess((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return value;
+    }
+
+    const body = value;
+    return {
+      ...body,
+      PPaymentName: body.PPaymentName ?? body.remarks ?? body.paymentName,
+      PMode: body.PMode ?? body.mode,
+      PAmount: body.PAmount ?? body.amount,
+      PDocType: body.PDocType ?? body.docTypeId,
+      PDate: body.PDate ?? body.docDate ?? body.date,
+      PBankID: body.PBankID ?? body.bankId,
+      PBankName: body.PBankName ?? body.bankName,
+      PProject: body.PProject ?? body.projectId ?? body.project,
+      PCompany: body.PCompany ?? body.companyId ?? body.company,
+      PExpenseRef: body.PExpenseRef ?? body.supplierId ?? body.expenseRef,
+      PChequeNo: body.PChequeNo ?? body.chequeNo,
+      PChequeLotId: body.PChequeLotId ?? body.chequeLotId,
+      PChequeLotNumber: body.PChequeLotNumber ?? body.chequeLotNumber,
+      PChequeDate: body.PChequeDate ?? body.chequeDate,
+      PChequeAccountNumber:
+        body.PChequeAccountNumber ?? body.chequeAccountNumber,
+      PChequeIfsc: body.PChequeIfsc ?? body.chequeIfsc,
+      PIsPostDated: body.PIsPostDated ?? body.isPostDated,
+      PNeftNumber: body.PNeftNumber ?? body.neftNumber,
+      PUpiTransactionId: body.PUpiTransactionId ?? body.upiTransactionId,
+      PRtgsReference: body.PRtgsReference ?? body.rtgsReference,
+      PImpsReference: body.PImpsReference ?? body.impsReference,
+    };
+  },
+  z
+    .object({
+      PPaymentName: optStr(200),
+      PMode: reqStr(50, "Payment mode is required"),
+      PAmount: reqNonNegativeNumber("Amount must be non-negative"),
+      PDocType: optStr(50),
+      PDate: optDate,
+      PBankID: optInt,
+      PBankName: optStr(200),
+      PProject: optStr(200),
+      PCompany: optStr(200),
+      PExpenseRef: optStr(100),
+      parentDocNo: optStr(100),
+      rootExBDocNo: optStr(100),
+      PChequeNo: optStr(50),
+      PChequeLotId: optInt,
+      PChequeLotNumber: optStr(100),
+      PChequeDate: optDate,
+      PChequeAccountNumber: optStr(50),
+      PChequeIfsc: optStr(20),
+      PIsPostDated: z.coerce.boolean().optional(),
+      PNeftNumber: optStr(50),
+      PUpiTransactionId: optStr(100),
+      PRtgsReference: optStr(100),
+      PImpsReference: optStr(100),
+    })
+    .passthrough(),
+  );
 
 module.exports = {
   purchaseOrderBodySchema,

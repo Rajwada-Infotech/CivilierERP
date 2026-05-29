@@ -393,30 +393,7 @@ const fetchCompanyOptions = async (): Promise<
   return res.json();
 };
 
-const fetchProjectOptions = async (): Promise<string[]> => {
-  const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
-  if (!res.ok) return [];
-  const data: { id: number; label: string }[] = await res.json();
-  return data.map((p) => p.label).sort();
-};
 
-const fetchFinYears = async (): Promise<string[]> => {
-  const res = await fetchWithAuth("/api/fin-year");
-  if (!res.ok) return [];
-  const data: { FId: number; FName: string | null }[] = await res.json();
-  return data
-    .filter((f) => f.FName)
-    .map((f) => f.FName as string)
-    .sort()
-    .reverse();
-};
-
-const fetchSupplierOptions = async (): Promise<string[]> => {
-  const res = await fetchWithAuth("/api/account-head/options?type=S");
-  if (!res.ok) return [];
-  const data: { id: number; label: string }[] = await res.json();
-  return data.map((s) => s.label).sort();
-};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -842,24 +819,30 @@ function FilterBar({
   filters: BookingFilters;
   onChange: (key: keyof BookingFilters, value: string) => void;
 }) {
-  const [projects, setProjects] = React.useState<string[]>([]);
-  const [finYears, setFinYears] = React.useState<string[]>([]);
-  const [suppliers, setSuppliers] = React.useState<string[]>([]);
-
-  React.useEffect(() => {
-    fetchProjectOptions()
-      .then(setProjects)
-      .catch(() => {});
-    fetchFinYears()
-      .then(setFinYears)
-      .catch(() => {});
-    fetchSupplierOptions()
-      .then(setSuppliers)
-      .catch(() => {});
-  }, []);
-
-  // Company — from enterprise table (business_type=C)
-  const companies = companyOptions.map((c) => c.label).sort();
+  // Derive all filter options directly from the loaded expenseOptions so that
+  // the dropdown values are guaranteed to exactly match what the filter compares.
+  // Previously these were fetched from separate master endpoints, causing
+  // mismatches (e.g. EProjectName stored as raw ID, or EName vs LHeadName).
+  const companies = React.useMemo(
+    () =>
+      [...new Set(expenseOptions.map((o) => o.companyName).filter(Boolean))].sort(),
+    [expenseOptions],
+  );
+  const projects = React.useMemo(
+    () =>
+      [...new Set(expenseOptions.map((o) => o.projectName ?? "").filter(Boolean))].sort(),
+    [expenseOptions],
+  );
+  const finYears = React.useMemo(
+    () =>
+      [...new Set(expenseOptions.map((o) => o.financialYear ?? "").filter(Boolean))].sort().reverse(),
+    [expenseOptions],
+  );
+  const suppliers = React.useMemo(
+    () =>
+      [...new Set(expenseOptions.map((o) => o.supplierName ?? "").filter(Boolean))].sort(),
+    [expenseOptions],
+  );
 
   const activeCount = Object.values(filters).filter(Boolean).length;
 
@@ -2445,21 +2428,11 @@ const Payment: React.FC = () => {
                 {!form.expenseRef &&
                   (() => {
                     const filteredOptions = expenseOptions.filter((o) => {
-                      if (bookingFilters.company) {
-                        // bookingFilters.company stores the label; resolve to id for robust matching
-                        const matchedCo = companyOptions.find(
-                          (c) => c.label === bookingFilters.company,
-                        );
-                        const filterCoId = matchedCo?.id;
-                        if (filterCoId && o.companyId !== filterCoId)
-                          return false;
-                        // fallback: string match if id not resolved
-                        if (
-                          !filterCoId &&
-                          (o.companyName ?? "") !== bookingFilters.company
-                        )
-                          return false;
-                      }
+                      if (
+                        bookingFilters.company &&
+                        (o.companyName ?? "") !== bookingFilters.company
+                      )
+                        return false;
                       if (
                         bookingFilters.project &&
                         (o.projectName ?? "") !== bookingFilters.project

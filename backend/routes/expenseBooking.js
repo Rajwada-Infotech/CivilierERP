@@ -128,8 +128,8 @@ async function buildGrnGstData(pool, grnId) {
   const vendorState = header.VendorState || "";
   const companyState = header.CompanyState || "";
   const isIntraState =
-    normalizeState(vendorState) &&
-    normalizeState(companyState) &&
+    !normalizeState(vendorState) ||
+    !normalizeState(companyState) ||
     normalizeState(vendorState) === normalizeState(companyState);
 
   const lines = grnItems.map((item, index) => {
@@ -165,14 +165,30 @@ async function buildGrnGstData(pool, grnId) {
       toNumber(poItem.tax) ||
       toNumber(header.POGstRate);
     const gstPercent = configuredGst;
-    const taxableAmount = roundMoney(receivedQty * unitRate);
-    const gstAmount = roundMoney((taxableAmount * gstPercent) / 100);
-    const cgstRate = isIntraState ? gstPercent / 2 : 0;
-    const sgstRate = isIntraState ? gstPercent / 2 : 0;
-    const igstRate = isIntraState ? 0 : gstPercent;
+    const inclusiveAmount =
+      toNumber(item.totalAmountInclGST) ||
+      toNumber(item.totalAmount) ||
+      toNumber(item.amount) ||
+      roundMoney(receivedQty * unitRate);
+    const cgstRate = isIntraState
+      ? configuredCgst || storedCgst || gstPercent / 2
+      : 0;
+    const sgstRate = isIntraState
+      ? configuredSgst || storedSgst || gstPercent / 2
+      : 0;
+    const igstRate = isIntraState ? 0 : configuredIgst || storedIgst || gstPercent;
+    const totalGstRate = cgstRate + sgstRate + igstRate;
+    const taxableAmount = roundMoney(
+      totalGstRate > 0
+        ? inclusiveAmount / (1 + totalGstRate / 100)
+        : inclusiveAmount,
+    );
     const cgstAmount = roundMoney((taxableAmount * cgstRate) / 100);
     const sgstAmount = roundMoney((taxableAmount * sgstRate) / 100);
     const igstAmount = roundMoney((taxableAmount * igstRate) / 100);
+    const splitGstAmount = roundMoney(cgstAmount + sgstAmount + igstAmount);
+    const netAmount = roundMoney(inclusiveAmount);
+    const gstAmount = splitGstAmount;
 
     return {
       lineNo: index + 1,
@@ -222,6 +238,19 @@ async function buildGrnGstData(pool, grnId) {
     0,
   );
 
+  const effectiveCgstRate =
+    totals.taxableAmount > 0
+      ? roundMoney((totals.cgstAmount / totals.taxableAmount) * 100)
+      : 0;
+  const effectiveSgstRate =
+    totals.taxableAmount > 0
+      ? roundMoney((totals.sgstAmount / totals.taxableAmount) * 100)
+      : 0;
+  const effectiveIgstRate =
+    totals.taxableAmount > 0
+      ? roundMoney((totals.igstAmount / totals.taxableAmount) * 100)
+      : 0;
+
   return {
     grnId: header.GRNID,
     grnNo: header.GRNNo || header.DocNo,
@@ -234,9 +263,9 @@ async function buildGrnGstData(pool, grnId) {
     companyState,
     taxMode: isIntraState ? "cgst_sgst" : "igst",
     gstPercent: maxGstPercent,
-    cgstRate: isIntraState ? maxGstPercent / 2 : 0,
-    sgstRate: isIntraState ? maxGstPercent / 2 : 0,
-    igstRate: isIntraState ? 0 : maxGstPercent,
+    cgstRate: effectiveCgstRate,
+    sgstRate: effectiveSgstRate,
+    igstRate: effectiveIgstRate,
     totals,
     lines,
   };
@@ -346,12 +375,12 @@ router.get(
           ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))) AS docNo,
           COALESCE(proj.name, eb.EProjectName, '') AS projectName,
           ISNULL(eb.EName, '')            AS partyName,
-          -- GRN-linked supplier name preferred; falls back to EName
-          ISNULL(
-            CASE WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL
-                 THEN ahm.LHeadName ELSE NULL END,
-            ISNULL(eb.EName, '')
-          )                               AS supplierName,
+          -- Supplier name: GRN -> account head name, PO/WO_PO/WORK_DONE -> EName (party), TOD -> empty
+          CASE
+            WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm.LHeadName, '')
+            WHEN eb.ESourceType IN ('PO','WO_PO','WORK_DONE') THEN ISNULL(eb.EName, '')
+            ELSE ''
+          END                             AS supplierName,
           -- For GRN-linked bookings use the live GRN total (incl. GST);
           -- it is always up-to-date whereas ENetAmount may be stale.
           CASE
@@ -407,11 +436,12 @@ router.get(
           ei.Status                    AS status,
           COALESCE(proj2.name, eb.EProjectName, '') AS projectName,
           ISNULL(eb.EName, '')         AS partyName,
-          ISNULL(
-            CASE WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL
-                 THEN ahm2.LHeadName ELSE NULL END,
-            ISNULL(eb.EName, '')
-          )                            AS supplierName,
+          -- Supplier name: GRN -> account head name, PO/WO_PO/WORK_DONE -> EName, TOD -> empty
+          CASE
+            WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL THEN ISNULL(ahm2.LHeadName, '')
+            WHEN eb.ESourceType IN ('PO','WO_PO','WORK_DONE') THEN ISNULL(eb.EName, '')
+            ELSE ''
+          END                          AS supplierName,
           eb.ECompanyId                AS companyId,
           ISNULL(e2.name, '')          AS companyName,
           ISNULL(eb.EFinYear, '')      AS financialYear,

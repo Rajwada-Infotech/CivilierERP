@@ -209,9 +209,11 @@ interface GRNItemLine {
   hsnCode?: string;
   cgstRate?: number;
   sgstRate?: number;
+  igstRate?: number;
   baseAmount?: number;
   cgstAmount?: number;
   sgstAmount?: number;
+  igstAmount?: number;
   gstAmount?: number;
   totalAmountInclGST?: number;
 }
@@ -234,10 +236,14 @@ interface SelectedDoc {
 interface GRNItem {
   GRNID: number;
   GRNNo: string;
+  DocNo?: string;
   GRNDate: string;
   SupplierName?: string;
   PONumber?: string;
   POID?: number;
+  CompanyId?: number;
+  ProjectId?: number;
+  FinYear?: string;
   Status?: string;
   TotalItems?: number;
   Remarks?: string;
@@ -1256,42 +1262,6 @@ function parseGRNItemsFromRaw(raw: unknown): GRNItemLine[] {
   return [];
 }
 
-function grnGstDataToBreakdown(data: any) {
-  const totals = data?.totals ?? {};
-  return {
-    items: Array.isArray(data?.lines)
-      ? data.lines.map((line: any) => ({
-          itemId: line.itemId,
-          itemName: line.itemName,
-          orderedQty: Number(line.orderedQty) || 0,
-          receivedQty: Number(line.receivedQty) || 0,
-          remainingQty: Number(line.remainingQty) || 0,
-          uom: line.uom || "",
-          rate: Number(line.unitRate) || Number(line.rate) || 0,
-          hsnCode: line.hsnCode || "",
-          gstPercent: Number(line.gstPercent) || 0,
-          cgstRate: Number(line.cgstRate) || 0,
-          sgstRate: Number(line.sgstRate) || 0,
-          igstRate: Number(line.igstRate) || 0,
-          baseAmount: Number(line.taxableAmount) || 0,
-          cgstAmount: Number(line.cgstAmount) || 0,
-          sgstAmount: Number(line.sgstAmount) || 0,
-          igstAmount: Number(line.igstAmount) || 0,
-          gstAmount: Number(line.gstAmount) || 0,
-          totalAmountInclGST: Number(line.netAmount) || 0,
-        }))
-      : [],
-    totals: {
-      totalBase: Number(totals.taxableAmount) || 0,
-      totalCGST: Number(totals.cgstAmount) || 0,
-      totalSGST: Number(totals.sgstAmount) || 0,
-      totalIGST: Number(totals.igstAmount) || 0,
-      totalGST: Number(totals.gstAmount) || 0,
-      totalInclGST: Number(totals.netAmount) || 0,
-    },
-  };
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 const BOOKING_STATUSES: BookingStatus[] = [
   "Draft",
@@ -1585,9 +1555,9 @@ export default function MaterialExpenseBooking() {
           if (items.length === 0)
             toast.info("This GRN has no item lines recorded against it.");
 
-          return apiFetch(`${API}/grn-gst-data?grnId=${doc.sourceId}`)
-            .then((grnGst: any) => {
-              const bd = grnGstDataToBreakdown(grnGst);
+          // Fetch GST breakdown — back-calculates base/tax per item using Item_Master_Group HSN rates
+          return apiFetch(`/api/grns/${doc.sourceId}/gst-breakdown`)
+            .then((bd: any) => {
               setGstBreakdown(bd);
               const t = bd?.totals;
               if (t && t.totalInclGST > 0) {
