@@ -951,8 +951,12 @@ function TableRow({
 const Applications: React.FC = () => {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [projectFilter, setProjectFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string | undefined>(
+    undefined,
+  );
+  const [projectFilter, setProjectFilter] = useState<string | undefined>(
+    undefined,
+  );
   const [showForm, setShowForm] = useState(false);
   const [editApp, setEditApp] = useState<Application | null>(null);
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
@@ -1157,7 +1161,7 @@ const Applications: React.FC = () => {
         {/* ── Status pill filters ── */}
         <div className="flex items-center gap-2 flex-wrap">
           <button
-            onClick={() => setStatusFilter("")}
+            onClick={() => setStatusFilter(undefined)}
             className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors
               ${!statusFilter ? "bg-foreground text-background border-foreground" : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"}`}
           >
@@ -1166,7 +1170,9 @@ const Applications: React.FC = () => {
           {Object.entries(STATUS_CONFIG).map(([s, cfg]) => (
             <button
               key={s}
-              onClick={() => setStatusFilter(statusFilter === s ? "" : s)}
+              onClick={() =>
+                setStatusFilter(statusFilter === s ? undefined : s)
+              }
               className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors
                 ${statusFilter === s ? `${cfg.bg} ${cfg.text} border-current` : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"}`}
             >
@@ -1200,8 +1206,8 @@ const Applications: React.FC = () => {
           </div>
           <select
             className="px-3 py-2 border border-border rounded-lg text-sm bg-card text-muted-foreground outline-none cursor-pointer focus:border-primary/60 min-w-[140px]"
-            value={projectFilter}
-            onChange={(e) => setProjectFilter(e.target.value)}
+            value={projectFilter ?? ""}
+            onChange={(e) => setProjectFilter(e.target.value || undefined)}
           >
             <option value="">All Projects</option>
             {projects.map((p) => (
@@ -1214,8 +1220,8 @@ const Applications: React.FC = () => {
             <button
               onClick={() => {
                 setSearch("");
-                setStatusFilter("");
-                setProjectFilter("");
+                setStatusFilter(undefined);
+                setProjectFilter(undefined);
               }}
               className="flex items-center gap-1.5 px-3 py-2 border border-red-400/30 bg-red-500/5 text-red-500 rounded-lg text-xs font-medium hover:bg-red-500/10 transition-colors"
             >
