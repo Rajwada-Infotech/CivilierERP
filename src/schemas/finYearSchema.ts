@@ -40,7 +40,7 @@ export const finYearSchema = z
     year: z.string().trim().min(1, "Financial year is required").max(20),
     startDate: z.string().trim().min(1, "Start date is required"),
     endDate: z.string().trim().min(1, "End date is required"),
-    status: z.enum(["Active", "Inactive"]),
+    status: z.enum(["Active", "Closed"]),
     locked: z.boolean().default(false),
   })
   .refine((value) => new Date(value.endDate) >= new Date(value.startDate), {

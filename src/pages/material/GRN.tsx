@@ -535,7 +535,8 @@ export default function GRN() {
       });
       if (!res.ok) throw new Error("Failed to fetch GRN details");
       setViewingGrn(await res.json());
-    } catch {
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
       setViewingGrn(grn);
     }
   };
@@ -550,7 +551,8 @@ export default function GRN() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) fullGrn = await res.json();
-    } catch {
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
       // fall back to list-row data
     }
 

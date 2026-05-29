@@ -181,7 +181,7 @@ const PAGE_SIZE = 25;
 export default function Brs() {
   // ── Filter state ──────────────────────────────────────────────────────────
   const [allBanks, setAllBanks] = useState<BrsFilterOption[]>([]);
-  const [bankId, setBankId] = useState("");
+  const [bankId, setBankId] = useState<string | undefined>(undefined);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | "clear" | "unclear">(
@@ -475,8 +475,8 @@ export default function Brs() {
               className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
             />
             <select
-              value={bankId}
-              onChange={(e) => setBankId(e.target.value)}
+              value={bankId ?? ""}
+              onChange={(e) => setBankId(e.target.value || undefined)}
               className={`h-8 pl-7 pr-8 bg-input/70 border rounded-lg text-xs appearance-none focus:ring-1 focus:ring-primary outline-none cursor-pointer ${bankId ? "border-primary/60 text-primary font-medium" : "border-border"}`}
             >
               <option value="">All Banks</option>

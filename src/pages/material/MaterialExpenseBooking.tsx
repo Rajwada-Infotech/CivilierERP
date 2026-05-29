@@ -511,9 +511,9 @@ function DocSelectorPanel({
         sourceId: tod.TypeOfDocId,
         nameLabel: tod.Description,
       });
-    } catch {
+    } catch (err) {
       onTodSelected?.(null);
-      toast.error("Could not fetch next document number.");
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setTodFetching(false);
     }
@@ -1088,7 +1088,12 @@ function DocSelectorPanel({
                       const parsed = JSON.parse(g.GRNItems);
                       return Array.isArray(parsed) ? parsed : [];
                     }
-                  } catch {
+                  } catch (err) {
+                    toast.error(
+                      err instanceof Error
+                        ? err.message
+                        : "Something went wrong",
+                    );
                     /* ignore */
                   }
                   return [];
@@ -1126,7 +1131,12 @@ function DocSelectorPanel({
                             ? (() => {
                                 try {
                                   return JSON.parse(g.ParentGST!);
-                                } catch {
+                                } catch (err) {
+                                  toast.error(
+                                    err instanceof Error
+                                      ? err.message
+                                      : "Something went wrong",
+                                  );
                                   return null;
                                 }
                               })()
@@ -1242,7 +1252,11 @@ function GRNChainBadge({
     fetchWithAuth(`/api/expense-booking/${bookingId}/grns`)
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => setGrns(Array.isArray(data) ? data : []))
-      .catch(() => {});
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
   }, [bookingId]);
   if (grns.length === 0)
     return <span className="text-muted-foreground text-xs">—</span>;
@@ -1268,7 +1282,8 @@ function parseGRNItemsFromRaw(raw: unknown): GRNItemLine[] {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed as GRNItemLine[];
     }
-  } catch {
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : "Something went wrong");
     /* fall through */
   }
   return [];
@@ -1382,7 +1397,8 @@ export default function MaterialExpenseBooking() {
     try {
       const data = await apiFetch(`${API}/source-ids`);
       setBookedSourceIds(Array.isArray(data) ? data : []);
-    } catch {
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
       // non-fatal — pickers will show everything if this fails
     }
   }, []);
@@ -1410,7 +1426,11 @@ export default function MaterialExpenseBooking() {
           (_mastersCache as any)[key] = list;
           setter(list);
         })
-        .catch(() => {})
+        .catch((err) => {
+          toast.error(
+            err instanceof Error ? err.message : "Something went wrong",
+          );
+        })
         .finally(() => setLd(false));
     };
 
@@ -1492,8 +1512,10 @@ export default function MaterialExpenseBooking() {
           (selectedTod.FullPrefix ?? selectedTod.Prefix) + "/001";
         setSelectedDoc((prev) => (prev ? { ...prev, docNo } : prev));
         setForm((prev) => ({ ...prev, bookingReference: docNo }));
-      } catch {
-        /* silently ignore */
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
       }
     })();
     return () => {
@@ -1507,13 +1529,25 @@ export default function MaterialExpenseBooking() {
     fetchBookedSources();
     apiFetch("/api/enterprises/options?business_type=C")
       .then((list: CompanyOption[]) => setCompanyOptions(list ?? []))
-      .catch(() => {});
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
     apiFetch("/api/enterprises/options?business_type=P")
       .then((list: ProjectOption[]) => setProjectOptions(list ?? []))
-      .catch(() => {});
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
     apiFetch("/api/enterprises/options?business_type=S")
       .then((list: { id: number; label: string }[]) => setSuppliers(list ?? []))
-      .catch(() => {});
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
     apiFetch("/api/account-head?type=S")
       .then((list: any[]) => {
         const heads = (Array.isArray(list) ? list : []).map((h) => ({
@@ -1522,14 +1556,22 @@ export default function MaterialExpenseBooking() {
         }));
         setSupplierHeads(heads);
       })
-      .catch(() => {});
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
     apiFetch("/api/billing-terms")
       .then((list: BillingTermOption[]) =>
         setBillingTerms(
           (Array.isArray(list) ? list : []).filter((t) => t.IsActive !== false),
         ),
       )
-      .catch(() => {});
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
     apiFetch("/api/tc-master")
       .then((list: TCOption[]) => setTcOptions(Array.isArray(list) ? list : []))
       .catch(() => {});
@@ -1733,7 +1775,10 @@ export default function MaterialExpenseBooking() {
                 return r.ParentGST as GSTConfig;
               try {
                 return JSON.parse(r.ParentGST) as GSTConfig;
-              } catch {
+              } catch (err) {
+                toast.error(
+                  err instanceof Error ? err.message : "Something went wrong",
+                );
                 return null;
               }
             })();
@@ -1754,7 +1799,11 @@ export default function MaterialExpenseBooking() {
               projectSite: r.ProjectId ? String(r.ProjectId) : prev.projectSite,
             }));
           })
-          .catch(() => {})
+          .catch((err) => {
+            toast.error(
+              err instanceof Error ? err.message : "Something went wrong",
+            );
+          })
           .finally(() => setGrnItemsLoading(false));
       } else if (kind === "PO") {
         // PO: find from already-loaded list or fetch lazily after fetchMasters
