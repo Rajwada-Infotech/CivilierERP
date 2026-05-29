@@ -853,8 +853,8 @@ const ResolvedTickets: React.FC = () => {
   if (selectedTicketId !== null) {
     return (
       <>
-        <Breadcrumbs items={["Tickets", "Resolved Tickets", `#${selectedTicketId}`]} />
-        <div className="max-w-3xl mx-auto pb-10">
+        <Breadcrumbs items={["Dashboard", "Tickets", "Resolved Tickets", `#${selectedTicketId}`]} />
+        <div className="max-w-3xl mx-auto pt-6 pb-10">
           <TicketDetailView
             ticketId={selectedTicketId}
             onBack={() => setSelectedTicketId(null)}
@@ -872,9 +872,9 @@ const ResolvedTickets: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Tickets", "Resolved Tickets"]} />
+      <Breadcrumbs items={["Dashboard", "Tickets", "Resolved Tickets"]} />
 
-      <div className="max-w-3xl mx-auto pb-10 space-y-5">
+      <div className="max-w-3xl mx-auto pt-6 pb-10 space-y-5">
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">

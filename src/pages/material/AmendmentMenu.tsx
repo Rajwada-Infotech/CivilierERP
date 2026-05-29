@@ -436,7 +436,8 @@ export default function Amendments() {
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
+            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+              <FileEdit size={20} className="text-primary" />
               Amendments
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
@@ -465,10 +466,10 @@ export default function Amendments() {
                   setShowComparison(false);
                   setShowAudit(false);
                 }}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border-0 transition-all gradient-accent text-white ${
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                   active
-                    ? "opacity-100 shadow-md ring-2 ring-white/20"
-                    : "opacity-60 hover:opacity-80"
+                    ? "gradient-accent text-white shadow-md ring-2 ring-white/20"
+                    : "border border-border text-muted-foreground hover:bg-muted bg-card"
                 }`}
               >
                 <Icon size={14} />

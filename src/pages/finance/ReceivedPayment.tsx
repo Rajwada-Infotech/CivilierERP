@@ -775,7 +775,7 @@ export default function ReceivedPaymentPage() {
             All inbound payments received from clients &amp; customers
           </p>
         </div>
-        <Button size="sm" onClick={openAdd} className="shrink-0">
+        <Button onClick={openAdd} className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-5 py-2 text-sm h-auto">
           <Plus size={15} className="mr-1" />
           Add Payment
         </Button>
@@ -1224,7 +1224,7 @@ export default function ReceivedPaymentPage() {
                           e.target.value ? new Date(e.target.value) : undefined,
                         )
                       }
-                      className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                      className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                     />
                   </div>
                 </div>
@@ -1458,13 +1458,13 @@ export default function ReceivedPaymentPage() {
           <DialogFooter className="px-7 py-4 border-t border-border bg-muted/10 gap-2">
             <Button
               variant="outline"
-              size="sm"
               onClick={() => setIsOpen(false)}
               disabled={actionLoading}
+              className="px-5 py-2 text-sm h-auto font-heading"
             >
               Cancel
             </Button>
-            <Button size="sm" onClick={handleSubmit} disabled={actionLoading}>
+            <Button onClick={handleSubmit} disabled={actionLoading} className="px-5 py-2 text-sm h-auto font-heading font-semibold gradient-accent text-white">
               {actionLoading ? (
                 <Loader2 size={14} className="animate-spin mr-1.5" />
               ) : null}
