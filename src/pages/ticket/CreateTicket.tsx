@@ -398,9 +398,9 @@ const CreateTicket = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Tickets", "Create Ticket"]} />
+      <Breadcrumbs items={["Dashboard", "Tickets", "Create Ticket"]} />
 
-      <div className="max-w-3xl mx-auto pb-10">
+      <div className="max-w-3xl mx-auto pt-6 pb-10">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
           <Button

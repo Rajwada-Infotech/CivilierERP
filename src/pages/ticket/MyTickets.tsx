@@ -1634,9 +1634,9 @@ const MyTickets: React.FC = () => {
     return (
       <>
         <Breadcrumbs
-          items={["Tickets", "My Tickets", `#${selectedTicketId}`]}
+          items={["Dashboard", "Tickets", "My Tickets", `#${selectedTicketId}`]}
         />
-        <div className="max-w-3xl mx-auto pb-10">
+        <div className="max-w-3xl mx-auto pt-6 pb-10">
           <TicketDetailView
             ticketId={selectedTicketId}
             onBack={() => setSelectedTicketId(null)}
@@ -1654,8 +1654,8 @@ const MyTickets: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Tickets", "My Tickets"]} />
-      <div className="max-w-3xl mx-auto pb-10 space-y-5">
+      <Breadcrumbs items={["Dashboard", "Tickets", "My Tickets"]} />
+      <div className="max-w-3xl mx-auto pt-6 pb-10 space-y-5">
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -1684,9 +1684,9 @@ const MyTickets: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={() => navigate("/ticket/create")}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+              className="flex items-center gap-2 h-9 px-4 text-sm rounded-lg gradient-accent text-white shadow-sm font-heading font-semibold"
             >
-              <Plus size={12} /> New
+              <Plus size={15} /> New Ticket
             </button>
             <button
               onClick={() => refetch()}

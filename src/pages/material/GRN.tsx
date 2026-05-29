@@ -13,6 +13,7 @@ import {
   Calendar,
   FileText,
   Eye,
+  ChevronDown,
 } from "lucide-react";
 import * as grnApi from "@/api/grnApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -51,7 +52,7 @@ const parseJsonArray = <T,>(val: unknown): T[] => {
 };
 
 const inp =
-  "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
+  "w-full px-3 py-2 pr-8 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50 appearance-none";
 
 // ─── GRN Chain Badge ──────────────────────────────────────────────────────────
 function GRNChainBadge({ grnId }: { grnId: number }) {
@@ -644,33 +645,36 @@ export default function GRN() {
                   <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-2">
                     Fin Year
                   </label>
-                  <select
-                    value={selectedFinYear}
-                    onChange={(e) => {
-                      setSelectedFinYear(e.target.value);
-                      setFormData((prev) => ({
-                        ...prev,
-                        poId: "",
-                        poNumber: "",
-                        supplierId: "",
-                        supplierName: "",
-                        items: [createEmptyItem()],
-                        grnNo: "",
-                        docNo: "",
-                        parentDocNo: "",
-                        rootExBDocNo: "",
-                        finYear: e.target.value,
-                      }));
-                    }}
-                    className={inp}
-                  >
-                    <option value="">All Years</option>
-                    {finYears.map((fy) => (
-                      <option key={fy.id} value={fy.year}>
-                        {fy.year}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={selectedFinYear}
+                      onChange={(e) => {
+                        setSelectedFinYear(e.target.value);
+                        setFormData((prev) => ({
+                          ...prev,
+                          poId: "",
+                          poNumber: "",
+                          supplierId: "",
+                          supplierName: "",
+                          items: [createEmptyItem()],
+                          grnNo: "",
+                          docNo: "",
+                          parentDocNo: "",
+                          rootExBDocNo: "",
+                          finYear: e.target.value,
+                        }));
+                      }}
+                      className={inp}
+                    >
+                      <option value="">All Years</option>
+                      {finYears.map((fy) => (
+                        <option key={fy.id} value={fy.year}>
+                          {fy.year}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  </div>
                 </div>
 
                 {/* Purchase Order — filtered by fin year */}
@@ -678,19 +682,22 @@ export default function GRN() {
                   <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-2">
                     Purchase Order <span className="text-destructive">*</span>
                   </label>
-                  <select
-                    value={formData.poId}
-                    onChange={(e) => handlePOSelect(e.target.value)}
-                    disabled={!!editingId || loadingPO}
-                    className={inp}
-                  >
-                    <option value="">Select Purchase Order...</option>
-                    {pos.map((po) => (
-                      <option key={po.value} value={po.value}>
-                        {po.label}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={formData.poId}
+                      onChange={(e) => handlePOSelect(e.target.value)}
+                      disabled={!!editingId || loadingPO}
+                      className={inp}
+                    >
+                      <option value="">Select Purchase Order...</option>
+                      {pos.map((po) => (
+                        <option key={po.value} value={po.value}>
+                          {po.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  </div>
                   {loadingPO && (
                     <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
                       <span className="animate-pulse">●</span> Loading PO
@@ -731,7 +738,7 @@ export default function GRN() {
                       onChange={(e) =>
                         setFormData((p) => ({ ...p, grnDate: e.target.value }))
                       }
-                      className={`${inp} pl-10`}
+                      className={`${inp} pl-10 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
                     />
                   </div>
                 </div>
@@ -1035,34 +1042,37 @@ export default function GRN() {
                                     {item.uom || "—"}
                                   </span>
                                 ) : (
-                                  <select
-                                    value={item.uom}
-                                    onChange={(e) => {
-                                      const nextItems = [...formData.items];
-                                      nextItems[idx] = {
-                                        ...nextItems[idx],
-                                        uom: e.target.value,
-                                      };
-                                      setFormData((p) => ({
-                                        ...p,
-                                        items: nextItems,
-                                      }));
-                                    }}
-                                    className={inp}
-                                  >
-                                    <option value="">Select UOM</option>
-                                    {uomsData
-                                      .filter((u: UOM) => u.IsActive !== false)
-                                      .map((u: UOM) => (
-                                        <option
-                                          key={u.UOMCode}
-                                          value={u.UOMCode}
-                                        >
-                                          {u.UOMName}{" "}
-                                          {u.Symbol ? `(${u.Symbol})` : ""}
-                                        </option>
-                                      ))}
-                                  </select>
+                                  <div className="relative">
+                                    <select
+                                      value={item.uom}
+                                      onChange={(e) => {
+                                        const nextItems = [...formData.items];
+                                        nextItems[idx] = {
+                                          ...nextItems[idx],
+                                          uom: e.target.value,
+                                        };
+                                        setFormData((p) => ({
+                                          ...p,
+                                          items: nextItems,
+                                        }));
+                                      }}
+                                      className={inp}
+                                    >
+                                      <option value="">Select UOM</option>
+                                      {uomsData
+                                        .filter((u: UOM) => u.IsActive !== false)
+                                        .map((u: UOM) => (
+                                          <option
+                                            key={u.UOMCode}
+                                            value={u.UOMCode}
+                                          >
+                                            {u.UOMName}{" "}
+                                            {u.Symbol ? `(${u.Symbol})` : ""}
+                                          </option>
+                                        ))}
+                                    </select>
+                                    <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                                  </div>
                                 )}
                               </td>
                               <td className="px-1.5 py-1.5">
@@ -1161,7 +1171,7 @@ export default function GRN() {
                   disabled={
                     createMutation.isPending || updateMutation.isPending
                   }
-                  className="w-full sm:w-auto gradient-accent inline-flex items-center justify-center gap-2 px-8 py-2.5 rounded-xl text-white text-sm font-semibold shadow-sm transition disabled:opacity-60"
+                  className="w-full sm:w-auto gradient-accent inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow-sm transition disabled:opacity-60"
                 >
                   <Save size={15} />
                   {createMutation.isPending || updateMutation.isPending
@@ -1172,7 +1182,7 @@ export default function GRN() {
                 </button>
                 <button
                   onClick={resetForm}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl border border-border hover:bg-muted text-sm transition-colors"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-border hover:bg-muted text-sm transition-colors"
                 >
                   <X size={15} /> Cancel
                 </button>

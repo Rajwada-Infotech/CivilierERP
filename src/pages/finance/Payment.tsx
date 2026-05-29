@@ -1512,7 +1512,7 @@ function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps) {
                       : undefined
                   }
                   onChange={(e) => set("chequeDate", e.target.value)}
-                  className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                 />
               </div>
             </Field>
@@ -2287,9 +2287,8 @@ const Payment: React.FC = () => {
             )}
             {view === "list" && (
               <Button
-                size="sm"
                 onClick={openNew}
-                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold"
+                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-5 py-2 text-sm h-auto"
               >
                 <Plus size={15} className="mr-1" /> New Payment
               </Button>
@@ -2375,14 +2374,14 @@ const Payment: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   onClick={cancelForm}
-                  className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  className="px-5 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleSave}
                   disabled={saving}
-                  className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white disabled:opacity-60"
+                  className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60"
                 >
                   {saving ? "Saving…" : editingId ? "Update" : "Save Payment"}
                 </button>
@@ -2579,7 +2578,7 @@ const Payment: React.FC = () => {
                         type="date"
                         value={form.date}
                         onChange={(e) => set("date", e.target.value)}
-                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                       />
                     </div>
                   </Field>
@@ -3234,7 +3233,7 @@ const Payment: React.FC = () => {
                                 setDocDateFilter(e.target.value);
                                 setPage(1);
                               }}
-                              className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                              className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                             />
                             {docDateFilter && (
                               <button

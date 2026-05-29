@@ -661,11 +661,12 @@ export default function StockTransfer() {
     <>
       <Breadcrumbs items={["Dashboard", "Material Module", "Stock Transfer"]} />
 
-      <div className="p-6 space-y-5 mt-6">
+      <div className="p-6 space-y-5">
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
+            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+              <ArrowLeftRight size={20} className="text-emerald-600" />
               Stock Transfer
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
