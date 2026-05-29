@@ -292,7 +292,34 @@ const fetchChequeLots = async (
 const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
   const res = await fetchWithAuth("/api/expense-booking/options");
   if (!res.ok) return [];
-  return res.json();
+  const raw = await res.json();
+  const items: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+  return items.map((o: any) => ({
+    ...o,
+    companyName:
+      o.companyName ||
+      o.ECompanyName ||
+      o.company_name ||
+      o.CompanyName ||
+      null,
+    projectName:
+      o.projectName ||
+      o.EProjectDisplayName ||
+      o.EProjectName ||
+      o.project_name ||
+      o.ProjectName ||
+      null,
+    financialYear:
+      o.financialYear || o.EFinYear || o.fin_year || o.FinYear || null,
+    supplierName:
+      o.supplierName ||
+      o.ESupplierName ||
+      o.supplier_name ||
+      o.SupplierName ||
+      o.partyName ||
+      o.EName ||
+      null,
+  }));
 };
 
 const fetchExpenseDetail = async (
@@ -393,29 +420,33 @@ const fetchCompanyOptions = async (): Promise<
   return res.json();
 };
 
-const fetchProjectOptions = async (): Promise<string[]> => {
+const fetchProjectOptions = async (): Promise<
+  { id: number; label: string }[]
+> => {
   const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
   if (!res.ok) return [];
-  const data: { id: number; label: string }[] = await res.json();
-  return data.map((p) => p.label).sort();
+  return res.json();
 };
 
-const fetchFinYears = async (): Promise<string[]> => {
-  const res = await fetchWithAuth("/api/fin-year");
-  if (!res.ok) return [];
-  const data: { FId: number; FName: string | null }[] = await res.json();
-  return data
-    .filter((f) => f.FName)
-    .map((f) => f.FName as string)
-    .sort()
-    .reverse();
-};
-
-const fetchSupplierOptions = async (): Promise<string[]> => {
+const fetchSupplierOptions = async (): Promise<
+  { id: number; label: string }[]
+> => {
   const res = await fetchWithAuth("/api/account-head/options?type=S");
   if (!res.ok) return [];
-  const data: { id: number; label: string }[] = await res.json();
-  return data.map((s) => s.label).sort();
+  return res.json();
+};
+
+const fetchFinYearOptions = async (): Promise<
+  { id: number; label: string }[]
+> => {
+  const res = await fetchWithAuth("/api/fin-year");
+  if (!res.ok) return [];
+  const data = await res.json();
+  const rows: any[] = Array.isArray(data) ? data : (data?.data ?? []);
+  return rows
+    .filter((r: any) => r.FStatus === 1 || r.FStatus === true)
+    .map((r: any) => ({ id: r.FId, label: r.FName }))
+    .sort((a: any, b: any) => b.label.localeCompare(a.label));
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -832,42 +863,24 @@ type BookingFilters = {
 };
 
 function FilterBar({
-  expenseOptions,
+  companyOptions,
+  projectOptions,
+  supplierOptions,
+  finYearOptions,
   filters,
   onChange,
 }: {
-  expenseOptions: ExpenseOption[];
+  companyOptions: { id: number; label: string }[];
+  projectOptions: { id: number; label: string }[];
+  supplierOptions: { id: number; label: string }[];
+  finYearOptions: { id: number; label: string }[];
   filters: BookingFilters;
   onChange: (key: keyof BookingFilters, value: string) => void;
 }) {
-  const [projects, setProjects] = React.useState<string[]>([]);
-  const [finYears, setFinYears] = React.useState<string[]>([]);
-  const [suppliers, setSuppliers] = React.useState<string[]>([]);
-
-  React.useEffect(() => {
-    fetchProjectOptions()
-      .then(setProjects)
-      .catch(() => {});
-    fetchFinYears()
-      .then(setFinYears)
-      .catch(() => {});
-    fetchSupplierOptions()
-      .then(setSuppliers)
-      .catch(() => {});
-  }, []);
-
-  // Company — derived from expenseOptions (already resolved per option)
-  const companies = React.useMemo(
-    () =>
-      Array.from(
-        new Set(
-          expenseOptions
-            .map((o) => o.companyName)
-            .filter((v): v is string => !!v && v.trim() !== ""),
-        ),
-      ).sort(),
-    [expenseOptions],
-  );
+  const companies = companyOptions.map((o) => o.label);
+  const projects = projectOptions.map((o) => o.label);
+  const finYears = finYearOptions.map((o) => o.label);
+  const suppliers = supplierOptions.map((o) => o.label);
 
   const activeCount = Object.values(filters).filter(Boolean).length;
 
@@ -1606,7 +1619,8 @@ const Payment: React.FC = () => {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [supplierFilter, setSupplierFilter] = useState("");
-  const [companyFilter, setCompanyFilter] = useState("");
+  const [companyFilter, setCompanyFilter] = useState(""); // stores numeric ID for display
+  const [companyNameFilter, setCompanyNameFilter] = useState(""); // stores label for backend
   const [projectFilter, setProjectFilter] = useState("");
   const [finYearFilter, setFinYearFilter] = useState("");
   const [docNumberFilter, setDocNumberFilter] = useState("");
@@ -1790,6 +1804,28 @@ const Payment: React.FC = () => {
   };
   const [loadingExpense, setLoadingExpense] = useState(false);
   const [linkedGRNs, setLinkedGRNs] = useState<GRNRef[]>([]);
+  const [grnGstBreakdown, setGrnGstBreakdown] = useState<{
+    items: {
+      itemName: string;
+      hsnCode: string;
+      gstPercent: number;
+      receivedQty: number;
+      totalAmountInclGST: number;
+      baseAmount: number;
+      cgstRate: number;
+      cgstAmount: number;
+      sgstRate: number;
+      sgstAmount: number;
+      gstAmount: number;
+    }[];
+    totals: {
+      totalBase: number;
+      totalCGST: number;
+      totalSGST: number;
+      totalGST: number;
+      totalInclGST: number;
+    };
+  } | null>(null);
   const [supplierBookingFilter, setSupplierBookingFilter] = useState("");
   const [bookingFilters, setBookingFilters] = useState<BookingFilters>({
     company: "",
@@ -1810,7 +1846,7 @@ const Payment: React.FC = () => {
       "payments",
       page,
       supplierFilter,
-      companyFilter,
+      companyNameFilter,
       projectFilter,
       finYearFilter,
       docNumberFilter,
@@ -1821,7 +1857,7 @@ const Payment: React.FC = () => {
         page,
         PAGE_SIZE,
         supplierFilter,
-        companyFilter,
+        companyNameFilter,
         projectFilter,
         finYearFilter,
         docNumberFilter,
@@ -1843,26 +1879,31 @@ const Payment: React.FC = () => {
   // Companies fetched with business_type=C from enterprise table
   const companyOptions = enterprises;
 
+  const { data: projectOptions = [] } = useQuery<
+    { id: number; label: string }[]
+  >({
+    queryKey: ["project-options-payment-filter"],
+    queryFn: fetchProjectOptions,
+  });
+
+  const { data: supplierOptions = [] } = useQuery<
+    { id: number; label: string }[]
+  >({
+    queryKey: ["supplier-options-payment-filter"],
+    queryFn: fetchSupplierOptions,
+  });
+
+  const { data: finYearOptions = [] } = useQuery<
+    { id: number; label: string }[]
+  >({
+    queryKey: ["fin-year-options-payment-filter"],
+    queryFn: fetchFinYearOptions,
+  });
+
   const dbItems: DbPayment[] = Array.isArray(dbData?.data) ? dbData.data : [];
   const totalPages: number = dbData?.totalPages ?? 1;
   const totalRecords: number = dbData?.total ?? 0;
   const records: PaymentRecord[] = dbItems.map(dbToRecord);
-
-  // Derive unique project names and fin-years from all loaded records for filter dropdowns
-  const projectOptions: string[] = Array.from(
-    new Set(
-      dbItems
-        .map((p) => p.PProject)
-        .filter((v): v is string => !!v && v.trim() !== ""),
-    ),
-  ).sort();
-
-  // Generate financial year options: current year ± 3, formatted as "YYYY"
-  const currentYear = new Date().getFullYear();
-  const finYearOptions: number[] = Array.from(
-    { length: 7 },
-    (_, i) => currentYear - 3 + i,
-  );
 
   // Fetch full detail (name + logo + address) for the selected company — used in PDF export
   const { data: selectedCompanyDetail = null } = useQuery<CompanyDetail | null>(
@@ -2002,9 +2043,14 @@ const Payment: React.FC = () => {
           parentDocNo,
           rootExBDocNo: parentDocNo,
           project: selectedOption.projectName || "",
-          company:
-            selectedOption.companyName ||
-            String(selectedOption.companyId ?? ""),
+          company: (() => {
+            const name = selectedOption.companyName;
+            if (name && name.trim()) return name.trim();
+            const matched = companyOptions.find(
+              (c) => c.id === selectedOption.companyId,
+            );
+            return matched?.label || String(selectedOption.companyId ?? "");
+          })(),
           amount: selectedOption.amount ?? null,
           docType: `EMI-${padded}`,
         }));
@@ -2037,8 +2083,15 @@ const Payment: React.FC = () => {
           parentDocNo,
           rootExBDocNo,
           project: detail.EProjectName || "",
-          company:
-            (detail as any).ECompanyName || String(detail.ECompanyId ?? ""),
+          company: (() => {
+            const name = (detail as any).ECompanyName;
+            if (name && name.trim()) return name.trim();
+            // Fall back to label from the enterprise options list
+            const matched = companyOptions.find(
+              (c) => c.id === detail.ECompanyId,
+            );
+            return matched?.label || String(detail.ECompanyId ?? "");
+          })(),
           amount: detail.ENetAmount ?? detail.EAmount ?? null,
           docType: detail.DocTypeName || detail.EDocumentType || "",
           baseAmount: detail.EAmount ?? null,
@@ -2061,6 +2114,41 @@ const Payment: React.FC = () => {
         setLinkedGRNs(grns);
         if (grns.length > 0 && grns[0].ProjectName) {
           setForm((prev) => ({ ...prev, projectSite: grns[0].ProjectName! }));
+        }
+
+        // If this expense is linked to a GRN, fetch the per-item GST breakdown
+        if (detail.ESourceType === "GRN" && detail.ESourceId) {
+          try {
+            const bdRes = await fetchWithAuth(
+              `/api/grns/${detail.ESourceId}/gst-breakdown`,
+            );
+            if (bdRes.ok) {
+              const bd = await bdRes.json();
+              setGrnGstBreakdown(bd);
+              // Override form amounts with correct values from GRN item-level GST breakdown.
+              // This ensures the Amount field matches the Net Payable shown in the breakdown.
+              if (bd?.totals?.totalInclGST > 0) {
+                const t = bd.totals;
+                const inclTotal = Math.round(t.totalInclGST * 100) / 100;
+                const avgCGST =
+                  t.totalBase > 0 ? (t.totalCGST / t.totalBase) * 100 : 0;
+                const avgSGST =
+                  t.totalBase > 0 ? (t.totalSGST / t.totalBase) * 100 : 0;
+                setForm((prev) => ({
+                  ...prev,
+                  amount: inclTotal, // sync Amount field
+                  baseAmount: Math.round(t.totalBase * 100) / 100,
+                  cgstRate: Math.round(avgCGST * 100) / 100,
+                  sgstRate: Math.round(avgSGST * 100) / 100,
+                  igstRate: 0,
+                }));
+              }
+            }
+          } catch {
+            /* non-fatal */
+          }
+        } else {
+          setGrnGstBreakdown(null);
         }
       } catch {
         toast.error("Could not load expense booking details.");
@@ -2089,6 +2177,7 @@ const Payment: React.FC = () => {
       billingTermsData: null,
     }));
     setLinkedGRNs([]);
+    setGrnGstBreakdown(null);
     setSupplierBookingFilter("");
   };
 
@@ -2303,7 +2392,6 @@ const Payment: React.FC = () => {
               {
                 label: "Total Paid",
                 value: formatINR(totalAmount),
-                sub: "all payments",
                 icon: Banknote,
                 ring: "ring-primary/20",
                 bg: "bg-primary/10",
@@ -2312,7 +2400,6 @@ const Payment: React.FC = () => {
               {
                 label: "By Cheque",
                 value: String(chequeCount),
-                sub: "cheque payments",
                 icon: Clock,
                 ring: "ring-amber-500/20",
                 bg: "bg-amber-500/10",
@@ -2321,13 +2408,12 @@ const Payment: React.FC = () => {
               {
                 label: "By Cash",
                 value: String(cashCount),
-                sub: "cash payments",
                 icon: CheckCircle2,
                 ring: "ring-emerald-500/20",
                 bg: "bg-emerald-500/10",
                 color: "text-emerald-500",
               },
-            ].map(({ label, value, sub, icon: Icon, ring, bg, color }) => (
+            ].map(({ label, value, icon: Icon, ring, bg, color }) => (
               <div
                 key={label}
                 className={`glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 ${ring}`}
@@ -2341,9 +2427,6 @@ const Payment: React.FC = () => {
                   </p>
                   <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
                     {label}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
-                    {sub}
                   </p>
                 </div>
               </div>
@@ -2423,7 +2506,10 @@ const Payment: React.FC = () => {
                     return (
                       <div className="space-y-3">
                         <FilterBar
-                          expenseOptions={expenseOptions}
+                          companyOptions={companyOptions}
+                          projectOptions={projectOptions}
+                          supplierOptions={supplierOptions}
+                          finYearOptions={finYearOptions}
                           filters={bookingFilters}
                           onChange={(key, val) =>
                             setBookingFilters((prev) => ({
@@ -2458,7 +2544,20 @@ const Payment: React.FC = () => {
                           className="text-muted-foreground shrink-0"
                         />
                         <ReadOnlyField
-                          value={form.company}
+                          value={(() => {
+                            // form.company may be a raw ID string if ECompanyName was blank
+                            const asNum = parseInt(form.company, 10);
+                            if (
+                              !isNaN(asNum) &&
+                              String(asNum) === form.company.trim()
+                            ) {
+                              return (
+                                companyOptions.find((c) => c.id === asNum)
+                                  ?.label || form.company
+                              );
+                            }
+                            return form.company;
+                          })()}
                           placeholder="From expense booking"
                         />
                       </div>
@@ -2589,9 +2688,11 @@ const Payment: React.FC = () => {
                     label="Amount (₹)"
                     required={isCashMode}
                     hint={
-                      form.expenseRef
-                        ? "Net amount from expense booking — editable if needed."
-                        : undefined
+                      grnGstBreakdown
+                        ? "Auto-filled from GRN item totals (incl. GST) — editable if needed."
+                        : form.expenseRef
+                          ? "Net amount from expense booking — editable if needed."
+                          : undefined
                     }
                   >
                     <div className="relative">
@@ -2613,12 +2714,34 @@ const Payment: React.FC = () => {
                   </Field>
                   {(form.amount ?? 0) > 0 &&
                     (() => {
-                      const base = form.baseAmount ?? form.amount ?? 0;
+                      // Only render a breakdown when we have reliable GST data:
+                      // either a GRN item-level breakdown OR explicit GST rates on the booking.
+                      const hasGrnBreakdown = !!(
+                        grnGstBreakdown &&
+                        grnGstBreakdown.totals.totalInclGST > 0
+                      );
+                      const hasExplicitGst =
+                        (form.cgstRate ?? 0) > 0 ||
+                        (form.sgstRate ?? 0) > 0 ||
+                        (form.igstRate ?? 0) > 0;
+                      const hasBaseAmount = !!(
+                        form.baseAmount && form.baseAmount > 0
+                      );
+
+                      // Don't render if we can't compute a meaningful breakdown
+                      if (!hasGrnBreakdown && !hasExplicitGst && !hasBaseAmount)
+                        return null;
+
+                      const base = hasBaseAmount
+                        ? form.baseAmount!
+                        : (form.amount ?? 0);
                       const cgstRate = form.cgstRate ?? 0;
                       const sgstRate = form.sgstRate ?? 0;
                       const igstRate = form.igstRate ?? 0;
 
-                      // Parse billing terms
+                      // Parse billing terms — must be an array of term objects.
+                      // EDiscountData is a legacy flat discount object {applicable,type,value}
+                      // and must NOT be treated as billing terms; skip it if not an array.
                       let billingTerms: {
                         masterTermName?: string;
                         type: string;
@@ -2630,10 +2753,17 @@ const Payment: React.FC = () => {
                       try {
                         if (form.billingTermsData) {
                           const parsed = JSON.parse(form.billingTermsData);
-                          const arr = Array.isArray(parsed) ? parsed : [parsed];
-                          billingTerms = arr.filter(
-                            (t: any) => t.applicable !== false,
-                          );
+                          // Only treat as billing terms if it's a proper array
+                          // with items that have an `appliedOn` field (billing term shape).
+                          if (
+                            Array.isArray(parsed) &&
+                            parsed.length > 0 &&
+                            parsed[0].appliedOn !== undefined
+                          ) {
+                            billingTerms = parsed.filter(
+                              (t: any) => t.applicable !== false,
+                            );
+                          }
                         }
                       } catch {
                         /* ignore */
@@ -2662,10 +2792,20 @@ const Payment: React.FC = () => {
                         else taxable = Math.max(0, taxable - amt);
                       }
 
-                      const cgst = (taxable * cgstRate) / 100;
-                      const sgst = (taxable * sgstRate) / 100;
-                      const igst = (taxable * igstRate) / 100;
-                      let gross = taxable + cgst + sgst + igst;
+                      // When a GRN breakdown is available, use its exact per-item sums
+                      // instead of recomputing from averaged rates — avoids floating-point drift.
+                      const cgst = grnGstBreakdown
+                        ? grnGstBreakdown.totals.totalCGST
+                        : (taxable * cgstRate) / 100;
+                      const sgst = grnGstBreakdown
+                        ? grnGstBreakdown.totals.totalSGST
+                        : (taxable * sgstRate) / 100;
+                      const igst = grnGstBreakdown
+                        ? 0
+                        : (taxable * igstRate) / 100;
+                      let gross = grnGstBreakdown
+                        ? grnGstBreakdown.totals.totalInclGST
+                        : taxable + cgst + sgst + igst;
 
                       const postGstRows: {
                         term: (typeof postGst)[0];
@@ -2735,9 +2875,97 @@ const Payment: React.FC = () => {
                               Payment Breakdown
                             </p>
                           </div>
+
+                          {/* ── GST Summary Cards (cumulative) ── */}
+                          {grnGstBreakdown &&
+                            grnGstBreakdown.totals.totalInclGST > 0 && (
+                              <>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+                                  {[
+                                    {
+                                      label: "Base Amount",
+                                      value: grnGstBreakdown.totals.totalBase,
+                                      cls: "border-blue-500/30 bg-blue-500/5 text-blue-700 dark:text-blue-300",
+                                    },
+                                    {
+                                      label: "CGST",
+                                      value: grnGstBreakdown.totals.totalCGST,
+                                      cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
+                                    },
+                                    {
+                                      label: "SGST",
+                                      value: grnGstBreakdown.totals.totalSGST,
+                                      cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
+                                    },
+                                    {
+                                      label: "Total GST",
+                                      value: grnGstBreakdown.totals.totalGST,
+                                      cls: "border-orange-500/30 bg-orange-500/5 text-orange-700 dark:text-orange-300",
+                                    },
+                                  ].map(({ label, value, cls }) => (
+                                    <div
+                                      key={label}
+                                      className={`rounded-lg border px-3 py-2 ${cls}`}
+                                    >
+                                      <div className="text-[10px] font-heading uppercase tracking-wider opacity-70">
+                                        {label}
+                                      </div>
+                                      <div className="text-sm font-mono font-bold mt-1">
+                                        {formatINR(value)}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="px-4 py-2.5 bg-muted/10 border border-blue-500/10 rounded-lg flex flex-wrap items-center gap-1.5 text-[11px] font-mono mb-2">
+                                  <span className="text-blue-600 dark:text-blue-400 font-semibold">
+                                    {formatINR(
+                                      grnGstBreakdown.totals.totalBase,
+                                    )}
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    (base)
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    +
+                                  </span>
+                                  <span className="text-violet-600 dark:text-violet-400 font-semibold">
+                                    {formatINR(
+                                      grnGstBreakdown.totals.totalCGST,
+                                    )}
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    (CGST)
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    +
+                                  </span>
+                                  <span className="text-violet-600 dark:text-violet-400 font-semibold">
+                                    {formatINR(
+                                      grnGstBreakdown.totals.totalSGST,
+                                    )}
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    (SGST)
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    =
+                                  </span>
+                                  <span className="text-foreground font-bold">
+                                    {formatINR(
+                                      grnGstBreakdown.totals.totalInclGST,
+                                    )}
+                                  </span>
+                                </div>
+                              </>
+                            )}
+
                           <div className="space-y-1.5">
                             {/* Base */}
-                            <Row label="Basic Amount" value={formatINR(base)} />
+                            <Row
+                              label="Basic Amount"
+                              sub={grnGstBreakdown ? "Excl. GST" : undefined}
+                              value={formatINR(base)}
+                            />
 
                             {/* Pre-GST billing terms */}
                             {preGstRows.map(({ term, amt }, i) => {
@@ -2776,26 +3004,53 @@ const Payment: React.FC = () => {
                                 {preGstRows.length === 0 && (
                                   <div className="border-t border-border/40 pt-1" />
                                 )}
-                                {cgst > 0 && (
-                                  <Row
-                                    label={`CGST @ ${cgstRate}%`}
-                                    value={formatINR(cgst)}
-                                    color="text-primary"
-                                  />
-                                )}
-                                {sgst > 0 && (
-                                  <Row
-                                    label={`SGST @ ${sgstRate}%`}
-                                    value={formatINR(sgst)}
-                                    color="text-primary"
-                                  />
-                                )}
-                                {igst > 0 && (
-                                  <Row
-                                    label={`IGST @ ${igstRate}%`}
-                                    value={formatINR(igst)}
-                                    color="text-primary"
-                                  />
+                                {grnGstBreakdown ? (
+                                  /* Cumulative GST totals */
+                                  <>
+                                    {grnGstBreakdown.totals.totalCGST > 0 && (
+                                      <Row
+                                        label="CGST"
+                                        value={formatINR(
+                                          grnGstBreakdown.totals.totalCGST,
+                                        )}
+                                        color="text-primary"
+                                      />
+                                    )}
+                                    {grnGstBreakdown.totals.totalSGST > 0 && (
+                                      <Row
+                                        label="SGST"
+                                        value={formatINR(
+                                          grnGstBreakdown.totals.totalSGST,
+                                        )}
+                                        color="text-primary"
+                                      />
+                                    )}
+                                  </>
+                                ) : (
+                                  /* Non-GRN: single averaged rate is the actual rate */
+                                  <>
+                                    {cgst > 0 && (
+                                      <Row
+                                        label={`CGST @ ${cgstRate}%`}
+                                        value={formatINR(cgst)}
+                                        color="text-primary"
+                                      />
+                                    )}
+                                    {sgst > 0 && (
+                                      <Row
+                                        label={`SGST @ ${sgstRate}%`}
+                                        value={formatINR(sgst)}
+                                        color="text-primary"
+                                      />
+                                    )}
+                                    {igst > 0 && (
+                                      <Row
+                                        label={`IGST @ ${igstRate}%`}
+                                        value={formatINR(igst)}
+                                        color="text-primary"
+                                      />
+                                    )}
+                                  </>
                                 )}
                               </>
                             )}
@@ -2863,62 +3118,7 @@ const Payment: React.FC = () => {
                 </div>
               </div>
 
-              {/* ── 3. Bank Account ── */}
-              <div className="space-y-3">
-                <SectionHeader icon={Landmark} label="Bank Account" />
-                <Field
-                  label="Bank"
-                  required={isChequeMode || isDigitalMode}
-                  hint={
-                    isChequeMode
-                      ? "Required — used to filter cheque lots."
-                      : isDigitalMode
-                        ? "Bank account from which the transfer was made."
-                        : "Optional for cash payments."
-                  }
-                >
-                  <div className="relative">
-                    <Landmark
-                      size={13}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                    <select
-                      value={form.bankId ? String(form.bankId) : ""}
-                      onChange={(e) => handleBankSelect(e.target.value)}
-                      className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                    >
-                      <option value="">— Select bank account —</option>
-                      {banks.map((b) => (
-                        <option key={b.id} value={String(b.id)}>
-                          {b.label}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={14}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
-                  {form.bankId &&
-                    (() => {
-                      const selected = banks.find((b) => b.id === form.bankId);
-                      if (!selected) return null;
-                      const details = [
-                        selected.ifscCode && `IFSC: ${selected.ifscCode}`,
-                        selected.branch && `Branch: ${selected.branch}`,
-                        selected.accountType && `Type: ${selected.accountType}`,
-                      ].filter(Boolean);
-                      if (!details.length) return null;
-                      return (
-                        <p className="text-[11px] text-muted-foreground/70 mt-1 pl-1">
-                          {details.join(" · ")}
-                        </p>
-                      );
-                    })()}
-                </Field>
-              </div>
-
-              {/* ── 4. Payment Mode ── */}
+              {/* ── 3. Payment Mode ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Wallet} label="Payment Mode" />
                 <Field label="Mode" required>
@@ -2954,6 +3154,68 @@ const Payment: React.FC = () => {
                 </Field>
 
                 {form.mode && <ModeInfoBanner mode={form.mode} />}
+              </div>
+
+              {/* ── 4. Bank Account ── */}
+              <div className="space-y-3">
+                <SectionHeader icon={Landmark} label="Bank Account" />
+                <Field
+                  label="Bank"
+                  required={isChequeMode || isDigitalMode}
+                  hint={
+                    !form.mode
+                      ? "Select a payment mode first."
+                      : isCashMode
+                        ? "Not applicable for cash payments."
+                        : isChequeMode
+                          ? "Required — used to filter cheque lots."
+                          : "Bank account from which the transfer was made."
+                  }
+                >
+                  <div
+                    className={`relative ${isCashMode || !form.mode ? "opacity-40 pointer-events-none" : ""}`}
+                  >
+                    <Landmark
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    <select
+                      value={form.bankId ? String(form.bankId) : ""}
+                      onChange={(e) => handleBankSelect(e.target.value)}
+                      disabled={isCashMode || !form.mode}
+                      className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed"
+                    >
+                      <option value="">— Select bank account —</option>
+                      {banks.map((b) => (
+                        <option key={b.id} value={String(b.id)}>
+                          {b.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={14}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                  {!isCashMode &&
+                    !!form.mode &&
+                    form.bankId &&
+                    (() => {
+                      const selected = banks.find((b) => b.id === form.bankId);
+                      if (!selected) return null;
+                      const details = [
+                        selected.ifscCode && `IFSC: ${selected.ifscCode}`,
+                        selected.branch && `Branch: ${selected.branch}`,
+                        selected.accountType && `Type: ${selected.accountType}`,
+                      ].filter(Boolean);
+                      if (!details.length) return null;
+                      return (
+                        <p className="text-[11px] text-muted-foreground/70 mt-1 pl-1">
+                          {details.join(" · ")}
+                        </p>
+                      );
+                    })()}
+                </Field>
               </div>
 
               {/* ── 5. Mode-specific section ── */}
@@ -3044,6 +3306,7 @@ const Payment: React.FC = () => {
               );
               const clearAll = () => {
                 setCompanyFilter("");
+                setCompanyNameFilter("");
                 setProjectFilter("");
                 setFinYearFilter("");
                 setDocNumberFilter("");
@@ -3115,7 +3378,14 @@ const Payment: React.FC = () => {
                             <select
                               value={companyFilter}
                               onChange={(e) => {
-                                setCompanyFilter(e.target.value);
+                                const val = e.target.value;
+                                setCompanyFilter(val);
+                                const label = val
+                                  ? (companyOptions.find(
+                                      (c) => String(c.id) === val,
+                                    )?.label ?? val)
+                                  : "";
+                                setCompanyNameFilter(label);
                                 setPage(1);
                               }}
                               className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
@@ -3150,8 +3420,8 @@ const Payment: React.FC = () => {
                             >
                               <option value="">All Projects</option>
                               {projectOptions.map((p) => (
-                                <option key={p} value={p}>
-                                  {p}
+                                <option key={p.id} value={p.label}>
+                                  {p.label}
                                 </option>
                               ))}
                             </select>
@@ -3178,8 +3448,8 @@ const Payment: React.FC = () => {
                             >
                               <option value="">All Fin Years</option>
                               {finYearOptions.map((y) => (
-                                <option key={y} value={String(y)}>
-                                  {y}–{y + 1}
+                                <option key={y.id} value={y.label}>
+                                  {y.label}
                                 </option>
                               ))}
                             </select>
@@ -3297,6 +3567,7 @@ const Payment: React.FC = () => {
                               <button
                                 onClick={() => {
                                   setCompanyFilter("");
+                                  setCompanyNameFilter("");
                                   setPage(1);
                                 }}
                                 className="ml-0.5 hover:text-destructive"
@@ -3324,7 +3595,7 @@ const Payment: React.FC = () => {
                       {finYearFilter && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-amber-500/10 text-amber-600 border border-amber-500/20">
                           <CalendarDays size={9} />
-                          FY {finYearFilter}–{parseInt(finYearFilter) + 1}
+                          FY {finYearFilter}
                           <button
                             onClick={() => {
                               setFinYearFilter("");

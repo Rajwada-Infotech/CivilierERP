@@ -110,6 +110,8 @@ export interface GRNFormDataPayload {
   parentDocNo?: string | null;
   /** Root ExB DocNo — present when this GRN is under an Expense Booking. */
   rootExBDocNo?: string | null;
+  /** Optional project this GRN is associated with. */
+  projectId?: number | null;
 }
 
 export interface DocNumberPreview {

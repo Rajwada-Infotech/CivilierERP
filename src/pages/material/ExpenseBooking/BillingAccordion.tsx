@@ -324,6 +324,13 @@ interface Props {
   billingTerms?: DiscountConfig[];
   onChange: (d: DiscountConfig) => void;
   onChangeBillingTerms?: (terms: DiscountConfig[]) => void;
+  /** When set (GRN source), snap Net Payable to this exact value instead of generic round-off */
+  grnNetAmount?: number | null;
+  /** When set (GRN source), use real per-item GST breakdown instead of averaged rates */
+  gstBreakdown?: {
+    items: { itemName: string; cgstRate: number; sgstRate: number; cgstAmount: number; sgstAmount: number; baseAmount: number; gstAmount: number; totalAmountInclGST: number; receivedQty: number; gstPercent: number }[];
+    totals: { totalBase: number; totalCGST: number; totalSGST: number; totalGST: number; totalInclGST: number };
+  } | null;
 }
 
 export function BillingAccordion({
@@ -334,6 +341,8 @@ export function BillingAccordion({
   billingTerms,
   onChange,
   onChangeBillingTerms,
+  grnNetAmount,
+  gstBreakdown,
 }: Props) {
   const { activeBillingTerms = [] } = useBillingTerms();
   const [open, setOpen] = useState(true);
@@ -386,6 +395,11 @@ export function BillingAccordion({
     setTerms(terms.map((t, i) => (i === idx ? updated : t)));
 
   const bd = computeBreakdown(basicAmount, cgstRate, sgstRate, terms);
+  // For GRN bookings, snap Net Payable to the GRN's exact TotalAmount
+  if (grnNetAmount != null) {
+    bd.roundOff = grnNetAmount - bd.grossAmount;
+    bd.netAmount = grnNetAmount;
+  }
   const hasBase = basicAmount > 0;
   const activeCount = terms.filter((t) => t.applicable).length;
 
@@ -604,6 +618,45 @@ export function BillingAccordion({
                     <p className="text-xs text-muted-foreground">
                       Basic amount not yet set
                     </p>
+                  </div>
+                ) : gstBreakdown ? (
+                  /* GRN booking: show real per-item GST slabs */
+                  <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-xs">
+                    {/* Basic */}
+                    <div className="flex justify-between items-center px-3 py-2 bg-muted/20">
+                      <span className="text-muted-foreground">Basic Amount</span>
+                      <span className="font-medium tabular-nums">₹{fmt(gstBreakdown.totals.totalBase)}</span>
+                    </div>
+                    {/* Per-item CGST rows */}
+                    {gstBreakdown.items.map((item, i) => (
+                      <div key={`cgst-${i}`} className="flex justify-between items-center px-3 py-1.5 bg-amber-500/[0.04]">
+                        <span className="text-muted-foreground">
+                          CGST [{item.cgstRate}%]
+                          <span className="ml-1 text-[10px] text-muted-foreground/60">· {item.itemName}</span>
+                        </span>
+                        <span className="text-amber-600 dark:text-amber-400 tabular-nums">+ ₹{fmt(item.cgstAmount)}</span>
+                      </div>
+                    ))}
+                    {/* Per-item SGST rows */}
+                    {gstBreakdown.items.map((item, i) => (
+                      <div key={`sgst-${i}`} className="flex justify-between items-center px-3 py-1.5 bg-amber-500/[0.04]">
+                        <span className="text-muted-foreground">
+                          SGST [{item.sgstRate}%]
+                          <span className="ml-1 text-[10px] text-muted-foreground/60">· {item.itemName}</span>
+                        </span>
+                        <span className="text-amber-600 dark:text-amber-400 tabular-nums">+ ₹{fmt(item.sgstAmount)}</span>
+                      </div>
+                    ))}
+                    {/* Gross subtotal */}
+                    <div className="flex justify-between items-center px-3 py-2 bg-muted/30">
+                      <span className="text-muted-foreground">Gross Amount</span>
+                      <span className="font-medium tabular-nums">₹{fmt(gstBreakdown.totals.totalInclGST)}</span>
+                    </div>
+                    {/* Net Payable */}
+                    <div className="flex justify-between items-center px-3 py-2.5 bg-primary/[0.06]">
+                      <span className="font-heading font-semibold text-foreground">Net Payable</span>
+                      <span className="font-heading font-bold text-primary tabular-nums">₹{fmt(gstBreakdown.totals.totalInclGST)}</span>
+                    </div>
                   </div>
                 ) : (
                   <PriceBreakdownPanel

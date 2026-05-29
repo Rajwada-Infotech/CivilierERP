@@ -298,6 +298,11 @@ export default function FinYearRights() {
                   <SelectItem value="Closed">Closed</SelectItem>
                 </SelectContent>
               </Select>
+              {errors.status && (
+                <p className="text-xs text-destructive">
+                  {errors.status.message}
+                </p>
+              )}
             </div>
 
             <div className="flex items-center space-x-2">
