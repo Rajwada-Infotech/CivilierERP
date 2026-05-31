@@ -240,7 +240,7 @@ function openAttachmentViewer(url: string, filename: string) {
           attachmentBlobUrlCache.set(url, blobUrl);
           registerAttachmentCacheCleanup();
         }
-      } catch { win.document.body.innerHTML = '<p style="color:#ccc;font-family:sans-serif;padding:24px">Unable to load attachment.</p>'; return; }
+      } catch { const p = win.document.createElement('p'); p.textContent = 'Unable to load attachment.'; p.style.cssText = 'color:#ccc;font-family:sans-serif;padding:24px'; win.document.body.appendChild(p); return; }
     }
     const content = isPdf
       ? `<iframe src="${blobUrl}" style="width:100%;height:90vh;border:none;border-radius:8px"></iframe>`
