@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 const sql = require("mssql");
 
 const { cache } = require("../middleware/cache");
@@ -390,3 +392,4 @@ router.put("/auto-match", async (req, res) => {
 });
 
 module.exports = router;
+

@@ -2,6 +2,8 @@ const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 const { getPool, sql } = require("../db");
 
 bumpCacheVersion("unit-master").catch(() => {});
