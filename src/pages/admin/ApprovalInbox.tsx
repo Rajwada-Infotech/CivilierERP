@@ -373,7 +373,7 @@ const ApprovalInbox: React.FC = () => {
       </div>
 
       {/* Module filter tabs */}
-      <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1 scrollbar-hide">
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
         <ModuleTab
           module={null}
           label="All"
