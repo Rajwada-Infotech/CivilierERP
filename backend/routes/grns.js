@@ -1108,4 +1108,70 @@ router.get("/:id/gst-breakdown", async (req, res) => {
   }
 });
 
+// ── GET /:id/pending-items ────────────────────────────────────────────────────
+// Returns items from a GRN that still have remainingQty > 0.
+// These are items ordered on the linked PO but not yet fully received.
+// Used to surface "pending items" directly on the GRN — replacing the old
+// auto-draft expense booking approach.
+router.get("/:id/pending-items", async (req, res) => {
+  const grnId = parseInt(req.params.id, 10);
+  if (isNaN(grnId)) return res.status(400).json({ error: "Invalid GRN ID" });
+
+  try {
+    const pool = await getPool();
+
+    const grnResult = await pool.request().input("GRNID", sql.Int, grnId)
+      .query(`
+        SELECT
+          grn.GRNID, grn.GRNNo, grn.DocNo, grn.GRNDate,
+          grn.GRNItems, grn.SupplierID, grn.POID,
+          s.LHeadName AS SupplierName,
+          p.PurchaseOrderNo, p.TotalAmount AS POTotal,
+          p.CompanyId, p.ProjectId
+        FROM dbo.GoodsReceiptNotes grn
+        LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId = grn.SupplierID
+        LEFT JOIN dbo.PurchaseOrders p ON p.PurchaseOrderID = grn.POID
+        WHERE grn.GRNID = @GRNID
+      `);
+
+    if (!grnResult.recordset.length)
+      return res.status(404).json({ error: "GRN not found" });
+
+    const row = grnResult.recordset[0];
+    const allItems = parseGRNItems(row.GRNItems);
+
+    const pendingItems = allItems
+      .filter((it) => Number(it.remainingQty || 0) > 0)
+      .map((it) => ({
+        itemId: it.itemId || it.ItemId || null,
+        itemName: it.itemName || it.ItemName || "",
+        uom: it.uom || it.UOM || "",
+        orderedQty: Number(it.orderedQty || 0),
+        receivedQty: Number(it.receivedQty || it.ReceivedQty || 0),
+        remainingQty: Number(it.remainingQty || 0),
+        rate: Number(it.rate || it.Rate || 0),
+        pendingAmount:
+          Number(it.remainingQty || 0) * Number(it.rate || it.Rate || 0),
+      }));
+
+    const totalPendingAmount = pendingItems.reduce(
+      (s, i) => s + i.pendingAmount,
+      0,
+    );
+
+    res.json({
+      grnId: row.GRNID,
+      grnNo: row.GRNNo || row.DocNo,
+      supplierName: row.SupplierName || null,
+      poNo: row.PurchaseOrderNo || null,
+      pendingItems,
+      totalPendingAmount: Math.round(totalPendingAmount * 100) / 100,
+      hasPending: pendingItems.length > 0,
+    });
+  } catch (err) {
+    console.error("GET pending-items error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

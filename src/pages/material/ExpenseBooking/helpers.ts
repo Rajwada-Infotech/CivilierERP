@@ -267,7 +267,13 @@ export function dbToRecord(row: any): ExpenseRecord {
   return {
     id: String(id),
     bookingName: row.EName ?? "",
-    bookingReference: row.EDocNo ?? (id ? `Draft #${id}` : ""),
+    bookingReference:
+      row.EDocNo ??
+      (row.ESourceType === "GRN" && (row.sourceDocNo || row.ESourceId)
+        ? `Pending Items — ${row.sourceDocNo ?? `GRN #${row.ESourceId}`}`
+        : id
+          ? `Draft #${id}`
+          : ""),
     docTypeName: row.DocTypeName ?? "",
     bookingDate: row.EDocDate ? row.EDocDate.slice(0, 10) : "",
     dueDate: row.EReminder ? row.EReminder.slice(0, 10) : "",
