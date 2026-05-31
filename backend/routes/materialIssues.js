@@ -843,7 +843,6 @@ router.get("/prefill/:type/:id", authenticateToken, async (req, res) => {
   }
 });
 
-<<<<<<< HEAD
 // ── PUT /:id/submit — Pending re-submission after rejection ───────────────────
 router.put("/:id/submit", authenticateToken, async (req, res) => {
   try {
@@ -902,7 +901,5 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
-
-=======
->>>>>>> 7393cf0 (fix: add rate limiter to all route files to resolve CodeQL missing-rate-limiting alerts)
 module.exports = router;
+
