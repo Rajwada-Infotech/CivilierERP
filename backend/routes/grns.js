@@ -6,6 +6,8 @@ const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
 const { grnBodySchema } = require("../validation/financialRouteSchemas");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const {
   lockNextDocNumber,
@@ -1096,3 +1098,7 @@ router.get("/:id/gst-breakdown", async (req, res) => {
 });
 
 module.exports = router;
+
+
+
+

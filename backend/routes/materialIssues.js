@@ -20,6 +20,9 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
+const rateLimit = require("express-rate-limit");
+const routeLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
+router.use(routeLimiter);
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
@@ -898,5 +901,7 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
-
 module.exports = router;
+
+
+
