@@ -1,6 +1,8 @@
 const express = require("express");
 
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 
 const LOG_TYPES = ["email", "call", "sms", "note", "payment"];
@@ -187,5 +189,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
+
+
 
 
