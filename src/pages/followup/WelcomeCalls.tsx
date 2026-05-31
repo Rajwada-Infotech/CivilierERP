@@ -527,19 +527,18 @@ export function WelcomeCallsPage() {
         }
         .wc-log-btn {
           display: flex; align-items: center; gap: 6px;
-          background: hsl(var(--primary));
-          color: hsl(var(--primary-foreground));
+          background: linear-gradient(135deg, #7c3aed, #2563eb);
+          color: #fff;
           border: none;
           border-radius: 9px;
           padding: 9px 16px;
           font-size: 13px;
           font-weight: 600;
           cursor: pointer;
-          transition: background 0.15s;
           white-space: nowrap;
           flex-shrink: 0;
         }
-        .wc-log-btn:hover { background: hsl(var(--primary) / 0.85); }
+        .wc-log-btn:hover { opacity: 0.9; }
 
         /* ── Stats strip ── */
         .wc-stats {
@@ -629,8 +628,8 @@ export function WelcomeCallsPage() {
 
         .wc-pills { display: flex; gap: 6px; flex-wrap: wrap; }
         .wc-pill {
-          display: flex; align-items: center; gap: 5px;
-          padding: 6px 12px;
+          display: flex; align-items: center; justify-content: center; gap: 5px;
+          padding: 7px 14px;
           border-radius: 9px;
           font-size: 12px;
           font-weight: 600;
@@ -640,6 +639,7 @@ export function WelcomeCallsPage() {
           cursor: pointer;
           transition: all 0.15s;
           white-space: nowrap;
+          line-height: 1;
         }
         .wc-pill:hover { border-color: hsl(var(--primary)); color: hsl(var(--primary)); }
         .wc-pill.active {
@@ -651,6 +651,7 @@ export function WelcomeCallsPage() {
           width: 6px; height: 6px;
           border-radius: 50%;
           flex-shrink: 0;
+          display: inline-block;
         }
 
         /* ── Body ── */
@@ -775,17 +776,16 @@ export function WelcomeCallsPage() {
           font-weight: 600;
           border-radius: 8px;
           border: 1.5px solid;
-          overflow: hidden;
           line-height: 1;
         }
         .wc-chip-icon {
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 24px; height: 24px;
-          border-radius: 0;
+          width: 26px; height: 26px;
+          flex-shrink: 0;
         }
-        .wc-outcome-chip span.wc-chip-icon + * { padding: 0 8px; }
+        .wc-outcome-chip span.wc-chip-icon + * { padding: 0 12px 0 6px; }
 
         .wc-time-ago {
           font-size: 11px;
@@ -999,7 +999,7 @@ export function WelcomeCallsPage() {
             <Button
               size="sm"
               onClick={() => setDialogOpen(true)}
-              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               <Plus size={14} />
               Log Call
@@ -1059,14 +1059,6 @@ export function WelcomeCallsPage() {
                   className={`wc-pill ${outcomeFilter === o ? "active" : ""}`}
                   onClick={() => setOutcomeFilter(o)}
                 >
-                  {cfg && (
-                    <span
-                      className="wc-pill-dot"
-                      style={{
-                        opacity: outcomeFilter === o ? 0.8 : 1,
-                      }}
-                    />
-                  )}
                   {isAll ? "All" : cfg!.label}
                 </button>
               );
@@ -1118,13 +1110,12 @@ export function WelcomeCallsPage() {
                   : "Log the first welcome call to get started"}
               </p>
               {!search && outcomeFilter === "all" && (
-                <button
-                  className="wc-log-btn"
+                <Button
                   onClick={() => setDialogOpen(true)}
-                  style={{ marginTop: 4 }}
+                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto mt-1"
                 >
                   <Plus style={{ width: 14, height: 14 }} /> Log Call
-                </button>
+                </Button>
               )}
             </div>
           ) : (
@@ -1339,12 +1330,18 @@ export function WelcomeCallsPage() {
             <div className="wc-form-grid">
               <div className="space-y-2">
                 <Label>Call Date</Label>
-                <Input
-                  type="date"
-                  value={form.date}
-                  onChange={(e) => set("date", e.target.value)}
-                  className="rounded-[9px]"
-                />
+                <div className="relative">
+                  <Calendar
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <input
+                    type="date"
+                    value={form.date}
+                    onChange={(e) => set("date", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Duration (minutes)</Label>
@@ -1392,7 +1389,7 @@ export function WelcomeCallsPage() {
                   notes: buildNotes(form.outcome, form.notes),
                 })
               }
-              className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-[9px] gap-2"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               {createMutation.isPending ? (
                 "Saving…"

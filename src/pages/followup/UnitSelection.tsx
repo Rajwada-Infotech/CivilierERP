@@ -583,11 +583,18 @@ function FormDialog({
             </div>
             <div className="space-y-2">
               <Label>Selection Date</Label>
-              <Input
-                type="date"
-                value={form.SelectionDate}
-                onChange={(e) => set("SelectionDate", e.target.value)}
-              />
+              <div className="relative">
+                <CalendarDays
+                  size={14}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+                <input
+                  type="date"
+                  value={form.SelectionDate}
+                  onChange={(e) => set("SelectionDate", e.target.value)}
+                  className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                />
+              </div>
             </div>
           </div>
 
@@ -688,7 +695,7 @@ function FormDialog({
           <Button
             onClick={() => onSave(form)}
             disabled={!form.ApplicantId || !form.UnitNo.trim() || isSaving}
-            className="bg-primary hover:bg-primary/90 text-primary-foreground"
+            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
           >
             {isSaving ? "Saving…" : editing ? "Update" : "Create"}
           </Button>
@@ -801,7 +808,7 @@ export function UnitSelectionPage() {
           <Button
             size="sm"
             onClick={openCreate}
-            className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
           >
             <Plus size={14} /> New Selection
           </Button>
@@ -886,7 +893,7 @@ export function UnitSelectionPage() {
               }}
               className={`px-3.5 py-[9px] rounded-lg text-xs font-semibold border transition-all ${
                 statusFilter === s
-                  ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                  ? "gradient-accent text-white border-transparent shadow-sm"
                   : "bg-card text-muted-foreground border-border hover:border-primary/40"
               }`}
             >
@@ -934,7 +941,7 @@ export function UnitSelectionPage() {
             {!search && statusFilter === "all" && (
               <Button
                 onClick={openCreate}
-                className="bg-primary hover:bg-primary/90 text-primary-foreground gap-2 rounded-xl mt-4"
+                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto mt-4"
               >
                 <Plus className="w-4 h-4" /> New Selection
               </Button>

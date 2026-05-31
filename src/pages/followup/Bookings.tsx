@@ -30,6 +30,7 @@ import {
   CreditCard,
   Users,
   ChevronDown,
+  CalendarDays,
   Save,
   Banknote,
   Trash2,
@@ -804,23 +805,35 @@ function BookingForm({
             />
           </div>
           <FormField label="Booking Date" required>
-            <input
-              type="date"
-              className={inputCls}
-              value={form.bookingDate}
-              onChange={(e) => set("bookingDate")(e.target.value)}
-            />
+            <div className="relative">
+              <CalendarDays
+                size={13}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <input
+                type="date"
+                className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                value={form.bookingDate}
+                onChange={(e) => set("bookingDate")(e.target.value)}
+              />
+            </div>
           </FormField>
           <FormField label="Status">
-            <select
-              className={inputCls}
-              value={form.status}
-              onChange={(e) => set("status")(e.target.value)}
-            >
-              {statusOptions.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                className="w-full appearance-none px-3 py-2.5 pr-9 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all"
+                value={form.status}
+                onChange={(e) => set("status")(e.target.value)}
+              >
+                {statusOptions.map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+              <ChevronDown
+                size={13}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+            </div>
           </FormField>
         </FormSection>
 
@@ -853,16 +866,22 @@ function BookingForm({
             />
           </FormField>
           <FormField label="Unit Type">
-            <select
-              className={inputCls}
-              value={form.unitType}
-              onChange={(e) => set("unitType")(e.target.value)}
-            >
-              <option value="">Select type...</option>
-              {unitTypes.map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                className="w-full appearance-none px-3 py-2.5 pr-9 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all"
+                value={form.unitType}
+                onChange={(e) => set("unitType")(e.target.value)}
+              >
+                <option value="">Select type...</option>
+                {unitTypes.map((t) => (
+                  <option key={t}>{t}</option>
+                ))}
+              </select>
+              <ChevronDown
+                size={13}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+            </div>
           </FormField>
           <FormField label="Block">
             <input
@@ -958,16 +977,22 @@ function BookingForm({
           color="bg-cyan-50 dark:bg-cyan-900/30"
         >
           <FormField label="Payment Mode">
-            <select
-              className={inputCls}
-              value={form.paymentMode}
-              onChange={(e) => set("paymentMode")(e.target.value)}
-            >
-              <option value="">Select mode...</option>
-              {paymentModes.map((m) => (
-                <option key={m}>{m}</option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                className="w-full appearance-none px-3 py-2.5 pr-9 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all"
+                value={form.paymentMode}
+                onChange={(e) => set("paymentMode")(e.target.value)}
+              >
+                <option value="">Select mode...</option>
+                {paymentModes.map((m) => (
+                  <option key={m}>{m}</option>
+                ))}
+              </select>
+              <ChevronDown
+                size={13}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+            </div>
           </FormField>
           {(form.paymentMode === "Cheque" || form.paymentMode === "DD") && (
             <>
@@ -1075,7 +1100,7 @@ function BookingForm({
           type="button"
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center gap-2 px-5 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-60 transition-all shadow-sm"
+          className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto rounded-lg flex items-center disabled:opacity-60"
         >
           {saving ? (
             <Loader2 size={14} className="animate-spin" />
@@ -1856,9 +1881,8 @@ export default function BookingsPage() {
               Refresh
             </button>
             <Button
-              size="sm"
               onClick={openNew}
-              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               <Plus size={13} />
               New Booking
@@ -1965,18 +1989,24 @@ export default function BookingsPage() {
                 </button>
               )}
             </div>
-            <select
-              className="px-3 py-2 border border-border rounded-xl text-sm bg-card text-muted-foreground outline-none cursor-pointer focus:border-primary/60 min-w-[130px]"
-              value={projectFilter ?? ""}
-              onChange={(e) => setProjectFilter(e.target.value || undefined)}
-            >
-              <option value="">All Projects</option>
-              {projects.map((p) => (
-                <option key={p.Id} value={p.Id}>
-                  {p.Name}
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                className="appearance-none px-3 py-2 pr-9 border border-border rounded-xl text-sm bg-card text-muted-foreground outline-none cursor-pointer focus:border-primary/60 min-w-[130px]"
+                value={projectFilter ?? ""}
+                onChange={(e) => setProjectFilter(e.target.value || undefined)}
+              >
+                <option value="">All Projects</option>
+                {projects.map((p) => (
+                  <option key={p.Id} value={p.Id}>
+                    {p.Name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={13}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+            </div>
             {hasFilters && (
               <button
                 onClick={() => {

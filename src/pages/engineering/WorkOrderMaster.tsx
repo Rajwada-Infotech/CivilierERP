@@ -360,13 +360,13 @@ const inputCls =
   "w-full h-10 text-sm rounded-lg border border-border px-3 py-0 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
 
 const selectCls =
-  "w-full h-10 text-sm rounded-lg border border-border px-3 py-0 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none";
+  "w-full h-10 text-sm rounded-lg border border-border pl-3 pr-8 py-0 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition wo-select-arrow";
 
 const cellInput =
   "w-full text-sm rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
 
 const cellSelect =
-  "w-full text-sm rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none";
+  "w-full text-sm rounded-md border border-border pl-2.5 pr-7 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition wo-select-arrow";
 
 const FieldLabel: React.FC<{
   children: React.ReactNode;
@@ -695,7 +695,7 @@ const MaterialBreakdownModal: React.FC<{
                                 onChange={(e) =>
                                   handleMatUomChange(idx, e.target.value)
                                 }
-                                className="w-full text-sm rounded-md border border-border px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
+                                className="w-full text-sm rounded-md border border-border pl-2 pr-7 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition wo-select-arrow"
                               >
                                 <option value="">Select unit…</option>
                                 {uomOptions.map((u) => (
@@ -1128,7 +1128,7 @@ const ActivityRow: React.FC<{
     <select
       value={activity.uomId !== null ? String(activity.uomId) : ""}
       onChange={(e) => handleUomChange(e.target.value)}
-      className="w-full text-sm rounded-md border border-border px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
+      className="w-full text-sm rounded-md border border-border pl-2 pr-7 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition wo-select-arrow"
     >
       <option value="">
         {safeUomOptions.length === 0 ? "No UOMs" : "Select unit…"}
@@ -1463,7 +1463,7 @@ const ActivityGroupCard: React.FC<{
           <select
             value={group.groupId !== null ? String(group.groupId) : ""}
             onChange={(e) => handleGroupChange(e.target.value)}
-            className="flex-1 min-w-0 text-sm font-semibold bg-background border border-border rounded-md px-2 py-1 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none cursor-pointer"
+            className="flex-1 min-w-0 text-sm font-semibold bg-background border border-border rounded-md pl-2 pr-7 py-1 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition wo-select-arrow cursor-pointer"
           >
             <option value="">
               {safeGroupOptions.length === 0
@@ -2480,7 +2480,7 @@ const WorkOrdersList: React.FC<{
             setStatusFilter(e.target.value);
             setPage(1);
           }}
-          className="text-sm rounded-lg border border-border px-3 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
+          className="text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition wo-select-arrow"
         >
           <option value="all">All Status</option>
           <option value="draft">Draft</option>
@@ -3480,12 +3480,15 @@ const WorkOrderEditPanel: React.FC<{
                     Document Date
                   </span>
                 </FieldLabel>
-                <input
-                  type="date"
-                  value={form.docDate}
-                  onChange={(e) => setField("docDate", e.target.value)}
-                  className={`${inputCls} ${errors.docDate ? "border-red-400" : ""}`}
-                />
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={14} />
+                  <input
+                    type="date"
+                    value={form.docDate}
+                    onChange={(e) => setField("docDate", e.target.value)}
+                    className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.docDate ? "border-red-400" : "border-border"}`}
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -4259,6 +4262,15 @@ const WorkOrderMaster: React.FC = () => {
 
   return (
     <>
+      <style>{`
+        .wo-select-arrow {
+          appearance: none;
+          -webkit-appearance: none;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 10px center;
+        }
+      `}</style>
       <Breadcrumbs items={["Engineering", "Transaction", "Work Order"]} />
 
       {/* Page header */}
@@ -4318,7 +4330,7 @@ const WorkOrderMaster: React.FC = () => {
               <button
                 onClick={handleSave}
                 disabled={saving || loadingDropdowns}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg gradient-accent text-white text-sm font-heading font-semibold shadow-sm disabled:opacity-60 transition-opacity"
+                className="gradient-accent flex items-center gap-1.5 font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-60 transition-opacity"
               >
                 {saving ? (
                   <>
@@ -4684,12 +4696,15 @@ const WorkOrderMaster: React.FC = () => {
                         Document Date
                       </span>
                     </FieldLabel>
-                    <input
-                      type="date"
-                      value={form.docDate}
-                      onChange={(e) => setField("docDate", e.target.value)}
-                      className={`${inputCls} ${errors.docDate ? "border-red-400" : ""}`}
-                    />
+                    <div className="relative">
+                      <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={14} />
+                      <input
+                        type="date"
+                        value={form.docDate}
+                        onChange={(e) => setField("docDate", e.target.value)}
+                        className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.docDate ? "border-red-400" : "border-border"}`}
+                      />
+                    </div>
                     {errors.docDate && (
                       <p className="text-xs text-red-500 mt-1">Required</p>
                     )}
@@ -5008,7 +5023,7 @@ const WorkOrderMaster: React.FC = () => {
             <button
               onClick={handleSave}
               disabled={saving || loadingDropdowns}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-lg gradient-accent text-white text-sm font-heading font-semibold shadow-sm disabled:opacity-60 transition-opacity"
+              className="gradient-accent flex items-center gap-1.5 font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-60 transition-opacity"
             >
               {saving ? (
                 <>

@@ -130,11 +130,13 @@ const Field = ({
 const DetailRow = ({
   label,
   value,
+  className,
 }: {
   label: string;
   value?: React.ReactNode;
+  className?: string;
 }) => (
-  <div>
+  <div className={className}>
     <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1">
       {label}
     </p>
@@ -1173,11 +1175,11 @@ export default function Issues() {
                     size={13}
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
-                  <Input
+                  <input
                     type="date"
                     value={header.date}
                     onChange={(e) => setH("date", e.target.value)}
-                    className="pl-9 h-9"
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                   />
                 </div>
               </Field>
@@ -1812,7 +1814,7 @@ export default function Issues() {
                 setEditingId(null);
                 setViewMode("form");
               }}
-              className="gradient-accent gap-1.5 shrink-0"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               <Plus size={15} /> New Issue
             </Button>

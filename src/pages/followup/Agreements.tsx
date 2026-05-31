@@ -896,10 +896,13 @@ export function AgreementsPage() {
 
         /* ── Status select ── */
         .ag-status-select {
-          width: 100%; padding: 8px 12px; border: 1.5px solid hsl(var(--border)); border-radius: 9px;
+          width: 100%; padding: 8px 32px 8px 12px; border: 1.5px solid hsl(var(--border)); border-radius: 9px;
           font-size: 13.5px; color: hsl(var(--foreground)); background: hsl(var(--card)); outline: none;
           transition: border-color 0.15s; font-family: inherit; cursor: pointer;
           appearance: none; -webkit-appearance: none;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 10px center;
         }
         .ag-status-select:focus { border-color: hsl(var(--primary)); }
 
@@ -943,7 +946,7 @@ export function AgreementsPage() {
             <Button
               size="sm"
               onClick={openCreate}
-              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               <Plus size={14} /> New Agreement
             </Button>
@@ -1105,8 +1108,11 @@ export function AgreementsPage() {
                   : "Create the first agreement to get started"}
               </p>
               {!search && !statusFilter && (
-                <Button size="sm" onClick={openCreate} style={{ marginTop: 4 }}>
-                  <Plus size={14} style={{ marginRight: 6 }} /> New Agreement
+                <Button
+                  onClick={openCreate}
+                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto mt-1"
+                >
+                  <Plus size={14} /> New Agreement
                 </Button>
               )}
             </div>
@@ -1460,21 +1466,33 @@ export function AgreementsPage() {
             <div className="ag-form-grid">
               <div className="space-y-2">
                 <Label>Agreement Date</Label>
-                <Input
-                  type="date"
-                  value={form.AgreementDate}
-                  onChange={(e) => set("AgreementDate", e.target.value)}
-                  className="rounded-[9px]"
-                />
+                <div className="relative">
+                  <CalendarDays
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <input
+                    type="date"
+                    value={form.AgreementDate}
+                    onChange={(e) => set("AgreementDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Registration Date</Label>
-                <Input
-                  type="date"
-                  value={form.RegistrationDate}
-                  onChange={(e) => set("RegistrationDate", e.target.value)}
-                  className="rounded-[9px]"
-                />
+                <div className="relative">
+                  <CalendarDays
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <input
+                    type="date"
+                    value={form.RegistrationDate}
+                    onChange={(e) => set("RegistrationDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1527,6 +1545,7 @@ export function AgreementsPage() {
                 !form.ApplicantId || createMut.isPending || updateMut.isPending
               }
               onClick={() => (editId ? updateMut.mutate() : createMut.mutate())}
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               {editId
                 ? updateMut.isPending
