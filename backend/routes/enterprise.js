@@ -2,6 +2,8 @@ const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 
 // GET all
@@ -367,4 +369,6 @@ router.get("/options", async (req, res) => {
 });
 
 module.exports = router;
+
+
 
