@@ -417,11 +417,13 @@ router.get("/", cache("grns", 300), async (req, res) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 500);
     const offset = (page - 1) * limit;
+    const finYearFilter = req.query.finYear || null; // e.g. "2025-2026"
 
     const result = await pool
       .request()
       .input("offset", sql.Int, offset)
-      .input("limit", sql.Int, limit).query(`
+      .input("limit", sql.Int, limit)
+      .input("finYear", sql.NVarChar(20), finYearFilter).query(`
       SELECT
         grn.GRNID,
         grn.GRNNo,
@@ -463,6 +465,15 @@ router.get("/", cache("grns", 300), async (req, res) => {
       LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
       LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
       LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = grn.DocTypeId
+      WHERE (@finYear IS NULL OR (
+        grn.DocYear IS NOT NULL AND (
+          CASE
+            WHEN MONTH(grn.GRNDate) >= 4
+              THEN CAST(grn.DocYear AS NVARCHAR(4)) + '-' + CAST(grn.DocYear + 1 AS NVARCHAR(4))
+            ELSE CAST(grn.DocYear - 1 AS NVARCHAR(4)) + '-' + CAST(grn.DocYear AS NVARCHAR(4))
+          END
+        ) = @finYear
+      ))
       ORDER BY grn.GRNID DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
@@ -1098,7 +1109,3 @@ router.get("/:id/gst-breakdown", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-

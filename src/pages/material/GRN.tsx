@@ -495,28 +495,43 @@ export default function GRN() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // ── Queries ──────────────────────────────────────────────────────────────────
-  const { data: grnsPage, isLoading: loadingGrns } = useQuery({
-    queryKey: ["grns", page, limit],
-    queryFn: () => grnApi.getGRNs({ page, limit }),
+  const {
+    data: grnsPage,
+    isLoading: loadingGrns,
+    isFetching: fetchingGrns,
+  } = useQuery({
+    queryKey: ["grns", page, limit, selectedFinYear],
+    queryFn: () =>
+      grnApi.getGRNs({
+        page,
+        limit,
+        ...(selectedFinYear ? { finYear: selectedFinYear } : {}),
+      }),
+    placeholderData: (prev) => prev,
   });
   const grns = grnsPage?.data ?? [];
   const totalPages = Math.max(grnsPage?.totalPages ?? 1, 1);
   const totalRecords = grnsPage?.total ?? grns.length;
 
-  // Fetch ALL POs — fy_id never written on POs so server filter is dead
+  // Fetch ALL POs — filtered client-side by fy_id
   const { data: posData = [] } = useQuery({
     queryKey: ["purchaseOrders"],
     queryFn: () => grnApi.getPurchaseOrders(),
   });
 
-  // "2025-26" → "25-26" (DocNo segment)
-  const finYearSuffix = useMemo(() => {
-    if (!selectedFinYear) return "";
-    const parts = selectedFinYear.split("-");
-    if (parts.length === 2)
-      return `${parts[0].trim().slice(-2)}-${parts[1].trim().slice(-2)}`;
-    return selectedFinYear;
-  }, [selectedFinYear]);
+  // Derive the financial year string from a date string using Indian FY rule (Apr–Mar).
+  // e.g. 2026-01-15 → "2025-2026",  2026-05-10 → "2026-2027"
+  const deriveFYFromDate = (
+    dateStr: string | null | undefined,
+  ): string | null => {
+    if (!dateStr) return null;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return null;
+    const yr = d.getFullYear();
+    const mo = d.getMonth() + 1; // 1-based
+    const startYr = mo >= 4 ? yr : yr - 1;
+    return `${startYr}-${startYr + 1}`;
+  };
 
   const { data: uomsData = [] } = useQuery({
     queryKey: ["uomMaster"],
@@ -545,9 +560,9 @@ export default function GRN() {
             String(po.PurchaseOrderID) === formData.poId
           )
             return true;
-          if (finYearSuffix) {
-            const docNo = po.DocNo || po.PurchaseOrderNo || "";
-            if (!docNo.includes(finYearSuffix)) return false;
+          if (selectedFinYear) {
+            const poFY = deriveFYFromDate((po as any).PODate);
+            if (poFY !== selectedFinYear) return false;
           }
           if (formData.projectId) {
             if (String((po as any).ProjectId ?? "") !== formData.projectId)
@@ -568,10 +583,12 @@ export default function GRN() {
             label: `${docNo}${typeTag}`,
           };
         }),
-    [posData, finYearSuffix, formData.projectId, formData.poId, editingId],
+    [posData, selectedFinYear, formData.projectId, formData.poId, editingId],
   );
 
   const filteredGrns = grns.filter((grn: any) => {
+    if (selectedFinYear && grn.FinYear && grn.FinYear !== selectedFinYear)
+      return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -676,6 +693,7 @@ export default function GRN() {
         poNumber: po.PurchaseOrderNo ?? "",
         supplierId: String(po.SupplierID ?? ""),
         supplierName: po.SupplierName ?? "",
+        projectId: po.ProjectId ? String(po.ProjectId) : prev.projectId,
         items: lineItems.length ? lineItems : [createEmptyItem()],
         docTypeId: null,
         parentDocNo: po.DocNo || po.PurchaseOrderNo || "",
@@ -904,6 +922,7 @@ export default function GRN() {
                       value={selectedFinYear}
                       onChange={(e) => {
                         setSelectedFinYear(e.target.value);
+                        setPage(1);
                         setFormData((prev) => ({
                           ...prev,
                           poId: "",
@@ -1413,7 +1432,9 @@ export default function GRN() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div
+            className={`overflow-x-auto transition-opacity duration-200 ${fetchingGrns ? "opacity-60 pointer-events-none" : ""}`}
+          >
             <DataTable
               data={filteredGrns}
               columns={GRN_LIST_COLUMNS}
