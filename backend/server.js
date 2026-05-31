@@ -247,7 +247,7 @@ async function createApp() {
       },
       store: makeStore("rl:api:"),
       skip: (req) => req.path.startsWith("/api/user-activity"),
-      keyGenerator: (req) => `${req.user?.userId || req.ip}`,
+      keyGenerator: (req) => req.user?.userId ? `user:${req.user.userId}` : req.ip,
       standardHeaders: true,
       legacyHeaders: false,
     });
@@ -431,3 +431,4 @@ module.exports = { startServer, createApp };
 if (!isTest) {
   startServer();
 }
+
