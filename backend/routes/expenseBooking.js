@@ -918,12 +918,20 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
         });
       }
 
-      bookingAmount = grnGst.totals.taxableAmount;
-      bookingNetAmount = grnGst.totals.netAmount;
-      // Existing schema stores only CGST/SGST rates. For inter-state GRNs the
-      // net amount includes IGST and the frontend reloads the IGST split by GRN.
-      bookingCgstRate = grnGst.cgstRate;
-      bookingSgstRate = grnGst.sgstRate;
+      // Split drafts carry their own pre-computed amount (remainingQty × rate)
+      // and must NOT be overwritten with the full GRN received total.
+      const isGrnSplitDraft =
+        typeof ERemarks === "string" &&
+        ERemarks.startsWith("Auto-created for remaining items from GRN");
+
+      if (!isGrnSplitDraft) {
+        bookingAmount = grnGst.totals.taxableAmount;
+        bookingNetAmount = grnGst.totals.netAmount;
+        // Existing schema stores only CGST/SGST rates. For inter-state GRNs the
+        // net amount includes IGST and the frontend reloads the IGST split by GRN.
+        bookingCgstRate = grnGst.cgstRate;
+        bookingSgstRate = grnGst.sgstRate;
+      }
     }
 
     if (EDocTypeId) {
@@ -2136,7 +2144,3 @@ router.get("/:id/grns", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-

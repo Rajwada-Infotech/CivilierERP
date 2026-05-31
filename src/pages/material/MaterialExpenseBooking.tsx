@@ -2088,10 +2088,9 @@ export default function MaterialExpenseBooking() {
             // Auto-create a draft booking for remaining items using the same GRN source
             try {
               const remainingTotal = remainingItems.reduce((s, i) => {
-                const amt =
-                  Number(i.totalAmount) > 0
-                    ? Number(i.totalAmount)
-                    : Number(i.rate || 0) * Number(i.remainingQty || 0);
+                // Always compute from remainingQty × rate — never use totalAmount
+                // which reflects the already-received qty, not what's left
+                const amt = Number(i.rate || 0) * Number(i.remainingQty || 0);
                 return s + amt;
               }, 0);
               const itemList = remainingItems
@@ -2178,7 +2177,6 @@ export default function MaterialExpenseBooking() {
       saveInFlight.current = false;
     }
   };
-
 
   const bd = computeBreakdown(
     form.basicAmount,
