@@ -1086,7 +1086,7 @@ export default function Login() {
             navigate(`/customer-portal/${uid}`, { replace: true });
           else if (role === "dba") navigate(`/dba/${uid}`, { replace: true });
           else if (role === "super_admin" || role === "admin")
-            navigate(`/admin/dashboard/${uid}`, { replace: true });
+            navigate(`/home/${uid}`, { replace: true });
           else navigate(`/home/${uid}`, { replace: true });
         }, 700);
       } else {

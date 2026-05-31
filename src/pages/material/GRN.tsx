@@ -93,20 +93,35 @@ function RemainingItemsPanel({ grnId }: { grnId: number }) {
           Remaining Items — Not Yet Expense Booked
         </span>
         <span className="ml-auto text-[10px] text-muted-foreground">
-          {data.pendingItems.length} {data.pendingItems.length === 1 ? "item" : "items"} pending
+          {data.pendingItems.length}{" "}
+          {data.pendingItems.length === 1 ? "item" : "items"} pending
         </span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-muted/10 border-b border-amber-500/15">
-              <th className="px-3 py-2 text-left text-[10px] font-heading uppercase tracking-wider text-muted-foreground">Item</th>
-              <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-muted-foreground">Ordered</th>
-              <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Received</th>
-              <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400">Remaining</th>
-              <th className="px-3 py-2 text-left text-[10px] font-heading uppercase tracking-wider text-muted-foreground">UOM</th>
-              <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-muted-foreground">Rate (₹)</th>
-              <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400">Pending Amt (₹)</th>
+              <th className="px-3 py-2 text-left text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                Item
+              </th>
+              <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                Ordered
+              </th>
+              <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                Received
+              </th>
+              <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                Remaining
+              </th>
+              <th className="px-3 py-2 text-left text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                UOM
+              </th>
+              <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                Rate (₹)
+              </th>
+              <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                Pending Amt (₹)
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-amber-500/10">
@@ -115,16 +130,30 @@ function RemainingItemsPanel({ grnId }: { grnId: number }) {
                 <td className="px-3 py-2 font-medium text-foreground max-w-[160px] truncate">
                   {item.itemName || `Item ${idx + 1}`}
                 </td>
-                <td className="px-3 py-2 text-right font-mono text-muted-foreground">{item.orderedQty}</td>
-                <td className="px-3 py-2 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">{item.receivedQty}</td>
-                <td className="px-3 py-2 text-right font-mono font-bold text-amber-600 dark:text-amber-400">{item.remainingQty}</td>
-                <td className="px-3 py-2 text-muted-foreground">{item.uom || "—"}</td>
                 <td className="px-3 py-2 text-right font-mono text-muted-foreground">
-                  {item.rate > 0 ? item.rate.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—"}
+                  {item.orderedQty}
+                </td>
+                <td className="px-3 py-2 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                  {item.receivedQty}
+                </td>
+                <td className="px-3 py-2 text-right font-mono font-bold text-amber-600 dark:text-amber-400">
+                  {item.remainingQty}
+                </td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {item.uom || "—"}
+                </td>
+                <td className="px-3 py-2 text-right font-mono text-muted-foreground">
+                  {item.rate > 0
+                    ? item.rate.toLocaleString("en-IN", {
+                        maximumFractionDigits: 2,
+                      })
+                    : "—"}
                 </td>
                 <td className="px-3 py-2 text-right font-mono font-semibold text-amber-600 dark:text-amber-400">
                   {item.pendingAmount > 0
-                    ? item.pendingAmount.toLocaleString("en-IN", { maximumFractionDigits: 2 })
+                    ? item.pendingAmount.toLocaleString("en-IN", {
+                        maximumFractionDigits: 2,
+                      })
                     : "—"}
                 </td>
               </tr>
@@ -132,11 +161,16 @@ function RemainingItemsPanel({ grnId }: { grnId: number }) {
           </tbody>
           <tfoot className="border-t-2 border-amber-500/30 bg-muted/10">
             <tr>
-              <td colSpan={6} className="px-3 py-2.5 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              <td
+                colSpan={6}
+                className="px-3 py-2.5 text-[10px] font-heading uppercase tracking-wider text-muted-foreground"
+              >
                 Total Pending Value
               </td>
               <td className="px-3 py-2.5 text-right font-mono text-sm font-bold text-amber-600 dark:text-amber-400">
-                {data.totalPendingAmount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                {data.totalPendingAmount.toLocaleString("en-IN", {
+                  maximumFractionDigits: 2,
+                })}
               </td>
             </tr>
           </tfoot>
@@ -144,7 +178,9 @@ function RemainingItemsPanel({ grnId }: { grnId: number }) {
       </div>
       <div className="px-4 py-2.5 border-t border-amber-500/15 bg-amber-500/5">
         <p className="text-[10px] text-amber-600 dark:text-amber-500">
-          These items have been received but not yet booked as expenses. Create an Expense Booking from the Material → Expense Booking page to book them.
+          These items have been received but not yet booked as expenses. Create
+          an Expense Booking from the Material → Expense Booking page to book
+          them.
         </p>
       </div>
     </div>
@@ -240,7 +276,19 @@ function LinkedExpenseBookings({ grnId }: { grnId: number }) {
       `/api/expense-booking/by-source?sourceType=GRN&sourceId=${grnId}`,
     )
       .then((r) => (r.ok ? r.json() : []))
-      .then((data) => setBookings(Array.isArray(data) ? data.filter((b: LinkedBooking) => b.EStatus !== 'Draft') : []))
+      .then((data) =>
+        setBookings(
+          Array.isArray(data)
+            ? data.filter(
+                (b: LinkedBooking) =>
+                  b.EStatus !== "Draft" &&
+                  !(b.ERemarks ?? "").startsWith(
+                    "Auto-created for remaining items from GRN",
+                  ),
+              )
+            : [],
+        ),
+      )
       .catch(() => setBookings([]))
       .finally(() => setLoading(false));
   }, [grnId]);
@@ -1962,7 +2010,8 @@ export default function GRN() {
                     {/* Remaining Items — not yet expense-booked */}
                     <div>
                       <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
-                        <AlertTriangle size={10} className="text-amber-500" /> Remaining Items
+                        <AlertTriangle size={10} className="text-amber-500" />{" "}
+                        Remaining Items
                       </p>
                       <RemainingItemsPanel grnId={viewingGrn.GRNID} />
                     </div>
