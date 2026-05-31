@@ -1225,7 +1225,7 @@ const PurchaseOrderMaster: React.FC = () => {
           }));
           setPoDocNo(created.PurchaseOrderNo);
         }
-        toast.success("Purchase Order created successfully!");
+        toast.success("Purchase Order created and sent for approval!");
         const savedDocTypeId = form.docTypeId ?? poDocTypeId;
         await refreshPoDocNumber(savedDocTypeId);
         setSaved(true);

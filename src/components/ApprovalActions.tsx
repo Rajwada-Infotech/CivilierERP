@@ -102,8 +102,9 @@ export function ApprovalActions({
   // No actions on terminal states
   if (status === "Approved" || status === "Fully Received") return null;
 
+  // Draft is now auto-submitted on creation — no manual submit needed for new records.
+  // Re-submit is still available if a record was Rejected.
   const showSubmit =
-    status === "Draft" ||
     status === "Rejected" ||
     status === "Issued" ||
     status === "Partially Received";

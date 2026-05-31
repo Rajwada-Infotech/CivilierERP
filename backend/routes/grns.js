@@ -6,6 +6,8 @@ const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
 const { grnBodySchema } = require("../validation/financialRouteSchemas");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const {
   lockNextDocNumber,
@@ -716,11 +718,25 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
     await bumpCacheVersion("stock-ledger");
     await bumpCacheVersion("grns");
 
+    // Auto-submit: transition Draft → Pending immediately after creation.
+    try {
+      await transition(
+        "goods-receipt",
+        grnId,
+        "Pending",
+        req.user?.email,
+        req.user?.role,
+      );
+    } catch (submitErr) {
+      console.warn("GRN auto-submit failed (non-fatal):", submitErr.message);
+    }
+
     res.status(201).json({
       message: "GRN created successfully",
       grnId,
       grnNo: finalDocNo,
       docNo: finalDocNo,
+      status: "Pending",
     });
   } catch (err) {
     await transaction.rollback().catch(() => {});
@@ -1082,3 +1098,7 @@ router.get("/:id/gst-breakdown", async (req, res) => {
 });
 
 module.exports = router;
+
+
+
+

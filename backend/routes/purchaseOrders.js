@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -219,14 +221,24 @@ router.get(
         ? parseInt(req.query.sourceWOId, 10)
         : null;
 
+      const fyId = req.query.fyId ? parseInt(req.query.fyId, 10) : null;
+
+      const whereConditions = [];
+      if (sourceWOId) whereConditions.push("po.SourceWOId = @sourceWOId");
+      if (fyId) whereConditions.push("po.fy_id = @fyId");
+      const whereClause = whereConditions.length
+        ? `WHERE ${whereConditions.join(" AND ")}`
+        : "";
+
       const result = await pool
         .request()
         .input("offset", sql.Int, offset)
         .input("limit", sql.Int, limit)
-        .input("sourceWOId", sql.Int, sourceWOId).query(`
+        .input("sourceWOId", sql.Int, sourceWOId)
+        .input("fyId", sql.Int, fyId).query(`
         SELECT *, COUNT(*) OVER() AS _total FROM (
           ${PO_SELECT}
-          ${sourceWOId ? "WHERE po.SourceWOId = @sourceWOId" : ""}
+          ${whereClause}
         ) _po
         ORDER BY _po.PurchaseOrderID DESC
         OFFSET @offset ROWS
@@ -525,10 +537,25 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
       })();
     }
 
+    // Auto-submit: transition Draft → Pending immediately after creation
+    // so no separate "Submit" step is needed.
+    try {
+      await transition(
+        "purchase-orders",
+        newId,
+        "Pending",
+        req.user?.email || userEmail,
+        req.user?.role,
+      );
+    } catch (submitErr) {
+      console.warn("PO auto-submit failed (non-fatal):", submitErr.message);
+    }
+
     res.status(201).json({
       message: "Purchase order created successfully",
       PurchaseOrderID: newId,
       PurchaseOrderNo: finalDocNo,
+      Status: "Pending",
     });
   } catch (err) {
     try {
@@ -542,91 +569,98 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
 });
 
 // ── PUT /:id  (Update) ────────────────────────────────────────────────────────
-router.put("/:id", validateBody(purchaseOrderUpdateSchema), async (req, res) => {
-  const id = requireValidId(req, res);
-  if (!id) return;
-  const {
-    PurchaseOrderNo,
-    PODate,
-    ExpectedDeliveryDate,
-    SupplierID,
-    CompanyId,
-    ProjectId,
-    ItemDescription,
-    Quantity,
-    Unit,
-    Rate,
-    TotalAmount,
-    PaymentTerms,
-    Status,
-    Remarks,
-    DocTypeId,
-    DocNo,
-    POItems,
-    Discount,
-    GST,
-  } = req.body;
+router.put(
+  "/:id",
+  validateBody(purchaseOrderUpdateSchema),
+  async (req, res) => {
+    const id = requireValidId(req, res);
+    if (!id) return;
+    const {
+      PurchaseOrderNo,
+      PODate,
+      ExpectedDeliveryDate,
+      SupplierID,
+      CompanyId,
+      ProjectId,
+      ItemDescription,
+      Quantity,
+      Unit,
+      Rate,
+      TotalAmount,
+      PaymentTerms,
+      Status,
+      Remarks,
+      DocTypeId,
+      DocNo,
+      POItems,
+      Discount,
+      GST,
+    } = req.body;
 
-  const poItemsArray = Array.isArray(POItems)
-    ? POItems
-    : (safeJson(parseJson(POItems)) ?? []);
-  const poItemsJson = JSON.stringify(poItemsArray);
-  const discountJson = parseJson(Discount);
-  const gstJson = parseJson(GST);
-  const { hsnCode, gstType, gstRate } = extractGstScalars(GST);
-  const subtotal =
-    computeSubtotal(poItemsArray) ??
-    (parseFloat(Quantity) * parseFloat(Rate) || 0);
+    const poItemsArray = Array.isArray(POItems)
+      ? POItems
+      : (safeJson(parseJson(POItems)) ?? []);
+    const poItemsJson = JSON.stringify(poItemsArray);
+    const discountJson = parseJson(Discount);
+    const gstJson = parseJson(GST);
+    const { hsnCode, gstType, gstRate } = extractGstScalars(GST);
+    const subtotal =
+      computeSubtotal(poItemsArray) ??
+      (parseFloat(Quantity) * parseFloat(Rate) || 0);
 
-  let transaction;
-  try {
-    const userEmail = requireUserName(req, res);
-    if (!userEmail) return;
+    let transaction;
+    try {
+      const userEmail = requireUserName(req, res);
+      if (!userEmail) return;
 
-    await guardEdit("purchase-orders", id);
+      await guardEdit("purchase-orders", id);
 
-    const pool = getPool();
-    const uomMap = await buildUomMap(pool);
+      const pool = getPool();
+      const uomMap = await buildUomMap(pool);
 
-    transaction = pool.transaction();
-    await transaction.begin();
+      transaction = pool.transaction();
+      await transaction.begin();
 
-    const result = await transaction
-      .request()
-      .input("PurchaseOrderID", sql.Int, id)
-      .input("PurchaseOrderNo", sql.NVarChar(100), PurchaseOrderNo || null)
-      .input("PODate", sql.Date, PODate || null)
-      .input(
-        "ExpectedDeliveryDate",
-        sql.Date,
-        ExpectedDeliveryDate || PODate || null,
-      )
-      .input(
-        "SupplierID",
-        sql.Int,
-        SupplierID ? parseInt(SupplierID, 10) : null,
-      )
-      .input("CompanyId", sql.Int, CompanyId ? parseInt(CompanyId, 10) : null)
-      .input("ProjectId", sql.Int, ProjectId ? parseInt(ProjectId, 10) : null)
-      .input("ItemDescription", sql.NVarChar(sql.MAX), ItemDescription || null)
-      .input("Quantity", sql.Decimal(18, 2), parseFloat(Quantity) || 0)
-      .input("Unit", sql.NVarChar(50), Unit || "NOS")
-      .input("Rate", sql.Decimal(18, 2), parseFloat(Rate) || 0)
-      .input("SubtotalAmount", sql.Decimal(18, 2), subtotal)
-      .input("TotalAmount", sql.Decimal(18, 2), parseFloat(TotalAmount) || 0)
-      .input("HsnCode", sql.NVarChar(20), hsnCode)
-      .input("GstType", sql.NVarChar(20), gstType)
-      .input("GstRate", sql.Decimal(5, 2), gstRate)
-      .input("PaymentTerms", sql.NVarChar(sql.MAX), PaymentTerms || null)
-      .input("Status", sql.NVarChar(50), Status || "Draft")
-      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
-      .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
-      .input("DocNo", sql.NVarChar(100), DocNo || null)
-      .input("UpdatedBy", sql.NVarChar(100), userEmail)
-      .input("UpdatedAt", sql.DateTime2, new Date())
-      .input("POItems", sql.NVarChar(sql.MAX), poItemsJson)
-      .input("Discount", sql.NVarChar(sql.MAX), discountJson)
-      .input("GST", sql.NVarChar(sql.MAX), gstJson).query(`
+      const result = await transaction
+        .request()
+        .input("PurchaseOrderID", sql.Int, id)
+        .input("PurchaseOrderNo", sql.NVarChar(100), PurchaseOrderNo || null)
+        .input("PODate", sql.Date, PODate || null)
+        .input(
+          "ExpectedDeliveryDate",
+          sql.Date,
+          ExpectedDeliveryDate || PODate || null,
+        )
+        .input(
+          "SupplierID",
+          sql.Int,
+          SupplierID ? parseInt(SupplierID, 10) : null,
+        )
+        .input("CompanyId", sql.Int, CompanyId ? parseInt(CompanyId, 10) : null)
+        .input("ProjectId", sql.Int, ProjectId ? parseInt(ProjectId, 10) : null)
+        .input(
+          "ItemDescription",
+          sql.NVarChar(sql.MAX),
+          ItemDescription || null,
+        )
+        .input("Quantity", sql.Decimal(18, 2), parseFloat(Quantity) || 0)
+        .input("Unit", sql.NVarChar(50), Unit || "NOS")
+        .input("Rate", sql.Decimal(18, 2), parseFloat(Rate) || 0)
+        .input("SubtotalAmount", sql.Decimal(18, 2), subtotal)
+        .input("TotalAmount", sql.Decimal(18, 2), parseFloat(TotalAmount) || 0)
+        .input("HsnCode", sql.NVarChar(20), hsnCode)
+        .input("GstType", sql.NVarChar(20), gstType)
+        .input("GstRate", sql.Decimal(5, 2), gstRate)
+        .input("PaymentTerms", sql.NVarChar(sql.MAX), PaymentTerms || null)
+        .input("Status", sql.NVarChar(50), Status || "Draft")
+        .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
+        .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
+        .input("DocNo", sql.NVarChar(100), DocNo || null)
+        .input("UpdatedBy", sql.NVarChar(100), userEmail)
+        .input("UpdatedAt", sql.DateTime2, new Date())
+        .input("POItems", sql.NVarChar(sql.MAX), poItemsJson)
+        .input("Discount", sql.NVarChar(sql.MAX), discountJson)
+        .input("GST", sql.NVarChar(sql.MAX), gstJson).query(`
         UPDATE dbo.PurchaseOrders SET
           PurchaseOrderNo       = @PurchaseOrderNo,
           PODate                = @PODate,
@@ -656,28 +690,29 @@ router.put("/:id", validateBody(purchaseOrderUpdateSchema), async (req, res) => 
         WHERE PurchaseOrderID = @PurchaseOrderID
       `);
 
-    if (!checkRowsAffected(result, res, "Purchase order")) {
-      await transaction.rollback();
-      return;
+      if (!checkRowsAffected(result, res, "Purchase order")) {
+        await transaction.rollback();
+        return;
+      }
+
+      // Sync normalised child table
+      await syncLineItems(transaction, sql, id, poItemsArray, uomMap);
+
+      await transaction.commit();
+      await bumpCacheVersion("purchase-orders");
+
+      res.json({ message: "Purchase order updated successfully" });
+    } catch (err) {
+      try {
+        if (transaction) await transaction.rollback();
+      } catch (_) {
+        /* ignore */
+      }
+      console.error("PUT PurchaseOrders error:", err);
+      res.status(500).json({ error: err.message });
     }
-
-    // Sync normalised child table
-    await syncLineItems(transaction, sql, id, poItemsArray, uomMap);
-
-    await transaction.commit();
-    await bumpCacheVersion("purchase-orders");
-
-    res.json({ message: "Purchase order updated successfully" });
-  } catch (err) {
-    try {
-      if (transaction) await transaction.rollback();
-    } catch (_) {
-      /* ignore */
-    }
-    console.error("PUT PurchaseOrders error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+  },
+);
 
 // ── DELETE /:id ───────────────────────────────────────────────────────────────
 // PurchaseOrderItems child rows are cascade-deleted by FK constraint
@@ -772,3 +807,7 @@ router.put("/:id/reject", async (req, res) => {
 });
 
 module.exports = router;
+
+
+
+

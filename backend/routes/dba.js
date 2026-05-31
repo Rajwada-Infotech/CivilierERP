@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 
 // ======================
@@ -49,6 +51,7 @@ router.get("/tables/:tableName/count", async (req, res) => {
     const pool = getPool();
     // Fix: removed dead .input("tableName", ...) binding that was never referenced in the query.
     // The validated tableName is safe to interpolate after the regex check above.
+    // lgtm[js/sql-injection] — tableName is regex-validated to /^[a-zA-Z_][a-zA-Z0-9_]*$/ above
     const result = await pool.request().query(`
       SELECT COUNT(*) AS row_count
       FROM dbo.[${tableName}]
@@ -86,6 +89,7 @@ router.post("/query", async (req, res) => {
 
   try {
     const pool = getPool();
+    // lgtm[js/sql-injection] — intentional DBA SQL console, role-gated to dba/admin/director in server.js
     const result = await pool.request().query(query);
     rowCount = result.recordset.length;
 
@@ -148,6 +152,7 @@ router.post("/query/write", async (req, res) => {
 
   try {
     const pool = getPool();
+    // lgtm[js/sql-injection] — intentional DBA write console, requires confirmed=true and role-gated
     const result = await pool.request().query(query);
 
     res.json({
@@ -419,3 +424,6 @@ router.patch("/payment-logs/:id/status", async (req, res) => {
 });
 
 module.exports = router;
+
+
+

@@ -20,8 +20,12 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
+const rateLimit = require("express-rate-limit");
+const routeLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
+router.use(routeLimiter);
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { transition } = require("../services/approvalService");
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -440,7 +444,23 @@ router.post("/", authenticateToken, async (req, res) => {
     await bumpCacheVersion("material-issues");
     await bumpCacheVersion("stock-ledger");
 
-    res.status(201).json({ ...newRecord, items });
+    // Auto-submit: transition → Pending immediately after creation.
+    try {
+      await transition(
+        "material-issues",
+        issueId,
+        "Pending",
+        req.user?.email,
+        req.user?.role,
+      );
+    } catch (submitErr) {
+      console.warn(
+        "Material Issue auto-submit failed (non-fatal):",
+        submitErr.message,
+      );
+    }
+
+    res.status(201).json({ ...newRecord, items, status: "Pending" });
   } catch (error) {
     console.error("Error creating material issue:", error);
     res.status(500).json({ error: "Failed to create material issue" });
@@ -823,4 +843,65 @@ router.get("/prefill/:type/:id", authenticateToken, async (req, res) => {
   }
 });
 
+// ── PUT /:id/submit — Pending re-submission after rejection ───────────────────
+router.put("/:id/submit", authenticateToken, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const userEmail = req.user?.email;
+    const result = await transition(
+      "material-issues",
+      id,
+      "Pending",
+      userEmail,
+      req.user?.role,
+    );
+    res.json({ message: "Material Issue submitted for approval", ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/approve ──────────────────────────────────────────────────────────
+router.put("/:id/approve", authenticateToken, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const result = await transition(
+      "material-issues",
+      id,
+      "Approved",
+      req.user?.email,
+      req.user?.role,
+      req.body?.note ?? null,
+    );
+    await bumpCacheVersion("material-issues");
+    res.json({ message: "Material Issue approved", ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/reject ───────────────────────────────────────────────────────────
+router.put("/:id/reject", authenticateToken, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const result = await transition(
+      "material-issues",
+      id,
+      "Rejected",
+      req.user?.email,
+      req.user?.role,
+      req.body?.note ?? null,
+    );
+    await bumpCacheVersion("material-issues");
+    res.json({ message: "Material Issue rejected", ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 module.exports = router;
+
+
+

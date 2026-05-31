@@ -1,5 +1,7 @@
-﻿const express = require("express");
+const express = require("express");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const {
   lockNextDocNumber,
@@ -10,7 +12,7 @@ const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+// -- Helpers --------------------------------------------------------------------
 
 // FIX: _hasNewCols was module-scoped, which means it memoizes correctly in
 // long-running Node processes but resets to null on every Vercel cold start.
@@ -24,10 +26,10 @@ let _hasNewCols = null;
 const HAS_NEW_COLS_REDIS_KEY = "schema:ReceivedPayment:hasRPDocNo";
 
 async function hasNewColumns(pool) {
-  // 1. In-process memo — fastest path for warm requests
+  // 1. In-process memo � fastest path for warm requests
   if (_hasNewCols !== null) return _hasNewCols;
 
-  // 2. Redis — survives across cold starts within the same deployment
+  // 2. Redis � survives across cold starts within the same deployment
   try {
     const { redisGet, redisSet } = require("../redis");
     const cached = await redisGet(HAS_NEW_COLS_REDIS_KEY);
@@ -36,17 +38,17 @@ async function hasNewColumns(pool) {
       return _hasNewCols;
     }
   } catch {
-    // Redis unavailable — fall through to DB probe
+    // Redis unavailable � fall through to DB probe
   }
 
-  // 3. DB probe — only on true first-ever cold start or after Redis flush
+  // 3. DB probe � only on true first-ever cold start or after Redis flush
   const r = await pool.request().query(`
     SELECT COUNT(*) AS cnt FROM sys.columns
     WHERE object_id = OBJECT_ID('dbo.ReceivedPayment') AND name = 'RPDocNo'
   `);
   _hasNewCols = r.recordset[0].cnt > 0;
 
-  // Store in Redis for 24 h — schema changes require a deploy anyway
+  // Store in Redis for 24 h � schema changes require a deploy anyway
   try {
     const { redisSet } = require("../redis");
     await redisSet(HAS_NEW_COLS_REDIS_KEY, _hasNewCols ? "1" : "0", 86400);
@@ -57,7 +59,7 @@ async function hasNewColumns(pool) {
   return _hasNewCols;
 }
 
-// ── GET / ──────────────────────────────────────────────────────────────────────
+// -- GET / ----------------------------------------------------------------------
 router.get("/", cache("received-payment", 30), async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -107,7 +109,7 @@ router.get("/", cache("received-payment", 30), async (req, res) => {
   }
 });
 
-// ── POST / ────────────────────────────────────────────────────────────────────
+// -- POST / --------------------------------------------------------------------
 router.post("/", async (req, res) => {
   try {
     const {
@@ -211,7 +213,7 @@ router.post("/", async (req, res) => {
         @RPCompanyName, @RPReceivedFrom, @RPProjectName, @RPDocDate, @RPMode, @RPAmount,
         @RPBankName, @RPTransactionId, @RPCheckNumber, @RPRemarks,
         @RPIsEmi, @RPEmiTotal, @RPEmiMonths, @RPEmiStartDate, @RPEmiSchedule, @RPEmiPaying,
-        'Draft', @RPCreatedBy, GETDATE() ${extraVals}
+        'Pending', @RPCreatedBy, GETDATE() ${extraVals}
       )
     `);
 
@@ -234,7 +236,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// ── PUT /:id ───────────────────────────────────────────────────────────────────
+// -- PUT /:id -------------------------------------------------------------------
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -338,7 +340,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// ── DELETE /:id ────────────────────────────────────────────────────────────────
+// -- DELETE /:id ----------------------------------------------------------------
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -355,7 +357,7 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// ── PATCH /:id/submit ─────────────────────────────────────────────────────────
+// -- PATCH /:id/submit ---------------------------------------------------------
 // Sets status = 'Pending' so it appears in the admin Approval Inbox
 router.patch("/:id/submit", async (req, res) => {
   try {
@@ -372,6 +374,8 @@ router.patch("/:id/submit", async (req, res) => {
       return res.status(404).json({ error: "Payment not found" });
 
     const current = check.recordset[0].RPStatus;
+    if (current === "Pending")
+      return res.json({ success: true, message: "Already pending approval" });
     if (current !== "Draft")
       return res
         .status(400)
@@ -394,7 +398,7 @@ router.patch("/:id/submit", async (req, res) => {
   }
 });
 
-// ── PUT /:id/approve (admin only — called from Approval Inbox) ───────────────
+// -- PUT /:id/approve (admin only � called from Approval Inbox) ---------------
 router.put("/:id/approve", async (req, res) => {
   try {
     const { id } = req.params;
@@ -415,7 +419,7 @@ router.put("/:id/approve", async (req, res) => {
   }
 });
 
-// ── PUT /:id/reject (admin only — called from Approval Inbox) ────────────────
+// -- PUT /:id/reject (admin only � called from Approval Inbox) ----------------
 router.put("/:id/reject", async (req, res) => {
   try {
     const { id } = req.params;
@@ -439,3 +443,7 @@ router.put("/:id/reject", async (req, res) => {
 });
 
 module.exports = router;
+
+
+
+
