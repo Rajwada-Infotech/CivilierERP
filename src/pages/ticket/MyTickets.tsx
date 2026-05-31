@@ -504,8 +504,10 @@ function openAttachmentViewer(url: string, filename: string) {
           registerAttachmentCacheCleanup();
         }
       } catch {
-        win.document.body.innerHTML =
-          '<p style="color:#ccc;font-family:sans-serif;padding:24px">Unable to load attachment.</p>';
+        const p = win.document.createElement('p');
+          p.textContent = 'Unable to load attachment.';
+          p.style.cssText = 'color:#ccc;font-family:sans-serif;padding:24px';
+          win.document.body.appendChild(p);
         return;
       }
     }
