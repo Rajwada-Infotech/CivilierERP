@@ -506,7 +506,7 @@ export default function GRN() {
       if (generated) {
         setFormData((p) => ({ ...p, grnNo: generated }));
       }
-      toast.success(`GRN ${generated} created successfully`);
+      toast.success(`GRN ${generated} created and sent for approval`);
     },
     onError: (err: any) => toast.error(err.message || "Failed to create GRN"),
   });
@@ -641,7 +641,7 @@ export default function GRN() {
       supplierId: Number(formData.supplierId),
       poId: Number(formData.poId) || 0,
       grnItems: formData.items,
-      status: "Draft",
+      status: "Draft", // backend will immediately transition to Pending via auto-submit
       remarks: formData.remarks,
       supplierName: formData.supplierName,
       poNumber: formData.poNumber,

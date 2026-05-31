@@ -1244,10 +1244,27 @@ router.post(
       await bumpCacheVersion("expense-booking-options");
       await bumpCacheVersion("expense-booking-source-ids");
 
+      // Auto-submit: transition Draft → Pending immediately after creation.
+      try {
+        await transition(
+          "expense-booking",
+          parseInt(newExpenseId, 10),
+          "Pending",
+          req.user?.email,
+          req.user?.role,
+        );
+      } catch (submitErr) {
+        console.warn(
+          "Expense Booking auto-submit failed (non-fatal):",
+          submitErr.message,
+        );
+      }
+
       res.status(201).json({
         message: "Expense booked successfully",
         id: newExpenseId,
         docNo: finalDocNo,
+        status: "Pending",
       });
     } catch (err) {
       try {

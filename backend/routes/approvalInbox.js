@@ -228,6 +228,29 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "material-issues") {
+      queries.push(`
+        SELECT
+          'material-issues'        AS Module,
+          'Material Issue'         AS ModuleLabel,
+          CAST(IssueId AS NVARCHAR) AS RecordId,
+          ISNULL(DocNo, ISNULL(IssueNo, CONCAT('ISS#', CAST(IssueId AS NVARCHAR)))) AS Reference,
+          Date                     AS RecordDate,
+          ISNULL(Status, 'Pending') AS Status,
+          NULL                     AS ContractorName,
+          NULL                     AS SupplierName,
+          NULL                     AS Amount,
+          NULL                     AS CreatedBy,
+          ''                       AS ApprovedBy,
+          ''                       AS ApprovedAt,
+          ''                       AS RejectedBy,
+          ''                       AS RejectionNote,
+          NULL                     AS LastModified
+        FROM dbo.MaterialIssues
+        WHERE ISNULL(Status, 'Pending') = 'Pending'
+      `);
+    }
+
     if (queries.length === 0) return res.json([]);
 
     const fullQuery =
@@ -260,7 +283,8 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.ExpenseBooking     WHERE EStatus = 'Pending') +
         (SELECT COUNT(*) FROM dbo.WorkDone           WHERE ISNULL(Status,'Draft') = 'Pending') +
         (SELECT COUNT(*) FROM dbo.BOQ                WHERE ISNULL(Status,'Draft') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.MaterialRequests     WHERE Status = 'Pending')
+        (SELECT COUNT(*) FROM dbo.MaterialRequests   WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.MaterialIssues     WHERE ISNULL(Status,'Pending') = 'Pending')
       AS TotalPending
     `);
     res.json({ count: result.recordset[0].TotalPending ?? 0 });

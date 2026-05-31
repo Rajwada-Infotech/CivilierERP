@@ -340,7 +340,7 @@ export default function MaterialRequest() {
   const createMutation = useMutation({
     mutationFn: mrApi.createMaterialRequest,
     onSuccess: (rec: any) => {
-      toast.success(`Material Request ${rec?.DocNo || ""} created`);
+      toast.success(`Material Request ${rec?.DocNo || ""} created and sent for approval`);
       invalidate();
       goToList();
     },
@@ -1209,19 +1209,6 @@ export default function MaterialRequest() {
                     className="gap-1.5 h-8"
                   >
                     <Edit3 size={13} /> Edit
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => submitMutation.mutate(viewingRecord.MRId)}
-                    disabled={submitMutation.isPending}
-                    className="gap-1.5 h-8 bg-emerald-600 hover:bg-emerald-700 text-white"
-                  >
-                    {submitMutation.isPending ? (
-                      <RefreshCw size={13} className="animate-spin" />
-                    ) : (
-                      <Send size={13} />
-                    )}
-                    Submit
                   </Button>
                 </>
               )}

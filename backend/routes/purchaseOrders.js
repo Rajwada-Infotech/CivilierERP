@@ -525,10 +525,25 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
       })();
     }
 
+    // Auto-submit: transition Draft → Pending immediately after creation
+    // so no separate "Submit" step is needed.
+    try {
+      await transition(
+        "purchase-orders",
+        newId,
+        "Pending",
+        req.user?.email || userEmail,
+        req.user?.role,
+      );
+    } catch (submitErr) {
+      console.warn("PO auto-submit failed (non-fatal):", submitErr.message);
+    }
+
     res.status(201).json({
       message: "Purchase order created successfully",
       PurchaseOrderID: newId,
       PurchaseOrderNo: finalDocNo,
+      Status: "Pending",
     });
   } catch (err) {
     try {
