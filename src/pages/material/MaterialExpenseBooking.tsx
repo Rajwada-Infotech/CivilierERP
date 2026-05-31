@@ -384,14 +384,18 @@ function StatCard({
   value,
   icon: Icon,
   color,
+  accentColor,
 }: {
   label: string;
   value: string | number;
   icon: React.ElementType;
   color: string;
+  accentColor?: string;
 }) {
   return (
-    <div className="rounded-xl bg-card border border-border p-4 flex items-center gap-3">
+    <div
+      className={`rounded-xl bg-card border border-border p-4 flex items-center gap-3 relative overflow-hidden ${accentColor ? `border-l-2 ${accentColor}` : ""}`}
+    >
       <div className={`p-2 rounded-lg shrink-0 ${color}`}>
         <Icon size={15} />
       </div>
@@ -1253,9 +1257,9 @@ function GRNChainBadge({
       {grns.map((g) => (
         <span
           key={g.GRNNo}
-          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400 border border-teal-200 dark:border-teal-800 font-mono"
+          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 font-mono whitespace-nowrap"
         >
-          <Truck size={9} />
+          <Truck size={9} className="shrink-0" />
           {g.GRNNo}
         </span>
       ))}
@@ -1279,7 +1283,6 @@ function parseGRNItemsFromRaw(raw: unknown): GRNItemLine[] {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 const BOOKING_STATUSES: BookingStatus[] = [
-  "Draft",
   "Pending",
   "Approved",
   "Rejected",
@@ -1322,6 +1325,7 @@ export default function MaterialExpenseBooking() {
   } | null>(null);
   const [selectedTod, setSelectedTod] = useState<TodItem | null>(null);
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [bookedSourceIds, setBookedSourceIds] = useState<
     { ESourceType: string; ESourceId: number; Eid: number }[]
   >([]);
@@ -1329,6 +1333,7 @@ export default function MaterialExpenseBooking() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
+  const [totalBookedAmount, setTotalBookedAmount] = useState(0);
   const [view, setView] = useState<PageView>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<ExpenseRecord, "id">>(blankForm());
@@ -1363,6 +1368,8 @@ export default function MaterialExpenseBooking() {
       setRecords((data.data ?? []).map(dbToRecord));
       setTotalPages(data.totalPages ?? 1);
       setTotalRecords(data.total ?? 0);
+      setStatusCounts(data.statusCounts ?? {});
+      setTotalBookedAmount(data.totalBookedAmount ?? 0);
       setPage(p);
     } catch (err: any) {
       toast.error("Failed to load bookings: " + err.message);
@@ -2076,96 +2083,6 @@ export default function MaterialExpenseBooking() {
           `Expense booking created and sent for approval — Ref: ${result?.docNo || form.bookingReference}`,
         );
 
-        if (
-          selectedDoc?.kind === "GRN" &&
-          selectedDoc.grnItems &&
-          selectedDoc.grnItems.length > 0
-        ) {
-          const remainingItems = selectedDoc.grnItems.filter(
-            (i) => Number(i.remainingQty) > 0,
-          );
-          if (remainingItems.length > 0) {
-            // Auto-create a draft booking for remaining items using the same GRN source
-            try {
-              const remainingTotal = remainingItems.reduce((s, i) => {
-                // Always compute from remainingQty × rate — never use totalAmount
-                // which reflects the already-received qty, not what's left
-                const amt = Number(i.rate || 0) * Number(i.remainingQty || 0);
-                return s + amt;
-              }, 0);
-              const itemList = remainingItems
-                .map(
-                  (i) =>
-                    `${i.itemName || "Item"} (${i.remainingQty} remaining)`,
-                )
-                .join(", ");
-              const remarks = (() => {
-                const full = `Auto-created for remaining items from GRN ${selectedDoc.docNo}. Items: ${itemList}`;
-                return full.length > 990 ? full.slice(0, 987) + "…" : full;
-              })();
-              const remainingBody = {
-                EName: form.bookingName
-                  ? `[Remaining] ${form.bookingName}`
-                  : `Remaining items – ${selectedDoc.docNo}`,
-                EProjectName: form.projectSite || null,
-                EDocumentType: "GRN",
-                EDocDate: form.bookingDate || null,
-                EAmount: remainingTotal,
-                ENetAmount: remainingTotal,
-                ECgstRate: 0,
-                ESgstRate: 0,
-                EDiscountData: JSON.stringify(form.discount),
-                EBillingTermsData: JSON.stringify(form.billingTerms ?? []),
-                EDocNo: null,
-                EDocTypeId: null,
-                EFinYear: form.financialYear || null,
-                EEmiPayment: false,
-                EEmiData: JSON.stringify({
-                  enabled: false,
-                  installmentCount: 0,
-                  emiAmount: 0,
-                  startDate: "",
-                  schedule: [],
-                }),
-                EInstallmentCount: null,
-                EEmiAmount: null,
-                EEmiStartDate: null,
-                EReminder: form.dueDate || null,
-                ERemarks: remarks,
-                EStatus: "Draft",
-                ECompanyId: form.companyId ?? null,
-                EBillingTermId: null,
-                EBillingTermName: null,
-                ETCId: form.tcId ?? null,
-                ETCName: form.tcName || null,
-                ETCText: form.tcText || null,
-                EVendorInvoiceNo: null,
-                EVendorInvoiceDate: null,
-                EAdditionalCharges: null,
-                ECostCenter: form.costCenter || null,
-                EGLAccount: form.glAccount || null,
-                EWorkDoneRef: null,
-                ESourceType: "GRN",
-                ESourceId: selectedDoc.sourceId,
-              };
-              const remainingResult = await apiFetch(
-                API,
-                { method: "POST", body: JSON.stringify(remainingBody) },
-                30000,
-              );
-              toast.info(
-                `Draft booking ${remainingResult?.docNo || ""} auto-created for ${remainingItems.length} remaining item(s) from the same GRN.`,
-                { duration: 6000 },
-              );
-            } catch (remErr: any) {
-              toast.warning(
-                "Main booking saved. Could not auto-create remaining items draft: " +
-                  remErr.message,
-              );
-            }
-          }
-        }
-
         cancelForm();
         await fetchRecords(page);
         fetchBookedSources();
@@ -2195,9 +2112,13 @@ export default function MaterialExpenseBooking() {
     statusFilter && statusFilter !== "All"
       ? records.filter((r) => r.status === statusFilter)
       : records;
-  const totalNet = records.reduce((s, r) => s + (r.netAmount ?? 0), 0);
-  const approvedCount = records.filter((r) => r.status === "Approved").length;
-  const pendingCount = records.filter((r) => r.status === "Pending").length;
+  const totalNet = totalBookedAmount;
+  const approvedCount =
+    statusCounts["Approved"] ??
+    records.filter((r) => r.status === "Approved").length;
+  const pendingCount =
+    statusCounts["Pending"] ??
+    records.filter((r) => r.status === "Pending").length;
   const emiCount = records.filter((r) => r.emi?.enabled).length;
   const vendorLabel =
     selectedDoc?.kind === "WORK_DONE" ? "Contractor" : "Supplier / Vendor";
@@ -3228,24 +3149,28 @@ export default function MaterialExpenseBooking() {
                   value={`₹${fmt(totalNet)}`}
                   icon={Receipt}
                   color="text-primary bg-primary/10"
+                  accentColor="border-l-primary"
                 />
                 <StatCard
                   label="Approved"
                   value={approvedCount}
                   icon={CheckCircle2}
                   color="text-emerald-500 bg-emerald-500/10"
+                  accentColor="border-l-emerald-500"
                 />
                 <StatCard
                   label="Pending"
                   value={pendingCount}
                   icon={Clock}
                   color="text-amber-500 bg-amber-500/10"
+                  accentColor="border-l-amber-500"
                 />
                 <StatCard
                   label="EMI Active"
                   value={emiCount}
                   icon={CreditCard}
                   color="text-violet-500 bg-violet-500/10"
+                  accentColor="border-l-violet-500"
                 />
               </div>
             )}
@@ -3268,7 +3193,7 @@ export default function MaterialExpenseBooking() {
                       {s}
                       {s !== "All" && (
                         <span className="ml-1.5 text-[10px] opacity-70">
-                          ({records.filter((r) => r.status === s).length})
+                          ({statusCounts[s] ?? 0})
                         </span>
                       )}
                     </button>
@@ -3313,31 +3238,31 @@ export default function MaterialExpenseBooking() {
                       <Table>
                         <TableHeader>
                           <TableRow className="bg-muted/30">
-                            <TableHead className="text-xs font-heading w-[22%]">
+                            <TableHead className="text-xs font-heading w-[20%]">
                               Booking Ref
                             </TableHead>
-                            <TableHead className="text-xs font-heading w-[18%]">
+                            <TableHead className="text-xs font-heading w-[16%]">
                               Vendor
                             </TableHead>
                             <TableHead className="text-xs font-heading w-[10%] text-right">
                               Basic Amt
                             </TableHead>
-                            <TableHead className="text-xs font-heading w-[10%] text-right hidden md:table-cell">
+                            <TableHead className="text-xs font-heading w-[8%] text-right hidden md:table-cell">
                               CGST
                             </TableHead>
-                            <TableHead className="text-xs font-heading w-[10%] text-right hidden md:table-cell">
+                            <TableHead className="text-xs font-heading w-[8%] text-right hidden md:table-cell">
                               SGST
                             </TableHead>
                             <TableHead className="text-xs font-heading w-[12%] text-right">
                               Net Amt
                             </TableHead>
-                            <TableHead className="text-xs font-heading w-[8%] hidden lg:table-cell">
+                            <TableHead className="text-xs font-heading w-[12%] hidden lg:table-cell">
                               GRN
                             </TableHead>
-                            <TableHead className="text-xs font-heading w-[8%]">
+                            <TableHead className="text-xs font-heading w-[9%]">
                               Status
                             </TableHead>
-                            <TableHead className="text-xs font-heading w-[12%] text-right">
+                            <TableHead className="text-xs font-heading w-[10%] text-right">
                               Actions
                             </TableHead>
                           </TableRow>
@@ -3359,49 +3284,86 @@ export default function MaterialExpenseBooking() {
                                     ? `booking-row-${rec.id}`
                                     : `booking-row-${index}`
                                 }
-                                className="hover:bg-muted/20"
+                                className={`hover:bg-muted/30 transition-colors border-b border-border/50 last:border-0 ${rec.status === "Draft" ? "opacity-70" : ""}`}
                               >
-                                <TableCell className="py-2.5">
-                                  <p className="font-mono text-[11px] font-semibold text-primary leading-tight break-all">
-                                    {rec.bookingReference || "—"}
-                                  </p>
-                                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                                    {rec.bookingDate}
+                                <TableCell className="py-3">
+                                  {rec.status === "Draft" ? (
+                                    <p
+                                      className="text-[11px] font-semibold text-amber-500 dark:text-amber-400 leading-tight max-w-[180px] truncate"
+                                      title={rec.bookingReference || ""}
+                                    >
+                                      {rec.bookingReference || "—"}
+                                    </p>
+                                  ) : (
+                                    <p
+                                      className="font-mono text-[11px] font-semibold text-primary leading-tight max-w-[160px] truncate"
+                                      title={rec.bookingReference || ""}
+                                    >
+                                      {rec.bookingReference || "—"}
+                                    </p>
+                                  )}
+                                  <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
+                                    {rec.bookingDate && (
+                                      <span>{rec.bookingDate}</span>
+                                    )}
                                     {rec.docTypeName ? (
-                                      <span className="ml-1 opacity-60">
+                                      <span className="opacity-60">
                                         · {rec.docTypeName}
                                       </span>
                                     ) : null}
                                     {rec.emi?.enabled ? (
-                                      <span className="ml-1 inline-flex items-center gap-0.5 text-[9px] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-1 py-0.5 rounded-full">
+                                      <span className="inline-flex items-center gap-0.5 text-[9px] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-1 py-0.5 rounded-full">
                                         <CreditCard size={8} />
                                         {rec.emi.installmentCount}x
                                       </span>
                                     ) : null}
                                   </p>
                                 </TableCell>
-                                <TableCell className="text-xs max-w-[140px] truncate py-2.5">
+                                <TableCell className="text-xs max-w-[120px] truncate py-3 text-foreground/80">
                                   {rec.supplier || "—"}
                                 </TableCell>
-                                <TableCell className="font-mono text-xs text-right text-muted-foreground py-2.5">
-                                  ₹{fmt(rec.basicAmount)}
+                                <TableCell className="font-mono text-xs text-right text-muted-foreground py-3">
+                                  {rec.status === "Draft" ? (
+                                    <span className="text-muted-foreground/50">
+                                      —
+                                    </span>
+                                  ) : (
+                                    `₹${fmt(rec.basicAmount)}`
+                                  )}
                                 </TableCell>
-                                <TableCell className="font-mono text-xs text-right text-foreground/70 py-2.5 hidden md:table-cell">
-                                  {rec.cgstRate}%
+                                <TableCell className="font-mono text-xs text-right text-foreground/70 py-3 hidden md:table-cell">
+                                  {rec.status === "Draft"
+                                    ? "—"
+                                    : `${rec.cgstRate}%`}
                                 </TableCell>
-                                <TableCell className="font-mono text-xs text-right text-foreground/70 py-2.5 hidden md:table-cell">
-                                  {rec.sgstRate}%
+                                <TableCell className="font-mono text-xs text-right text-foreground/70 py-3 hidden md:table-cell">
+                                  {rec.status === "Draft"
+                                    ? "—"
+                                    : `${rec.sgstRate}%`}
                                 </TableCell>
-                                <TableCell className="font-mono text-xs font-semibold text-right py-2.5">
-                                  ₹{fmt(rec.netAmount ?? rbd.netAmount)}
+                                <TableCell className="font-mono text-xs font-semibold text-right py-3">
+                                  {rec.status === "Draft" ? (
+                                    <span className="text-amber-500 dark:text-amber-400">
+                                      ₹{fmt(rec.netAmount ?? rbd.netAmount)}
+                                    </span>
+                                  ) : (
+                                    `₹${fmt(rec.netAmount ?? rbd.netAmount)}`
+                                  )}
                                 </TableCell>
-                                <TableCell className="hidden lg:table-cell py-2.5">
+                                <TableCell className="hidden lg:table-cell py-3 min-w-[100px]">
                                   <GRNChainBadge bookingId={rec.id} />
                                 </TableCell>
-                                <TableCell className="py-2.5">
-                                  <StatusBadge status={rec.status} />
+                                <TableCell className="py-3">
+                                  {rec.status === "Draft" ? (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25">
+                                      <Package size={10} className="shrink-0" />
+                                      Pending Items
+                                    </span>
+                                  ) : (
+                                    <StatusBadge status={rec.status} />
+                                  )}
                                 </TableCell>
-                                <TableCell className="py-2.5">
+                                <TableCell className="py-3">
                                   <div className="flex gap-1 items-center justify-end">
                                     <ApprovalActions
                                       status={rec.status}

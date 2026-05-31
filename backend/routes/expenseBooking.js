@@ -527,10 +527,29 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
     const offset = (page - 1) * limit;
 
-    const result = await pool
-      .request()
-      .input("offset", sql.Int, offset)
-      .input("limit", sql.Int, limit).query(`
+    // Run status counts and paginated list in parallel
+    const [countResult, result] = await Promise.all([
+      pool.request().query(`
+        SELECT
+          eb.EStatus,
+          COUNT(*) AS cnt,
+          SUM(
+            CASE
+              WHEN eb.ESourceType = 'GRN' AND grn_cnt.TotalAmount IS NOT NULL AND grn_cnt.TotalAmount > 0
+              THEN grn_cnt.TotalAmount
+              ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
+            END
+          ) AS totalAmount
+        FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.GoodsReceiptNotes grn_cnt
+          ON eb.ESourceType = 'GRN' AND grn_cnt.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        WHERE ISNULL(eb.EStatus, '') != 'Draft'
+        GROUP BY eb.EStatus
+      `),
+      pool
+        .request()
+        .input("offset", sql.Int, offset)
+        .input("limit", sql.Int, limit).query(`
         SELECT
           eb.Eid, eb.Eid AS id,
           eb.EProjectName, eb.EDocumentType, eb.EDocDate,
@@ -571,20 +590,25 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         -- GRN join for sourceDocNo and project fallback
         LEFT JOIN dbo.GoodsReceiptNotes grn_list
           ON eb.ESourceType = 'GRN' AND grn_list.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster grn_supp_list ON grn_supp_list.LHeadId = grn_list.SupplierID
         LEFT JOIN dbo.PurchaseOrders po_list ON grn_list.POID = po_list.PurchaseOrderID
         LEFT JOIN dbo.enterprise epo_proj ON epo_proj.id = po_list.ProjectId
-        LEFT JOIN dbo.AccountHeadMaster grn_supp_list ON grn_supp_list.LHeadId = grn_list.SupplierID
-        WHERE NOT (
-          eb.EStatus = 'Draft'
-          AND ISNULL(eb.ESourceType, '') = 'GRN'
-          AND ISNULL(eb.ERemarks, '') LIKE 'Auto-created for remaining items from GRN%'
-        )
+        WHERE ISNULL(eb.EStatus, '') != 'Draft'
         ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-      `);
+      `),
+    ]);
 
     const rows = result.recordset;
     const total = rows.length > 0 ? parseInt(rows[0]._total) : 0;
+
+    // Build status counts map from the summary query
+    const statusCounts = {};
+    let totalBookedAmount = 0;
+    for (const row of countResult.recordset) {
+      statusCounts[row.EStatus] = parseInt(row.cnt) || 0;
+      totalBookedAmount += parseFloat(row.totalAmount) || 0;
+    }
 
     res.json({
       data: rows.map(({ _total, ...r }) => r),
@@ -592,6 +616,8 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
       limit,
       total,
       totalPages: Math.ceil(total / limit) || 1,
+      statusCounts,
+      totalBookedAmount: Math.round(totalBookedAmount * 100) / 100,
     });
   } catch (err) {
     console.error("List error:", err.message);
@@ -613,14 +639,10 @@ router.get(
         SELECT ESourceType, ESourceId, Eid
         FROM dbo.ExpenseBooking
         WHERE EStatus != 'Deleted'
+          AND EStatus != 'Draft'
           AND ESourceType IS NOT NULL
           AND ESourceId   IS NOT NULL
-          -- Exclude auto-split drafts so the parent GRN stays selectable
-          AND NOT (
-            ISNULL(EStatus, '') = 'Draft'
-            AND ISNULL(ESourceType, '') = 'GRN'
-            AND ISNULL(ERemarks, '') LIKE 'Auto-created for remaining items from GRN%'
-          )
+
       `);
       res.json(result.recordset);
     } catch (err) {
@@ -680,7 +702,7 @@ router.get("/by-source", async (req, res) => {
         FROM dbo.ExpenseBooking eb
         WHERE eb.ESourceType = @ESourceType
           AND eb.ESourceId = @ESourceId
-          AND (eb.EStatus IS NULL OR eb.EStatus != 'Deleted')
+          AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
         ORDER BY eb.Eid ASC
       `);
     res.json(result.recordset);
@@ -918,20 +940,10 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
         });
       }
 
-      // Split drafts carry their own pre-computed amount (remainingQty × rate)
-      // and must NOT be overwritten with the full GRN received total.
-      const isGrnSplitDraft =
-        typeof ERemarks === "string" &&
-        ERemarks.startsWith("Auto-created for remaining items from GRN");
-
-      if (!isGrnSplitDraft) {
-        bookingAmount = grnGst.totals.taxableAmount;
-        bookingNetAmount = grnGst.totals.netAmount;
-        // Existing schema stores only CGST/SGST rates. For inter-state GRNs the
-        // net amount includes IGST and the frontend reloads the IGST split by GRN.
-        bookingCgstRate = grnGst.cgstRate;
-        bookingSgstRate = grnGst.sgstRate;
-      }
+      bookingAmount = grnGst.totals.taxableAmount;
+      bookingNetAmount = grnGst.totals.netAmount;
+      bookingCgstRate = grnGst.cgstRate;
+      bookingSgstRate = grnGst.sgstRate;
     }
 
     if (EDocTypeId) {
@@ -1228,28 +1240,19 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
     await bumpCacheVersion("expense-booking-source-ids");
 
     // Auto-submit: transition Draft → Pending immediately after creation.
-    // Skip for GRN auto-created split drafts — those are reused as templates
-    // for the next expense booking on the same GRN and must remain Draft.
-    const isGrnAutoSplitDraft =
-      ESourceType === "GRN" &&
-      typeof ERemarks === "string" &&
-      ERemarks.startsWith("Auto-created for remaining items from GRN");
-
-    if (!isGrnAutoSplitDraft) {
-      try {
-        await transition(
-          "expense-booking",
-          parseInt(newExpenseId, 10),
-          "Pending",
-          req.user?.email,
-          req.user?.role,
-        );
-      } catch (submitErr) {
-        console.warn(
-          "Expense Booking auto-submit failed (non-fatal):",
-          submitErr.message,
-        );
-      }
+    try {
+      await transition(
+        "expense-booking",
+        parseInt(newExpenseId, 10),
+        "Pending",
+        req.user?.email,
+        req.user?.role,
+      );
+    } catch (submitErr) {
+      console.warn(
+        "Expense Booking auto-submit failed (non-fatal):",
+        submitErr.message,
+      );
     }
 
     res.status(201).json({
