@@ -544,6 +544,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         LEFT JOIN dbo.GoodsReceiptNotes grn_cnt
           ON eb.ESourceType = 'GRN' AND grn_cnt.GRNID = TRY_CAST(eb.ESourceId AS INT)
         WHERE ISNULL(eb.EStatus, '') != 'Draft'
+          AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
         GROUP BY eb.EStatus
       `),
       pool
@@ -594,6 +595,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         LEFT JOIN dbo.PurchaseOrders po_list ON grn_list.POID = po_list.PurchaseOrderID
         LEFT JOIN dbo.enterprise epo_proj ON epo_proj.id = po_list.ProjectId
         WHERE ISNULL(eb.EStatus, '') != 'Draft'
+          AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
         ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `),
