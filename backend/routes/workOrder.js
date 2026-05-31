@@ -192,7 +192,7 @@ router.get("/meta/items", async (req, res) => {
         CAST(i.M_Id AS NVARCHAR(36)) AS id,
         i.M_Name                     AS name,
         i.M_HSN                      AS hsnCode,
-        ${hasUOM ? "u.Id AS uomId, u.UOMName AS uomName," : "NULL AS uomId, NULL AS uomName,"}
+        ${hasUOM ? "u.Id AS uomId, u.UOMName AS uomName," : "NULL AS uomId, NULL AS uomName,"} // lgtm[js/sql-injection]
         ISNULL(
           CASE
             WHEN ISNULL(h.HIGST, 0) > 0 THEN h.HIGST
@@ -205,7 +205,7 @@ router.get("/meta/items", async (req, res) => {
         ) AS gstRate
       FROM dbo.Item_Master_Group i
       LEFT JOIN dbo.HSN h       ON h.HCode    = i.M_HSN  AND h.HStatus = 1
-      ${hasUOM ? "LEFT JOIN dbo.UOMMaster u ON u.UOMCode = i.M_UOM" : ""}
+      ${hasUOM ? "LEFT JOIN dbo.UOMMaster u ON u.UOMCode = i.M_UOM" : ""} // lgtm[js/sql-injection]
       WHERE (i.Parent_Id IS NOT NULL OR i.M_IdentityCode = 1)
       ORDER BY i.M_Name
     `);
@@ -1134,7 +1134,7 @@ router.post("/:id/save-full", async (req, res) => {
           .query(`
           DELETE FROM dbo.WorkOrderActivityMaterials
           WHERE WorkOrderActivityId = @WorkOrderActivityId
-          AND Id NOT IN (${safeMaterialIds.join(",")})
+          AND Id NOT IN (${safeMaterialIds.join(",")}) // lgtm[js/sql-injection] — safeIntList() ensures only positive integers
         `);
       } else {
         await pool
@@ -1153,12 +1153,12 @@ router.post("/:id/save-full", async (req, res) => {
         DELETE m FROM dbo.WorkOrderActivityMaterials m
         INNER JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
         WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
-        AND a.Id NOT IN (${safeActivityIds.join(",")})
+        AND a.Id NOT IN (${safeActivityIds.join(",")}) // lgtm[js/sql-injection] — safeIntList() ensures only positive integers
       `);
       await pool.request().input("WorkOrderHeaderId", sql.Int, headerId).query(`
         DELETE FROM dbo.WorkOrderActivities
         WHERE WorkOrderHeaderId = @WorkOrderHeaderId
-        AND Id NOT IN (${safeActivityIds.join(",")})
+        AND Id NOT IN (${safeActivityIds.join(",")}) // lgtm[js/sql-injection] — safeIntList() ensures only positive integers
       `);
     } else {
       await pool.request().input("WorkOrderHeaderId", sql.Int, headerId).query(`
