@@ -211,7 +211,7 @@ router.post("/", async (req, res) => {
         @RPCompanyName, @RPReceivedFrom, @RPProjectName, @RPDocDate, @RPMode, @RPAmount,
         @RPBankName, @RPTransactionId, @RPCheckNumber, @RPRemarks,
         @RPIsEmi, @RPEmiTotal, @RPEmiMonths, @RPEmiStartDate, @RPEmiSchedule, @RPEmiPaying,
-        'Draft', @RPCreatedBy, GETDATE() ${extraVals}
+        'Pending', @RPCreatedBy, GETDATE() ${extraVals}
       )
     `);
 
@@ -372,6 +372,8 @@ router.patch("/:id/submit", async (req, res) => {
       return res.status(404).json({ error: "Payment not found" });
 
     const current = check.recordset[0].RPStatus;
+    if (current === "Pending")
+      return res.json({ success: true, message: "Already pending approval" });
     if (current !== "Draft")
       return res
         .status(400)

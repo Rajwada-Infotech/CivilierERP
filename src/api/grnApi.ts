@@ -244,8 +244,12 @@ export const getSuppliers = async (): Promise<Supplier[]> => {
   return Array.isArray(data) ? data : [];
 };
 
-export const getPurchaseOrders = async (): Promise<PurchaseOrder[]> => {
-  const res = await fetch(buildUrl("/api/purchase-orders", { limit: 500 }), {
+export const getPurchaseOrders = async (
+  fyId?: number | null,
+): Promise<PurchaseOrder[]> => {
+  const params: Record<string, string> = { limit: "500" };
+  if (fyId) params.fyId = String(fyId);
+  const res = await fetch(buildUrl("/api/purchase-orders", params), {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch Purchase Orders");
@@ -278,4 +282,15 @@ export const getUoms = async (): Promise<UOM[]> => {
   return Array.isArray(data)
     ? data.filter((u: UOM) => u.IsActive !== false)
     : [];
+};
+
+export const getProjects = async (): Promise<
+  { id: number; name: string; short_name: string }[]
+> => {
+  const res = await fetch("/api/material-issues/projects", {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch projects");
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
 };

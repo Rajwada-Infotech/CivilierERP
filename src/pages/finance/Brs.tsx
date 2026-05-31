@@ -46,6 +46,8 @@ import {
   ArrowUpRight,
   CalendarDays,
   Hash,
+  ShieldCheck,
+  Hourglass,
 } from "lucide-react";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -130,7 +132,36 @@ function ClearBadge({ cleared }: { cleared: boolean }) {
   );
 }
 
-// Custom checkbox styled for the BRS passbook tick
+function PayStatusBadge({ status }: { status: string | null }) {
+  if (!status || status === "Draft")
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-muted text-muted-foreground border border-border">
+        Draft
+      </span>
+    );
+  if (status === "Approved") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+        <ShieldCheck size={9} strokeWidth={2.5} />
+        Approved
+      </span>
+    );
+  }
+  if (status === "Pending") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+        <Hourglass size={9} strokeWidth={2.5} />
+        Pending
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-muted text-muted-foreground border border-border">
+      {status}
+    </span>
+  );
+}
+
 function PassbookCheck({
   checked,
   loading,
@@ -348,7 +379,6 @@ export default function Brs() {
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "BRS"]} />
       <div className="relative space-y-8 mt-6">
-
         {/* ── Page header ────────────────────────────────────────────────────── */}
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -393,424 +423,433 @@ export default function Brs() {
 
         {/* ── Stats ──────────────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {stats.map(({ label, value, sub, icon: Icon, ring, bg, color }) => (
-          <div
-            key={label}
-            className={`glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 ${ring}`}
-          >
-            <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
-              <Icon size={16} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-lg font-bold font-heading text-foreground leading-none">
-                {value}
-              </p>
-              <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
-                {label}
-              </p>
-              <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
-                {sub}
-              </p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* ── Progress bar ───────────────────────────────────────────────────── */}
-      {total > 0 && (
-        <div className="glass rounded-xl px-5 py-3.5">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-muted-foreground">
-              Reconciliation progress
-            </span>
-            <span className="text-xs font-bold text-foreground tabular-nums">
-              {reconcileRate}% · {clearCount}/{total}
-            </span>
-          </div>
-          <div className="h-2 bg-muted rounded-full overflow-hidden">
+          {stats.map(({ label, value, sub, icon: Icon, ring, bg, color }) => (
             <div
-              className="h-full rounded-full transition-all duration-700 ease-out"
-              style={{
-                width: `${reconcileRate}%`,
-                background:
-                  reconcileRate === 100
-                    ? "linear-gradient(90deg,#10b981,#34d399)"
-                    : "linear-gradient(90deg,#f59e0b,#10b981)",
-              }}
-            />
-          </div>
+              key={label}
+              className={`glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 ${ring}`}
+            >
+              <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
+                <Icon size={16} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-lg font-bold font-heading text-foreground leading-none">
+                  {value}
+                </p>
+                <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+                  {label}
+                </p>
+                <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
+                  {sub}
+                </p>
+              </div>
+            </div>
+          ))}
         </div>
-      )}
 
-      {/* ── Filters ────────────────────────────────────────────────────────── */}
-      <div className="glass rounded-xl px-5 py-4 space-y-3">
-        {/* Row 1: search + company + bank */}
-        <div className="flex flex-wrap gap-2 items-center">
-          {/* Search */}
-          <div className="relative flex-1 min-w-[180px] max-w-xs">
-            <Search
-              size={13}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-            />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, bank, txn ID…"
-              className="w-full h-8 pl-8 pr-7 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none"
-            />
-            {search && (
+        {/* ── Progress bar ───────────────────────────────────────────────────── */}
+        {total > 0 && (
+          <div className="glass rounded-xl px-5 py-3.5">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-medium text-muted-foreground">
+                Reconciliation progress
+              </span>
+              <span className="text-xs font-bold text-foreground tabular-nums">
+                {reconcileRate}% · {clearCount}/{total}
+              </span>
+            </div>
+            <div className="h-2 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-700 ease-out"
+                style={{
+                  width: `${reconcileRate}%`,
+                  background:
+                    reconcileRate === 100
+                      ? "linear-gradient(90deg,#10b981,#34d399)"
+                      : "linear-gradient(90deg,#f59e0b,#10b981)",
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ── Filters ────────────────────────────────────────────────────────── */}
+        <div className="glass rounded-xl px-5 py-4 space-y-3">
+          {/* Row 1: search + company + bank */}
+          <div className="flex flex-wrap gap-2 items-center">
+            {/* Search */}
+            <div className="relative flex-1 min-w-[180px] max-w-xs">
+              <Search
+                size={13}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search name, bank, txn ID…"
+                className="w-full h-8 pl-8 pr-7 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none"
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+
+            {/* Bank */}
+            <div className="relative">
+              <Landmark
+                size={12}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <select
+                value={bankId ?? ""}
+                onChange={(e) => setBankId(e.target.value || undefined)}
+                className={`h-8 pl-7 pr-8 bg-input/70 border rounded-lg text-xs appearance-none focus:ring-1 focus:ring-primary outline-none cursor-pointer ${bankId ? "border-primary/60 text-primary font-medium" : "border-border"}`}
+              >
+                <option value="">All Banks</option>
+                {allBanks.map((b) => (
+                  <option key={b.id} value={String(b.id)}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Row 2: date range + status pills */}
+          <div className="flex flex-wrap gap-2 items-center">
+            {/* Date from */}
+            <div className="relative">
+              <CalendarDays
+                size={12}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="h-8 pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer"
+              />
+            </div>
+
+            <span className="text-muted-foreground text-xs">to</span>
+
+            {/* Date to */}
+            <div className="relative">
+              <CalendarDays
+                size={12}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                className="h-8 pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer"
+              />
+            </div>
+
+            {/* Clear date range */}
+            {(fromDate || toDate) && (
               <button
-                onClick={() => setSearch("")}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  setFromDate("");
+                  setToDate("");
+                }}
+                className="h-8 px-2 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors border border-dashed border-border"
+                title="Clear date range"
               >
                 <X size={12} />
               </button>
             )}
-          </div>
 
-          {/* Bank */}
-          <div className="relative">
-            <Landmark
-              size={12}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-            />
-            <select
-              value={bankId ?? ""}
-              onChange={(e) => setBankId(e.target.value || undefined)}
-              className={`h-8 pl-7 pr-8 bg-input/70 border rounded-lg text-xs appearance-none focus:ring-1 focus:ring-primary outline-none cursor-pointer ${bankId ? "border-primary/60 text-primary font-medium" : "border-border"}`}
-            >
-              <option value="">All Banks</option>
-              {allBanks.map((b) => (
-                <option key={b.id} value={String(b.id)}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Row 2: date range + status pills */}
-        <div className="flex flex-wrap gap-2 items-center">
-          {/* Date from */}
-          <div className="relative">
-            <CalendarDays
-              size={12}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-            />
-            <input
-              type="date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="h-8 pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer"
-            />
-          </div>
-
-          <span className="text-muted-foreground text-xs">to</span>
-
-          {/* Date to */}
-          <div className="relative">
-            <CalendarDays
-              size={12}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-            />
-            <input
-              type="date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              className="h-8 pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer"
-            />
-          </div>
-
-          {/* Clear date range */}
-          {(fromDate || toDate) && (
-            <button
-              onClick={() => {
-                setFromDate("");
-                setToDate("");
-              }}
-              className="h-8 px-2 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors border border-dashed border-border"
-              title="Clear date range"
-            >
-              <X size={12} />
-            </button>
-          )}
-
-          {/* Status filter pills */}
-          <div className="flex gap-1.5 ml-auto">
-            {(["", "clear", "unclear"] as const).map((s) => {
-              const label =
-                s === "" ? "All" : s === "clear" ? "✓ Clear" : "○ Unclear";
-              const active = statusFilter === s;
-              return (
-                <button
-                  key={s}
-                  onClick={() => setStatusFilter(s)}
-                  className={`px-3 h-8 rounded-lg text-xs font-medium transition-all border ${
-                    active
-                      ? s === "clear"
-                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 font-semibold"
-                        : s === "unclear"
-                          ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 font-semibold"
-                          : "bg-primary/10 text-primary border-primary/30 font-semibold"
-                      : "bg-transparent text-muted-foreground border-border hover:bg-muted"
-                  }`}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Table ──────────────────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-border bg-card shadow-sm overflow-visible">
-        {/* Table header row */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-muted/20 rounded-t-xl">
-          <p className="text-xs text-muted-foreground">
-            <span className="font-semibold text-foreground">
-              {filtered.length}
-            </span>{" "}
-            entr{filtered.length === 1 ? "y" : "ies"}
-            {total !== filtered.length && ` (${total} server-side)`}
-          </p>
-          {loading && (
-            <RefreshCw
-              size={13}
-              className="animate-spin text-muted-foreground"
-            />
-          )}
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/10">
-                {/* Passbook tick */}
-                <th className="px-4 py-2.5 text-center w-10">
-                  <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
-                    ✓
-                  </span>
-                </th>
-                <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
-                  Type
-                </th>
-                <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
-                  Company
-                </th>
-                <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden md:table-cell">
-                  Bank
-                </th>
-                <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell">
-                  Date
-                </th>
-                <th className="px-4 py-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
-                  Amount
-                </th>
-                <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">
-                  Mode
-                </th>
-                <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden xl:table-cell">
-                  Doc / Txn ID
-                </th>
-                <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
-                  Status
-                </th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-border">
-              {!loading && filtered.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={9}
-                    className="px-5 py-14 text-center text-muted-foreground text-sm"
-                  >
-                    No entries match your filters.
-                  </td>
-                </tr>
-              )}
-
-              {loading && filtered.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={9}
-                    className="px-5 py-14 text-center text-muted-foreground text-sm"
-                  >
-                    <RefreshCw
-                      size={18}
-                      className="animate-spin mx-auto mb-2 opacity-40"
-                    />
-                    Loading…
-                  </td>
-                </tr>
-              )}
-
-              {filtered.map((entry) => {
-                const key = `${entry.SourceType}-${entry.SourceID}`;
-                const cleared = isCleared(entry);
-                const toggling = togglingId === key;
-
+            {/* Status filter pills */}
+            <div className="flex gap-1.5 ml-auto">
+              {(["", "clear", "unclear"] as const).map((s) => {
+                const label =
+                  s === "" ? "All" : s === "clear" ? "✓ Clear" : "○ Unclear";
+                const active = statusFilter === s;
                 return (
-                  <tr
-                    key={key}
-                    className={`transition-colors ${
-                      cleared
-                        ? "bg-emerald-500/[0.03] hover:bg-emerald-500/[0.07]"
-                        : "hover:bg-muted/30"
+                  <button
+                    key={s}
+                    onClick={() => setStatusFilter(s)}
+                    className={`px-3 h-8 rounded-lg text-xs font-medium transition-all border ${
+                      active
+                        ? s === "clear"
+                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 font-semibold"
+                          : s === "unclear"
+                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 font-semibold"
+                            : "bg-primary/10 text-primary border-primary/30 font-semibold"
+                        : "bg-transparent text-muted-foreground border-border hover:bg-muted"
                     }`}
                   >
-                    {/* Passbook tick checkbox */}
-                    <td className="px-4 py-3 text-center">
-                      <PassbookCheck
-                        checked={cleared}
-                        loading={toggling}
-                        onChange={() => toggle(entry)}
-                      />
-                    </td>
-
-                    {/* Type */}
-                    <td className="px-4 py-3">
-                      <TypePill type={entry.SourceType} />
-                    </td>
-
-                    {/* Company */}
-                    <td className="px-4 py-3">
-                      <p className="text-xs font-medium text-foreground leading-snug">
-                        {entry.CompanyName || "—"}
-                      </p>
-                      {entry.PaymentName &&
-                        entry.PaymentName !== entry.CompanyName && (
-                          <p className="text-[10px] text-muted-foreground truncate max-w-[140px]">
-                            {entry.PaymentName}
-                          </p>
-                        )}
-                    </td>
-
-                    {/* Bank */}
-                    <td className="px-4 py-3 hidden md:table-cell">
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-5 h-5 rounded bg-blue-500/10 flex items-center justify-center shrink-0">
-                          <Landmark size={10} className="text-blue-500" />
-                        </div>
-                        <span className="text-xs text-foreground truncate max-w-[120px]">
-                          {entry.BankName || "—"}
-                        </span>
-                      </div>
-                    </td>
-
-                    {/* Date */}
-                    <td className="px-4 py-3 hidden lg:table-cell">
-                      <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                        {fmt(entry.PayDate)}
-                      </span>
-                    </td>
-
-                    {/* Amount */}
-                    <td className="px-4 py-3 text-right">
-                      <span className="text-xs font-mono font-semibold text-foreground whitespace-nowrap">
-                        {formatINR(entry.Amount)}
-                      </span>
-                    </td>
-
-                    {/* Mode */}
-                    <td className="px-4 py-3 hidden sm:table-cell">
-                      <span className="text-xs text-muted-foreground">
-                        {entry.Mode || "—"}
-                      </span>
-                    </td>
-
-                    {/* Doc / Txn ID */}
-                    <td className="px-4 py-3 hidden xl:table-cell">
-                      <div className="space-y-0.5">
-                        {entry.DocNo && (
-                          <span className="block font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 w-fit">
-                            {entry.DocNo}
-                          </span>
-                        )}
-                        {entry.TxnId && (
-                          <span className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
-                            <Hash size={9} />
-                            {entry.TxnId}
-                          </span>
-                        )}
-                        {!entry.DocNo && !entry.TxnId && (
-                          <span className="text-muted-foreground/40 text-xs">
-                            —
-                          </span>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* BRS Status */}
-                    <td className="px-4 py-3">
-                      <ClearBadge cleared={cleared} />
-                    </td>
-                  </tr>
+                    {label}
+                  </button>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
-
-        {/* ── Pagination ─────────────────────────────────────────────────── */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-5 py-3 border-t border-border bg-muted/10 rounded-b-xl">
-            <p className="text-xs text-muted-foreground tabular-nums">
-              Page {page} of {totalPages} · {total} total
-            </p>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1 || loading}
-                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-              >
-                <ChevronLeft size={14} />
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages || loading}
-                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-              >
-                <ChevronRight size={14} />
-              </button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
 
-      {/* ── Legend ─────────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-4 mt-4 px-1">
-        <p className="text-[11px] text-muted-foreground">
-          <span className="inline-flex items-center gap-1 font-medium text-foreground">
-            <span className="w-3.5 h-3.5 rounded border-2 border-emerald-500 bg-emerald-500 inline-flex items-center justify-center">
-              <svg
-                viewBox="0 0 10 8"
-                className="w-2 h-2 fill-none stroke-white stroke-[2]"
-              >
-                <path
-                  d="M1 4l2.5 2.5L9 1"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </span>
-            Tick
-          </span>{" "}
-          — confirmed in your bank passbook (Clear)
-        </p>
-        <p className="text-[11px] text-muted-foreground">
-          <span className="inline-flex items-center gap-1 font-medium text-foreground">
-            <span className="w-3.5 h-3.5 rounded border-2 border-border inline-block" />
-            Empty
-          </span>{" "}
-          — not yet verified (Unclear)
-        </p>
-        <p className="text-[11px] text-muted-foreground ml-auto">
-          Showing payments and received payments with a linked bank account
-        </p>
+        {/* ── Table ──────────────────────────────────────────────────────────── */}
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-visible">
+          {/* Table header row */}
+          <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-muted/20 rounded-t-xl">
+            <p className="text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">
+                {filtered.length}
+              </span>{" "}
+              entr{filtered.length === 1 ? "y" : "ies"}
+              {total !== filtered.length && ` (${total} server-side)`}
+            </p>
+            {loading && (
+              <RefreshCw
+                size={13}
+                className="animate-spin text-muted-foreground"
+              />
+            )}
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/10">
+                  {/* Passbook tick */}
+                  <th className="px-4 py-2.5 text-center w-10">
+                    <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                      ✓
+                    </span>
+                  </th>
+                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                    Type
+                  </th>
+                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                    Company
+                  </th>
+                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden md:table-cell">
+                    Bank
+                  </th>
+                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell">
+                    Date
+                  </th>
+                  <th className="px-4 py-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                    Amount
+                  </th>
+                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">
+                    Mode
+                  </th>
+                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden xl:table-cell">
+                    Doc / Txn ID
+                  </th>
+                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                    Pay Status
+                  </th>
+                  <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                    BRS
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-border">
+                {!loading && filtered.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={10}
+                      className="px-5 py-14 text-center text-muted-foreground text-sm"
+                    >
+                      No entries match your filters.
+                    </td>
+                  </tr>
+                )}
+
+                {loading && filtered.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={10}
+                      className="px-5 py-14 text-center text-muted-foreground text-sm"
+                    >
+                      <RefreshCw
+                        size={18}
+                        className="animate-spin mx-auto mb-2 opacity-40"
+                      />
+                      Loading…
+                    </td>
+                  </tr>
+                )}
+
+                {filtered.map((entry) => {
+                  const key = `${entry.SourceType}-${entry.SourceID}`;
+                  const cleared = isCleared(entry);
+                  const toggling = togglingId === key;
+
+                  return (
+                    <tr
+                      key={key}
+                      className={`transition-colors ${
+                        cleared
+                          ? "bg-emerald-500/[0.03] hover:bg-emerald-500/[0.07]"
+                          : "hover:bg-muted/30"
+                      }`}
+                    >
+                      {/* Passbook tick checkbox */}
+                      <td className="px-4 py-3 text-center">
+                        <PassbookCheck
+                          checked={cleared}
+                          loading={toggling}
+                          onChange={() => toggle(entry)}
+                        />
+                      </td>
+
+                      {/* Type */}
+                      <td className="px-4 py-3">
+                        <TypePill type={entry.SourceType} />
+                      </td>
+
+                      {/* Company */}
+                      <td className="px-4 py-3">
+                        <p className="text-xs font-medium text-foreground leading-snug">
+                          {entry.CompanyName || "—"}
+                        </p>
+                        {entry.PaymentName &&
+                          entry.PaymentName !== entry.CompanyName && (
+                            <p className="text-[10px] text-muted-foreground truncate max-w-[140px]">
+                              {entry.PaymentName}
+                            </p>
+                          )}
+                      </td>
+
+                      {/* Bank */}
+                      <td className="px-4 py-3 hidden md:table-cell">
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-5 h-5 rounded bg-blue-500/10 flex items-center justify-center shrink-0">
+                            <Landmark size={10} className="text-blue-500" />
+                          </div>
+                          <span className="text-xs text-foreground truncate max-w-[120px]">
+                            {entry.BankName || "—"}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Date */}
+                      <td className="px-4 py-3 hidden lg:table-cell">
+                        <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                          {fmt(entry.PayDate)}
+                        </span>
+                      </td>
+
+                      {/* Amount */}
+                      <td className="px-4 py-3 text-right">
+                        <span className="text-xs font-mono font-semibold text-foreground whitespace-nowrap">
+                          {formatINR(entry.Amount)}
+                        </span>
+                      </td>
+
+                      {/* Mode */}
+                      <td className="px-4 py-3 hidden sm:table-cell">
+                        <span className="text-xs text-muted-foreground">
+                          {entry.Mode || "—"}
+                        </span>
+                      </td>
+
+                      {/* Doc / Txn ID */}
+                      <td className="px-4 py-3 hidden xl:table-cell">
+                        <div className="space-y-0.5">
+                          {entry.DocNo && (
+                            <span className="block font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 w-fit">
+                              {entry.DocNo}
+                            </span>
+                          )}
+                          {entry.TxnId && (
+                            <span className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
+                              <Hash size={9} />
+                              {entry.TxnId}
+                            </span>
+                          )}
+                          {!entry.DocNo && !entry.TxnId && (
+                            <span className="text-muted-foreground/40 text-xs">
+                              —
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* BRS Status */}
+                      <td className="px-4 py-3">
+                        <PayStatusBadge status={entry.PayStatus} />
+                      </td>
+
+                      {/* BRS Clear/Unclear */}
+                      <td className="px-4 py-3">
+                        <ClearBadge cleared={cleared} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ── Pagination ─────────────────────────────────────────────────── */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-5 py-3 border-t border-border bg-muted/10 rounded-b-xl">
+              <p className="text-xs text-muted-foreground tabular-nums">
+                Page {page} of {totalPages} · {total} total
+              </p>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1 || loading}
+                  className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages || loading}
+                  className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                >
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Legend ─────────────────────────────────────────────────────────── */}
+        <div className="flex flex-wrap items-center gap-4 mt-4 px-1">
+          <p className="text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1 font-medium text-foreground">
+              <span className="w-3.5 h-3.5 rounded border-2 border-emerald-500 bg-emerald-500 inline-flex items-center justify-center">
+                <svg
+                  viewBox="0 0 10 8"
+                  className="w-2 h-2 fill-none stroke-white stroke-[2]"
+                >
+                  <path
+                    d="M1 4l2.5 2.5L9 1"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </span>
+              Tick
+            </span>{" "}
+            — confirmed in your bank passbook (Clear)
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1 font-medium text-foreground">
+              <span className="w-3.5 h-3.5 rounded border-2 border-border inline-block" />
+              Empty
+            </span>{" "}
+            — not yet verified (Unclear)
+          </p>
+          <p className="text-[11px] text-muted-foreground ml-auto">
+            Showing payments and received payments with a linked bank account
+          </p>
+        </div>
       </div>
-      </div>{/* end p-6 space-y-8 */}
+      {/* end p-6 space-y-8 */}
     </>
   );
 }

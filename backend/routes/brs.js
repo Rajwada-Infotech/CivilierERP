@@ -173,7 +173,7 @@ router.get("/", cache("brs", 60), async (req, res) => {
           ON  brc.SourceType = 'PAYMENT'
           AND brc.SourceID   = np.PPaymentID
         WHERE np.PBankID IS NOT NULL
-          AND np.Status NOT IN ('Draft','Rejected')
+          AND ISNULL(np.Status, 'Draft') NOT IN ('Draft', 'Rejected')
 
         UNION ALL
 
@@ -211,9 +211,9 @@ router.get("/", cache("brs", 60), async (req, res) => {
         LEFT JOIN BankReconciliation brc2
           ON  brc2.SourceType = 'RECEIVED'
           AND brc2.SourceID   = rp.RPPaymentID
-        -- Show Draft, Pending, and Approved — exclude only Rejected
+        -- Show Pending and Approved — exclude Draft and Rejected
         WHERE (rp.RPDepositBankId IS NOT NULL OR rp.RPBankName IS NOT NULL)
-          AND ISNULL(rp.RPStatus, 'Draft') NOT IN ('Rejected')
+          AND ISNULL(rp.RPStatus, 'Draft') NOT IN ('Draft', 'Rejected')
       )
     `;
 

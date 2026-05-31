@@ -381,10 +381,8 @@ router.post("/", validateBody(paymentBodySchema), async (req, res) => {
     const docYear = parseInt(parts[parts.length - 2], 10) || null;
     const docSerial = parseInt(parts[parts.length - 1], 10) || null;
 
-    // Determine Status: digital modes start as Pending (submitted for approval),
-    // all others start as Draft.
-    const digitalModes = ["NEFT", "UPI", "RTGS", "IMPS"];
-    const initialStatus = digitalModes.includes(PMode) ? "Pending" : "Draft";
+    // All new payments auto-submit to Pending for approval — no manual submit step.
+    const initialStatus = "Pending";
 
     const insertResult = await pool
       .request()

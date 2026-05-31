@@ -22,7 +22,7 @@ import {
   FolderOpen,
 } from "lucide-react";
 import * as grnApi from "@/api/grnApi";
-import { getProjects } from "@/api/issuesApi";
+import { getProjects } from "@/api/grnApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -420,8 +420,14 @@ export default function GRN() {
   const totalRecords = grnsPage?.total ?? grns.length;
 
   const { data: posData = [] } = useQuery({
-    queryKey: ["purchaseOrders"],
-    queryFn: grnApi.getPurchaseOrders,
+    queryKey: ["purchaseOrders", selectedFinYear],
+    queryFn: () => {
+      const fyId = selectedFinYear
+        ? Number(finYears.find((fy) => fy.year === selectedFinYear)?.id ?? 0) ||
+          null
+        : null;
+      return grnApi.getPurchaseOrders(fyId);
+    },
   });
 
   const { data: uomsData = [] } = useQuery({
@@ -441,13 +447,6 @@ export default function GRN() {
     queryFn: getProjects,
   });
 
-  // Derive the calendar year embedded in PO DocNos from the fin-year string.
-  // e.g. "2025-2026" → "2026"  (the second/end year, which appears in PO-2026-xxxxx)
-  // Falls back to the raw string so "All Years" ("") still passes through.
-  const finYearDocFragment = selectedFinYear
-    ? (selectedFinYear.split("-").pop() ?? selectedFinYear)
-    : "";
-
   const pos = posData
     .filter((po: PurchaseOrder) => {
       // When editing, always include the GRN's linked PO regardless of any filter
@@ -457,11 +456,6 @@ export default function GRN() {
         String(po.PurchaseOrderID) === formData.poId
       )
         return true;
-      // Fin-year filter
-      if (finYearDocFragment) {
-        const docNo = po.PurchaseOrderNo || "";
-        if (!docNo.includes(finYearDocFragment)) return false;
-      }
       // Project filter — PurchaseOrder carries ProjectId from the backend SELECT
       if (formData.projectId) {
         if (String((po as any).ProjectId ?? "") !== formData.projectId)
@@ -833,7 +827,10 @@ export default function GRN() {
                         </option>
                       ))}
                     </select>
-                    <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
                   </div>
                 </div>
 
@@ -899,7 +896,10 @@ export default function GRN() {
                         </option>
                       ))}
                     </select>
-                    <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
                   </div>
                   {loadingPO && (
                     <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
@@ -1263,7 +1263,9 @@ export default function GRN() {
                                     >
                                       <option value="">Select UOM</option>
                                       {uomsData
-                                        .filter((u: UOM) => u.IsActive !== false)
+                                        .filter(
+                                          (u: UOM) => u.IsActive !== false,
+                                        )
                                         .map((u: UOM) => (
                                           <option
                                             key={u.UOMCode}
@@ -1274,7 +1276,10 @@ export default function GRN() {
                                           </option>
                                         ))}
                                     </select>
-                                    <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                                    <ChevronDown
+                                      size={11}
+                                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                                    />
                                   </div>
                                 )}
                               </td>
