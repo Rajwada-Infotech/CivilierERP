@@ -1,7 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 const { getPool, getPoolStats, sql } = require("../db");
 const bcrypt = require("bcrypt");
 const logger = require("../logger");
@@ -288,4 +286,5 @@ router.delete("/:id/avatar", async (req, res) => {
 });
 
 module.exports = router;
+
 

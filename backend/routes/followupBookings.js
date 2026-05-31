@@ -4,8 +4,6 @@ const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 
 const PERMISSION_MODULE = "Followup";
 const PERMISSION_SUBMODULE = "Bookings";
@@ -676,4 +674,5 @@ router.delete(
 );
 
 module.exports = router;
+
 

@@ -20,7 +20,6 @@ const {
   requestTimeout,
 } = require("./middleware/requestObservability");
 
-const { ipKeyGenerator } = require("express-rate-limit");
 const { safeLoadRoutes, printRoutesSummary } = require("./utils/loadRoutes");
 const http = require("http");
 const { initSocket } = require("./socket");
@@ -248,7 +247,7 @@ async function createApp() {
       },
       store: makeStore("rl:api:"),
       skip: (req) => req.path.startsWith("/api/user-activity"),
-      keyGenerator: (req) => `${req.user?.userId || ipKeyGenerator(req)}`,
+      keyGenerator: (req) => `${req.user?.userId || req.ip}`,
       standardHeaders: true,
       legacyHeaders: false,
     });

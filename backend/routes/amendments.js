@@ -4,8 +4,6 @@ const authMiddleware = require("../middleware/auth");
 const role = require("../middleware/role");
 
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 
 const APPROVER_ROLES = ["admin", "director", "manager"];
 const FALLBACK_DOC_PREFIX = "AMD";
@@ -603,4 +601,5 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
+
 

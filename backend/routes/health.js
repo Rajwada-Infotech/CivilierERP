@@ -1,7 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 const logger = require("../logger");
 const { isDbReady } = require("../db");
 const { isRedisReady } = require("../redis");
@@ -90,3 +88,4 @@ router.get("/ready", requireHealthToken, async (req, res) => {
 });
 
 module.exports = router;
+
