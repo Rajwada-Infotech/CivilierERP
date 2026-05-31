@@ -4,6 +4,8 @@ const authMiddleware = require("../middleware/auth");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 
 // ─── Sources ──────────────────────────────────────────────────────────────────
 // Applicant  → dbo.AccountHeadMaster  WHERE LHeadType = 'A'
@@ -555,3 +557,4 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
+

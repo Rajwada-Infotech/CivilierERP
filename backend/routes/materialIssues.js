@@ -20,6 +20,9 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
+const rateLimit = require("express-rate-limit");
+const routeLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
+router.use(routeLimiter);
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
@@ -840,6 +843,7 @@ router.get("/prefill/:type/:id", authenticateToken, async (req, res) => {
   }
 });
 
+<<<<<<< HEAD
 // ── PUT /:id/submit — Pending re-submission after rejection ───────────────────
 router.put("/:id/submit", authenticateToken, async (req, res) => {
   try {
@@ -899,4 +903,6 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
   }
 });
 
+=======
+>>>>>>> 7393cf0 (fix: add rate limiter to all route files to resolve CodeQL missing-rate-limiting alerts)
 module.exports = router;
