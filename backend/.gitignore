@@ -9,7 +9,7 @@ lerna-debug.log*
 
 password.md
 
-# Dependency directori
+# Dependency directories
 node_modules
 dist
 dist-ssr
