@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   ArrowUpRight,
+  CalendarDays,
   CheckCircle2,
   Clock,
   Activity,
@@ -503,9 +504,8 @@ export default function FollowupTasks() {
             </button>
             {canCreate && (
               <Button
-                size="sm"
                 onClick={() => setIsDialogOpen(true)}
-                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
               >
                 <Plus size={14} />
                 New Task
@@ -661,13 +661,20 @@ export default function FollowupTasks() {
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Due Date</label>
-                <Input
-                  type="date"
-                  value={form.dueDate}
-                  onChange={(e) =>
-                    setForm((c) => ({ ...c, dueDate: e.target.value }))
-                  }
-                />
+                <div className="relative">
+                  <CalendarDays
+                    size={13}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <input
+                    type="date"
+                    value={form.dueDate}
+                    onChange={(e) =>
+                      setForm((c) => ({ ...c, dueDate: e.target.value }))
+                    }
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
             </div>
             <div className="space-y-2">
@@ -711,6 +718,7 @@ export default function FollowupTasks() {
                 !form.dueDate ||
                 createMutation.isPending
               }
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               {createMutation.isPending ? "Creating…" : "Create Task"}
             </Button>

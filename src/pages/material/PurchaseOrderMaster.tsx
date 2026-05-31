@@ -1509,9 +1509,9 @@ const PurchaseOrderMaster: React.FC = () => {
           </div>
           <button
             onClick={goToCreate}
-            className="gradient-accent inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition shrink-0"
+            className="gradient-accent inline-flex items-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white shrink-0 transition"
           >
-            <Plus size={16} />
+            <Plus size={15} />
             New Purchase Order
           </button>
         </div>
@@ -1731,7 +1731,7 @@ const PurchaseOrderMaster: React.FC = () => {
             <button
               onClick={handleSave}
               disabled={saving || saved}
-              className="gradient-accent inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold disabled:opacity-60 transition shadow-sm"
+              className="gradient-accent inline-flex items-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
             >
               {saved ? (
                 <Check size={14} />
@@ -2719,7 +2719,7 @@ const PurchaseOrderMaster: React.FC = () => {
             <button
               onClick={handleSave}
               disabled={saving || saved}
-              className="gradient-accent inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold disabled:opacity-60 transition shadow-sm"
+              className="gradient-accent inline-flex items-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
             >
               {saved ? (
                 <Check size={14} />

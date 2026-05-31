@@ -22,6 +22,7 @@ import {
   Droplets,
   Car,
   Gift,
+  CalendarDays,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -960,10 +961,13 @@ export function HandoverPage() {
         }
         .ho-field-input:focus { border-color: hsl(var(--primary)); }
         .ho-select {
-          width: 100%; padding: 8px 12px; border: 1.5px solid hsl(var(--border)); border-radius: 9px;
+          width: 100%; padding: 8px 32px 8px 12px; border: 1.5px solid hsl(var(--border)); border-radius: 9px;
           font-size: 13.5px; color: hsl(var(--foreground)); background: hsl(var(--card));
           outline: none; transition: border-color 0.15s; font-family: inherit;
           cursor: pointer; appearance: none; -webkit-appearance: none;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 10px center;
         }
         .ho-select:focus { border-color: hsl(var(--primary)); }
 
@@ -1023,7 +1027,7 @@ export function HandoverPage() {
             <Button
               size="sm"
               onClick={openCreate}
-              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               <Plus size={14} /> New Handover
             </Button>
@@ -1151,13 +1155,12 @@ export function HandoverPage() {
                     : "Create the first Handover to start tracking possession closures"}
                 </p>
                 {!search && !statusFilter && (
-                  <button
-                    className="ho-add-btn"
+                  <Button
                     onClick={openCreate}
-                    style={{ marginTop: 8 }}
+                    className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto mt-2"
                   >
                     <Plus size={14} /> New Handover
-                  </button>
+                  </Button>
                 )}
               </div>
             ) : (
@@ -1493,57 +1496,60 @@ export function HandoverPage() {
             <div className="ho-form-grid-3">
               <div>
                 <Label
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    marginBottom: 6,
-                    display: "block",
-                  }}
+                  style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "block" }}
                 >
                   Scheduled Date
                 </Label>
-                <input
-                  type="date"
-                  className="ho-field-input"
-                  value={form.HandoverDate}
-                  onChange={(e) => set("HandoverDate", e.target.value)}
-                />
+                <div className="relative">
+                  <CalendarDays
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <input
+                    type="date"
+                    value={form.HandoverDate}
+                    onChange={(e) => set("HandoverDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
               <div>
                 <Label
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    marginBottom: 6,
-                    display: "block",
-                  }}
+                  style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "block" }}
                 >
                   Actual Date
                 </Label>
-                <input
-                  type="date"
-                  className="ho-field-input"
-                  value={form.ActualHandoverDate}
-                  onChange={(e) => set("ActualHandoverDate", e.target.value)}
-                />
+                <div className="relative">
+                  <CalendarDays
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <input
+                    type="date"
+                    value={form.ActualHandoverDate}
+                    onChange={(e) => set("ActualHandoverDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
               <div>
                 <Label
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    marginBottom: 6,
-                    display: "block",
-                  }}
+                  style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "block" }}
                 >
                   Key Handover Date
                 </Label>
-                <input
-                  type="date"
-                  className="ho-field-input"
-                  value={form.KeyHandoverDate}
-                  onChange={(e) => set("KeyHandoverDate", e.target.value)}
-                />
+                <div className="relative">
+                  <CalendarDays
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <input
+                    type="date"
+                    value={form.KeyHandoverDate}
+                    onChange={(e) => set("KeyHandoverDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1583,21 +1589,22 @@ export function HandoverPage() {
               </div>
               <div>
                 <Label
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    marginBottom: 6,
-                    display: "block",
-                  }}
+                  style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "block" }}
                 >
                   Snags Cleared Date
                 </Label>
-                <input
-                  type="date"
-                  className="ho-field-input"
-                  value={form.SnagsClearedDate}
-                  onChange={(e) => set("SnagsClearedDate", e.target.value)}
-                />
+                <div className="relative">
+                  <CalendarDays
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <input
+                    type="date"
+                    value={form.SnagsClearedDate}
+                    onChange={(e) => set("SnagsClearedDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
             </div>
             <div>
@@ -1797,17 +1804,17 @@ export function HandoverPage() {
             >
               Cancel
             </button>
-            <button
-              className="ho-add-btn"
+            <Button
               onClick={() => (editId ? updateMut.mutate() : createMut.mutate())}
               disabled={!form.ApplicantId || isSaving}
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               {isSaving
                 ? "Saving…"
                 : editId
                   ? "Update Handover"
                   : "Create Handover"}
-            </button>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

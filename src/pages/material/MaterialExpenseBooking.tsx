@@ -2243,10 +2243,10 @@ export default function MaterialExpenseBooking() {
           </div>
           {view === "list" && (
             <Button
-              className="gradient-accent shrink-0 gap-1.5 w-full sm:w-auto"
               onClick={openNew}
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
-              <Plus size={14} /> New Booking
+              <Plus size={15} /> New Booking
             </Button>
           )}
         </div>
@@ -2285,8 +2285,7 @@ export default function MaterialExpenseBooking() {
                     Cancel
                   </Button>
                   <Button
-                    size="sm"
-                    className="gradient-accent flex-1 sm:flex-none"
+                    className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex-1 sm:flex-none"
                     onClick={handleSave}
                     disabled={saving}
                   >
@@ -2424,18 +2423,32 @@ export default function MaterialExpenseBooking() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <Field label="Booking Date" required>
-                    <Input
-                      type="date"
-                      value={form.bookingDate}
-                      onChange={(e) => set("bookingDate", e.target.value)}
-                    />
+                    <div className="relative">
+                      <CalendarDays
+                        size={13}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                      <input
+                        type="date"
+                        value={form.bookingDate}
+                        onChange={(e) => set("bookingDate", e.target.value)}
+                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                      />
+                    </div>
                   </Field>
                   <Field label="Due Date">
-                    <Input
-                      type="date"
-                      value={form.dueDate}
-                      onChange={(e) => set("dueDate", e.target.value)}
-                    />
+                    <div className="relative">
+                      <CalendarDays
+                        size={13}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                      <input
+                        type="date"
+                        value={form.dueDate}
+                        onChange={(e) => set("dueDate", e.target.value)}
+                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                      />
+                    </div>
                   </Field>
                   <Field
                     label="Financial Year"
@@ -3192,7 +3205,7 @@ export default function MaterialExpenseBooking() {
                   Cancel
                 </Button>
                 <Button
-                  className="gradient-accent gap-1.5 w-full sm:w-auto"
+                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
                   onClick={handleSave}
                   disabled={saving}
                 >

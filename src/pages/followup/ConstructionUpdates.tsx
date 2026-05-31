@@ -18,6 +18,7 @@ import {
   AlertCircle,
   Building2,
   TrendingUp,
+  Calendar as CalendarIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -860,10 +861,13 @@ export function ConstructionUpdatesPage() {
           padding-top: 8px; border-top: 1px solid hsl(var(--border)); margin-top: 4px;
         }
         .cu-select {
-          width: 100%; padding: 8px 12px; border: 1.5px solid hsl(var(--border)); border-radius: 9px;
+          width: 100%; padding: 8px 32px 8px 12px; border: 1.5px solid hsl(var(--border)); border-radius: 9px;
           font-size: 13.5px; color: hsl(var(--foreground)); background: hsl(var(--card));
           outline: none; transition: border-color 0.15s; font-family: inherit;
           cursor: pointer; appearance: none; -webkit-appearance: none;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 10px center;
         }
         .cu-select:focus { border-color: hsl(var(--primary)); }
 
@@ -905,9 +909,8 @@ export function ConstructionUpdatesPage() {
               Refresh
             </button>
             <Button
-              size="sm"
               onClick={openCreate}
-              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               <Plus size={14} /> New Update
             </Button>
@@ -1036,13 +1039,12 @@ export function ConstructionUpdatesPage() {
                     : "Record the first update to start tracking construction progress"}
                 </p>
                 {!search && !statusFilter && (
-                  <button
-                    className="cu-add-btn"
+                  <Button
                     onClick={openCreate}
-                    style={{ marginTop: 8 }}
+                    className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto mt-2"
                   >
                     <Plus size={14} /> New Update
-                  </button>
+                  </Button>
                 )}
               </div>
             ) : (
@@ -1357,11 +1359,15 @@ export function ConstructionUpdatesPage() {
             <div className="cu-form-grid-3">
               <div className="space-y-2">
                 <Label>Update Date</Label>
-                <Input
-                  type="date"
-                  value={form.UpdateDate}
-                  onChange={(e) => set("UpdateDate", e.target.value)}
-                />
+                <div className="relative">
+                  <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={14} />
+                  <input
+                    type="date"
+                    value={form.UpdateDate}
+                    onChange={(e) => set("UpdateDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Stage</Label>
@@ -1416,11 +1422,15 @@ export function ConstructionUpdatesPage() {
               </div>
               <div className="space-y-2">
                 <Label>Shared On</Label>
-                <Input
-                  type="date"
-                  value={form.SharedOn}
-                  onChange={(e) => set("SharedOn", e.target.value)}
-                />
+                <div className="relative">
+                  <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={14} />
+                  <input
+                    type="date"
+                    value={form.SharedOn}
+                    onChange={(e) => set("SharedOn", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1474,7 +1484,7 @@ export function ConstructionUpdatesPage() {
                 !form.ApplicantId || createMut.isPending || updateMut.isPending
               }
               onClick={() => (editId ? updateMut.mutate() : createMut.mutate())}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground"
+              className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               {createMut.isPending || updateMut.isPending
                 ? "Saving…"

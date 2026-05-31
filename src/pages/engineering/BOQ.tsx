@@ -21,6 +21,7 @@ import {
   Printer,
   ArrowLeft,
   Send,
+  Calendar as CalendarIcon,
 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
@@ -1332,7 +1333,7 @@ const FormModal: React.FC<FormModalProps> = ({
               variant="ghost"
               size="sm"
               onClick={onClose}
-              className="gap-1.5 text-muted-foreground hover:text-foreground px-2"
+              className="gap-1.5 text-muted-foreground hover:text-foreground hover:bg-muted px-2 font-semibold text-sm border border-border bg-transparent"
             >
               <ArrowLeft size={15} /> Back
             </Button>
@@ -1379,15 +1380,14 @@ const FormModal: React.FC<FormModalProps> = ({
               variant="outline"
               onClick={onClose}
               disabled={saving}
-              size="sm"
+              className="font-semibold text-sm px-5 py-2 h-auto"
             >
               Cancel
             </Button>
             <Button
               onClick={handleSave}
               disabled={saving}
-              className="gap-2"
-              size="sm"
+              className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               {saving ? (
                 <RefreshCw className="animate-spin" size={14} />
@@ -1503,12 +1503,15 @@ const FormModal: React.FC<FormModalProps> = ({
               </Field>
 
               <Field label="BOQ Date" required error={errors.BoqDate}>
-                <Input
-                  type="date"
-                  value={form.BoqDate}
-                  onChange={(e) => set("BoqDate", e.target.value)}
-                  className={`h-10 ${errors.BoqDate ? "border-destructive" : ""}`}
-                />
+                <div className="relative">
+                  <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={14} />
+                  <input
+                    type="date"
+                    value={form.BoqDate}
+                    onChange={(e) => set("BoqDate", e.target.value)}
+                    className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer${errors.BoqDate ? " border-destructive" : " border-border"}`}
+                  />
+                </div>
               </Field>
             </div>
 
@@ -1727,7 +1730,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
               variant="ghost"
               size="sm"
               onClick={onClose}
-              className="gap-1.5 text-muted-foreground hover:text-foreground px-2"
+              className="gap-1.5 text-muted-foreground hover:text-foreground hover:bg-muted px-2 font-semibold text-sm border border-border bg-transparent"
             >
               <ArrowLeft size={15} /> Back
             </Button>
@@ -2453,7 +2456,7 @@ export default function BOQ() {
                   setEditRecord(null);
                   setShowForm(true);
                 }}
-                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
               >
                 <Plus size={15} /> New BOQ
               </Button>
@@ -2520,7 +2523,7 @@ export default function BOQ() {
                     key={s}
                     variant={filterStatus === s ? "default" : "outline"}
                     size="sm"
-                    className="h-8 rounded-full text-xs"
+                    className={`h-8 rounded-full text-xs font-semibold${filterStatus === s ? " gradient-accent text-white border-0" : ""}`}
                     onClick={() => {
                       setFilterStatus(s);
                       setPage(1);

@@ -950,7 +950,7 @@ export function SalesDeedPage() {
             <Button
               size="sm"
               onClick={openCreate}
-              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               <Plus size={14} /> New Deed
             </Button>
@@ -1081,13 +1081,12 @@ export function SalesDeedPage() {
                     : "Create the first Sales Deed to start tracking property registrations"}
                 </p>
                 {!search && !statusFilter && (
-                  <button
-                    className="sd-add-btn"
+                  <Button
                     onClick={openCreate}
-                    style={{ marginTop: 8 }}
+                    className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto mt-2"
                   >
                     <Plus size={14} /> New Deed
-                  </button>
+                  </Button>
                 )}
               </div>
             ) : (
@@ -1493,27 +1492,48 @@ export function SalesDeedPage() {
             <div className="sd-form-grid-3">
               <div className="space-y-2">
                 <Label>Deed Date</Label>
-                <Input
-                  type="date"
-                  value={form.DeedDate}
-                  onChange={(e) => set("DeedDate", e.target.value)}
-                />
+                <div className="relative">
+                  <CalendarDays
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <input
+                    type="date"
+                    value={form.DeedDate}
+                    onChange={(e) => set("DeedDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Registration Date</Label>
-                <Input
-                  type="date"
-                  value={form.RegistrationDate}
-                  onChange={(e) => set("RegistrationDate", e.target.value)}
-                />
+                <div className="relative">
+                  <CalendarDays
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <input
+                    type="date"
+                    value={form.RegistrationDate}
+                    onChange={(e) => set("RegistrationDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Possession Date</Label>
-                <Input
-                  type="date"
-                  value={form.PossessionDate}
-                  onChange={(e) => set("PossessionDate", e.target.value)}
-                />
+                <div className="relative">
+                  <CalendarDays
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <input
+                    type="date"
+                    value={form.PossessionDate}
+                    onChange={(e) => set("PossessionDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1584,7 +1604,7 @@ export function SalesDeedPage() {
                 !form.ApplicantId || createMut.isPending || updateMut.isPending
               }
               onClick={() => (editId ? updateMut.mutate() : createMut.mutate())}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               {createMut.isPending || updateMut.isPending
                 ? "Saving…"

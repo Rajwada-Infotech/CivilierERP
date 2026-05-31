@@ -852,35 +852,36 @@ export default function GRN() {
                       Project
                     </span>
                   </label>
-                  <select
-                    value={formData.projectId}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        projectId: e.target.value,
-                        // Reset PO when project changes so a stale PO from
-                        // a different project isn't accidentally submitted
-                        poId: "",
-                        poNumber: "",
-                        supplierId: "",
-                        supplierName: "",
-                        items: [createEmptyItem()],
-                        parentDocNo: "",
-                        rootExBDocNo: "",
-                      }))
-                    }
-                    className={inp}
-                  >
-                    <option value="">— All Projects —</option>
-                    {(projectsData as any[]).map((p: any) => (
-                      <option
-                        key={p.ProjectId ?? p.id}
-                        value={String(p.ProjectId ?? p.id)}
-                      >
-                        {p.ProjectName ?? p.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={formData.projectId}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          projectId: e.target.value,
+                          poId: "",
+                          poNumber: "",
+                          supplierId: "",
+                          supplierName: "",
+                          items: [createEmptyItem()],
+                          parentDocNo: "",
+                          rootExBDocNo: "",
+                        }))
+                      }
+                      className={inp}
+                    >
+                      <option value="">— All Projects —</option>
+                      {(projectsData as any[]).map((p: any) => (
+                        <option
+                          key={p.ProjectId ?? p.id}
+                          value={String(p.ProjectId ?? p.id)}
+                        >
+                          {p.ProjectName ?? p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  </div>
                   {formData.projectId && (
                     <p className="text-[10px] text-muted-foreground mt-1 truncate">
                       {(projectsData as any[]).find(
@@ -952,7 +953,7 @@ export default function GRN() {
                       onChange={(e) =>
                         setFormData((p) => ({ ...p, grnDate: e.target.value }))
                       }
-                      className={`${inp} pl-10 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+                      className="w-full pl-10 pr-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                     />
                   </div>
                 </div>
@@ -1385,7 +1386,7 @@ export default function GRN() {
                   disabled={
                     createMutation.isPending || updateMutation.isPending
                   }
-                  className="w-full sm:w-auto gradient-accent inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow-sm transition disabled:opacity-60"
+                  className="w-full sm:w-auto gradient-accent inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-semibold shadow-sm transition disabled:opacity-60"
                 >
                   <Save size={15} />
                   {createMutation.isPending || updateMutation.isPending
@@ -1396,7 +1397,7 @@ export default function GRN() {
                 </button>
                 <button
                   onClick={resetForm}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-border hover:bg-muted text-sm transition-colors"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted text-sm transition-colors"
                 >
                   <X size={15} /> Cancel
                 </button>

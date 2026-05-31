@@ -900,7 +900,7 @@ export function NOCPage() {
             <Button
               size="sm"
               onClick={openCreate}
-              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               <Plus size={14} /> New NOC
             </Button>
@@ -1029,13 +1029,12 @@ export function NOCPage() {
                     : "Create the first NOC to start tracking certificate approvals"}
                 </p>
                 {!search && !statusFilter && (
-                  <button
-                    className="noc-add-btn"
+                  <Button
                     onClick={openCreate}
-                    style={{ marginTop: 8 }}
+                    className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto mt-2"
                   >
                     <Plus size={14} /> New NOC
-                  </button>
+                  </Button>
                 )}
               </div>
             ) : (
@@ -1444,7 +1443,7 @@ export function NOCPage() {
                 !form.ApplicantId || createMut.isPending || updateMut.isPending
               }
               onClick={() => (editId ? updateMut.mutate() : createMut.mutate())}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground"
+              className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               {createMut.isPending || updateMut.isPending
                 ? "Saving…"

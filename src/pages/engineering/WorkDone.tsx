@@ -41,15 +41,15 @@ const inputCls =
   "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
 
 const selectCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none";
+  "w-full text-sm rounded-lg border border-border pl-3 pr-8 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition wd-select-arrow";
 
 const FieldLabel: React.FC<{
   children: React.ReactNode;
   required?: boolean;
 }> = ({ children, required }) => (
-  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
+  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-0.5 mb-1.5">
     {children}
-    {required && <span className="text-red-500 ml-0.5">*</span>}
+    {required && <span className="text-red-500">*</span>}
   </label>
 );
 
@@ -493,12 +493,15 @@ function WorkDoneForm({
                   Date
                 </span>
               </FieldLabel>
-              <input
-                type="date"
-                value={form.docDate}
-                onChange={(e) => setField("docDate", e.target.value)}
-                className={`${inputCls} ${errors.docDate ? "border-red-400" : ""}`}
-              />
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={14} />
+                <input
+                  type="date"
+                  value={form.docDate}
+                  onChange={(e) => setField("docDate", e.target.value)}
+                  className={`w-full pl-8 pr-3 py-2.5 rounded-lg text-sm bg-background border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.docDate ? "border-red-400" : "border-border"}`}
+                />
+              </div>
               {errors.docDate && (
                 <p className="text-xs text-red-500 mt-1">Required</p>
               )}
@@ -696,21 +699,27 @@ function WorkDoneForm({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
             <div>
               <FieldLabel>Period From</FieldLabel>
-              <input
-                type="date"
-                value={form.PeriodFrom}
-                onChange={(e) => setField("PeriodFrom", e.target.value)}
-                className={inputCls}
-              />
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={14} />
+                <input
+                  type="date"
+                  value={form.PeriodFrom}
+                  onChange={(e) => setField("PeriodFrom", e.target.value)}
+                  className="w-full pl-8 pr-3 py-2.5 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                />
+              </div>
             </div>
             <div>
               <FieldLabel>Period To</FieldLabel>
-              <input
-                type="date"
-                value={form.PeriodTo}
-                onChange={(e) => setField("PeriodTo", e.target.value)}
-                className={inputCls}
-              />
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={14} />
+                <input
+                  type="date"
+                  value={form.PeriodTo}
+                  onChange={(e) => setField("PeriodTo", e.target.value)}
+                  className="w-full pl-8 pr-3 py-2.5 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                />
+              </div>
             </div>
             <div>
               <FieldLabel>Unit</FieldLabel>
@@ -948,7 +957,7 @@ function WorkDoneForm({
         <button
           onClick={handleSave}
           disabled={saveMutation.isPending}
-          className="flex items-center gap-1.5 text-sm bg-violet-600 hover:bg-violet-700 text-white rounded-lg px-5 py-2 font-medium transition-colors disabled:opacity-60"
+          className="gradient-accent flex items-center gap-1.5 font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-60 transition-opacity"
         >
           <Save size={13} />
           {saveMutation.isPending
@@ -1294,6 +1303,15 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <>
+      <style>{`
+        .wd-select-arrow {
+          appearance: none;
+          -webkit-appearance: none;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 10px center;
+        }
+      `}</style>
       <Breadcrumbs
         items={[
           { label: "Engineering", path: "/engineering" },
@@ -1348,7 +1366,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
             <Button
               size="sm"
               onClick={openNew}
-              className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold gap-1.5"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               <Plus size={14} /> New Entry
             </Button>
@@ -1390,7 +1408,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                 onClick={() => setStatusFilter(s)}
                 className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
                   statusFilter === s
-                    ? "bg-violet-600 text-white border-violet-600"
+                    ? "gradient-accent text-white border-transparent font-semibold"
                     : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
                 }`}
               >

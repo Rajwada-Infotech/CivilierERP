@@ -655,8 +655,7 @@ export default function Amendments() {
                               )}
                             </Button>
                             <Button
-                              size="sm"
-                              className="h-8 text-xs gap-1.5 gradient-accent"
+                              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
                               onClick={enterEdit}
                             >
                               <FileEdit size={12} />
@@ -683,8 +682,7 @@ export default function Amendments() {
                               <X size={12} />
                             </Button>
                             <Button
-                              size="sm"
-                              className="h-8 text-xs gap-1.5 gradient-accent"
+                              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
                               onClick={saveAmendment}
                               disabled={saving}
                             >
