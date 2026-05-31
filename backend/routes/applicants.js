@@ -3,8 +3,6 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 
 // GET /api/applicants
 // Fetches all records from AccountHeadMaster where LHeadType = 'A'
@@ -91,4 +89,5 @@ router.get("/:code", async (req, res) => {
 });
 
 module.exports = router;
+
 
