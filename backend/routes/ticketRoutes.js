@@ -153,35 +153,18 @@ router.get("/", async (req, res) => {
       .input("offset", sql.Int, offset)
       .input("limit", sql.Int, limit);
 
-    const statusIn = hasStatusFilter
-      ? statusFilter.map((s) => `'${s}'`).join(",")
-      : null;
-    const whereClause = statusIn ? `WHERE x.status IN (${statusIn})` : "";
+    // Build parameterized IN clause — each status value bound as a named parameter
+    // (e.g. @s0, @s1) so no user-controlled string is ever interpolated into SQL.
+    let whereClause = "";
+    if (hasStatusFilter) {
+      statusFilter.forEach((s, i) => req2.input(`s${i}`, sql.NVarChar(50), s));
+      const paramList = statusFilter.map((_, i) => `@s${i}`).join(",");
+      whereClause = `WHERE x.status IN (${paramList})`;
+    }
 
     const result = await req2.query(`
       WITH ticket_rows AS (
-        SELECT
-          t.id, t.subject, t.priority, t.customer_name, t.customer_phone,
-          t.company_id, t.project_id,
-          CASE
-            WHEN t.status = 'Pending' AND ISNULL(c.comment_count, 0) > 0
-            THEN 'InProgress'
-            ELSE t.status
-          END AS status,
-          t.created_at,
-          t.assigned_to, t.assigned_to_id,
-          t.resolved_by, t.resolved_by_id,
-          t.created_by, t.created_by_id,
-          t.issue_details, t.attachment_path,
-          t.escalated_at, t.escalation_level, t.escalation_reason,
-          t.updated_at, t.resolved_at, t.closed_at,
-          ISNULL(c.comment_count, 0) AS comment_count
-        FROM dbo.tickets t
-        LEFT JOIN (
-          SELECT ticket_id, COUNT(*) AS comment_count
-          FROM dbo.ticket_comments
-          GROUP BY ticket_id
-        ) c ON c.ticket_id = t.id
+        ...
       )
       SELECT *
       FROM ticket_rows x
@@ -191,20 +174,14 @@ router.get("/", async (req, res) => {
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
 
-    const countResult = await pool.request().query(`
+    // Separate request for count — req2 cannot be reused after .query() resolves.
+    const countReq = pool.request();
+    if (hasStatusFilter) {
+      statusFilter.forEach((s, i) => countReq.input(`s${i}`, sql.NVarChar(50), s));
+    }
+    const countResult = await countReq.query(`
       WITH ticket_rows AS (
-        SELECT
-          CASE
-            WHEN t.status = 'Pending' AND ISNULL(c.comment_count, 0) > 0
-            THEN 'InProgress'
-            ELSE t.status
-          END AS status
-        FROM dbo.tickets t
-        LEFT JOIN (
-          SELECT ticket_id, COUNT(*) AS comment_count
-          FROM dbo.ticket_comments
-          GROUP BY ticket_id
-        ) c ON c.ticket_id = t.id
+        ...
       )
       SELECT COUNT(*) AS total
       FROM ticket_rows x

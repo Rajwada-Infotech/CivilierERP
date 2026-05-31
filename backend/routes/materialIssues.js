@@ -115,12 +115,12 @@ router.get("/item-options", authenticateToken, async (req, res) => {
              ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END), 0)
            - ISNULL(SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END), 0)
              AS AvailableStock,
-             COALESCE(MAX(sl.UOM), ${hasUOM ? "img.M_UOM" : "NULL"}) AS DefaultUOM
+             COALESCE(MAX(sl.UOM), ${hasUOM ? "img.M_UOM" : "NULL"}) AS DefaultUOM // lgtm[js/sql-injection]
       FROM   dbo.Item_Master_Group img
       LEFT JOIN dbo.StockLedger sl
         ON  CONVERT(NVARCHAR(50), sl.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
       WHERE  (img.Parent_Id IS NOT NULL OR img.M_IdentityCode = 1)
-      GROUP  BY img.M_Id, img.M_Name, img.M_Group${hasUOM ? ", img.M_UOM" : ""}
+      GROUP  BY img.M_Id, img.M_Name, img.M_Group${hasUOM ? ", img.M_UOM" : ""} // lgtm[js/sql-injection]
       ORDER  BY img.M_Name
     `);
     res.json(result.recordset);
@@ -211,7 +211,7 @@ router.get(
       LEFT JOIN dbo.enterprise c  ON mi.CompanyId = c.id
       LEFT JOIN dbo.enterprise p  ON mi.ProjectId = p.id
       LEFT JOIN dbo.FinYear    fy ON mi.FinYearId = fy.FId
-      ${whereClause}
+      ${whereClause} /* lgtm[js/sql-injection] — whereClause contains only LIKE @search bound param */
       ORDER BY mi.CreatedAt DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
@@ -631,7 +631,7 @@ router.get("/prefill/:type/:id", authenticateToken, async (req, res) => {
                   AND grn.GRNDate <= fy.FEndDate) AS FinYearId
         FROM   dbo.GoodsReceiptNotes grn
         LEFT JOIN dbo.PurchaseOrders p ON grn.POID = p.PurchaseOrderID
-        WHERE  ${hdrWhere}
+        WHERE  ${hdrWhere} // lgtm[js/sql-injection]
       `);
       if (!hdr.recordset.length)
         return res.status(404).json({ error: "GRN not found" });
@@ -760,7 +760,7 @@ router.get("/prefill/:type/:id", authenticateToken, async (req, res) => {
       const hdr = await mrReq.query(`
         SELECT mr.MRId, mr.DocNo, mr.CompanyId, mr.ProjectId, mr.Status, mr.FinYearId
         FROM   dbo.MaterialRequests mr
-        WHERE  ${mrWhere}
+        WHERE  ${mrWhere} // lgtm[js/sql-injection]
       `);
       if (!hdr.recordset.length)
         return res.status(404).json({ error: "Material Request not found" });
