@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const logger = require("../logger");
 const { getPool, sql } = require("../db");
 
@@ -133,21 +135,32 @@ router.get("/", async (req, res) => {
         SELECT
           'expense-booking'        AS Module,
           'Expense Booking'        AS ModuleLabel,
-          CAST(Eid AS NVARCHAR)    AS RecordId,
-          CAST(Eid AS NVARCHAR)    AS Reference,
-          NULL                     AS RecordDate,
-          ISNULL(EStatus, 'Draft') AS Status,
+          CAST(eb.Eid AS NVARCHAR) AS RecordId,
+          ISNULL(eb.EDocNo, CONCAT('EB#', CAST(eb.Eid AS NVARCHAR))) AS Reference,
+          eb.EDocDate              AS RecordDate,
+          ISNULL(eb.EStatus, 'Draft') AS Status,
           NULL                     AS ContractorName,
-          NULL                     AS SupplierName,
-          NULL                     AS Amount,
-          NULL                     AS CreatedBy,
-          ISNULL(CAST(EApprovedBy AS NVARCHAR), '') AS ApprovedBy,
+          CASE
+            WHEN eb.ESourceType = 'GRN' AND grn_eb.GRNID IS NOT NULL THEN ISNULL(ahm_eb.LHeadName, eb.EName)
+            ELSE eb.EName
+          END                      AS SupplierName,
+          ISNULL(eb.ENetAmount, eb.EAmount) AS Amount,
+          CAST(eb.ECreatedBy AS NVARCHAR) AS CreatedBy,
+          ISNULL(CAST(eb.EApprovedBy AS NVARCHAR), '') AS ApprovedBy,
           ''                       AS ApprovedAt,
           ''                       AS RejectedBy,
           ''                       AS RejectionNote,
-          EUpdatedAt               AS LastModified
-        FROM dbo.ExpenseBooking
-        WHERE EStatus = 'Pending'
+          eb.EUpdatedAt            AS LastModified
+        FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.GoodsReceiptNotes grn_eb
+          ON eb.ESourceType = 'GRN' AND grn_eb.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster ahm_eb
+          ON ahm_eb.LHeadId = grn_eb.SupplierID
+        WHERE eb.EStatus = 'Pending'
+          AND NOT (
+            ISNULL(eb.ESourceType, '') = 'GRN'
+            AND ISNULL(eb.ERemarks, '') LIKE 'Auto-created for remaining items from GRN%'
+          )
       `);
     }
 
@@ -228,6 +241,29 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "material-issues") {
+      queries.push(`
+        SELECT
+          'material-issues'        AS Module,
+          'Material Issue'         AS ModuleLabel,
+          CAST(IssueId AS NVARCHAR) AS RecordId,
+          ISNULL(DocNo, ISNULL(IssueNo, CONCAT('ISS#', CAST(IssueId AS NVARCHAR)))) AS Reference,
+          Date                     AS RecordDate,
+          ISNULL(Status, 'Pending') AS Status,
+          NULL                     AS ContractorName,
+          NULL                     AS SupplierName,
+          NULL                     AS Amount,
+          NULL                     AS CreatedBy,
+          ''                       AS ApprovedBy,
+          ''                       AS ApprovedAt,
+          ''                       AS RejectedBy,
+          ''                       AS RejectionNote,
+          NULL                     AS LastModified
+        FROM dbo.MaterialIssues
+        WHERE ISNULL(Status, 'Pending') = 'Pending'
+      `);
+    }
+
     if (queries.length === 0) return res.json([]);
 
     const fullQuery =
@@ -257,10 +293,12 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.NewPayment         WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.ReceivedPayment    WHERE RPStatus = 'Pending') +
         (SELECT COUNT(*) FROM dbo.GoodsReceiptNotes  WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.ExpenseBooking     WHERE EStatus = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.ExpenseBooking     WHERE EStatus = 'Pending'
+          AND NOT (ISNULL(ESourceType,'') = 'GRN' AND ISNULL(ERemarks,'') LIKE 'Auto-created for remaining items from GRN%')) +
         (SELECT COUNT(*) FROM dbo.WorkDone           WHERE ISNULL(Status,'Draft') = 'Pending') +
         (SELECT COUNT(*) FROM dbo.BOQ                WHERE ISNULL(Status,'Draft') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.MaterialRequests     WHERE Status = 'Pending')
+        (SELECT COUNT(*) FROM dbo.MaterialRequests   WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.MaterialIssues     WHERE ISNULL(Status,'Pending') = 'Pending')
       AS TotalPending
     `);
     res.json({ count: result.recordset[0].TotalPending ?? 0 });
@@ -276,3 +314,7 @@ router.get("/count", async (req, res) => {
 });
 
 module.exports = router;
+
+
+
+

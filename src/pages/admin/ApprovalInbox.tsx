@@ -10,6 +10,7 @@ import {
   ClipboardCheck,
   ClipboardList,
   Package,
+  PackageOpen,
   Hammer,
   Banknote,
   Truck,
@@ -122,6 +123,13 @@ const MODULE_CONFIG: Record<
     navPath: "/material/material-request",
     apiEndpoint: "/api/material-requests",
     label: "Material Requests",
+  },
+  "material-issues": {
+    icon: PackageOpen,
+    color: "text-cyan-500 bg-cyan-500/10",
+    navPath: "/material/issues",
+    apiEndpoint: "/api/material-issues",
+    label: "Material Issues",
   },
 };
 
@@ -365,7 +373,7 @@ const ApprovalInbox: React.FC = () => {
       </div>
 
       {/* Module filter tabs */}
-      <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1 scrollbar-hide">
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
         <ModuleTab
           module={null}
           label="All"

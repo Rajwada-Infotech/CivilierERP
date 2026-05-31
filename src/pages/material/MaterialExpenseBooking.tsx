@@ -2073,7 +2073,7 @@ export default function MaterialExpenseBooking() {
           30000,
         );
         toast.success(
-          `Expense booking created — Ref: ${result?.docNo || form.bookingReference}`,
+          `Expense booking created and sent for approval — Ref: ${result?.docNo || form.bookingReference}`,
         );
 
         if (

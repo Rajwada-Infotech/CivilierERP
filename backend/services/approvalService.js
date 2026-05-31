@@ -32,6 +32,11 @@ const MODULE_MAP = {
     pk: "MRId",
     status: "Status",
   },
+  "material-issues": {
+    table: "dbo.MaterialIssues",
+    pk: "IssueId",
+    status: "Status",
+  },
 };
 
 const MODULE_DOC_LINKS = {

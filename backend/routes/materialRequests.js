@@ -17,6 +17,8 @@
 
 const express = require("express");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { cache } = require("../middleware/cache");
@@ -487,12 +489,32 @@ router.post("/", authenticateToken, async (req, res) => {
     }
 
     await bumpCacheVersion("material-requests");
+
+    // Auto-submit: transition Draft → Pending immediately so no manual
+    // "Submit" step is required after creation.
+    try {
+      await transition(
+        "material-requests",
+        newId,
+        "Pending",
+        req.user?.email || user,
+        req.user?.role,
+      );
+    } catch (submitErr) {
+      // Non-fatal — record is saved; log and continue.
+      console.warn("MR auto-submit failed (non-fatal):", submitErr.message);
+    }
+
     const created = await pool
       .request()
       .input("id", sql.Int, newId)
-      .query("SELECT DocNo FROM dbo.MaterialRequests WHERE MRId = @id");
+      .query("SELECT DocNo, Status FROM dbo.MaterialRequests WHERE MRId = @id");
 
-    res.status(201).json({ MRId: newId, DocNo: created.recordset[0]?.DocNo });
+    res.status(201).json({
+      MRId: newId,
+      DocNo: created.recordset[0]?.DocNo,
+      Status: created.recordset[0]?.Status,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -766,3 +788,7 @@ router.put("/:id/mark-ordered", authenticateToken, async (req, res) => {
 });
 
 module.exports = router;
+
+
+
+

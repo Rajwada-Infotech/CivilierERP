@@ -584,7 +584,7 @@ export default function Issues() {
   const createMutation = useMutation({
     mutationFn: issuesApi.createIssue,
     onSuccess: (rec: any) => {
-      toast.success(`Issue ${rec?.DocNo || rec?.IssueNo || ""} created`);
+      toast.success(`Issue ${rec?.DocNo || rec?.IssueNo || ""} created and sent for approval`);
       queryClient.invalidateQueries({ queryKey: ["issues-list"] });
       queryClient.invalidateQueries({ queryKey: ["issues-items"] });
       goToList();
