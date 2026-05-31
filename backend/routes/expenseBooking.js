@@ -703,6 +703,7 @@ router.get("/by-source", async (req, res) => {
         WHERE eb.ESourceType = @ESourceType
           AND eb.ESourceId = @ESourceId
           AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+          AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
         ORDER BY eb.Eid ASC
       `);
     res.json(result.recordset);
