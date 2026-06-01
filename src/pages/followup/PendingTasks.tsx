@@ -164,28 +164,32 @@ function StatCard({
   return (
     <div
       onClick={onClick}
-      className={`relative bg-white rounded-2xl border p-5 overflow-hidden transition-all duration-200 ${
+      className={`relative bg-card rounded-xl border p-5 overflow-hidden transition-all duration-200 ${
         onClick ? "cursor-pointer select-none" : ""
       } ${
         active
-          ? "border-indigo-300 shadow-md shadow-indigo-100 ring-2 ring-indigo-100"
-          : "border-slate-100 hover:border-slate-200 hover:shadow-md"
+          ? "border-primary/40 shadow-md shadow-primary/10 ring-2 ring-primary/10"
+          : "border-border hover:border-primary/25 hover:shadow-md"
       }`}
     >
       <div
-        className={`absolute top-0 right-0 w-24 h-24 rounded-full opacity-[0.06] -translate-y-6 translate-x-6 ${accent}`}
+        className={`absolute top-0 right-0 w-24 h-24 rounded-full opacity-10 -translate-y-6 translate-x-6 ${accent}`}
       />
       <div
         className={`inline-flex items-center justify-center w-10 h-10 rounded-xl mb-3 ${accent} bg-opacity-10`}
       >
         <Icon className="w-5 h-5" />
       </div>
-      <div className="text-3xl font-bold text-slate-800 tracking-tight">
+      <div className="text-3xl font-bold text-foreground tracking-tight">
         {value}
       </div>
-      <div className="text-sm font-medium text-slate-500 mt-0.5">{label}</div>
+      <div className="text-sm font-medium text-muted-foreground mt-0.5">
+        {label}
+      </div>
       {sublabel && (
-        <div className="text-xs text-slate-400 mt-1">{sublabel}</div>
+        <div className="text-xs text-muted-foreground/70 mt-1">
+          {sublabel}
+        </div>
       )}
     </div>
   );
@@ -195,15 +199,15 @@ function PriorityPill({ priority }: { priority: TaskPriority | null }) {
   const p = priority ?? "medium";
   const map: Record<TaskPriority, { bg: string; dot: string }> = {
     high: {
-      bg: "bg-red-50 text-red-600 border border-red-200",
+      bg: "bg-red-500/10 text-red-600 border border-red-500/20",
       dot: "bg-red-500",
     },
     medium: {
-      bg: "bg-amber-50 text-amber-600 border border-amber-200",
+      bg: "bg-amber-500/10 text-amber-600 border border-amber-500/20",
       dot: "bg-amber-500",
     },
     low: {
-      bg: "bg-emerald-50 text-emerald-600 border border-emerald-200",
+      bg: "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20",
       dot: "bg-emerald-500",
     },
   };
@@ -221,23 +225,23 @@ function PriorityPill({ priority }: { priority: TaskPriority | null }) {
 function StatusPill({ status }: { status: TaskStatus }) {
   const map: Record<TaskStatus, { bg: string; dot: string; label: string }> = {
     open: {
-      bg: "bg-slate-100 text-slate-600 border border-slate-200",
-      dot: "bg-slate-400",
+      bg: "bg-muted text-muted-foreground border border-border",
+      dot: "bg-muted-foreground",
       label: "Open",
     },
     in_progress: {
-      bg: "bg-blue-50 text-blue-600 border border-blue-200",
+      bg: "bg-blue-500/10 text-blue-600 border border-blue-500/20",
       dot: "bg-blue-500",
       label: "In Progress",
     },
     closed: {
-      bg: "bg-emerald-50 text-emerald-600 border border-emerald-200",
+      bg: "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20",
       dot: "bg-emerald-500",
       label: "Closed",
     },
     reviewed: {
-      bg: "bg-violet-50 text-violet-600 border border-violet-200",
-      dot: "bg-violet-500",
+      bg: "bg-primary/10 text-primary border border-primary/20",
+      dot: "bg-primary",
       label: "Reviewed",
     },
   };
@@ -256,10 +260,13 @@ function DueDateChip({ task }: { task: PendingTask }) {
   const days = getDaysUntilDue(task.dueDate);
   const done = task.status === "closed" || task.status === "reviewed";
 
-  if (days === null) return <span className="text-slate-400 text-sm">—</span>;
+  if (days === null)
+    return <span className="text-muted-foreground text-sm">—</span>;
   if (done)
     return (
-      <span className="text-slate-500 text-sm">{fmtDate(task.dueDate)}</span>
+      <span className="text-muted-foreground text-sm">
+        {fmtDate(task.dueDate)}
+      </span>
     );
   if (days < 0)
     return (
@@ -276,9 +283,9 @@ function DueDateChip({ task }: { task: PendingTask }) {
       </span>
     );
   return (
-    <span className="text-slate-600 text-sm tabular-nums">
+    <span className="text-muted-foreground text-sm tabular-nums">
       {fmtDate(task.dueDate)}
-      <span className="text-slate-400 text-xs ml-1">({days}d)</span>
+      <span className="text-muted-foreground/70 text-xs ml-1">({days}d)</span>
     </span>
   );
 }
@@ -288,7 +295,7 @@ function CompletionBar({ tasks }: { tasks: PendingTask[] }) {
   const segments = [
     {
       key: "open",
-      color: "bg-slate-300",
+      color: "bg-muted-foreground/40",
       count: tasks.filter((t) => t.status === "open").length,
     },
     {
@@ -303,7 +310,7 @@ function CompletionBar({ tasks }: { tasks: PendingTask[] }) {
     },
     {
       key: "reviewed",
-      color: "bg-violet-400",
+      color: "bg-primary",
       count: tasks.filter((t) => t.status === "reviewed").length,
     },
   ];
@@ -325,13 +332,13 @@ function CompletionBar({ tasks }: { tasks: PendingTask[] }) {
 function EmptyState({ search }: { search: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-20 text-center">
-      <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mb-4">
-        <Inbox className="w-8 h-8 text-slate-400" />
+      <div className="w-16 h-16 bg-muted rounded-2xl flex items-center justify-center mb-4">
+        <Inbox className="w-8 h-8 text-muted-foreground" />
       </div>
-      <p className="text-slate-600 font-medium">
+      <p className="text-foreground font-medium">
         {search ? "No tasks match your search" : "No pending tasks yet"}
       </p>
-      <p className="text-slate-400 text-sm mt-1">
+      <p className="text-muted-foreground text-sm mt-1">
         {search
           ? "Try adjusting your search or filters"
           : "Create a task to get started"}
@@ -353,8 +360,8 @@ function TaskRow({
 
   return (
     <div
-      className={`group grid grid-cols-[1fr_auto] gap-3 items-center px-5 py-4 border-b border-slate-50 last:border-b-0 transition-colors duration-100 ${
-        overdue ? "bg-red-50/30 hover:bg-red-50/50" : "hover:bg-slate-50/70"
+      className={`group grid grid-cols-[1fr_auto] gap-3 items-center px-5 py-4 border-b border-border/60 last:border-b-0 transition-colors duration-100 ${
+        overdue ? "bg-red-500/5 hover:bg-red-500/10" : "hover:bg-muted/40"
       }`}
     >
       {/* Main columns */}
@@ -363,13 +370,13 @@ function TaskRow({
         <div className="min-w-0">
           <div
             className={`font-semibold text-sm leading-5 truncate ${
-              overdue ? "text-red-700" : "text-slate-800"
+              overdue ? "text-red-600" : "text-foreground"
             }`}
           >
             {task.title}
           </div>
           {task.description && (
-            <div className="text-xs text-slate-400 truncate mt-0.5">
+            <div className="text-xs text-muted-foreground truncate mt-0.5">
               {task.description}
             </div>
           )}
@@ -382,10 +389,10 @@ function TaskRow({
 
         {/* Assigned to */}
         <div className="flex items-center gap-1.5 min-w-0">
-          <div className="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
-            <UserCircle className="w-3.5 h-3.5 text-indigo-500" />
+          <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+            <UserCircle className="w-3.5 h-3.5 text-primary" />
           </div>
-          <span className="text-sm text-slate-600 truncate">
+          <span className="text-sm text-muted-foreground truncate">
             {task.assignedToName || "—"}
           </span>
         </div>
@@ -408,7 +415,7 @@ function TaskRow({
           onValueChange={(v) => onStatusChange(task.id, v as TaskStatus)}
           disabled={isUpdating}
         >
-          <SelectTrigger className="h-8 w-36 text-xs rounded-lg border-slate-200 bg-white shadow-sm">
+          <SelectTrigger className="h-8 w-36 text-xs rounded-lg border-border bg-background shadow-sm">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -522,31 +529,31 @@ export default function PendingTasksPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#F7F8FC]">
+    <div className="min-h-screen bg-background">
       <div className="max-w-[1280px] mx-auto px-6 py-8 space-y-6">
         {/* ── Header ── */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <div className="flex items-center gap-2 text-xs text-slate-400 mb-2 font-medium tracking-wide uppercase">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2 font-medium tracking-wide uppercase">
               <button
                 onClick={() => navigate("/followup")}
-                className="hover:text-indigo-600 transition-colors flex items-center gap-1"
+                className="hover:text-primary transition-colors flex items-center gap-1"
               >
                 <ArrowLeft className="w-3 h-3" />
                 Follow-Up
               </button>
               <ChevronRight className="w-3 h-3" />
-              <span className="text-slate-600">Pending Tasks</span>
+              <span className="text-foreground">Pending Tasks</span>
             </div>
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 bg-violet-100 rounded-2xl flex items-center justify-center">
-                <ClipboardList className="w-5 h-5 text-violet-600" />
+              <div className="w-11 h-11 bg-primary/10 rounded-xl flex items-center justify-center">
+                <ClipboardList className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                <h1 className="text-2xl font-bold text-foreground tracking-tight">
                   Pending Tasks
                 </h1>
-                <p className="text-slate-500 text-sm mt-0.5">
+                <p className="text-muted-foreground text-sm mt-0.5">
                   All follow-up tasks — create, assign, and track to completion.
                 </p>
               </div>
@@ -557,7 +564,7 @@ export default function PendingTasksPage() {
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="p-2 rounded-xl border border-slate-200 bg-white text-slate-500 hover:text-slate-700 hover:border-slate-300 transition-all disabled:opacity-50"
+              className="p-2 rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all disabled:opacity-50"
             >
               <RefreshCw
                 className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`}
@@ -566,7 +573,7 @@ export default function PendingTasksPage() {
             {canCreate && (
               <Button
                 onClick={() => setIsDialogOpen(true)}
-                className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm shadow-indigo-200 rounded-xl h-10 px-4"
+                className="gap-2 gradient-accent text-primary-foreground shadow-sm shadow-primary/20 rounded-xl h-10 px-4"
               >
                 <Plus className="w-4 h-4" />
                 New Task
@@ -581,7 +588,7 @@ export default function PendingTasksPage() {
             label="Open"
             value={counts.open}
             icon={ListTodo}
-            accent="bg-slate-500 text-slate-600"
+            accent="bg-muted-foreground text-muted-foreground"
             sublabel="Awaiting action"
             active={activeFilter === "open"}
             onClick={() =>
@@ -592,7 +599,7 @@ export default function PendingTasksPage() {
             label="In Progress"
             value={counts.inProgress}
             icon={Activity}
-            accent="bg-blue-500 text-blue-600"
+            accent="bg-primary text-primary"
             sublabel="Currently active"
             active={activeFilter === "in_progress"}
             onClick={() =>
@@ -623,16 +630,16 @@ export default function PendingTasksPage() {
 
         {/* ── Completion bar ── */}
         {tasks.length > 0 && (
-          <div className="bg-white rounded-2xl border border-slate-100 px-5 py-4 space-y-2">
-            <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
+          <div className="bg-card rounded-xl border border-border px-5 py-4 space-y-2">
+            <div className="flex items-center justify-between text-xs text-muted-foreground font-medium">
               <span className="flex items-center gap-1.5">
                 <TrendingUp className="w-3.5 h-3.5" />
                 Overall Progress
               </span>
-              <span className="text-slate-700 font-semibold">
+              <span className="text-foreground font-semibold">
                 {counts.completed} / {counts.total} completed
                 {counts.total > 0 && (
-                  <span className="text-slate-400 font-normal ml-1">
+                  <span className="text-muted-foreground font-normal ml-1">
                     ({Math.round((counts.completed / counts.total) * 100)}%)
                   </span>
                 )}
@@ -641,14 +648,14 @@ export default function PendingTasksPage() {
             <CompletionBar tasks={tasks} />
             <div className="flex items-center gap-5 pt-0.5">
               {[
-                { color: "bg-slate-300", label: "Open" },
+                { color: "bg-muted-foreground/40", label: "Open" },
                 { color: "bg-blue-400", label: "In Progress" },
                 { color: "bg-emerald-400", label: "Closed" },
-                { color: "bg-violet-400", label: "Reviewed" },
+                { color: "bg-primary", label: "Reviewed" },
               ].map((l) => (
                 <span
                   key={l.label}
-                  className="flex items-center gap-1 text-xs text-slate-400"
+                  className="flex items-center gap-1 text-xs text-muted-foreground"
                 >
                   <span className={`w-2 h-2 rounded-full ${l.color}`} />
                   {l.label}
@@ -659,28 +666,28 @@ export default function PendingTasksPage() {
         )}
 
         {/* ── Table Card ── */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
           {/* Toolbar */}
-          <div className="px-5 pt-5 pb-4 border-b border-slate-100">
+          <div className="px-5 pt-5 pb-4 border-b border-border">
             <div className="flex items-center justify-between gap-4 flex-wrap">
               {/* Status tabs */}
-              <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
+              <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
                 {filterTabs.map((tab) => (
                   <button
                     key={tab.key}
                     onClick={() => setActiveFilter(tab.key)}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 ${
                       activeFilter === tab.key
-                        ? "bg-white text-slate-800 shadow-sm"
-                        : "text-slate-500 hover:text-slate-700"
+                        ? "bg-card text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     {tab.label}
                     <span
                       className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${
                         activeFilter === tab.key
-                          ? "bg-indigo-100 text-indigo-700"
-                          : "bg-slate-200 text-slate-500"
+                          ? "bg-primary/10 text-primary"
+                          : "bg-background text-muted-foreground"
                       }`}
                     >
                       {tab.count}
@@ -692,13 +699,13 @@ export default function PendingTasksPage() {
               <div className="flex items-center gap-2">
                 {/* Priority filter */}
                 <div className="flex items-center gap-1.5">
-                  <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" />
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-muted-foreground" />
                   <select
                     value={priorityFilter}
                     onChange={(e) =>
                       setPriorityFilter(e.target.value as "all" | TaskPriority)
                     }
-                    className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 transition-all"
+                    className="text-sm text-foreground bg-background border border-border rounded-lg px-2 py-1.5 outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/15 transition-all"
                   >
                     <option value="all">All priorities</option>
                     <option value="high">High</option>
@@ -709,13 +716,13 @@ export default function PendingTasksPage() {
 
                 {/* Search */}
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                   <input
                     type="text"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Search tasks…"
-                    className="pl-9 pr-4 py-2 w-56 text-sm bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 transition-all placeholder:text-slate-400 text-slate-700"
+                    className="pl-9 pr-4 py-2 w-56 text-sm bg-background border border-border rounded-xl outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/15 transition-all placeholder:text-muted-foreground text-foreground"
                   />
                 </div>
               </div>
@@ -723,20 +730,20 @@ export default function PendingTasksPage() {
           </div>
 
           {/* Column headers */}
-          <div className="grid grid-cols-[1fr_auto] gap-3 px-5 py-3 border-b border-slate-100 bg-slate-50/50">
+          <div className="grid grid-cols-[1fr_auto] gap-3 px-5 py-3 border-b border-border bg-muted/40">
             <div className="grid grid-cols-[minmax(180px,2.5fr)_90px_130px_150px_100px] gap-4">
               {["Task", "Priority", "Assigned To", "Due Date", "Status"].map(
                 (h) => (
                   <span
                     key={h}
-                    className="text-xs font-semibold text-slate-400 uppercase tracking-wider"
+                    className="text-xs font-semibold text-muted-foreground uppercase tracking-wider"
                   >
                     {h}
                   </span>
                 ),
               )}
             </div>
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider opacity-0 select-none">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider opacity-0 select-none">
               Action
             </span>
           </div>
@@ -747,7 +754,7 @@ export default function PendingTasksPage() {
               {[...Array(6)].map((_, i) => (
                 <div
                   key={i}
-                  className="h-14 rounded-xl bg-slate-100 animate-pulse"
+                  className="h-14 rounded-xl bg-muted animate-pulse"
                   style={{ opacity: 1 - i * 0.13 }}
                 />
               ))}
@@ -757,13 +764,13 @@ export default function PendingTasksPage() {
           {/* Error */}
           {isError && (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <div className="w-12 h-12 bg-red-50 rounded-2xl flex items-center justify-center">
+              <div className="w-12 h-12 bg-red-500/10 rounded-2xl flex items-center justify-center">
                 <AlertCircle className="w-6 h-6 text-red-500" />
               </div>
-              <p className="text-slate-600 font-medium">Failed to load tasks</p>
+              <p className="text-foreground font-medium">Failed to load tasks</p>
               <button
                 onClick={() => refetch()}
-                className="text-sm text-indigo-600 hover:underline"
+                className="text-sm text-primary hover:underline"
               >
                 Try again
               </button>
@@ -791,14 +798,14 @@ export default function PendingTasksPage() {
 
           {/* Footer */}
           {!isLoading && !isError && filteredTasks.length > 0 && (
-            <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/40">
-              <p className="text-xs text-slate-400">
+            <div className="px-5 py-3 border-t border-border bg-muted/30">
+              <p className="text-xs text-muted-foreground">
                 Showing{" "}
-                <span className="font-semibold text-slate-600">
+                <span className="font-semibold text-foreground">
                   {filteredTasks.length}
                 </span>{" "}
                 of{" "}
-                <span className="font-semibold text-slate-600">
+                <span className="font-semibold text-foreground">
                   {tasks.length}
                 </span>{" "}
                 tasks
@@ -814,8 +821,8 @@ export default function PendingTasksPage() {
         <DialogContent className="sm:max-w-md rounded-2xl">
           <DialogHeader>
             <div className="flex items-center gap-3 mb-1">
-              <div className="w-10 h-10 bg-violet-100 rounded-xl flex items-center justify-center">
-                <ClipboardList className="w-5 h-5 text-violet-600" />
+              <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center">
+                <ClipboardList className="w-5 h-5 text-primary" />
               </div>
               <div>
                 <DialogTitle className="text-lg">New Task</DialogTitle>
@@ -829,7 +836,7 @@ export default function PendingTasksPage() {
 
           <div className="space-y-4 mt-2">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-700">
+              <label className="text-sm font-medium text-foreground">
                 Title <span className="text-red-500">*</span>
               </label>
               <Input
@@ -843,7 +850,7 @@ export default function PendingTasksPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-700">
+              <label className="text-sm font-medium text-foreground">
                 Description
               </label>
               <textarea
@@ -859,7 +866,7 @@ export default function PendingTasksPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-700">
+                <label className="text-sm font-medium text-foreground">
                   Priority
                 </label>
                 <Select
@@ -880,7 +887,7 @@ export default function PendingTasksPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-700">
+                <label className="text-sm font-medium text-foreground">
                   Due Date <span className="text-red-500">*</span>
                 </label>
                 <Input
@@ -895,7 +902,7 @@ export default function PendingTasksPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-700">
+              <label className="text-sm font-medium text-foreground">
                 Assign To <span className="text-red-500">*</span>
               </label>
               <Select
@@ -941,7 +948,7 @@ export default function PendingTasksPage() {
                 !form.dueDate ||
                 createMutation.isPending
               }
-              className="rounded-xl flex-1 bg-indigo-600 hover:bg-indigo-700"
+              className="rounded-xl flex-1 gradient-accent text-primary-foreground"
             >
               {createMutation.isPending ? "Creating…" : "Create Task"}
             </Button>
