@@ -520,11 +520,35 @@ export default function CompanyMaster() {
   const [logoPreview, setLogoPreview] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const coTypes = useLookup("CO_TYPE", ["Private Limited", "Public Limited", "LLP", "Partnership", "Proprietorship", "Section 8", "OPC"]);
-  const industries = useLookup("INDUSTRY", ["Manufacturing", "IT & Technology", "Infrastructure", "Retail", "Finance", "Healthcare", "Education", "Logistics", "Real Estate", "Other"]);
+  const coTypes = useLookup("CO_TYPE", [
+    "Private Limited",
+    "Public Limited",
+    "LLP",
+    "Partnership",
+    "Proprietorship",
+    "Section 8",
+    "OPC",
+  ]);
+  const industries = useLookup("INDUSTRY", [
+    "Manufacturing",
+    "IT & Technology",
+    "Infrastructure",
+    "Retail",
+    "Finance",
+    "Healthcare",
+    "Education",
+    "Logistics",
+    "Real Estate",
+    "Other",
+  ]);
   const currencies = useLookup("CURRENCY", ["INR", "USD", "EUR", "GBP", "AED"]);
   const gstStatuses = useLookup("GST_STATUS", ["Registered", "Unregistered"]);
-  const fiscalYearStarts = useLookup("FISCAL_YEAR_START", ["January", "April", "July", "October"]);
+  const fiscalYearStarts = useLookup("FISCAL_YEAR_START", [
+    "January",
+    "April",
+    "July",
+    "October",
+  ]);
 
   const { data: companies = [], isLoading } = useQuery({
     queryKey: ["company-master"],
@@ -598,7 +622,10 @@ export default function CompanyMaster() {
       const res = await fetchWithAuth(`/api/company-master/${id}`, {
         method: "DELETE",
       });
-      if (!res.ok) throw new Error("Delete failed");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.reason || err.error || "Delete failed");
+      }
     },
     onSuccess: () => {
       toast.success("Company deleted");
@@ -638,7 +665,7 @@ export default function CompanyMaster() {
         openEdit,
         setDeleteConfirm,
       ),
-     
+
     [],
   );
 
