@@ -696,7 +696,7 @@ export default function ApplicantDetail() {
           </p>
           <Button
             variant="outline"
-            onClick={() => navigate("/followup/sales/applicants")}
+            onClick={() => navigate("/followup/sales/applications")}
           >
             <ArrowLeft size={14} className="mr-2" /> Back to Applicants
           </Button>
@@ -728,13 +728,13 @@ export default function ApplicantDetail() {
             <Breadcrumbs
               items={[
                 { label: "Follow-Up", path: "/followup" },
-                { label: "Applicants", path: "/followup/sales/applicants" },
+                { label: "Applications", path: "/followup/sales/applications" },
                 { label: name, path: "#" },
               ]}
             />
             <div className="flex items-center gap-3 mt-2">
               <button
-                onClick={() => navigate("/followup/sales/applicants")}
+                onClick={() => navigate("/followup/sales/applications")}
                 className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
               >
                 <ArrowLeft size={16} />

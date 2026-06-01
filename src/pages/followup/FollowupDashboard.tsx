@@ -623,7 +623,7 @@ export default function FollowupDashboard() {
               icon={Users}
               iconColor="text-indigo-600"
               iconBg="bg-indigo-500/10"
-              onClick={() => navigate("/followup/sales/applicants")}
+              onClick={() => navigate("/followup/sales/applications")}
             />
             <KPICard
               label="Confirmed Bookings"
@@ -754,7 +754,7 @@ export default function FollowupDashboard() {
               title="Application Status"
               sub="By current status"
               action="View all"
-              onAction={() => navigate("/followup/sales/applicants")}
+              onAction={() => navigate("/followup/sales/applications")}
               iconColor="text-indigo-600"
             />
             {applicationsLoading ? (
@@ -849,7 +849,7 @@ export default function FollowupDashboard() {
                 title="Recent Applications"
                 sub="Latest entries"
                 action="View all"
-                onAction={() => navigate("/followup/sales/applicants")}
+                onAction={() => navigate("/followup/sales/applications")}
                 iconColor="text-indigo-600"
               />
             </div>
@@ -1086,7 +1086,7 @@ export default function FollowupDashboard() {
               {
                 label: "Applications",
                 icon: Users,
-                path: "/followup/sales/applicants",
+                path: "/followup/sales/applications",
                 color: "text-indigo-600",
                 bg: "bg-indigo-500/10",
               },
