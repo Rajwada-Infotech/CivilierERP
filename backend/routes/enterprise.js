@@ -300,15 +300,54 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// DELETE
+// DELETE — blocked if enterprise has linked companies or projects
 router.delete("/:id", async (req, res) => {
-  const { id } = req.params;
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id))
+    return res.status(400).json({ error: "Invalid enterprise ID" });
+
   try {
     const pool = getPool();
+
+    // 1. Confirm the record exists
+    const entRow = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query(
+        "SELECT id, name FROM dbo.enterprise WHERE id=@id AND business_type='E'",
+      );
+
+    if (!entRow.recordset.length)
+      return res.status(404).json({ error: "Enterprise not found" });
+
+    // 2. Check for linked companies and projects
+    const usageCheck = await pool.request().input("EnterpriseId", sql.Int, id)
+      .query(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.enterprise WHERE enterprise_id = @EnterpriseId AND business_type = 'C') AS CompanyCount,
+        (SELECT COUNT(*) FROM dbo.enterprise WHERE enterprise_id = @EnterpriseId AND business_type = 'P') AS ProjectCount
+    `);
+
+    const { CompanyCount, ProjectCount } = usageCheck.recordset[0];
+    const linked = [];
+    if (CompanyCount > 0)
+      linked.push(`${CompanyCount} Company${CompanyCount > 1 ? "s" : ""}`);
+    if (ProjectCount > 0)
+      linked.push(`${ProjectCount} Project${ProjectCount > 1 ? "s" : ""}`);
+
+    if (linked.length > 0) {
+      return res.status(409).json({
+        error: "Cannot delete enterprise",
+        reason: `This enterprise has ${linked.join(" and ")} linked to it and cannot be deleted.`,
+      });
+    }
+
+    // 3. Safe to delete
     await pool
       .request()
       .input("id", sql.Int, id)
       .query("DELETE FROM dbo.enterprise WHERE id=@id AND business_type='E'");
+
     await bumpCacheVersion("enterprises");
     res.json({ message: "Enterprise deleted successfully" });
   } catch (err) {
@@ -369,6 +408,3 @@ router.get("/options", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
