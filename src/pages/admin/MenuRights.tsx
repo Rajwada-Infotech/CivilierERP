@@ -275,7 +275,7 @@ export default function MenuRights() {
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <ShieldCheck size={22} className="text-primary" />
+            <ShieldCheck size={24} className="text-primary" />
             <h1 className="text-xl font-heading font-bold text-foreground">
               Menu Rights
             </h1>
