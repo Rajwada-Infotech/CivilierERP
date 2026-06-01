@@ -579,7 +579,7 @@ export const MobileNav: React.FC = () => {
             children: [
               {
                 label: "Applications",
-                path: "/followup/sales/applicants",
+                path: "/followup/sales/applications",
                 icon: FileText,
               },
               {
