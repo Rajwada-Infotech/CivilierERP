@@ -862,9 +862,6 @@ export default function GRN() {
       <div className="space-y-6 mt-6 pb-10">
         {/* ── Page header ── */}
         <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-primary/10 shrink-0">
-            <Truck size={20} className="text-primary" />
-          </div>
           <div>
             <h1 className="text-lg font-heading font-bold text-foreground leading-tight">
               Goods Receipt Note

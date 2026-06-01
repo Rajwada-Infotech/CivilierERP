@@ -18,6 +18,8 @@ import {
   Shield,
   Users,
   Printer,
+  CalendarDays,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -557,6 +559,7 @@ export default function ProjectMaster() {
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ["project-master"],
     queryFn: getProjects,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: enterprises = [] } = useQuery({
@@ -762,16 +765,34 @@ export default function ProjectMaster() {
       <label className="block text-xs font-medium text-muted-foreground mb-1">
         {label}
       </label>
-      <input
-        type={type}
-        value={(form[key] as string) || ""}
-        onChange={(e) =>
-          !readOnly && setForm((p) => ({ ...p, [key]: e.target.value }))
-        }
-        placeholder={ph || label}
-        readOnly={readOnly}
-        className={`w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all ${readOnly ? "opacity-60 cursor-not-allowed bg-muted/40" : ""}`}
-      />
+      {type === "date" ? (
+        <div className="relative">
+          <CalendarDays
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+          <input
+            type="date"
+            value={(form[key] as string) || ""}
+            onChange={(e) =>
+              !readOnly && setForm((p) => ({ ...p, [key]: e.target.value }))
+            }
+            readOnly={readOnly}
+            className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${readOnly ? "opacity-60 cursor-not-allowed bg-muted/40" : ""}`}
+          />
+        </div>
+      ) : (
+        <input
+          type={type}
+          value={(form[key] as string) || ""}
+          onChange={(e) =>
+            !readOnly && setForm((p) => ({ ...p, [key]: e.target.value }))
+          }
+          placeholder={ph || label}
+          readOnly={readOnly}
+          className={`w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all ${readOnly ? "opacity-60 cursor-not-allowed bg-muted/40" : ""}`}
+        />
+      )}
     </div>
   );
 
@@ -780,17 +801,21 @@ export default function ProjectMaster() {
       <label className="block text-xs font-medium text-muted-foreground mb-1">
         {label}
       </label>
-      <select
-        value={(form[key] as string) || ""}
-        onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
-        className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-      >
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
+      <div className="relative">
+        <select
+          value={(form[key] as string) || ""}
+          onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
+          className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+        >
+          <option value="">— Select —</option>
+          {options.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+        <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+      </div>
     </div>
   );
 
@@ -806,7 +831,7 @@ export default function ProjectMaster() {
     <>
       <Breadcrumbs items={["Admin", "Masters", "Project Master"]} />
 
-      <div className="p-6 space-y-6">
+      <div className="relative space-y-6 mt-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -822,12 +847,14 @@ export default function ProjectMaster() {
               </p>
             </div>
           </div>
-          <button
-            onClick={openNew}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
-          >
-            <Plus size={16} /> Add Project
-          </button>
+          {!showForm && (
+            <button
+              onClick={openNew}
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
+            >
+              <Plus size={16} /> Add Project
+            </button>
+          )}
         </div>
 
         {/* Table */}
@@ -901,9 +928,9 @@ export default function ProjectMaster() {
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-1.5 rounded-md text-xs font-heading capitalize whitespace-nowrap transition-colors ${
+                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize whitespace-nowrap transition-colors ${
                     activeTab === tab
-                      ? "bg-primary text-primary-foreground"
+                      ? "gradient-accent text-white"
                       : "text-muted-foreground hover:bg-muted"
                   }`}
                 >
@@ -987,34 +1014,37 @@ export default function ProjectMaster() {
                     <label className="block text-xs font-medium text-muted-foreground mb-1">
                       Enterprise
                     </label>
-                    <select
-                      value={form.enterpriseId}
-                      onChange={(e) => {
-                        const selected = enterprises.find(
-                          (en: any) =>
-                            String(en.id ?? en.Id) === e.target.value,
-                        );
-                        setForm((p) => ({
-                          ...p,
-                          enterpriseId: e.target.value,
-                          enterpriseName: selected
-                            ? (selected.name ?? selected.Name ?? "")
-                            : "",
-                        }));
-                      }}
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                    >
-                      <option value="">— Select Enterprise —</option>
-                      {enterprises.map((e: any) => {
-                        const name = e.name ?? e.Name ?? "";
-                        const id = String(e.id ?? e.Id);
-                        return (
-                          <option key={id} value={id}>
-                            {name}
-                          </option>
-                        );
-                      })}
-                    </select>
+                    <div className="relative">
+                      <select
+                        value={form.enterpriseId}
+                        onChange={(e) => {
+                          const selected = enterprises.find(
+                            (en: any) =>
+                              String(en.id ?? en.Id) === e.target.value,
+                          );
+                          setForm((p) => ({
+                            ...p,
+                            enterpriseId: e.target.value,
+                            enterpriseName: selected
+                              ? (selected.name ?? selected.Name ?? "")
+                              : "",
+                          }));
+                        }}
+                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+                      >
+                        <option value="">— Select Enterprise —</option>
+                        {enterprises.map((e: any) => {
+                          const name = e.name ?? e.Name ?? "";
+                          const id = String(e.id ?? e.Id);
+                          return (
+                            <option key={id} value={id}>
+                              {name}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    </div>
                   </div>
 
                   {/* Company Dropdown — triggers compliance auto-fetch */}
@@ -1022,32 +1052,35 @@ export default function ProjectMaster() {
                     <label className="block text-xs font-medium text-muted-foreground mb-1">
                       Company
                     </label>
-                    <select
-                      value={form.companyId}
-                      onChange={(e) => {
-                        const selected = companies.find(
-                          (c: any) => String(c.Id ?? c.id) === e.target.value,
-                        );
-                        handleCompanyChange(
-                          e.target.value,
-                          selected
-                            ? (selected.Name ?? selected.name ?? "")
-                            : "",
-                        );
-                      }}
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                    >
-                      <option value="">— Select Company —</option>
-                      {companies.map((c: any) => {
-                        const name = c.Name ?? c.name ?? "";
-                        const id = String(c.Id ?? c.id ?? "");
-                        return (
-                          <option key={id} value={id}>
-                            {name}
-                          </option>
-                        );
-                      })}
-                    </select>
+                    <div className="relative">
+                      <select
+                        value={form.companyId}
+                        onChange={(e) => {
+                          const selected = companies.find(
+                            (c: any) => String(c.Id ?? c.id) === e.target.value,
+                          );
+                          handleCompanyChange(
+                            e.target.value,
+                            selected
+                              ? (selected.Name ?? selected.name ?? "")
+                              : "",
+                          );
+                        }}
+                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+                      >
+                        <option value="">— Select Company —</option>
+                        {companies.map((c: any) => {
+                          const name = c.Name ?? c.name ?? "";
+                          const id = String(c.Id ?? c.id ?? "");
+                          return (
+                            <option key={id} value={id}>
+                              {name}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    </div>
                     {complianceLoading && (
                       <p className="text-[10px] text-primary mt-1 flex items-center gap-1">
                         <Loader2 size={10} className="animate-spin" />
@@ -1272,7 +1305,7 @@ export default function ProjectMaster() {
               <button
                 onClick={() => saveMutation.mutate()}
                 disabled={!form.code || !form.name || saveMutation.isPending}
-                className="px-5 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+                className="gradient-accent font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 {saveMutation.isPending && (
                   <Loader2 size={13} className="animate-spin" />
@@ -1293,24 +1326,31 @@ export default function ProjectMaster() {
 
         {/* Delete Confirmation */}
         {deleteConfirm !== null && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="bg-card border border-border rounded-xl p-6 w-80">
-              <p className="font-semibold text-foreground">
-                Delete this project?
-              </p>
-              <p className="text-sm text-muted-foreground mt-1">
-                This action is permanent and cannot be undone.
-              </p>
-              <div className="flex gap-3 mt-6">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
+                  <Trash2 size={18} className="text-red-500" />
+                </div>
+                <div>
+                  <p className="font-heading font-semibold text-foreground">
+                    Delete this project?
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    This action cannot be undone.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3">
                 <button
                   onClick={() => setDeleteConfirm(null)}
-                  className="flex-1 py-2 border border-border rounded-lg hover:bg-muted"
+                  className="flex-1 py-2 text-sm rounded-lg border border-border hover:bg-muted"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => deleteMutation.mutate(deleteConfirm)}
-                  className="flex-1 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+                  className="flex-1 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600"
                 >
                   Delete
                 </button>
@@ -1318,7 +1358,7 @@ export default function ProjectMaster() {
             </div>
           </div>
         )}
-      </div>
+      </div>{/* end space-y-6 mt-6 */}
     </>
   );
 }

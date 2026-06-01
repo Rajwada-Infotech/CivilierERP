@@ -166,6 +166,20 @@ const fmtAmount = (n: number | null) => {
 
 // ─── Module filter tab ────────────────────────────────────────────────────────
 
+// Semantic color map: module key → { inactive tint, active solid }
+const MODULE_TAB_COLORS: Record<string, { inactive: string; active: string }> = {
+  "purchase-orders":  { inactive: "border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20",     active: "bg-blue-500 text-white border-blue-500 font-semibold" },
+  "work-orders":      { inactive: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20", active: "bg-amber-500 text-white border-amber-500 font-semibold" },
+  "payments":         { inactive: "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20", active: "bg-emerald-500 text-white border-emerald-500 font-semibold" },
+  "goods-receipt":    { inactive: "border-violet-500/30 bg-violet-500/10 text-violet-600 dark:text-violet-400 hover:bg-violet-500/20", active: "bg-violet-500 text-white border-violet-500 font-semibold" },
+  "expense-booking":  { inactive: "border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20",       active: "bg-rose-500 text-white border-rose-500 font-semibold" },
+  "received-payment": { inactive: "border-teal-500/30 bg-teal-500/10 text-teal-600 dark:text-teal-400 hover:bg-teal-500/20",       active: "bg-teal-500 text-white border-teal-500 font-semibold" },
+  "work-done":        { inactive: "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-600/20", active: "bg-emerald-600 text-white border-emerald-600 font-semibold" },
+  "boq":              { inactive: "border-indigo-500/30 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20", active: "bg-indigo-500 text-white border-indigo-500 font-semibold" },
+  "material-requests":{ inactive: "border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-400 hover:bg-orange-500/20", active: "bg-orange-500 text-white border-orange-500 font-semibold" },
+  "material-issues":  { inactive: "border-cyan-500/30 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20",       active: "bg-cyan-500 text-white border-cyan-500 font-semibold" },
+};
+
 const ModuleTab: React.FC<{
   module: string | null;
   label: string;
@@ -173,28 +187,36 @@ const ModuleTab: React.FC<{
   count: number;
   active: boolean;
   onClick: () => void;
-}> = ({ label, icon: Icon, count, active, onClick }) => (
+}> = ({ module, label, icon: Icon, count, active, onClick }) => {
+  const colors = module ? MODULE_TAB_COLORS[module] : null;
+  const activeClass = colors
+    ? colors.active
+    : "gradient-accent text-white border-transparent font-semibold";
+  const inactiveClass = colors
+    ? colors.inactive
+    : "border-border bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground";
+
+  return (
   <button
     onClick={onClick}
-    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
-      active
-        ? "bg-primary text-primary-foreground shadow-sm"
-        : "bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground"
+    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-all whitespace-nowrap ${
+      active ? activeClass : inactiveClass
     }`}
   >
-    {Icon && <Icon size={13} />}
+    {Icon && <Icon size={12} />}
     <span>{label}</span>
     {count > 0 && (
       <span
         className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
-          active ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
+          active ? "bg-white/20 text-white" : "bg-muted/60 text-muted-foreground"
         }`}
       >
         {count}
       </span>
     )}
   </button>
-);
+  );
+};
 
 // ─── Inbox row ────────────────────────────────────────────────────────────────
 
@@ -345,13 +367,15 @@ const ApprovalInbox: React.FC = () => {
     <>
       <Breadcrumbs items={["Approvals", "Inbox"]} />
 
+      <div className="relative space-y-6 mt-6">
+
       {/* Page header */}
-      <div className="mb-5 flex items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Approval Inbox
-            </h1>
+            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+            <Inbox className="text-primary" /> Approval Inbox
+          </h1>
             {totalCount > 0 && (
               <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full leading-none">
                 {totalCount}
@@ -365,15 +389,16 @@ const ApprovalInbox: React.FC = () => {
         <button
           onClick={() => refetch()}
           disabled={isRefetching}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-xs text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+          className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+          title="Refresh"
         >
           <RefreshCw size={13} className={isRefetching ? "animate-spin" : ""} />
-          <span className="hidden sm:inline">Refresh</span>
+          Refresh
         </button>
       </div>
 
       {/* Module filter tabs */}
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap">
         <ModuleTab
           module={null}
           label="All"
@@ -483,6 +508,7 @@ const ApprovalInbox: React.FC = () => {
             </div>
           </>
         )}
+      </div>
       </div>
     </>
   );
