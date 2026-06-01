@@ -170,18 +170,19 @@ export default function WidgetsRights() {
   const enabledCount = allowedWidgets.size;
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-        <Breadcrumbs items={["Admin", "Rights", "Widgets Rights"]} />
+    <>
+      <Breadcrumbs items={["Admin", "Rights", "Widgets Rights"]} />
+
+      <div className="relative space-y-6 mt-6">
 
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
+          <div>
             <div className="flex items-center gap-2">
               <Puzzle size={22} className="text-primary" />
               <h1 className="text-xl font-heading font-bold text-foreground">Widgets Rights</h1>
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs text-muted-foreground mt-0.5">
               Control which dashboard widgets each user can access. Changes take effect on next login.
             </p>
           </div>
@@ -190,14 +191,12 @@ export default function WidgetsRights() {
             <button
               onClick={handleSave}
               disabled={saveStatus === "saving"}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all shrink-0
+              className={`gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-60 transition-all
                 ${saveStatus === "saved"
-                  ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
+                  ? "!bg-none !bg-emerald-500 border border-emerald-500/30"
                   : saveStatus === "error"
-                  ? "bg-destructive/20 text-destructive border border-destructive/30"
-                  : saveStatus === "saving"
-                  ? "bg-primary/60 text-primary-foreground cursor-not-allowed"
-                  : "bg-primary text-primary-foreground hover:bg-primary/90 active:scale-95"
+                  ? "!bg-none !bg-destructive border border-destructive/30"
+                  : ""
                 }`}
             >
               {saveStatus === "saving" ? (
@@ -230,12 +229,12 @@ export default function WidgetsRights() {
             <div className="relative">
               <button
                 onClick={() => setUserDropdownOpen(o => !o)}
-                className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-colors text-sm"
+                className="w-full flex items-center justify-between gap-2 pl-3 pr-3 py-2.5 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-colors text-sm appearance-none"
               >
                 <span className={selectedUser ? "text-foreground font-medium" : "text-muted-foreground"}>
                   {selectedUser ? `${selectedUser.name} — ${selectedUser.email}` : "Choose a user to configure…"}
                 </span>
-                <ChevronDown size={16} className={`text-muted-foreground transition-transform ${userDropdownOpen ? "rotate-180" : ""}`} />
+<ChevronDown size={14} className={`shrink-0 text-muted-foreground transition-transform ${userDropdownOpen ? "rotate-180" : ""}`} />
               </button>
 
               {userDropdownOpen && (
@@ -310,10 +309,46 @@ export default function WidgetsRights() {
                   <button
                     key={cat}
                     onClick={() => setCategoryFilter(cat)}
-                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all
+                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-all whitespace-nowrap
                       ${categoryFilter === cat
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted/30 text-muted-foreground hover:bg-muted/60"
+                        ? cat === "All"
+                          ? "gradient-accent text-white border-transparent font-semibold"
+                          : cat === "Charts"
+                            ? "bg-blue-500 text-white border-blue-500 font-semibold"
+                            : cat === "KPIs"
+                              ? "bg-violet-500 text-white border-violet-500 font-semibold"
+                              : cat === "Data"
+                                ? "bg-cyan-500 text-white border-cyan-500 font-semibold"
+                                : cat === "Planning"
+                                  ? "bg-emerald-500 text-white border-emerald-500 font-semibold"
+                                  : cat === "Alerts"
+                                    ? "bg-rose-500 text-white border-rose-500 font-semibold"
+                                    : cat === "Activity"
+                                      ? "bg-amber-500 text-white border-amber-500 font-semibold"
+                                      : cat === "Geo"
+                                        ? "bg-teal-500 text-white border-teal-500 font-semibold"
+                                        : cat === "Tools"
+                                          ? "bg-orange-500 text-white border-orange-500 font-semibold"
+                                          : "gradient-accent text-white border-transparent font-semibold"
+                        : cat === "All"
+                          ? "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60"
+                          : cat === "Charts"
+                            ? "border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20"
+                            : cat === "KPIs"
+                              ? "border-violet-500/30 bg-violet-500/10 text-violet-600 dark:text-violet-400 hover:bg-violet-500/20"
+                              : cat === "Data"
+                                ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20"
+                                : cat === "Planning"
+                                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
+                                  : cat === "Alerts"
+                                    ? "border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20"
+                                    : cat === "Activity"
+                                      ? "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"
+                                      : cat === "Geo"
+                                        ? "border-teal-500/30 bg-teal-500/10 text-teal-600 dark:text-teal-400 hover:bg-teal-500/20"
+                                        : cat === "Tools"
+                                          ? "border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-400 hover:bg-orange-500/20"
+                                          : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60"
                       }`}
                   >
                     {cat}
@@ -426,6 +461,6 @@ export default function WidgetsRights() {
           </div>
         )}
       </div>
-    </div>
+    </>
   );
 }
