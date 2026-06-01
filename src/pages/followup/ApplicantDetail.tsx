@@ -28,6 +28,8 @@ import {
   StickyNote,
   CreditCard,
   Globe,
+  Circle,
+  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -49,7 +51,6 @@ import { Textarea } from "@/components/ui/textarea";
 
 type LogType = "email" | "call" | "sms" | "note" | "payment";
 
-// AccountHeadMaster-based applicant (from /api/applicants)
 interface LegacyApplicant {
   LHeadId: number;
   LHeadCode: string | null;
@@ -69,7 +70,6 @@ interface LegacyApplicant {
   LBranchName?: string | null;
 }
 
-// FollowupApplicants-based (from /api/followup-applications)
 interface FollowupApplicant {
   Id: number;
   ApplicantNo?: string | null;
@@ -152,13 +152,14 @@ interface LogFormState {
   notes: string;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 interface ApiErrorPayload {
   error?: string;
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 const fmt = (v?: string | null) => v || "—";
+
 function fmtDate(v?: string | null) {
   if (!v) return "—";
   const d = new Date(v);
@@ -170,6 +171,7 @@ function fmtDate(v?: string | null) {
         year: "numeric",
       });
 }
+
 function fmtDateTime(v?: string | null) {
   if (!v) return "—";
   const d = new Date(v);
@@ -183,9 +185,16 @@ function fmtDateTime(v?: string | null) {
         minute: "2-digit",
       });
 }
+
 function fmtMoney(v?: number | null) {
-  return typeof v === "number" ? `₹${v.toLocaleString("en-IN")}` : "—";
+  if (typeof v !== "number") return "—";
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(v);
 }
+
 function initials(name: string) {
   return name
     .split(" ")
@@ -194,71 +203,90 @@ function initials(name: string) {
     .join("")
     .toUpperCase();
 }
+
 const AVATAR_PALETTE = [
-  "#2563EB",
-  "#7C3AED",
-  "#0891B2",
-  "#059669",
-  "#D97706",
-  "#DC2626",
-  "#DB2777",
-  "#4F46E5",
+  "from-blue-500 to-indigo-600",
+  "from-violet-500 to-purple-600",
+  "from-cyan-500 to-teal-600",
+  "from-emerald-500 to-green-600",
+  "from-orange-500 to-amber-600",
+  "from-rose-500 to-red-600",
+  "from-pink-500 to-fuchsia-600",
+  "from-indigo-500 to-blue-600",
 ];
-function avatarColor(name: string) {
+
+function avatarGradient(name: string) {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
 }
 
-const STATUS_PILL: Record<number, string> = {
-  1: "bg-emerald-500/10 text-emerald-600 border border-emerald-400/20",
-  0: "bg-red-500/10 text-red-500 border border-red-400/20",
-};
-
-const APPLICATION_STATUS_PILL: Record<string, string> = {
-  New: "bg-blue-500/10 text-blue-600 border border-blue-400/20",
-  Qualified: "bg-emerald-500/10 text-emerald-600 border border-emerald-400/20",
-  Shortlisted: "bg-violet-500/10 text-violet-600 border border-violet-400/20",
-  "Document Pending":
-    "bg-amber-500/10 text-amber-600 border border-amber-400/20",
-  Rejected: "bg-red-500/10 text-red-500 border border-red-400/20",
+const APPLICATION_STATUS_CONFIG: Record<
+  string,
+  { color: string; dot: string }
+> = {
+  New: {
+    color: "bg-sky-500/10 text-sky-500 border border-sky-400/20",
+    dot: "bg-sky-500",
+  },
+  Qualified: {
+    color: "bg-emerald-500/10 text-emerald-500 border border-emerald-400/20",
+    dot: "bg-emerald-500",
+  },
+  Shortlisted: {
+    color: "bg-violet-500/10 text-violet-500 border border-violet-400/20",
+    dot: "bg-violet-500",
+  },
+  "Document Pending": {
+    color: "bg-amber-500/10 text-amber-500 border border-amber-400/20",
+    dot: "bg-amber-500",
+  },
+  Rejected: {
+    color: "bg-red-500/10 text-red-500 border border-red-400/20",
+    dot: "bg-red-500",
+  },
 };
 
 const LOG_TYPE_CONFIG: Record<
   LogType,
-  { icon: typeof Phone; color: string; bg: string }
+  { icon: typeof Phone; color: string; bg: string; label: string }
 > = {
   call: {
     icon: Phone,
-    color: "text-blue-600",
+    color: "text-blue-500",
     bg: "bg-blue-500/10 border-blue-400/20",
+    label: "Call",
   },
   email: {
     icon: Mail,
-    color: "text-violet-600",
+    color: "text-violet-500",
     bg: "bg-violet-500/10 border-violet-400/20",
+    label: "Email",
   },
   sms: {
     icon: MessageSquare,
-    color: "text-cyan-600",
+    color: "text-cyan-500",
     bg: "bg-cyan-500/10 border-cyan-400/20",
+    label: "SMS",
   },
   note: {
     icon: StickyNote,
-    color: "text-amber-600",
+    color: "text-amber-500",
     bg: "bg-amber-500/10 border-amber-400/20",
+    label: "Note",
   },
   payment: {
     icon: IndianRupee,
-    color: "text-emerald-600",
+    color: "text-emerald-500",
     bg: "bg-emerald-500/10 border-emerald-400/20",
+    label: "Payment",
   },
 };
 
 const REMINDER_STATUS: Record<string, string> = {
-  sent: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
-  overdue: "bg-red-500/10 text-red-500 border-red-400/20",
-  scheduled: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+  sent: "bg-emerald-500/10 text-emerald-500 border border-emerald-400/20",
+  overdue: "bg-red-500/10 text-red-500 border border-red-400/20",
+  scheduled: "bg-amber-500/10 text-amber-500 border border-amber-400/20",
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -274,15 +302,15 @@ function InfoRow({
 }) {
   if (!value || value === "—") return null;
   return (
-    <div className="flex items-start gap-3 py-2.5 border-b border-border last:border-0">
+    <div className="flex items-start gap-3 py-2.5 border-b border-border/60 last:border-0">
       {Icon && (
         <Icon
-          size={14}
+          size={13}
           className="text-muted-foreground mt-0.5 flex-shrink-0"
         />
       )}
       <div className="flex-1 min-w-0">
-        <p className="text-[11px] text-muted-foreground leading-none mb-0.5">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground leading-none mb-1">
           {label}
         </p>
         <p className="text-[13px] font-medium text-foreground break-words">
@@ -293,87 +321,112 @@ function InfoRow({
   );
 }
 
-function SectionCard({
+function Panel({
   title,
   icon: Icon,
   children,
   badge,
+  action,
 }: {
   title: string;
   icon: typeof Phone;
   children: React.ReactNode;
   badge?: number;
+  action?: React.ReactNode;
 }) {
   return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden">
-      <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border bg-muted/30">
-        <Icon size={14} className="text-primary" />
-        <h3 className="text-[13px] font-semibold text-foreground">{title}</h3>
+    <div className="bg-card border border-border rounded-2xl overflow-hidden">
+      <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border bg-muted/20">
+        <div className="p-1.5 rounded-lg bg-primary/10">
+          <Icon size={13} className="text-primary" />
+        </div>
+        <h3 className="text-[13px] font-semibold text-foreground flex-1">
+          {title}
+        </h3>
         {badge !== undefined && (
-          <span className="ml-auto text-[11px] font-semibold bg-primary/10 text-primary rounded-full px-2 py-0.5">
+          <span className="text-[11px] font-bold bg-primary/10 text-primary rounded-full px-2 py-0.5 min-w-[22px] text-center">
             {badge}
           </span>
         )}
+        {action}
       </div>
       <div className="p-4">{children}</div>
     </div>
   );
 }
 
+function EmptyState({
+  icon: Icon,
+  message,
+}: {
+  icon: typeof FileText;
+  message: string;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+      <Icon size={28} className="opacity-20" />
+      <p className="text-[12px]">{message}</p>
+    </div>
+  );
+}
+
 function UnitCard({ unit }: { unit: UnitSelectionRecord }) {
   return (
-    <div className="border border-border rounded-lg p-3 mb-2 last:mb-0 hover:border-primary/30 transition-colors">
-      <div className="flex items-start justify-between gap-2 mb-2">
+    <div className="border border-border rounded-xl p-3.5 mb-2 last:mb-0 hover:border-primary/30 hover:bg-muted/20 transition-all">
+      <div className="flex items-start justify-between gap-2 mb-3">
         <div>
           <p className="text-[13px] font-semibold text-foreground">
             Unit {fmt(unit.UnitNo)}
           </p>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[11px] text-muted-foreground mt-0.5">
             {fmt(unit.SelectionNo)}
           </p>
         </div>
         {unit.Status && (
-          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-400/20">
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-400/20">
             {unit.Status}
           </span>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
         {unit.BlockName && (
-          <p className="text-[11px] text-muted-foreground">
+          <div className="text-[11px] text-muted-foreground">
             Block:{" "}
             <span className="text-foreground font-medium">
               {unit.BlockName}
             </span>
-          </p>
+          </div>
         )}
         {unit.FloorName && (
-          <p className="text-[11px] text-muted-foreground">
+          <div className="text-[11px] text-muted-foreground">
             Floor:{" "}
             <span className="text-foreground font-medium">
               {unit.FloorName}
             </span>
-          </p>
+          </div>
         )}
         {unit.UnitType && (
-          <p className="text-[11px] text-muted-foreground">
+          <div className="text-[11px] text-muted-foreground">
             Type:{" "}
             <span className="text-foreground font-medium">{unit.UnitType}</span>
-          </p>
+          </div>
         )}
         {unit.AreaSqFt && (
-          <p className="text-[11px] text-muted-foreground">
+          <div className="text-[11px] text-muted-foreground">
             Area:{" "}
             <span className="text-foreground font-medium">
               {unit.AreaSqFt} sqft
             </span>
-          </p>
+          </div>
         )}
       </div>
       {unit.TotalValue && (
-        <p className="text-[13px] font-bold text-primary mt-2">
-          {fmtMoney(unit.TotalValue)}
-        </p>
+        <div className="mt-3 pt-2.5 border-t border-border flex items-center justify-between">
+          <p className="text-[11px] text-muted-foreground">Total Value</p>
+          <p className="text-[14px] font-bold text-primary">
+            {fmtMoney(unit.TotalValue)}
+          </p>
+        </div>
       )}
     </div>
   );
@@ -381,37 +434,43 @@ function UnitCard({ unit }: { unit: UnitSelectionRecord }) {
 
 function AgreementCard({ agr }: { agr: AgreementRecord }) {
   return (
-    <div className="border border-border rounded-lg p-3 mb-2 last:mb-0 hover:border-primary/30 transition-colors">
-      <div className="flex items-start justify-between gap-2 mb-2">
+    <div className="border border-border rounded-xl p-3.5 mb-2 last:mb-0 hover:border-primary/30 hover:bg-muted/20 transition-all">
+      <div className="flex items-start justify-between gap-2 mb-3">
         <div>
           <p className="text-[13px] font-semibold text-foreground">
             {fmt(agr.AgreementNo)}
           </p>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[11px] text-muted-foreground mt-0.5">
             {fmtDate(agr.AgreementDate)}
           </p>
         </div>
         {agr.Status && (
-          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-600 border border-violet-400/20">
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-500 border border-violet-400/20">
             {agr.Status}
           </span>
         )}
       </div>
-      <div className="grid grid-cols-3 gap-2 mt-2">
-        <div className="bg-muted/40 rounded-lg p-2 text-center">
-          <p className="text-[10px] text-muted-foreground">Value</p>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-muted/40 rounded-xl p-2.5 text-center">
+          <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wide mb-1">
+            Value
+          </p>
           <p className="text-[12px] font-bold text-foreground">
             {fmtMoney(agr.AgreementValue)}
           </p>
         </div>
-        <div className="bg-muted/40 rounded-lg p-2 text-center">
-          <p className="text-[10px] text-muted-foreground">Advance</p>
-          <p className="text-[12px] font-bold text-emerald-600">
+        <div className="bg-emerald-500/5 border border-emerald-400/10 rounded-xl p-2.5 text-center">
+          <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wide mb-1">
+            Advance
+          </p>
+          <p className="text-[12px] font-bold text-emerald-500">
             {fmtMoney(agr.AdvanceAmount)}
           </p>
         </div>
-        <div className="bg-muted/40 rounded-lg p-2 text-center">
-          <p className="text-[10px] text-muted-foreground">Balance</p>
+        <div className="bg-amber-500/5 border border-amber-400/10 rounded-xl p-2.5 text-center">
+          <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wide mb-1">
+            Balance
+          </p>
           <p className="text-[12px] font-bold text-amber-500">
             {fmtMoney(agr.BalanceAmount)}
           </p>
@@ -425,19 +484,19 @@ function LogEntry({ log }: { log: LogRecord }) {
   const cfg = LOG_TYPE_CONFIG[log.type] ?? LOG_TYPE_CONFIG.note;
   const Icon = cfg.icon;
   return (
-    <div className="flex gap-3 py-3 border-b border-border last:border-0">
+    <div className="flex gap-3 py-3 border-b border-border/60 last:border-0">
       <div
-        className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 border ${cfg.bg}`}
+        className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 border ${cfg.bg}`}
       >
-        <Icon size={14} className={cfg.color} />
+        <Icon size={13} className={cfg.color} />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
-          <span className="text-[12px] font-semibold text-foreground capitalize">
-            {log.type}
+          <span className="text-[12px] font-semibold text-foreground">
+            {cfg.label}
           </span>
           {log.amount && (
-            <span className="text-[11px] font-medium text-emerald-600">
+            <span className="text-[11px] font-medium text-emerald-500 bg-emerald-500/10 rounded-full px-2 py-0.5">
               {fmtMoney(log.amount)}
             </span>
           )}
@@ -446,7 +505,7 @@ function LogEntry({ log }: { log: LogRecord }) {
           </span>
         </div>
         {log.notes && (
-          <p className="text-[12px] text-muted-foreground leading-snug">
+          <p className="text-[12px] text-muted-foreground leading-relaxed">
             {log.notes}
           </p>
         )}
@@ -455,8 +514,38 @@ function LogEntry({ log }: { log: LogRecord }) {
   );
 }
 
-// ─── Quick Log Panel ──────────────────────────────────────────────────────────
+// ─── KPI Card ─────────────────────────────────────────────────────────────────
+function KpiCard({
+  icon,
+  label,
+  value,
+  bg,
+  color,
+  small,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string | number;
+  bg: string;
+  color: string;
+  small?: boolean;
+}) {
+  return (
+    <div className="bg-card border border-border rounded-2xl p-4 hover:border-border/80 transition-colors">
+      <div className={`p-2 rounded-xl ${bg} w-fit mb-3`}>
+        <span className={color}>{icon}</span>
+      </div>
+      <p
+        className={`font-bold font-heading text-foreground leading-none ${small ? "text-[18px]" : "text-2xl"}`}
+      >
+        {value}
+      </p>
+      <p className="text-[11px] text-muted-foreground mt-1.5">{label}</p>
+    </div>
+  );
+}
 
+// ─── Quick Log Panel ──────────────────────────────────────────────────────────
 function QuickLogPanel({
   refId,
   applicantName,
@@ -501,19 +590,22 @@ function QuickLogPanel({
   });
 
   return (
-    <SectionCard title="Quick Log" icon={Plus}>
+    <Panel title="Quick Log" icon={Plus}>
       {!open ? (
         <button
           onClick={() => setOpen(true)}
-          className="w-full flex items-center gap-2 text-[13px] text-muted-foreground hover:text-foreground border border-dashed border-border hover:border-primary/40 rounded-lg px-3 py-2.5 transition-colors"
+          className="w-full flex items-center gap-2 text-[13px] text-muted-foreground hover:text-foreground border border-dashed border-border hover:border-primary/40 rounded-xl px-4 py-3 transition-colors"
         >
-          <Plus size={13} /> Add call, email, note or payment…
+          <Plus size={13} />
+          Add call, email, note or payment…
         </button>
       ) : (
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-[11px] mb-1 block">Date</Label>
+              <Label className="text-[10px] font-semibold uppercase tracking-wide mb-1.5 block text-muted-foreground">
+                Date
+              </Label>
               <Input
                 type="date"
                 value={form.date}
@@ -524,7 +616,9 @@ function QuickLogPanel({
               />
             </div>
             <div>
-              <Label className="text-[11px] mb-1 block">Type</Label>
+              <Label className="text-[10px] font-semibold uppercase tracking-wide mb-1.5 block text-muted-foreground">
+                Type
+              </Label>
               <Select
                 value={form.type}
                 onValueChange={(v) =>
@@ -545,7 +639,9 @@ function QuickLogPanel({
             </div>
           </div>
           <div>
-            <Label className="text-[11px] mb-1 block">Amount (optional)</Label>
+            <Label className="text-[10px] font-semibold uppercase tracking-wide mb-1.5 block text-muted-foreground">
+              Amount (optional)
+            </Label>
             <Input
               type="number"
               placeholder="₹ 0"
@@ -557,7 +653,9 @@ function QuickLogPanel({
             />
           </div>
           <div>
-            <Label className="text-[11px] mb-1 block">Notes</Label>
+            <Label className="text-[10px] font-semibold uppercase tracking-wide mb-1.5 block text-muted-foreground">
+              Notes
+            </Label>
             <Textarea
               rows={3}
               placeholder="Meeting outcome, next steps…"
@@ -601,23 +699,20 @@ function QuickLogPanel({
           </div>
         </div>
       )}
-    </SectionCard>
+    </Panel>
   );
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
-
 export default function ApplicantDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
 
-  // The list page passes the full applicant object via router state
   const stateApplicant = location.state?.applicant as
     | LegacyApplicant
     | undefined;
-
   const numericId = Number(id);
   const stateName = stateApplicant?.LHeadName || "";
 
@@ -639,7 +734,6 @@ export default function ApplicantDetail() {
     retry: false,
   });
 
-  // Try to find a matching FollowupApplicants record by LHeadId used as refId
   const { data: matchedFollowupRecord } = useQuery<FollowupApplicant | null>({
     queryKey: ["followup-applicant-by-ref", stateApplicant?.LHeadId],
     queryFn: async () => {
@@ -724,7 +818,7 @@ export default function ApplicantDetail() {
     queryClient.invalidateQueries({ queryKey: ["detail-reminders", refId] });
   };
 
-  // ─── No state — nothing to show ───────────────────────────────────────────
+  // ─── Loading / Error states ───────────────────────────────────────────────
 
   if (!applicant && applicantLoading) {
     return (
@@ -733,7 +827,7 @@ export default function ApplicantDetail() {
         <div className="relative z-10 p-6 flex flex-col items-center justify-center min-h-[60vh] gap-3">
           <Loader2 size={24} className="animate-spin text-primary" />
           <p className="text-sm text-muted-foreground">
-            Loading applicant details...
+            Loading applicant details…
           </p>
         </div>
       </>
@@ -745,7 +839,7 @@ export default function ApplicantDetail() {
       <>
         <DashboardBackground />
         <div className="relative z-10 p-6 flex flex-col items-center justify-center min-h-[60vh] gap-4">
-          <div className="p-3 rounded-2xl bg-red-500/10">
+          <div className="p-4 rounded-2xl bg-red-500/10">
             <AlertCircle size={28} className="text-red-500" />
           </div>
           <p className="text-sm text-muted-foreground">
@@ -769,11 +863,15 @@ export default function ApplicantDetail() {
     : applicant?.LHeadStatus === 1;
   const statusLabel =
     followupRecord?.Status ?? (isActive ? "Active" : "Inactive");
-  const statusClass = followupRecord?.Status
-    ? APPLICATION_STATUS_PILL[followupRecord.Status] ??
-      "bg-muted text-muted-foreground border border-border"
-    : STATUS_PILL[applicant?.LHeadStatus ?? 0] ??
-      "bg-muted text-muted-foreground border border-border";
+  const statusCfg = followupRecord?.Status
+    ? APPLICATION_STATUS_CONFIG[followupRecord.Status]
+    : {
+        color: isActive
+          ? "bg-emerald-500/10 text-emerald-500 border border-emerald-400/20"
+          : "bg-red-500/10 text-red-500 border border-red-400/20",
+        dot: isActive ? "bg-emerald-500" : "bg-red-500",
+      };
+
   const totalDealValue = agreements.reduce(
     (s, a) => s + (a.AgreementValue ?? 0),
     0,
@@ -783,6 +881,19 @@ export default function ApplicantDetail() {
     0,
   );
   const overdueCount = reminders.filter((r) => r.status === "overdue").length;
+
+  const salesJourneySteps = [
+    { label: "Lead Created", done: true },
+    { label: "Unit Selected", done: unitSelections.length > 0 },
+    {
+      label: "Agreement Signed",
+      done: agreements.some((a) => a.Status === "Signed"),
+    },
+    { label: "Registration", done: false },
+    { label: "Handover", done: false },
+  ];
+
+  const journeyProgress = salesJourneySteps.filter((s) => s.done).length;
 
   return (
     <>
@@ -798,7 +909,7 @@ export default function ApplicantDetail() {
                 { label: name, path: "#" },
               ]}
             />
-            <div className="flex items-center gap-3 mt-2">
+            <div className="flex items-center gap-3 mt-3">
               <button
                 onClick={() => navigate("/followup/sales/applications")}
                 className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
@@ -806,23 +917,25 @@ export default function ApplicantDetail() {
                 <ArrowLeft size={16} />
               </button>
               <div
-                className="w-12 h-12 rounded-2xl flex items-center justify-center text-[15px] font-bold text-white flex-shrink-0"
-                style={{ background: avatarColor(name) }}
+                className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${avatarGradient(name)} flex items-center justify-center text-[15px] font-bold text-white flex-shrink-0 shadow-lg`}
               >
                 {initials(name)}
               </div>
               <div>
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-2.5 flex-wrap">
                   <h1 className="text-2xl font-heading font-bold text-foreground leading-tight">
                     {name}
                   </h1>
                   <span
-                    className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${statusClass}`}
+                    className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${statusCfg?.color}`}
                   >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${statusCfg?.dot}`}
+                    />
                     {statusLabel}
                   </span>
                   {overdueCount > 0 && (
-                    <span className="flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-500/10 text-red-500 border border-red-400/20">
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-500/10 text-red-500 border border-red-400/20">
                       <Bell size={10} /> {overdueCount} overdue
                     </span>
                   )}
@@ -840,77 +953,59 @@ export default function ApplicantDetail() {
           </div>
           <button
             onClick={refresh}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 hover:bg-muted transition-colors mt-1"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-xl px-3 py-2 hover:bg-muted transition-colors"
           >
-            <RefreshCw size={13} /> Refresh
+            <RefreshCw size={12} /> Refresh
           </button>
         </div>
 
         {/* ── KPI Strip ── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {[
-            {
-              icon: <FileText size={16} />,
-              label: "Agreements",
-              value: agreements.length,
-              accent: "text-violet-600",
-              bg: "bg-violet-500/10",
-              small: false,
-            },
-            {
-              icon: <Home size={16} />,
-              label: "Unit Selections",
-              value: unitSelections.length,
-              accent: "text-blue-600",
-              bg: "bg-blue-500/10",
-              small: false,
-            },
-            {
-              icon: <IndianRupee size={16} />,
-              label: "Total Deal Value",
-              value: totalDealValue > 0 ? fmtMoney(totalDealValue) : "—",
-              accent: "text-emerald-600",
-              bg: "bg-emerald-500/10",
-              small: true,
-            },
-            {
-              icon: <TrendingUp size={16} />,
-              label: "Balance Due",
-              value: totalBalance > 0 ? fmtMoney(totalBalance) : "—",
-              accent:
-                totalBalance > 0 ? "text-amber-500" : "text-muted-foreground",
-              bg: totalBalance > 0 ? "bg-amber-500/10" : "bg-muted",
-              small: true,
-            },
-          ].map((t) => (
-            <div
-              key={t.label}
-              className="bg-card border border-border rounded-xl p-4"
-            >
-              <div className={`p-2 rounded-lg ${t.bg} w-fit mb-2.5`}>
-                <span className={t.accent}>{t.icon}</span>
-              </div>
-              <p
-                className={`font-bold font-heading text-foreground leading-none ${t.small ? "text-[18px]" : "text-2xl"}`}
-              >
-                {t.value}
-              </p>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                {t.label}
-              </p>
-            </div>
-          ))}
+          <KpiCard
+            icon={<FileText size={16} />}
+            label="Agreements"
+            value={agreements.length}
+            bg="bg-violet-500/10"
+            color="text-violet-500"
+          />
+          <KpiCard
+            icon={<Home size={16} />}
+            label="Unit Selections"
+            value={unitSelections.length}
+            bg="bg-blue-500/10"
+            color="text-blue-500"
+          />
+          <KpiCard
+            icon={<IndianRupee size={16} />}
+            label="Total Deal Value"
+            value={totalDealValue > 0 ? fmtMoney(totalDealValue) : "—"}
+            bg="bg-emerald-500/10"
+            color="text-emerald-500"
+            small
+          />
+          <KpiCard
+            icon={<TrendingUp size={16} />}
+            label="Balance Due"
+            value={totalBalance > 0 ? fmtMoney(totalBalance) : "—"}
+            bg={totalBalance > 0 ? "bg-amber-500/10" : "bg-muted"}
+            color={
+              totalBalance > 0 ? "text-amber-500" : "text-muted-foreground"
+            }
+            small
+          />
         </div>
 
         {/* ── Three-column layout ── */}
-        <div className="grid grid-cols-1 xl:grid-cols-[320px_1fr_300px] gap-5">
+        <div className="grid grid-cols-1 xl:grid-cols-[300px_1fr_280px] gap-5">
           {/* LEFT: Profile */}
           <div className="space-y-4">
-            <SectionCard title="Applicant Profile" icon={UserRound}>
+            <Panel title="Applicant Profile" icon={UserRound}>
               <div>
                 <InfoRow
                   label="Mobile"
-                  value={fmt(followupRecord?.PrimaryMobile ?? applicant?.LHeadPhone)}
+                  value={fmt(
+                    followupRecord?.PrimaryMobile ?? applicant?.LHeadPhone,
+                  )}
                   icon={Phone}
                 />
                 <InfoRow
@@ -970,16 +1065,15 @@ export default function ApplicantDetail() {
                 />
               </div>
               {applicant?.LDescription && (
-                <div className="mt-3 bg-muted/40 rounded-lg p-3">
-                  <p className="text-[11px] text-muted-foreground mb-1">
+                <div className="mt-3 bg-muted/40 rounded-xl p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
                     Description
                   </p>
-                  <p className="text-[12px] text-foreground leading-snug">
+                  <p className="text-[12px] text-foreground leading-relaxed">
                     {applicant.LDescription}
                   </p>
                 </div>
               )}
-              {/* Followup record extra info */}
               {followupRecord && (
                 <div className="mt-3 pt-3 border-t border-border space-y-0">
                   <InfoRow
@@ -1033,81 +1127,121 @@ export default function ApplicantDetail() {
                   />
                 </div>
               )}
-            </SectionCard>
+            </Panel>
 
             <QuickLogPanel refId={refId} applicantName={name} />
           </div>
 
           {/* CENTRE: Unit Selections + Agreements */}
           <div className="space-y-4">
-            <SectionCard
+            <Panel
               title="Unit Selections"
               icon={Home}
               badge={unitSelections.length}
             >
               {unitSelections.length === 0 ? (
-                <p className="text-[12px] text-muted-foreground text-center py-6">
-                  No unit selections linked.
-                </p>
+                <EmptyState icon={Home} message="No unit selections linked." />
               ) : (
                 unitSelections.map((u) => <UnitCard key={u.Id} unit={u} />)
               )}
-            </SectionCard>
+            </Panel>
 
-            <SectionCard
-              title="Agreements"
-              icon={FileText}
-              badge={agreements.length}
-            >
+            <Panel title="Agreements" icon={FileText} badge={agreements.length}>
               {agreements.length === 0 ? (
-                <p className="text-[12px] text-muted-foreground text-center py-6">
-                  No agreements yet.
-                </p>
+                <EmptyState icon={FileText} message="No agreements yet." />
               ) : (
                 agreements.map((a) => <AgreementCard key={a.Id} agr={a} />)
               )}
-            </SectionCard>
+            </Panel>
           </div>
 
           {/* RIGHT: Log + Reminders + Sales Journey */}
           <div className="space-y-4">
-            <SectionCard
+            {/* Sales Journey */}
+            <Panel title="Sales Journey" icon={BadgeCheck}>
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-[11px] text-muted-foreground">Progress</p>
+                  <p className="text-[11px] font-semibold text-foreground">
+                    {journeyProgress}/{salesJourneySteps.length}
+                  </p>
+                </div>
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all"
+                    style={{
+                      width: `${(journeyProgress / salesJourneySteps.length) * 100}%`,
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="space-y-0">
+                {salesJourneySteps.map((step, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-3 py-2.5 border-b border-border/60 last:border-0"
+                  >
+                    <div
+                      className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${step.done ? "bg-emerald-500 shadow-sm shadow-emerald-500/30" : "bg-muted border border-border"}`}
+                    >
+                      {step.done ? (
+                        <CheckCircle2 size={13} className="text-white" />
+                      ) : (
+                        <Circle
+                          size={10}
+                          className="text-muted-foreground/40"
+                        />
+                      )}
+                    </div>
+                    <span
+                      className={`text-[12px] flex-1 ${step.done ? "text-foreground font-medium" : "text-muted-foreground"}`}
+                    >
+                      {step.label}
+                    </span>
+                    {step.done && (
+                      <span className="text-[10px] font-semibold text-emerald-500 bg-emerald-500/10 rounded-full px-2 py-0.5">
+                        Done
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Panel>
+
+            {/* Follow-Up Log */}
+            <Panel
               title="Follow-Up Log"
               icon={ClipboardList}
               badge={logs.length}
             >
               {logs.length === 0 ? (
-                <p className="text-[12px] text-muted-foreground text-center py-6">
-                  No log entries yet.
-                </p>
+                <EmptyState
+                  icon={ClipboardList}
+                  message="No log entries yet."
+                />
               ) : (
-                <div className="max-h-[340px] overflow-y-auto pr-1">
+                <div className="max-h-[300px] overflow-y-auto -mr-2 pr-2">
                   {logs.map((l) => (
                     <LogEntry key={l.id} log={l} />
                   ))}
                 </div>
               )}
-            </SectionCard>
+            </Panel>
 
-            <SectionCard title="Reminders" icon={Bell} badge={reminders.length}>
+            {/* Reminders */}
+            <Panel title="Reminders" icon={Bell} badge={reminders.length}>
               {reminders.length === 0 ? (
-                <p className="text-[12px] text-muted-foreground text-center py-6">
-                  No reminders.
-                </p>
+                <EmptyState icon={Bell} message="No reminders set." />
               ) : (
-                <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                <div className="space-y-2 max-h-[280px] overflow-y-auto">
                   {reminders.map((r) => (
                     <div
                       key={r.id}
-                      className="flex items-start gap-2.5 border border-border rounded-lg p-2.5 hover:border-primary/20 transition-colors"
+                      className="flex items-start gap-2.5 border border-border rounded-xl p-3 hover:border-primary/20 transition-colors"
                     >
                       <Bell
-                        size={13}
-                        className={
-                          r.status === "overdue"
-                            ? "text-red-500 mt-0.5"
-                            : "text-muted-foreground mt-0.5"
-                        }
+                        size={12}
+                        className={`mt-0.5 flex-shrink-0 ${r.status === "overdue" ? "text-red-500" : "text-muted-foreground"}`}
                       />
                       <div className="flex-1 min-w-0">
                         <p className="text-[12px] font-medium text-foreground truncate">
@@ -1129,43 +1263,7 @@ export default function ApplicantDetail() {
                   ))}
                 </div>
               )}
-            </SectionCard>
-
-            <SectionCard title="Sales Journey" icon={BadgeCheck}>
-              {[
-                { label: "Lead Created", done: true },
-                { label: "Unit Selected", done: unitSelections.length > 0 },
-                {
-                  label: "Agreement Signed",
-                  done: agreements.some((a) => a.Status === "Signed"),
-                },
-                { label: "Registration", done: false },
-                { label: "Handover", done: false },
-              ].map((step, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-2.5 py-2 border-b border-border last:border-0"
-                >
-                  <div
-                    className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${step.done ? "bg-emerald-500" : "bg-muted border border-border"}`}
-                  >
-                    {step.done && (
-                      <CheckCircle2 size={12} className="text-white" />
-                    )}
-                  </div>
-                  <span
-                    className={`text-[12px] ${step.done ? "text-foreground font-medium" : "text-muted-foreground"}`}
-                  >
-                    {step.label}
-                  </span>
-                  {step.done && (
-                    <span className="ml-auto text-[10px] text-emerald-600 font-semibold">
-                      Done
-                    </span>
-                  )}
-                </div>
-              ))}
-            </SectionCard>
+            </Panel>
           </div>
         </div>
       </div>
