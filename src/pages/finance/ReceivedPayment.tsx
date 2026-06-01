@@ -115,6 +115,12 @@ const PAYMENT_MODES: PaymentMode[] = [
 
 const fmt = (n: number) => formatINR(n, { decimals: 2 });
 
+const normalizeCompanyName = (value: string | null | undefined) =>
+  String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
 const modeIcon = (mode: string) => {
   if (mode === "Cash")
     return <Banknote size={13} className="text-emerald-500" />;
@@ -384,9 +390,14 @@ export default function ReceivedPaymentPage() {
     companies.find((c) => String(c.id) === form.companyId)?.label ?? "";
   const depositBanks = useMemo(() => {
     if (!selectedCompanyLabel) return banks;
-    return banks.filter(
-      (b) => !b.BCompanyName || b.BCompanyName === selectedCompanyLabel,
-    );
+
+    const selectedCompany = normalizeCompanyName(selectedCompanyLabel);
+    const matchedBanks = banks.filter((b) => {
+      const bankCompany = normalizeCompanyName(b.BCompanyName);
+      return !bankCompany || bankCompany === selectedCompany;
+    });
+
+    return matchedBanks.length > 0 ? matchedBanks : banks;
   }, [banks, selectedCompanyLabel]);
 
   // ── Projects — independent selection, show all ───────────────────────────────
@@ -601,8 +612,8 @@ export default function ReceivedPaymentPage() {
       await deleteReceivedPayment(Number(id));
       toast.success("Payment deleted");
       await loadPayments(currentPage);
-    } catch {
-      toast.error("Failed to delete payment");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to delete payment");
     }
   };
 
