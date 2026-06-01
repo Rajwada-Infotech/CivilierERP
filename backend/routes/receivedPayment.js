@@ -8,6 +8,7 @@ const {
   backPatchRecordId,
 } = require("../utils/docNumberLock");
 const { cache, localVersionCache } = require("../middleware/cache");
+const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
@@ -24,6 +25,13 @@ router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
 // (~2ms) instead of a SQL Server sys.columns scan (~200ms+).
 let _hasNewCols = null;
 const HAS_NEW_COLS_REDIS_KEY = "schema:ReceivedPayment:hasRPDocNo";
+
+const MUTATION_CACHE_KEYS = ["received-payment", "brs", "finance-dashboard"];
+
+async function invalidateReceivedPaymentWorkflowCaches() {
+  MUTATION_CACHE_KEYS.forEach((key) => localVersionCache.invalidate(key));
+  await Promise.all(MUTATION_CACHE_KEYS.map((key) => bumpCacheVersion(key)));
+}
 
 async function hasNewColumns(pool) {
   // 1. In-process memo — fastest path for warm requests
@@ -66,14 +74,7 @@ router.get("/", cache("received-payment", 30), async (req, res) => {
     const limit = Math.min(100, parseInt(req.query.limit) || 20);
     const offset = (page - 1) * limit;
     const pool = getPool();
-    const newCols = await hasNewColumns(pool);
-
-    const extraSelect = newCols
-      ? `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId,
-           RPCustomerName, RPDepositBankId, RPDepositBankName`
-      : "";
-
-    // Single query: COUNT(*) OVER() avoids a separate round-trip
+    // All new schema columns always present (migration 017+)
     const result = await pool
       .request()
       .input("offset", sql.Int, offset)
@@ -84,8 +85,9 @@ router.get("/", cache("received-payment", 30), async (req, res) => {
           RPRemarks, RPIsEmi, RPEmiTotal, RPEmiMonths, RPEmiStartDate,
           RPEmiSchedule, RPEmiPaying, RPStatus, RPCreatedBy, RPCreatedAt,
           RPUpdatedBy, RPUpdatedAt, RPApprovedBy, RPApprovedAt,
-          RPRejectedBy, RPRejectedAt, RPRejectionNote
-          ${extraSelect},
+          RPRejectedBy, RPRejectedAt, RPRejectionNote,
+          RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId,
+          RPCustomerName, RPDepositBankId, RPDepositBankName,
           COUNT(*) OVER() AS _total
         FROM dbo.ReceivedPayment
         ORDER BY RPCreatedAt DESC
@@ -140,10 +142,8 @@ router.post("/", async (req, res) => {
 
     const createdBy = req.user?.name || req.user?.email || null;
     const pool = getPool();
-    const newCols = await hasNewColumns(pool);
-
     let finalDocNo = null;
-    if (newCols && RPDocTypeId) {
+    if (RPDocTypeId) {
       finalDocNo = await lockNextDocNumber(pool, sql, {
         docTypeId: Number(RPDocTypeId),
         finYear: RPFinYear || null,
@@ -182,26 +182,17 @@ router.post("/", async (req, res) => {
       )
       .input("RPCreatedBy", sql.NVarChar(100), createdBy);
 
-    let extraCols = "";
-    let extraVals = "";
-    if (newCols) {
-      req2
-        .input("RPDocNo", sql.NVarChar(100), finalDocNo || null)
-        .input("RPFinYear", sql.NVarChar(20), RPFinYear || null)
-        .input("RPDocTypeId", sql.Int, RPDocTypeId || null)
-        .input("RPCompanyId", sql.Int, RPCompanyId || null)
-        .input("RPProjectId", sql.Int, RPProjectId || null)
-        .input("RPCustomerName", sql.NVarChar(255), RPCustomerName || null)
-        .input("RPDepositBankId", sql.Int, RPDepositBankId || null)
-        .input(
-          "RPDepositBankName",
-          sql.NVarChar(255),
-          RPDepositBankName || null,
-        );
-
-      extraCols = `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId, RPCustomerName, RPDepositBankId, RPDepositBankName`;
-      extraVals = `, @RPDocNo, @RPFinYear, @RPDocTypeId, @RPCompanyId, @RPProjectId, @RPCustomerName, @RPDepositBankId, @RPDepositBankName`;
-    }
+    req2
+      .input("RPDocNo", sql.NVarChar(100), finalDocNo || null)
+      .input("RPFinYear", sql.NVarChar(20), RPFinYear || null)
+      .input("RPDocTypeId", sql.Int, RPDocTypeId || null)
+      .input("RPCompanyId", sql.Int, RPCompanyId || null)
+      .input("RPProjectId", sql.Int, RPProjectId || null)
+      .input("RPCustomerName", sql.NVarChar(255), RPCustomerName || null)
+      .input("RPDepositBankId", sql.Int, RPDepositBankId || null)
+      .input("RPDepositBankName", sql.NVarChar(255), RPDepositBankName || null);
+    const extraCols = `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId, RPCustomerName, RPDepositBankId, RPDepositBankName`;
+    const extraVals = `, @RPDocNo, @RPFinYear, @RPDocTypeId, @RPCompanyId, @RPProjectId, @RPCustomerName, @RPDepositBankId, @RPDepositBankName`;
 
     const result = await req2.query(`
       INSERT INTO dbo.ReceivedPayment (
@@ -218,7 +209,7 @@ router.post("/", async (req, res) => {
     `);
 
     const row = result.recordset[0];
-    if (newCols && finalDocNo && row?.RPPaymentID) {
+    if (finalDocNo && row?.RPPaymentID) {
       await backPatchRecordId(
         pool,
         sql,
@@ -228,7 +219,7 @@ router.post("/", async (req, res) => {
       );
     }
 
-    localVersionCache.invalidate("received-payment");
+    await invalidateReceivedPaymentWorkflowCaches();
     res.status(201).json(row);
   } catch (err) {
     console.error("POST /received-payment error:", err);
@@ -267,8 +258,6 @@ router.put("/:id", async (req, res) => {
 
     const updatedBy = req.user?.name || req.user?.email || null;
     const pool = getPool();
-    const newCols = await hasNewColumns(pool);
-
     const req2 = pool
       .request()
       .input("id", sql.Int, id)
@@ -298,24 +287,16 @@ router.put("/:id", async (req, res) => {
       )
       .input("RPUpdatedBy", sql.NVarChar(150), updatedBy);
 
-    let extraSet = "";
-    if (newCols) {
-      req2
-        .input("RPCompanyId", sql.Int, RPCompanyId || null)
-        .input("RPProjectId", sql.Int, RPProjectId || null)
-        .input("RPCustomerName", sql.NVarChar(255), RPCustomerName || null)
-        .input("RPDepositBankId", sql.Int, RPDepositBankId || null)
-        .input(
-          "RPDepositBankName",
-          sql.NVarChar(255),
-          RPDepositBankName || null,
-        )
-        .input("RPFinYear", sql.NVarChar(20), RPFinYear || null);
-
-      extraSet = `RPCompanyId=@RPCompanyId, RPProjectId=@RPProjectId,
-                  RPCustomerName=@RPCustomerName, RPFinYear=@RPFinYear,
-                  RPDepositBankId=@RPDepositBankId, RPDepositBankName=@RPDepositBankName,`;
-    }
+    req2
+      .input("RPCompanyId", sql.Int, RPCompanyId || null)
+      .input("RPProjectId", sql.Int, RPProjectId || null)
+      .input("RPCustomerName", sql.NVarChar(255), RPCustomerName || null)
+      .input("RPDepositBankId", sql.Int, RPDepositBankId || null)
+      .input("RPDepositBankName", sql.NVarChar(255), RPDepositBankName || null)
+      .input("RPFinYear", sql.NVarChar(20), RPFinYear || null);
+    const extraSet = `RPCompanyId=@RPCompanyId, RPProjectId=@RPProjectId,
+                RPCustomerName=@RPCustomerName, RPFinYear=@RPFinYear,
+                RPDepositBankId=@RPDepositBankId, RPDepositBankName=@RPDepositBankName,`;
 
     const result = await req2.query(`
       UPDATE dbo.ReceivedPayment SET
@@ -332,7 +313,7 @@ router.put("/:id", async (req, res) => {
     `);
     if (result.recordset.length === 0)
       return res.status(404).json({ error: "Not found" });
-    localVersionCache.invalidate("received-payment");
+    await invalidateReceivedPaymentWorkflowCaches();
     res.json(result.recordset[0]);
   } catch (err) {
     console.error("PUT /received-payment error:", err);
@@ -342,18 +323,56 @@ router.put("/:id", async (req, res) => {
 
 // -- DELETE /:id ----------------------------------------------------------------
 router.delete("/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "Invalid payment id" });
+  }
+
+  const pool = getPool();
+  const tx = new sql.Transaction(pool);
+  let txDone = false;
+
   try {
-    const { id } = req.params;
-    const pool = getPool();
-    await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query(`DELETE FROM dbo.ReceivedPayment WHERE RPPaymentID=@id`);
-    localVersionCache.invalidate("received-payment");
-    res.json({ success: true });
+    await tx.begin();
+
+    const existing = await new sql.Request(tx).input("id", sql.Int, id).query(`
+      SELECT RPPaymentID
+      FROM dbo.ReceivedPayment
+      WHERE RPPaymentID = @id
+    `);
+
+    if (existing.recordset.length === 0) {
+      await tx.rollback();
+      txDone = true;
+      return res.status(404).json({ error: "Received payment not found" });
+    }
+
+    await new sql.Request(tx).input("id", sql.Int, id).query(`
+      DELETE FROM dbo.BankReconciliation
+      WHERE SourceType = 'RECEIVED' AND SourceID = @id
+    `);
+
+    const deleted = await new sql.Request(tx).input("id", sql.Int, id).query(`
+      DELETE FROM dbo.ReceivedPayment
+      WHERE RPPaymentID = @id
+    `);
+
+    if ((deleted.rowsAffected?.[0] || 0) === 0) {
+      await tx.rollback();
+      txDone = true;
+      return res.status(404).json({ error: "Received payment not found" });
+    }
+
+    await tx.commit();
+    txDone = true;
+    await invalidateReceivedPaymentWorkflowCaches();
+    res.json({ success: true, message: "Received payment deleted" });
   } catch (err) {
+    try {
+      if (!txDone) await tx.rollback();
+    } catch {}
     console.error("DELETE /received-payment error:", err);
-    res.status(500).json({ error: "Failed to delete" });
+    res.status(500).json({ error: err.message || "Failed to delete" });
   }
 });
 
@@ -390,7 +409,7 @@ router.patch("/:id/submit", async (req, res) => {
         WHERE RPPaymentID = @id
       `);
 
-    localVersionCache.invalidate("received-payment");
+    await invalidateReceivedPaymentWorkflowCaches();
     res.json({ success: true, message: "Submitted for approval" });
   } catch (err) {
     console.error("PATCH /submit error:", err);
@@ -398,7 +417,7 @@ router.patch("/:id/submit", async (req, res) => {
   }
 });
 
-// -- PUT /:id/approve (admin only — called from Approval Inbox) ---------------
+// -- PUT /:id/approve (admin only &#65533; called from Approval Inbox) ---------------
 router.put("/:id/approve", async (req, res) => {
   try {
     const { id } = req.params;
@@ -411,7 +430,7 @@ router.put("/:id/approve", async (req, res) => {
       .query(
         `UPDATE dbo.ReceivedPayment SET RPStatus='Approved', RPApprovedBy=@by, RPApprovedAt=GETDATE() WHERE RPPaymentID=@id`,
       );
-    localVersionCache.invalidate("received-payment");
+    await invalidateReceivedPaymentWorkflowCaches();
     res.json({ success: true });
   } catch (err) {
     console.error("PUT /:id/approve error:", err);
@@ -419,7 +438,7 @@ router.put("/:id/approve", async (req, res) => {
   }
 });
 
-// -- PUT /:id/reject (admin only — called from Approval Inbox) ----------------
+// -- PUT /:id/reject (admin only &#65533; called from Approval Inbox) ----------------
 router.put("/:id/reject", async (req, res) => {
   try {
     const { id } = req.params;
@@ -434,7 +453,7 @@ router.put("/:id/reject", async (req, res) => {
       .query(
         `UPDATE dbo.ReceivedPayment SET RPStatus='Rejected', RPRejectedBy=@by, RPRejectedAt=GETDATE(), RPRejectionNote=@note WHERE RPPaymentID=@id`,
       );
-    localVersionCache.invalidate("received-payment");
+    await invalidateReceivedPaymentWorkflowCaches();
     res.json({ success: true });
   } catch (err) {
     console.error("PUT /:id/reject error:", err);
@@ -443,7 +462,3 @@ router.put("/:id/reject", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
