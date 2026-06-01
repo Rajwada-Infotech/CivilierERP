@@ -2,13 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
-  CalendarDays,
   ChevronLeft,
   ChevronRight,
   Edit2,
   Eye,
   FileText,
-  IndianRupee,
   Loader2,
   Mail,
   Phone,
@@ -17,8 +15,16 @@ import {
   Save,
   Search,
   Trash2,
-  User,
   X,
+  Sparkles,
+  UserCheck,
+  TrendingUp,
+  AlertTriangle,
+  MapPin,
+  Users,
+  ChevronDown,
+  SlidersHorizontal,
+  ArrowUpRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
@@ -70,18 +76,18 @@ interface Option {
   Id: number;
   Name: string;
 }
-
 interface Customer extends Option {
   Phone: string | null;
   Email: string | null;
+  Address?: string | null;
+  PanNumber?: string | null;
+  ContactPerson?: string | null;
 }
-
 interface UnitOption extends Option {
   ProjectId: number | null;
   BlockId: number | null;
   BlockName: string | null;
 }
-
 interface ListResponse {
   data: Application[];
   pagination: {
@@ -91,14 +97,12 @@ interface ListResponse {
     totalPages: number;
   };
 }
-
 interface OptionsResponse {
   projects: Option[];
   companies: Option[];
   users: Option[];
   statusOptions: ApplicationStatus[];
 }
-
 interface FormState {
   CustomerId: string;
   ApplicantName: string;
@@ -145,83 +149,292 @@ const emptyForm: FormState = {
   Notes: "",
 };
 
-const statusStyles: Record<ApplicationStatus, string> = {
-  New: "bg-blue-500/10 text-blue-600 border border-blue-400/20",
-  Qualified:
-    "bg-emerald-500/10 text-emerald-600 border border-emerald-400/20",
-  Shortlisted:
-    "bg-violet-500/10 text-violet-600 border border-violet-400/20",
-  "Document Pending":
-    "bg-amber-500/10 text-amber-600 border border-amber-400/20",
-  Rejected: "bg-red-500/10 text-red-600 border border-red-400/20",
+// Status visual config — each status gets a unique look
+const statusConfig: Record<
+  ApplicationStatus,
+  {
+    pill: string;
+    dot: string;
+    label: string;
+    track: string; // for the status pipeline bar
+    glow: string; // row hover glow
+  }
+> = {
+  New: {
+    pill: "bg-sky-500/10 text-sky-400 ring-1 ring-sky-400/25",
+    dot: "bg-sky-400",
+    label: "New",
+    track: "bg-sky-500",
+    glow: "hover:shadow-[inset_3px_0_0_hsl(199_89%_48%)]",
+  },
+  Qualified: {
+    pill: "bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-400/25",
+    dot: "bg-emerald-400",
+    label: "Qualified",
+    track: "bg-emerald-500",
+    glow: "hover:shadow-[inset_3px_0_0_hsl(160_84%_39%)]",
+  },
+  Shortlisted: {
+    pill: "bg-violet-500/10 text-violet-400 ring-1 ring-violet-400/25",
+    dot: "bg-violet-400",
+    label: "Shortlisted",
+    track: "bg-violet-500",
+    glow: "hover:shadow-[inset_3px_0_0_hsl(263_70%_58%)]",
+  },
+  "Document Pending": {
+    pill: "bg-amber-500/10 text-amber-400 ring-1 ring-amber-400/25",
+    dot: "bg-amber-400",
+    label: "Doc Pending",
+    track: "bg-amber-500",
+    glow: "hover:shadow-[inset_3px_0_0_hsl(38_92%_50%)]",
+  },
+  Rejected: {
+    pill: "bg-red-500/10 text-red-400 ring-1 ring-red-400/25",
+    dot: "bg-red-400",
+    label: "Rejected",
+    track: "bg-red-500",
+    glow: "hover:shadow-[inset_3px_0_0_hsl(0_72%_51%)]",
+  },
 };
 
-function toNullable(value: string) {
-  return value.trim() === "" ? null : value.trim();
+function toNullable(v: string) {
+  return v.trim() === "" ? null : v.trim();
 }
-
-function toNullableNumber(value: string) {
-  return value === "" ? null : Number(value);
+function toNullableNumber(v: string) {
+  return v === "" ? null : Number(v);
 }
-
-function formatDate(value: string | null) {
-  if (!value) return "-";
-  return new Date(value).toLocaleDateString("en-IN", {
+function formatDate(v: string | null) {
+  if (!v) return "—";
+  return new Date(v).toLocaleDateString("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
   });
 }
-
-function formatCurrency(value: number | null) {
-  if (value == null) return "-";
+function formatCurrency(v: number | null) {
+  if (v == null) return "—";
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0,
-  }).format(value);
+    notation: v >= 10000000 ? "compact" : "standard",
+  }).format(v);
 }
-
 function initials(name: string) {
   return name
     .split(" ")
     .slice(0, 2)
-    .map((part) => part[0])
+    .map((p) => p[0])
     .join("")
     .toUpperCase();
 }
+const PALETTE = [
+  "from-blue-500 to-indigo-600",
+  "from-violet-500 to-purple-600",
+  "from-cyan-500 to-teal-600",
+  "from-emerald-500 to-green-600",
+  "from-orange-500 to-amber-600",
+  "from-rose-500 to-red-600",
+  "from-pink-500 to-fuchsia-600",
+  "from-indigo-500 to-blue-600",
+];
+function grad(name: string) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+}
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+// ─── Status Pipeline Strip ────────────────────────────────────────────────────
+// A thin horizontal bar at the top of the table showing status distribution
+function StatusPipeline({ apps }: { apps: Application[] }) {
+  const counts: Record<ApplicationStatus, number> = {
+    New: 0,
+    Qualified: 0,
+    Shortlisted: 0,
+    "Document Pending": 0,
+    Rejected: 0,
+  };
+  apps.forEach((a) => {
+    counts[a.Status] = (counts[a.Status] ?? 0) + 1;
+  });
+  const total = apps.length;
+  if (total === 0) return null;
+  const statuses: ApplicationStatus[] = [
+    "New",
+    "Qualified",
+    "Shortlisted",
+    "Document Pending",
+    "Rejected",
+  ];
   return (
-    <label className="space-y-1.5 text-sm">
-      <span className="font-medium text-foreground">{label}</span>
-      {children}
-    </label>
+    <div className="flex items-center gap-4 px-5 py-3 border-b border-border/50">
+      <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground shrink-0">
+        Pipeline
+      </span>
+      <div className="flex-1 flex rounded-full overflow-hidden h-1.5 gap-px">
+        {statuses.map((s) => {
+          const pct = total ? (counts[s] / total) * 100 : 0;
+          if (pct === 0) return null;
+          return (
+            <div
+              key={s}
+              title={`${s}: ${counts[s]}`}
+              className={`${statusConfig[s].track} transition-all duration-500`}
+              style={{ width: `${pct}%` }}
+            />
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-3 shrink-0">
+        {statuses
+          .filter((s) => counts[s] > 0)
+          .map((s) => (
+            <div key={s} className="flex items-center gap-1">
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${statusConfig[s].track}`}
+              />
+              <span className="text-[10px] text-muted-foreground">
+                {counts[s]} {statusConfig[s].label}
+              </span>
+            </div>
+          ))}
+      </div>
+    </div>
   );
 }
 
-const inputClass =
-  "h-10 w-full rounded-lg border border-border bg-card px-3 text-sm text-foreground outline-none transition focus:border-primary/60 focus:ring-2 focus:ring-primary/10";
-
-const textareaClass =
-  "min-h-[84px] w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary/60 focus:ring-2 focus:ring-primary/10";
-
+// ─── Status Badge ─────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: ApplicationStatus }) {
+  const c = statusConfig[status] ?? statusConfig.New;
   return (
     <span
-      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusStyles[status]}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${c.pill}`}
     >
-      {status}
+      <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
+      {c.label}
     </span>
   );
 }
 
+// ─── Drawer primitives ────────────────────────────────────────────────────────
+function DrawerSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+          {title}
+        </p>
+        <div className="flex-1 h-px bg-border/60" />
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">{children}</div>
+    </div>
+  );
+}
+function Field({
+  label,
+  children,
+  span2,
+}: {
+  label: string;
+  children: React.ReactNode;
+  span2?: boolean;
+}) {
+  return (
+    <label className={`space-y-1.5 text-sm ${span2 ? "sm:col-span-2" : ""}`}>
+      <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+const inputCls =
+  "h-9 w-full rounded-lg border border-border bg-background/60 px-3 text-sm text-foreground outline-none transition focus:border-primary/60 focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/40";
+const textareaCls =
+  "min-h-[80px] w-full rounded-lg border border-border bg-background/60 px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary/60 focus:ring-2 focus:ring-primary/10 resize-none placeholder:text-muted-foreground/40";
+
+// ─── Styled Select ────────────────────────────────────────────────────────────
+function StyledSelect({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  const sel = options.find((o) => o.value === value);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((p) => !p)}
+        className="h-9 w-full rounded-lg border border-border bg-background/60 px-3 text-sm text-foreground outline-none transition focus:border-primary/60 flex items-center justify-between gap-2 hover:border-border/80"
+      >
+        <span className={sel ? "text-foreground" : "text-muted-foreground/50"}>
+          {sel?.label ?? placeholder ?? "Select…"}
+        </span>
+        <ChevronDown
+          size={13}
+          className={`text-muted-foreground transition-transform flex-shrink-0 ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 right-0 z-[200] mt-1 rounded-xl border border-border bg-card shadow-2xl overflow-hidden max-h-52 overflow-y-auto">
+          {placeholder && (
+            <button
+              type="button"
+              onClick={() => {
+                onChange("");
+                setOpen(false);
+              }}
+              className={`w-full text-left px-3 py-2 text-sm transition-colors hover:bg-muted ${value === "" ? "text-foreground bg-muted/60 font-medium" : "text-muted-foreground"}`}
+            >
+              {placeholder}
+            </button>
+          )}
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => {
+                onChange(o.value);
+                setOpen(false);
+              }}
+              className={`w-full text-left px-3 py-2 text-sm transition-colors hover:bg-muted flex items-center gap-2 ${value === o.value ? "text-primary bg-primary/5 font-medium" : "text-foreground"}`}
+            >
+              {value === o.value && (
+                <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
+              )}
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Drawer ───────────────────────────────────────────────────────────────────
 function ApplicationDrawer({
   open,
   editing,
@@ -243,282 +456,435 @@ function ApplicationDrawer({
   saving: boolean;
   onClose: () => void;
   onSubmit: () => void;
-  onChange: (patch: Partial<FormState>) => void;
+  onChange: (p: Partial<FormState>) => void;
 }) {
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [showDrop, setShowDrop] = useState(false);
+  const autoFilled = !!form.CustomerId;
+  const selectedCustomer = customers.find(
+    (c) => String(c.Id) === form.CustomerId,
+  );
+  const filtered = customers
+    .filter(
+      (c) =>
+        c.Name.toLowerCase().includes(customerSearch.toLowerCase()) ||
+        c.Phone?.includes(customerSearch),
+    )
+    .slice(0, 8);
+
+  function pickCustomer(c: Customer) {
+    onChange({
+      CustomerId: String(c.Id),
+      ApplicantName: c.Name,
+      PrimaryMobile: c.Phone ?? form.PrimaryMobile,
+      Email: c.Email ?? form.Email,
+      PanNumber: c.PanNumber ?? form.PanNumber,
+    });
+    setCustomerSearch(c.Name);
+    setShowDrop(false);
+  }
+  function clearCustomer() {
+    onChange({
+      CustomerId: "",
+      ApplicantName: "",
+      PrimaryMobile: "",
+      Email: "",
+    });
+    setCustomerSearch("");
+  }
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-background/70 backdrop-blur-sm">
-      <div className="h-full w-full max-w-3xl overflow-y-auto border-l border-border bg-card shadow-2xl">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card/95 px-6 py-4 backdrop-blur">
-          <div>
-            <h2 className="text-lg font-heading font-semibold text-foreground">
-              {editing ? "Edit Application" : "New Application"}
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              {editing?.ApplicantNo ?? "Capture applicant and project details"}
-            </p>
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-[2px]">
+      <div
+        className="h-full w-full max-w-[700px] flex flex-col border-l border-border bg-card shadow-2xl"
+        style={{ animation: "slideIn 0.22s cubic-bezier(0.16,1,0.3,1)" }}
+      >
+        <div className="flex items-center justify-between border-b border-border px-6 py-4 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+              <FileText size={14} className="text-primary" />
+            </div>
+            <div>
+              <h2 className="text-[15px] font-semibold text-foreground leading-tight">
+                {editing ? "Edit Application" : "New Application"}
+              </h2>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {editing?.ApplicantNo ??
+                  "Fill in applicant and project details"}
+              </p>
+            </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <X className="h-4 w-4" />
-          </Button>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+          >
+            <X size={15} />
+          </button>
         </div>
 
-        <div className="grid gap-4 px-6 py-5 sm:grid-cols-2">
-          <Field label="Customer">
-            <select
-              className={inputClass}
-              value={form.CustomerId}
-              onChange={(event) => {
-                const customer = customers.find(
-                  (item) => String(item.Id) === event.target.value,
-                );
-                onChange({
-                  CustomerId: event.target.value,
-                  ApplicantName: customer?.Name ?? form.ApplicantName,
-                  PrimaryMobile: customer?.Phone ?? form.PrimaryMobile,
-                  Email: customer?.Email ?? form.Email,
-                });
-              }}
-            >
-              <option value="">Walk-in / new customer</option>
-              {customers.map((customer) => (
-                <option key={customer.Id} value={customer.Id}>
-                  {customer.Name}
-                </option>
-              ))}
-            </select>
-          </Field>
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+          {/* Customer lookup */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                Customer Lookup
+              </p>
+              <div className="flex-1 h-px bg-border/60" />
+              {autoFilled && (
+                <button
+                  onClick={clearCustomer}
+                  className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1"
+                >
+                  <X size={10} /> Clear
+                </button>
+              )}
+            </div>
+            {autoFilled ? (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/8 border border-emerald-400/20 text-emerald-400 text-xs font-medium">
+                <Sparkles size={12} /> Auto-filled from customer master ·{" "}
+                <span className="font-bold">{selectedCustomer?.Name}</span>
+              </div>
+            ) : (
+              <div className="relative">
+                <Search
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+                <input
+                  className={`${inputCls} pl-9 pr-9`}
+                  placeholder="Search by name or phone to auto-fill…"
+                  value={customerSearch}
+                  onChange={(e) => {
+                    setCustomerSearch(e.target.value);
+                    setShowDrop(true);
+                  }}
+                  onFocus={() => setShowDrop(true)}
+                />
+                <ChevronDown
+                  size={13}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+                {showDrop && filtered.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-xl border border-border bg-card shadow-xl overflow-hidden">
+                    {filtered.map((c) => (
+                      <button
+                        key={c.Id}
+                        onClick={() => pickCustomer(c)}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-muted transition-colors text-left"
+                      >
+                        <div
+                          className={`w-7 h-7 rounded-lg bg-gradient-to-br ${grad(c.Name)} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}
+                        >
+                          {initials(c.Name)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-foreground truncate">
+                            {c.Name}
+                          </p>
+                          {c.Phone && (
+                            <p className="text-xs text-muted-foreground">
+                              {c.Phone}
+                            </p>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                    <div className="px-4 py-2 border-t border-border">
+                      <p className="text-[11px] text-muted-foreground">
+                        Or fill in manually below for a walk-in
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {showDrop && customerSearch && filtered.length === 0 && (
+                  <div
+                    className="absolute top-full left-0 right-0 z-50 mt-1 rounded-xl border border-border bg-card shadow-xl overflow-hidden"
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    <div className="px-4 py-3 text-sm text-muted-foreground">
+                      No matching customers — fill in manually below
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
-          <Field label="Applicant Name">
-            <input
-              className={inputClass}
-              value={form.ApplicantName}
-              onChange={(event) => onChange({ ApplicantName: event.target.value })}
-            />
-          </Field>
-
-          <Field label="Mobile">
-            <input
-              className={inputClass}
-              value={form.PrimaryMobile}
-              onChange={(event) => onChange({ PrimaryMobile: event.target.value })}
-            />
-          </Field>
-
-          <Field label="Email">
-            <input
-              className={inputClass}
-              type="email"
-              value={form.Email}
-              onChange={(event) => onChange({ Email: event.target.value })}
-            />
-          </Field>
-
-          <Field label="PAN">
-            <input
-              className={inputClass}
-              value={form.PanNumber}
-              onChange={(event) =>
-                onChange({ PanNumber: event.target.value.toUpperCase() })
-              }
-            />
-          </Field>
-
-          <Field label="Application Date">
-            <input
-              className={inputClass}
-              type="date"
-              value={form.ApplicationDate}
-              onChange={(event) => onChange({ ApplicationDate: event.target.value })}
-            />
-          </Field>
-
-          <Field label="Project">
-            <select
-              className={inputClass}
-              value={form.ProjectId}
-              onChange={(event) =>
-                onChange({ ProjectId: event.target.value, UnitId: "" })
-              }
-            >
-              <option value="">Select project</option>
-              {options?.projects.map((project) => (
-                <option key={project.Id} value={project.Id}>
-                  {project.Name}
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          <Field label="Preferred Unit">
-            <select
-              className={inputClass}
-              value={form.UnitId}
-              onChange={(event) => onChange({ UnitId: event.target.value })}
-            >
-              <option value="">No unit selected</option>
-              {units.map((unit) => (
-                <option key={unit.Id} value={unit.Id}>
-                  {unit.BlockName ? `${unit.BlockName} - ` : ""}
-                  {unit.Name}
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          <Field label="Company">
-            <select
-              className={inputClass}
-              value={form.CompanyId}
-              onChange={(event) => onChange({ CompanyId: event.target.value })}
-            >
-              <option value="">Select company</option>
-              {options?.companies.map((company) => (
-                <option key={company.Id} value={company.Id}>
-                  {company.Name}
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          <Field label="Preferred Type">
-            <input
-              className={inputClass}
-              placeholder="2 BHK, 3 BHK, Villa..."
-              value={form.PreferredUnitType}
-              onChange={(event) =>
-                onChange({ PreferredUnitType: event.target.value })
-              }
-            />
-          </Field>
-
-          <Field label="Budget">
-            <input
-              className={inputClass}
-              type="number"
-              min="0"
-              value={form.BudgetAmount}
-              onChange={(event) => onChange({ BudgetAmount: event.target.value })}
-            />
-          </Field>
-
-          <Field label="Status">
-            <select
-              className={inputClass}
-              value={form.Status}
-              onChange={(event) =>
-                onChange({ Status: event.target.value as ApplicationStatus })
-              }
-            >
-              {options?.statusOptions.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          <Field label="Assigned To">
-            <select
-              className={inputClass}
-              value={form.AssignedTo}
-              onChange={(event) => onChange({ AssignedTo: event.target.value })}
-            >
-              <option value="">Unassigned</option>
-              {options?.users.map((user) => (
-                <option key={user.Id} value={user.Id}>
-                  {user.Name}
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          <Field label="Source">
-            <input
-              className={inputClass}
-              value={form.Source}
-              onChange={(event) => onChange({ Source: event.target.value })}
-            />
-          </Field>
-
-          <Field label="City">
-            <input
-              className={inputClass}
-              value={form.City}
-              onChange={(event) => onChange({ City: event.target.value })}
-            />
-          </Field>
-
-          <div className="sm:col-span-2">
-            <Field label="Applicant Address">
+          <DrawerSection title="Applicant Info">
+            <Field label="Full Name">
+              <input
+                className={inputCls}
+                value={form.ApplicantName}
+                placeholder="Enter applicant name"
+                onChange={(e) => onChange({ ApplicantName: e.target.value })}
+              />
+            </Field>
+            <Field label="Mobile">
+              <input
+                className={inputCls}
+                value={form.PrimaryMobile}
+                placeholder="+91 00000 00000"
+                onChange={(e) => onChange({ PrimaryMobile: e.target.value })}
+              />
+            </Field>
+            <Field label="Email">
+              <input
+                className={inputCls}
+                type="email"
+                value={form.Email}
+                placeholder="applicant@email.com"
+                onChange={(e) => onChange({ Email: e.target.value })}
+              />
+            </Field>
+            <Field label="PAN">
+              <input
+                className={inputCls}
+                value={form.PanNumber}
+                placeholder="ABCDE1234F"
+                onChange={(e) =>
+                  onChange({ PanNumber: e.target.value.toUpperCase() })
+                }
+              />
+            </Field>
+            <Field label="City">
+              <input
+                className={inputCls}
+                value={form.City}
+                placeholder="City"
+                onChange={(e) => onChange({ City: e.target.value })}
+              />
+            </Field>
+            <Field label="Application Date">
+              <input
+                className={inputCls}
+                type="date"
+                value={form.ApplicationDate}
+                onChange={(e) => onChange({ ApplicationDate: e.target.value })}
+              />
+            </Field>
+            <Field label="Applicant Address" span2>
               <textarea
-                className={textareaClass}
+                className={textareaCls}
                 value={form.ApplicantAddress}
-                onChange={(event) =>
-                  onChange({ ApplicantAddress: event.target.value })
-                }
+                placeholder="Residential address"
+                onChange={(e) => onChange({ ApplicantAddress: e.target.value })}
               />
             </Field>
-          </div>
+          </DrawerSection>
 
-          <Field label="Co-applicant Name">
-            <input
-              className={inputClass}
-              value={form.CoApplicantName}
-              onChange={(event) => onChange({ CoApplicantName: event.target.value })}
-            />
-          </Field>
-
-          <Field label="Co-applicant Phone">
-            <input
-              className={inputClass}
-              value={form.CoApplicantPhone}
-              onChange={(event) => onChange({ CoApplicantPhone: event.target.value })}
-            />
-          </Field>
-
-          <div className="sm:col-span-2">
-            <Field label="Correspondence Address">
+          <DrawerSection title="Co-Applicant">
+            <Field label="Co-applicant Name">
+              <input
+                className={inputCls}
+                value={form.CoApplicantName}
+                placeholder="Co-applicant full name"
+                onChange={(e) => onChange({ CoApplicantName: e.target.value })}
+              />
+            </Field>
+            <Field label="Co-applicant Phone">
+              <input
+                className={inputCls}
+                value={form.CoApplicantPhone}
+                placeholder="+91 00000 00000"
+                onChange={(e) => onChange({ CoApplicantPhone: e.target.value })}
+              />
+            </Field>
+            <Field label="Correspondence Address" span2>
               <textarea
-                className={textareaClass}
+                className={textareaCls}
                 value={form.CorrespondenceAddress}
-                onChange={(event) =>
-                  onChange({ CorrespondenceAddress: event.target.value })
+                placeholder="Correspondence / mailing address"
+                onChange={(e) =>
+                  onChange({ CorrespondenceAddress: e.target.value })
                 }
               />
             </Field>
-          </div>
+          </DrawerSection>
 
-          <div className="sm:col-span-2">
-            <Field label="Notes">
-              <textarea
-                className={textareaClass}
-                value={form.Notes}
-                onChange={(event) => onChange({ Notes: event.target.value })}
+          <DrawerSection title="Project & Preferences">
+            <Field label="Project">
+              <StyledSelect
+                value={form.ProjectId}
+                onChange={(v) => onChange({ ProjectId: v, UnitId: "" })}
+                placeholder="Select project"
+                options={(options?.projects ?? []).map((p) => ({
+                  value: String(p.Id),
+                  label: p.Name,
+                }))}
               />
             </Field>
-          </div>
+            <Field label="Preferred Unit">
+              <StyledSelect
+                value={form.UnitId}
+                onChange={(v) => onChange({ UnitId: v })}
+                placeholder="No unit selected"
+                options={units.map((u) => ({
+                  value: String(u.Id),
+                  label: u.BlockName ? `${u.BlockName} – ${u.Name}` : u.Name,
+                }))}
+              />
+            </Field>
+            <Field label="Company">
+              <StyledSelect
+                value={form.CompanyId}
+                onChange={(v) => onChange({ CompanyId: v })}
+                placeholder="Select company"
+                options={(options?.companies ?? []).map((c) => ({
+                  value: String(c.Id),
+                  label: c.Name,
+                }))}
+              />
+            </Field>
+            <Field label="Preferred Type">
+              <input
+                className={inputCls}
+                placeholder="2 BHK, 3 BHK, Villa…"
+                value={form.PreferredUnitType}
+                onChange={(e) =>
+                  onChange({ PreferredUnitType: e.target.value })
+                }
+              />
+            </Field>
+            <Field label="Budget (₹)">
+              <input
+                className={inputCls}
+                type="number"
+                min="0"
+                value={form.BudgetAmount}
+                placeholder="0"
+                onChange={(e) => onChange({ BudgetAmount: e.target.value })}
+              />
+            </Field>
+            <Field label="Source">
+              <input
+                className={inputCls}
+                value={form.Source}
+                placeholder="Referral, Website, Site Visit…"
+                onChange={(e) => onChange({ Source: e.target.value })}
+              />
+            </Field>
+          </DrawerSection>
+
+          <DrawerSection title="Status & Assignment">
+            <Field label="Status">
+              <StyledSelect
+                value={form.Status}
+                onChange={(v) => onChange({ Status: v as ApplicationStatus })}
+                options={(options?.statusOptions ?? []).map((s) => ({
+                  value: s,
+                  label: s,
+                }))}
+              />
+            </Field>
+            <Field label="Assigned To">
+              <StyledSelect
+                value={form.AssignedTo}
+                onChange={(v) => onChange({ AssignedTo: v })}
+                placeholder="Unassigned"
+                options={(options?.users ?? []).map((u) => ({
+                  value: String(u.Id),
+                  label: u.Name,
+                }))}
+              />
+            </Field>
+            <Field label="Notes" span2>
+              <textarea
+                className={textareaCls}
+                value={form.Notes}
+                placeholder="Any additional notes or observations…"
+                onChange={(e) => onChange({ Notes: e.target.value })}
+              />
+            </Field>
+          </DrawerSection>
         </div>
 
-        <div className="sticky bottom-0 flex justify-end gap-2 border-t border-border bg-card/95 px-6 py-4 backdrop-blur">
-          <Button variant="outline" onClick={onClose}>
+        <div className="flex justify-end gap-2 border-t border-border px-6 py-4 shrink-0">
+          <Button variant="outline" onClick={onClose} className="h-9">
             Cancel
           </Button>
-          <Button onClick={onSubmit} disabled={saving} className="gradient-accent text-white">
+          <Button
+            onClick={onSubmit}
+            disabled={saving}
+            className="gradient-accent text-white h-9 px-5 font-semibold"
+          >
             {saving ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <Save className="mr-2 h-4 w-4" />
             )}
-            Save
+            {editing ? "Update" : "Create Application"}
           </Button>
         </div>
+      </div>
+      <style>{`@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`}</style>
+    </div>
+  );
+}
+
+// ─── Bento Stat Card ──────────────────────────────────────────────────────────
+function BentoCard({
+  icon,
+  label,
+  value,
+  sub,
+  accentFrom,
+  accentTo,
+  iconColor,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string | number;
+  sub?: string;
+  accentFrom: string;
+  accentTo: string;
+  iconColor: string;
+}) {
+  return (
+    <div className="relative rounded-2xl border border-border bg-card p-5 overflow-hidden group transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:border-border/80">
+      {/* Gradient mesh background */}
+      <div
+        className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-br ${accentFrom} ${accentTo}`}
+        style={{ opacity: 0.04 }}
+      />
+      {/* Top-right glow orb */}
+      <div
+        className={`absolute -top-6 -right-6 w-20 h-20 rounded-full blur-2xl opacity-20 ${accentFrom.replace("from-", "bg-")}`}
+      />
+
+      <div className="relative flex items-start justify-between gap-3">
+        <div
+          className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br ${accentFrom} ${accentTo} bg-opacity-10`}
+          style={{
+            background: "transparent",
+            border: "1px solid",
+            borderColor: `color-mix(in srgb, currentColor 15%, transparent)`,
+          }}
+        >
+          <span className={iconColor}>{icon}</span>
+        </div>
+        <ArrowUpRight
+          size={13}
+          className="text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors mt-0.5"
+        />
+      </div>
+
+      <div className="relative mt-4">
+        <p className="text-[26px] font-bold tracking-tight text-foreground leading-none font-heading">
+          {value}
+        </p>
+        {sub && (
+          <p className="text-[10px] text-muted-foreground/60 mt-0.5 font-mono">
+            {sub}
+          </p>
+        )}
+        <p className="text-[11px] text-muted-foreground mt-2">{label}</p>
       </div>
     </div>
   );
 }
 
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function ApplicationsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -533,63 +899,56 @@ export default function ApplicationsPage() {
   const [form, setForm] = useState<FormState>(emptyForm);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    const t = window.setTimeout(() => {
       setDebouncedSearch(search);
       setPage(1);
     }, 300);
-    return () => window.clearTimeout(timer);
+    return () => window.clearTimeout(t);
   }, [search]);
 
   const { data: options } = useQuery<OptionsResponse>({
     queryKey: ["followup-applications-options"],
     queryFn: async () => {
-      const res = await fetchWithAuth(`${API}/options`);
-      if (!res.ok) throw new Error("Failed to load application options");
-      return res.json();
+      const r = await fetchWithAuth(`${API}/options`);
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
     },
   });
-
   const { data: customers = [] } = useQuery<Customer[]>({
     queryKey: ["followup-application-customers"],
     queryFn: async () => {
-      const res = await fetchWithAuth(`${API}/customers`);
-      if (!res.ok) throw new Error("Failed to load customers");
-      return res.json();
+      const r = await fetchWithAuth(`${API}/customers`);
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
     },
   });
-
   const { data: units = [] } = useQuery<UnitOption[]>({
     queryKey: ["followup-application-units", form.ProjectId],
     queryFn: async () => {
-      const params = form.ProjectId ? `?projectId=${form.ProjectId}` : "";
-      const res = await fetchWithAuth(`${API}/units${params}`);
-      if (!res.ok) throw new Error("Failed to load units");
-      return res.json();
+      const p = form.ProjectId ? `?projectId=${form.ProjectId}` : "";
+      const r = await fetchWithAuth(`${API}/units${p}`);
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
     },
     enabled: drawerOpen,
   });
 
-  const params = useMemo(() => {
-    const query = new URLSearchParams();
-    query.set("page", String(page));
-    query.set("pageSize", "20");
-    if (debouncedSearch) query.set("search", debouncedSearch);
-    if (status) query.set("status", status);
-    if (projectId) query.set("projectId", projectId);
-    return query.toString();
+  const queryParams = useMemo(() => {
+    const q = new URLSearchParams();
+    q.set("page", String(page));
+    q.set("pageSize", "20");
+    if (debouncedSearch) q.set("search", debouncedSearch);
+    if (status) q.set("status", status);
+    if (projectId) q.set("projectId", projectId);
+    return q.toString();
   }, [debouncedSearch, page, projectId, status]);
 
-  const {
-    data,
-    isLoading,
-    isFetching,
-    refetch,
-  } = useQuery<ListResponse>({
-    queryKey: ["followup-applications", params],
+  const { data, isLoading, isFetching, refetch } = useQuery<ListResponse>({
+    queryKey: ["followup-applications", queryParams],
     queryFn: async () => {
-      const res = await fetchWithAuth(`${API}?${params}`);
-      if (!res.ok) throw new Error("Failed to load applications");
-      return res.json();
+      const r = await fetchWithAuth(`${API}?${queryParams}`);
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
     },
   });
 
@@ -597,15 +956,16 @@ export default function ApplicationsPage() {
   const pagination = data?.pagination;
   const totalPages = pagination?.totalPages ?? 1;
 
-  const totals = useMemo(() => {
-    const list = applications;
-    return {
+  const totals = useMemo(
+    () => ({
       total: pagination?.total ?? 0,
-      active: list.filter((item) => item.Status !== "Rejected").length,
-      pendingDocs: list.filter((item) => item.Status === "Document Pending").length,
-      budget: list.reduce((sum, item) => sum + Number(item.BudgetAmount ?? 0), 0),
-    };
-  }, [applications, pagination?.total]);
+      active: applications.filter((a) => a.Status !== "Rejected").length,
+      pendingDocs: applications.filter((a) => a.Status === "Document Pending")
+        .length,
+      budget: applications.reduce((s, a) => s + Number(a.BudgetAmount ?? 0), 0),
+    }),
+    [applications, pagination?.total],
+  );
 
   function resetAndOpen() {
     setEditing(null);
@@ -613,31 +973,30 @@ export default function ApplicationsPage() {
     setDrawerOpen(true);
   }
 
-  function editApplication(application: Application) {
-    setEditing(application);
+  function editApplication(app: Application) {
+    setEditing(app);
     setForm({
-      CustomerId: application.CustomerId ? String(application.CustomerId) : "",
-      ApplicantName: application.ApplicantName ?? "",
-      PrimaryMobile: application.PrimaryMobile ?? "",
-      Email: application.Email ?? "",
-      PanNumber: application.PanNumber ?? "",
-      ApplicantAddress: application.ApplicantAddress ?? "",
-      CoApplicantName: application.CoApplicantName ?? "",
-      CoApplicantPhone: application.CoApplicantPhone ?? "",
-      CorrespondenceAddress: application.CorrespondenceAddress ?? "",
+      CustomerId: app.CustomerId ? String(app.CustomerId) : "",
+      ApplicantName: app.ApplicantName ?? "",
+      PrimaryMobile: app.PrimaryMobile ?? "",
+      Email: app.Email ?? "",
+      PanNumber: app.PanNumber ?? "",
+      ApplicantAddress: app.ApplicantAddress ?? "",
+      CoApplicantName: app.CoApplicantName ?? "",
+      CoApplicantPhone: app.CoApplicantPhone ?? "",
+      CorrespondenceAddress: app.CorrespondenceAddress ?? "",
       ApplicationDate:
-        application.ApplicationDate ?? new Date().toISOString().slice(0, 10),
-      City: application.City ?? "",
-      Source: application.Source ?? "",
-      ProjectId: application.ProjectId ? String(application.ProjectId) : "",
-      UnitId: application.UnitId ? String(application.UnitId) : "",
-      CompanyId: application.CompanyId ? String(application.CompanyId) : "",
-      PreferredUnitType: application.PreferredUnitType ?? "",
-      BudgetAmount:
-        application.BudgetAmount == null ? "" : String(application.BudgetAmount),
-      Status: application.Status,
-      AssignedTo: application.AssignedTo ? String(application.AssignedTo) : "",
-      Notes: application.Notes ?? "",
+        app.ApplicationDate ?? new Date().toISOString().slice(0, 10),
+      City: app.City ?? "",
+      Source: app.Source ?? "",
+      ProjectId: app.ProjectId ? String(app.ProjectId) : "",
+      UnitId: app.UnitId ? String(app.UnitId) : "",
+      CompanyId: app.CompanyId ? String(app.CompanyId) : "",
+      PreferredUnitType: app.PreferredUnitType ?? "",
+      BudgetAmount: app.BudgetAmount == null ? "" : String(app.BudgetAmount),
+      Status: app.Status,
+      AssignedTo: app.AssignedTo ? String(app.AssignedTo) : "",
+      Notes: app.Notes ?? "",
     });
     setDrawerOpen(true);
   }
@@ -647,7 +1006,6 @@ export default function ApplicationsPage() {
       toast.error("Applicant name is required");
       return;
     }
-
     const payload = {
       CustomerId: toNullableNumber(form.CustomerId),
       ApplicantName: form.ApplicantName.trim(),
@@ -670,51 +1028,47 @@ export default function ApplicationsPage() {
       AssignedTo: toNullableNumber(form.AssignedTo),
       Notes: toNullable(form.Notes),
     };
-
     setSaving(true);
     try {
-      const res = await fetchWithAuth(editing ? `${API}/${editing.Id}` : API, {
+      const r = await fetchWithAuth(editing ? `${API}/${editing.Id}` : API, {
         method: editing ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to save application");
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error((e as { error?: string }).error || "Failed");
       }
       toast.success(editing ? "Application updated" : "Application created");
       setDrawerOpen(false);
-      await queryClient.invalidateQueries({ queryKey: ["followup-applications"] });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save");
+      await queryClient.invalidateQueries({
+        queryKey: ["followup-applications"],
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save");
     } finally {
       setSaving(false);
     }
   }
 
-  async function deleteApplication(application: Application) {
-    if (
-      !window.confirm(
-        `Delete application ${application.ApplicantNo ?? application.ApplicantName}?`,
-      )
-    ) {
-      return;
-    }
-
+  async function deleteApplication(app: Application) {
+    if (!window.confirm(`Delete application for ${app.ApplicantName}?`)) return;
     try {
-      const res = await fetchWithAuth(`${API}/${application.Id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to delete application");
+      const r = await fetchWithAuth(`${API}/${app.Id}`, { method: "DELETE" });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error((e as { error?: string }).error || "Failed");
       }
       toast.success("Application deleted");
-      await queryClient.invalidateQueries({ queryKey: ["followup-applications"] });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete");
+      await queryClient.invalidateQueries({
+        queryKey: ["followup-applications"],
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete");
     }
   }
+
+  const hasFilters = !!(search || status || projectId);
 
   return (
     <>
@@ -725,138 +1079,190 @@ export default function ApplicationsPage() {
           { label: "Applications", path: "/followup/sales/applications" },
         ]}
       />
-      <div className="relative space-y-8 mt-6">
-        <div className="flex items-start justify-between gap-4">
+
+      <div className="space-y-6 mt-4">
+        {/* ── Header ─────────────────────────────────────────────────────── */}
+        <div className="flex items-end justify-between gap-4">
           <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Applications
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Manage sales applications before unit selection and booking.
+            <div className="flex items-center gap-2.5 mb-1">
+              <div className="w-1 h-5 rounded-full gradient-accent" />
+              <h1 className="text-[22px] font-heading font-bold text-foreground tracking-tight leading-none">
+                Applications
+              </h1>
+              {isFetching && (
+                <Loader2
+                  size={13}
+                  className="animate-spin text-muted-foreground"
+                />
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground pl-3.5">
+              Track and manage sales applications before unit selection and
+              booking.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-lg border border-border hover:bg-muted/60 transition-colors disabled:opacity-40 text-muted-foreground hover:text-foreground"
             >
               <RefreshCw
-                size={13}
+                size={12}
                 className={isFetching ? "animate-spin" : ""}
-              />
+              />{" "}
               Refresh
             </button>
             <Button
               onClick={resetAndOpen}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+              className="gradient-accent gap-1.5 font-semibold text-white text-sm h-9 px-4 rounded-xl shadow-lg shadow-primary/20"
             >
-              <Plus size={13} />
-              New Application
+              <Plus size={14} /> New Application
             </Button>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="p-2 rounded-lg bg-blue-500/10 w-fit mb-3">
-              <FileText size={16} className="text-blue-600" />
-            </div>
-            <p className="text-2xl font-bold font-heading text-foreground leading-none">
-              {totals.total}
-            </p>
-            <p className="text-[11px] text-muted-foreground mt-1">Total</p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="p-2 rounded-lg bg-emerald-500/10 w-fit mb-3">
-              <User size={16} className="text-emerald-600" />
-            </div>
-            <p className="text-2xl font-bold font-heading text-foreground leading-none">
-              {totals.active}
-            </p>
-            <p className="text-[11px] text-muted-foreground mt-1">Active on page</p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="p-2 rounded-lg bg-amber-500/10 w-fit mb-3">
-              <CalendarDays size={16} className="text-amber-600" />
-            </div>
-            <p className="text-2xl font-bold font-heading text-foreground leading-none">
-              {totals.pendingDocs}
-            </p>
-            <p className="text-[11px] text-muted-foreground mt-1">Docs pending</p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="p-2 rounded-lg bg-violet-500/10 w-fit mb-3">
-              <IndianRupee size={16} className="text-violet-600" />
-            </div>
-            <p className="text-2xl font-bold font-heading text-foreground leading-none">
-              {formatCurrency(totals.budget)}
-            </p>
-            <p className="text-[11px] text-muted-foreground mt-1">Budget on page</p>
-          </div>
+        {/* ── Bento Stats ─────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <BentoCard
+            icon={<Users size={15} />}
+            label="Total Applications"
+            value={totals.total}
+            sub={`across all projects`}
+            accentFrom="from-blue-500/5"
+            accentTo="to-indigo-500/5"
+            iconColor="text-blue-400"
+          />
+          <BentoCard
+            icon={<UserCheck size={15} />}
+            label="Active on Page"
+            value={totals.active}
+            sub={`${totals.total > 0 ? Math.round((totals.active / applications.length) * 100) : 0}% of this page`}
+            accentFrom="from-emerald-500/5"
+            accentTo="to-teal-500/5"
+            iconColor="text-emerald-400"
+          />
+          <BentoCard
+            icon={<AlertTriangle size={15} />}
+            label="Docs Pending"
+            value={totals.pendingDocs}
+            sub="needs attention"
+            accentFrom="from-amber-500/5"
+            accentTo="to-orange-500/5"
+            iconColor="text-amber-400"
+          />
+          <BentoCard
+            icon={<TrendingUp size={15} />}
+            label="Budget on Page"
+            value={formatCurrency(totals.budget)}
+            sub="combined applicant budget"
+            accentFrom="from-violet-500/5"
+            accentTo="to-purple-500/5"
+            iconColor="text-violet-400"
+          />
         </div>
 
-        <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
-          <div className="grid gap-3 border-b border-border p-4 md:grid-cols-[1fr_220px_220px]">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        {/* ── Table Card ───────────────────────────────────────────────────── */}
+        <div className="rounded-2xl border border-border bg-card overflow-hidden">
+          {/* Filter bar */}
+          <div className="flex flex-col gap-3 px-4 py-3 border-b border-border sm:flex-row sm:items-center">
+            <div className="relative flex-1 min-w-0">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60" />
               <input
-                className={`${inputClass} pl-9`}
-                placeholder="Search name, mobile, email, PAN, project"
+                className="h-9 w-full rounded-lg border border-border bg-muted/30 pl-9 pr-3 text-sm text-foreground outline-none transition focus:border-primary/60 focus:ring-2 focus:ring-primary/10 focus:bg-background/60 placeholder:text-muted-foreground/40"
+                placeholder="Search name, mobile, email, PAN…"
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <select
-              className={inputClass}
-              value={status}
-              onChange={(event) => {
-                setStatus(event.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="">All statuses</option>
-              {options?.statusOptions.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-            <select
-              className={inputClass}
-              value={projectId}
-              onChange={(event) => {
-                setProjectId(event.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="">All projects</option>
-              {options?.projects.map((project) => (
-                <option key={project.Id} value={project.Id}>
-                  {project.Name}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-2 shrink-0">
+              <SlidersHorizontal
+                size={13}
+                className="text-muted-foreground/50"
+              />
+              <div className="relative">
+                <select
+                  className="h-9 appearance-none rounded-lg border border-border bg-muted/30 px-3 pr-7 text-sm text-foreground outline-none focus:border-primary/60 min-w-[140px] cursor-pointer"
+                  value={status}
+                  onChange={(e) => {
+                    setStatus(e.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="">All Statuses</option>
+                  {options?.statusOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={11}
+                  className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60"
+                />
+              </div>
+              <div className="relative">
+                <select
+                  className="h-9 appearance-none rounded-lg border border-border bg-muted/30 px-3 pr-7 text-sm text-foreground outline-none focus:border-primary/60 min-w-[150px] cursor-pointer"
+                  value={projectId}
+                  onChange={(e) => {
+                    setProjectId(e.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="">All Projects</option>
+                  {options?.projects.map((p) => (
+                    <option key={p.Id} value={p.Id}>
+                      {p.Name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={11}
+                  className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60"
+                />
+              </div>
+              {hasFilters && (
+                <button
+                  onClick={() => {
+                    setSearch("");
+                    setStatus("");
+                    setProjectId("");
+                    setPage(1);
+                  }}
+                  className="h-9 px-2.5 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 text-xs"
+                >
+                  <X size={11} /> Clear
+                </button>
+              )}
+            </div>
           </div>
 
+          {/* Status pipeline visualization */}
+          {applications.length > 0 && <StatusPipeline apps={applications} />}
+
+          {/* Table */}
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="border-b border-border bg-muted/30">
+                <tr className="border-b border-border bg-muted/20">
+                  {/* Empty col for status accent bar */}
+                  <th className="w-1 pl-0" />
                   {[
                     "Applicant",
+                    "Contact",
                     "Project / Unit",
                     "Date",
                     "Budget",
                     "Status",
-                    "Assigned",
-                    "Actions",
-                  ].map((heading) => (
+                    "Assigned To",
+                    "",
+                  ].map((h) => (
                     <th
-                      key={heading}
-                      className={`px-4 py-3 text-[10px] font-bold text-muted-foreground uppercase tracking-widest whitespace-nowrap ${heading === "Actions" ? "text-right" : ""}`}
+                      key={h}
+                      className="px-3 py-2.5 text-[10px] font-bold text-muted-foreground uppercase tracking-widest whitespace-nowrap first:pl-4"
                     >
-                      {heading}
+                      {h}
                     </th>
                   ))}
                 </tr>
@@ -864,137 +1270,242 @@ export default function ApplicationsPage() {
               <tbody>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
+                    <td
+                      colSpan={9}
+                      className="px-4 py-16 text-center text-muted-foreground"
+                    >
                       <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" />
-                      Loading applications
+                      <p className="text-sm">Loading applications…</p>
                     </td>
                   </tr>
                 ) : applications.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
-                      No applications found
+                    <td colSpan={9} className="px-4 py-16 text-center">
+                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                        <div className="w-12 h-12 rounded-2xl bg-muted/50 flex items-center justify-center mb-1">
+                          <FileText size={22} className="opacity-30" />
+                        </div>
+                        <p className="text-sm font-medium">
+                          No applications found
+                        </p>
+                        <p className="text-xs text-muted-foreground/60">
+                          {hasFilters
+                            ? "Try adjusting your filters"
+                            : "Create your first application to get started"}
+                        </p>
+                        {hasFilters && (
+                          <button
+                            onClick={() => {
+                              setSearch("");
+                              setStatus("");
+                              setProjectId("");
+                            }}
+                            className="mt-1 text-xs text-primary hover:underline"
+                          >
+                            Clear filters
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ) : (
-                  applications.map((application) => (
-                    <tr
-                      key={application.Id}
-                      className="border-b border-border/40 align-top transition hover:bg-muted/40"
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-sm font-bold text-primary">
-                            {initials(application.ApplicantName)}
+                  applications.map((app, idx) => {
+                    const cfg = statusConfig[app.Status] ?? statusConfig.New;
+                    return (
+                      <tr
+                        key={app.Id}
+                        className={`group cursor-pointer transition-colors border-b border-border/40 last:border-0 hover:bg-muted/20 ${idx % 2 === 1 ? "bg-muted/[0.025]" : ""}`}
+                        onClick={() =>
+                          navigate(`/followup/sales/applications/${app.Id}`)
+                        }
+                      >
+                        {/* Status accent bar */}
+                        <td className="w-1 p-0 relative">
+                          <div
+                            className={`absolute inset-y-0 left-0 w-[3px] ${cfg.track} opacity-0 group-hover:opacity-80 transition-opacity rounded-r-full`}
+                          />
+                        </td>
+
+                        {/* Applicant */}
+                        <td className="pl-3 pr-3 py-3">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className={`h-8 w-8 shrink-0 rounded-xl bg-gradient-to-br ${grad(app.ApplicantName)} flex items-center justify-center text-[10px] font-bold text-white shadow-sm`}
+                            >
+                              {initials(app.ApplicantName)}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-foreground text-[13px] leading-tight group-hover:text-primary transition-colors">
+                                {app.ApplicantName}
+                              </p>
+                              <p className="text-[10px] font-mono text-muted-foreground/60 mt-0.5">
+                                {app.ApplicantNo ?? `APP-${app.Id}`}
+                              </p>
+                            </div>
                           </div>
-                          <div>
-                            <div className="font-semibold text-foreground">
-                              {application.ApplicantName}
-                            </div>
-                            <div className="text-xs font-mono text-muted-foreground">
-                              {application.ApplicantNo ?? `#${application.Id}`}
-                            </div>
-                            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                              {application.PrimaryMobile && (
-                                <span className="inline-flex items-center gap-1">
-                                  <Phone className="h-3 w-3" />
-                                  {application.PrimaryMobile}
+                        </td>
+
+                        {/* Contact */}
+                        <td className="px-3 py-3">
+                          <div className="space-y-0.5">
+                            {app.PrimaryMobile && (
+                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <Phone size={10} className="shrink-0" />
+                                {app.PrimaryMobile}
+                              </div>
+                            )}
+                            {app.Email && (
+                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <Mail size={10} className="shrink-0" />
+                                <span className="truncate max-w-[130px]">
+                                  {app.Email}
                                 </span>
-                              )}
-                              {application.Email && (
-                                <span className="inline-flex items-center gap-1">
-                                  <Mail className="h-3 w-3" />
-                                  {application.Email}
-                                </span>
-                              )}
+                              </div>
+                            )}
+                            {app.City && (
+                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <MapPin size={10} className="shrink-0" />
+                                {app.City}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Project / Unit */}
+                        <td className="px-3 py-3">
+                          <div className="flex items-start gap-2">
+                            <Building2
+                              size={11}
+                              className="text-muted-foreground/50 mt-0.5 shrink-0"
+                            />
+                            <div>
+                              <p className="text-[13px] font-medium text-foreground leading-tight">
+                                {app.ProjectName ?? "—"}
+                              </p>
+                              <p className="text-[11px] text-muted-foreground/60 mt-0.5">
+                                {app.UnitName
+                                  ? `${app.BlockName ? `${app.BlockName} / ` : ""}${app.UnitName}`
+                                  : (app.PreferredUnitType ?? "No preference")}
+                              </p>
                             </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-start gap-2">
-                          <Building2 className="mt-0.5 h-4 w-4 text-muted-foreground" />
-                          <div>
-                            <div className="font-medium text-foreground">
-                              {application.ProjectName ?? "-"}
+                        </td>
+
+                        {/* Date */}
+                        <td className="px-3 py-3 text-[12px] text-muted-foreground whitespace-nowrap tabular-nums">
+                          {formatDate(app.ApplicationDate)}
+                        </td>
+
+                        {/* Budget */}
+                        <td className="px-3 py-3">
+                          <span className="text-[13px] font-bold text-foreground whitespace-nowrap tabular-nums">
+                            {formatCurrency(app.BudgetAmount)}
+                          </span>
+                        </td>
+
+                        {/* Status */}
+                        <td className="px-3 py-3">
+                          <StatusBadge status={app.Status} />
+                        </td>
+
+                        {/* Assigned */}
+                        <td className="px-3 py-3 text-[12px] text-muted-foreground">
+                          {app.AssignedToName ? (
+                            <div className="flex items-center gap-1.5">
+                              <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-[8px] font-bold text-primary shrink-0">
+                                {initials(app.AssignedToName)}
+                              </div>
+                              <span className="truncate max-w-[90px]">
+                                {app.AssignedToName}
+                              </span>
                             </div>
-                            <div className="text-xs text-muted-foreground">
-                              {application.UnitName
-                                ? `${application.BlockName ? `${application.BlockName} / ` : ""}${application.UnitName}`
-                                : application.PreferredUnitType ?? "No unit preference"}
-                            </div>
+                          ) : (
+                            <span className="text-muted-foreground/25 select-none">
+                              —
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Actions */}
+                        <td
+                          className="px-3 py-3"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground"
+                              onClick={() =>
+                                navigate(
+                                  `/followup/sales/applications/${app.Id}`,
+                                )
+                              }
+                              title="View"
+                            >
+                              <Eye size={13} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground"
+                              onClick={() => editApplication(app)}
+                              title="Edit"
+                            >
+                              <Edit2 size={13} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 rounded-lg text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={() => deleteApplication(app)}
+                              title="Delete"
+                            >
+                              <Trash2 size={13} />
+                            </Button>
                           </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">{formatDate(application.ApplicationDate)}</td>
-                      <td className="px-4 py-3">{formatCurrency(application.BudgetAmount)}</td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={application.Status} />
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {application.AssignedToName ?? "-"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            title="Open application"
-                            onClick={() =>
-                              navigate(`/followup/sales/applications/${application.Id}`)
-                            }
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            title="Edit"
-                            onClick={() => editApplication(application)}
-                          >
-                            <Edit2 className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            title="Delete"
-                            onClick={() => deleteApplication(application)}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
 
-          <div className="flex flex-col gap-3 border-t border-border p-4 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-            <span>
-              Showing page {pagination?.page ?? 1} of {totalPages} ·{" "}
-              {pagination?.total ?? 0} applications
+          {/* Pagination */}
+          <div className="flex flex-col gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <span className="tabular-nums">
+              Page{" "}
+              <span className="text-foreground font-medium">
+                {pagination?.page ?? 1}
+              </span>{" "}
+              of{" "}
+              <span className="text-foreground font-medium">{totalPages}</span>
+              <span className="mx-1.5 text-border">·</span>
+              <span className="text-foreground font-medium">
+                {pagination?.total ?? 0}
+              </span>{" "}
+              total
             </span>
-            <div className="flex gap-2">
+            <div className="flex gap-1.5">
               <Button
                 variant="outline"
                 size="sm"
                 disabled={page <= 1}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-                className="rounded-xl"
+                onClick={() => setPage((c) => Math.max(1, c - 1))}
+                className="h-8 rounded-lg text-xs px-3"
               >
-                <ChevronLeft className="mr-1 h-4 w-4" />
-                Previous
+                <ChevronLeft size={12} className="mr-1" /> Previous
               </Button>
               <Button
                 variant="outline"
                 size="sm"
                 disabled={page >= totalPages}
-                onClick={() => setPage((current) => current + 1)}
-                className="rounded-xl"
+                onClick={() => setPage((c) => c + 1)}
+                className="h-8 rounded-lg text-xs px-3"
               >
-                Next
-                <ChevronRight className="ml-1 h-4 w-4" />
+                Next <ChevronRight size={12} className="ml-1" />
               </Button>
             </div>
           </div>
@@ -1011,7 +1522,7 @@ export default function ApplicationsPage() {
         saving={saving}
         onClose={() => setDrawerOpen(false)}
         onSubmit={saveApplication}
-        onChange={(patch) => setForm((current) => ({ ...current, ...patch }))}
+        onChange={(patch) => setForm((c) => ({ ...c, ...patch }))}
       />
     </>
   );
