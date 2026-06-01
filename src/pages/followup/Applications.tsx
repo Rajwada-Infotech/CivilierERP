@@ -940,7 +940,7 @@ export default function ApplicationsPage() {
                             size="icon"
                             title="Open application"
                             onClick={() =>
-                              navigate(`/followup/sales/applicants/${application.Id}`)
+                              navigate(`/followup/sales/applications/${application.Id}`)
                             }
                           >
                             <Eye className="h-4 w-4" />
