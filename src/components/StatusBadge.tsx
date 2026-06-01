@@ -19,65 +19,77 @@ const STATUS_CONFIG: Record<
   Draft: {
     label: "Draft",
     icon: FileEdit,
-    classes: "bg-slate-100 text-slate-600 border-slate-200",
+    classes:
+      "bg-slate-500/10 text-slate-400 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
   },
   Issued: {
     label: "Issued",
     icon: SendHorizonal,
-    classes: "bg-blue-50 text-blue-700 border-blue-200",
+    classes:
+      "bg-blue-500/10 text-blue-500 border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/25",
   },
   Pending: {
     label: "Pending",
     icon: Clock,
-    classes: "bg-amber-50 text-amber-700 border-amber-200",
+    classes:
+      "bg-amber-500/10 text-amber-600 border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/25",
   },
   Approved: {
     label: "Approved",
     icon: CheckCircle2,
-    classes: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
   },
   Rejected: {
     label: "Rejected",
     icon: XCircle,
-    classes: "bg-red-50 text-red-700 border-red-200",
+    classes:
+      "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
   },
   // Expense booking domain statuses
   Booked: {
     label: "Booked",
     icon: CheckCircle2,
-    classes: "bg-blue-50 text-blue-700 border-blue-200",
+    classes:
+      "bg-blue-500/10 text-blue-500 border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/25",
   },
   Hold: {
     label: "Hold",
     icon: Clock,
-    classes: "bg-yellow-50 text-yellow-700 border-yellow-200",
+    classes:
+      "bg-yellow-500/10 text-yellow-600 border-yellow-500/25 dark:bg-yellow-500/10 dark:text-yellow-400 dark:border-yellow-500/25",
   },
   Received: {
     label: "Received",
     icon: PackageCheck,
-    classes: "bg-teal-50 text-teal-700 border-teal-200",
+    classes:
+      "bg-teal-500/10 text-teal-600 border-teal-500/25 dark:bg-teal-500/10 dark:text-teal-400 dark:border-teal-500/25",
   },
   // GoodsReceiptNotes domain statuses
   "Partially Received": {
     label: "Partial",
     icon: PackageSearch,
-    classes: "bg-orange-50 text-orange-700 border-orange-200",
+    classes:
+      "bg-orange-500/10 text-orange-500 border-orange-500/25 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/25",
   },
   "Fully Received": {
     label: "Received",
     icon: PackageCheck,
-    classes: "bg-teal-50 text-teal-700 border-teal-200",
+    classes:
+      "bg-teal-500/10 text-teal-600 border-teal-500/25 dark:bg-teal-500/10 dark:text-teal-400 dark:border-teal-500/25",
   },
   // Material Request domain statuses
   Ordered: {
     label: "Ordered",
     icon: PackageCheck,
-    classes: "bg-teal-50 text-teal-700 border-teal-200",
+    classes:
+      "bg-teal-500/10 text-teal-600 border-teal-500/25 dark:bg-teal-500/10 dark:text-teal-400 dark:border-teal-500/25",
   },
   "Partially Ordered": {
     label: "Partial PO",
     icon: PackageSearch,
-    classes: "bg-orange-50 text-orange-700 border-orange-200",
+    classes:
+      "bg-orange-500/10 text-orange-500 border-orange-500/25 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/25",
   },
 };
 

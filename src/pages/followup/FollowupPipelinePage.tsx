@@ -819,7 +819,7 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
                           {config.entity === "applicants" &&
                           column.key === "ApplicantName" ? (
                             <Link
-                              to={`/followup/sales/applicants/${record.Id}`}
+                              to={`/followup/sales/applications/${record.Id}`}
                               className="font-medium text-primary underline-offset-4 hover:underline"
                             >
                               {toStringValue(record[column.key] || "-")}
