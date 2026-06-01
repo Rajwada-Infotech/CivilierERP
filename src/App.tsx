@@ -695,6 +695,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/followup/sales/applications/:id"
+        element={
+          <ProtectedRoute>
+            <ApplicantDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/followup/sales/applicants/:id"
         element={
           <ProtectedRoute>

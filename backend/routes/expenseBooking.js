@@ -527,10 +527,30 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
     const offset = (page - 1) * limit;
 
-    const result = await pool
-      .request()
-      .input("offset", sql.Int, offset)
-      .input("limit", sql.Int, limit).query(`
+    // Run status counts and paginated list in parallel
+    const [countResult, result] = await Promise.all([
+      pool.request().query(`
+        SELECT
+          eb.EStatus,
+          COUNT(*) AS cnt,
+          SUM(
+            CASE
+              WHEN eb.ESourceType = 'GRN' AND grn_cnt.TotalAmount IS NOT NULL AND grn_cnt.TotalAmount > 0
+              THEN grn_cnt.TotalAmount
+              ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
+            END
+          ) AS totalAmount
+        FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.GoodsReceiptNotes grn_cnt
+          ON eb.ESourceType = 'GRN' AND grn_cnt.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        WHERE ISNULL(eb.EStatus, '') != 'Draft'
+          AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
+        GROUP BY eb.EStatus
+      `),
+      pool
+        .request()
+        .input("offset", sql.Int, offset)
+        .input("limit", sql.Int, limit).query(`
         SELECT
           eb.Eid, eb.Eid AS id,
           eb.EProjectName, eb.EDocumentType, eb.EDocDate,
@@ -571,20 +591,26 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         -- GRN join for sourceDocNo and project fallback
         LEFT JOIN dbo.GoodsReceiptNotes grn_list
           ON eb.ESourceType = 'GRN' AND grn_list.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster grn_supp_list ON grn_supp_list.LHeadId = grn_list.SupplierID
         LEFT JOIN dbo.PurchaseOrders po_list ON grn_list.POID = po_list.PurchaseOrderID
         LEFT JOIN dbo.enterprise epo_proj ON epo_proj.id = po_list.ProjectId
-        LEFT JOIN dbo.AccountHeadMaster grn_supp_list ON grn_supp_list.LHeadId = grn_list.SupplierID
-        WHERE NOT (
-          eb.EStatus = 'Draft'
-          AND ISNULL(eb.ESourceType, '') = 'GRN'
-          AND ISNULL(eb.ERemarks, '') LIKE 'Auto-created for remaining items from GRN%'
-        )
+        WHERE ISNULL(eb.EStatus, '') != 'Draft'
+          AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
         ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-      `);
+      `),
+    ]);
 
     const rows = result.recordset;
     const total = rows.length > 0 ? parseInt(rows[0]._total) : 0;
+
+    // Build status counts map from the summary query
+    const statusCounts = {};
+    let totalBookedAmount = 0;
+    for (const row of countResult.recordset) {
+      statusCounts[row.EStatus] = parseInt(row.cnt) || 0;
+      totalBookedAmount += parseFloat(row.totalAmount) || 0;
+    }
 
     res.json({
       data: rows.map(({ _total, ...r }) => r),
@@ -592,6 +618,8 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
       limit,
       total,
       totalPages: Math.ceil(total / limit) || 1,
+      statusCounts,
+      totalBookedAmount: Math.round(totalBookedAmount * 100) / 100,
     });
   } catch (err) {
     console.error("List error:", err.message);
@@ -613,14 +641,10 @@ router.get(
         SELECT ESourceType, ESourceId, Eid
         FROM dbo.ExpenseBooking
         WHERE EStatus != 'Deleted'
+          AND EStatus != 'Draft'
           AND ESourceType IS NOT NULL
           AND ESourceId   IS NOT NULL
-          -- Exclude auto-split drafts so the parent GRN stays selectable
-          AND NOT (
-            ISNULL(EStatus, '') = 'Draft'
-            AND ISNULL(ESourceType, '') = 'GRN'
-            AND ISNULL(ERemarks, '') LIKE 'Auto-created for remaining items from GRN%'
-          )
+
       `);
       res.json(result.recordset);
     } catch (err) {
@@ -680,7 +704,8 @@ router.get("/by-source", async (req, res) => {
         FROM dbo.ExpenseBooking eb
         WHERE eb.ESourceType = @ESourceType
           AND eb.ESourceId = @ESourceId
-          AND (eb.EStatus IS NULL OR eb.EStatus != 'Deleted')
+          AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+          AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
         ORDER BY eb.Eid ASC
       `);
     res.json(result.recordset);
@@ -697,20 +722,70 @@ router.get("/:id/can-delete", async (req, res) => {
 
   try {
     const pool = getPool();
-    const refCheck = await pool.request().input("Eid", sql.Int, id).query(`
-      SELECT COUNT(*) AS cnt
-      FROM dbo.DebitNote
-      WHERE bill_id = @Eid
-    `);
 
-    const linkedDebitNoteCount = Number(refCheck.recordset[0]?.cnt) || 0;
+    // ── 1. Debit Note guard ───────────────────────────────────────────────────
+    const dnCheck = await pool.request().input("Eid", sql.Int, id).query(`
+      SELECT COUNT(*) AS cnt FROM dbo.DebitNote WHERE bill_id = @Eid
+    `);
+    const linkedDebitNoteCount = Number(dnCheck.recordset[0]?.cnt) || 0;
     if (linkedDebitNoteCount > 0) {
-      const reason =
-        "This booking cannot be deleted because it has linked Debit Notes. Please delete or unlink them first.";
       return res.json({
         deletable: false,
-        reason,
+        reason:
+          "This booking has linked Debit Notes. Please delete or unlink them first.",
         linkedDebitNoteCount,
+      });
+    }
+
+    // ── 2. BRS cleared payment guard ─────────────────────────────────────────
+    // Chain: ExpenseBooking.EDocNo → NewPayment.PExpenseRef → BankReconciliation.SourceID (IsMatched=1)
+    const brsCheck = await pool.request().input("Eid", sql.Int, id).query(`
+      SELECT
+        np.PPaymentID,
+        np.PPaymentName,
+        np.PAmount,
+        brc.BRSID,
+        brc.IsMatched
+      FROM dbo.ExpenseBooking eb
+      JOIN dbo.NewPayment np
+        ON np.PExpenseRef = eb.EDocNo
+      JOIN dbo.BankReconciliation brc
+        ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID AND brc.IsMatched = 1
+      WHERE eb.Eid = @Eid
+    `);
+
+    if (brsCheck.recordset.length > 0) {
+      const clearedPayments = brsCheck.recordset.map((r) => ({
+        paymentId: r.PPaymentID,
+        paymentName: r.PPaymentName,
+        amount: r.PAmount,
+        brsId: r.BRSID,
+      }));
+      return res.json({
+        deletable: false,
+        reason: "brs_cleared",
+        clearedPayments,
+      });
+    }
+
+    // ── 3. Uncollected payments (not yet in BRS but exist) ───────────────────
+    const payCheck = await pool.request().input("Eid", sql.Int, id).query(`
+      SELECT np.PPaymentID, np.PPaymentName, np.PAmount
+      FROM dbo.ExpenseBooking eb
+      JOIN dbo.NewPayment np ON np.PExpenseRef = eb.EDocNo
+      WHERE eb.Eid = @Eid
+    `);
+
+    if (payCheck.recordset.length > 0) {
+      const linkedPayments = payCheck.recordset.map((r) => ({
+        paymentId: r.PPaymentID,
+        paymentName: r.PPaymentName,
+        amount: r.PAmount,
+      }));
+      return res.json({
+        deletable: false,
+        reason: "has_payments",
+        linkedPayments,
       });
     }
 
@@ -918,20 +993,10 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
         });
       }
 
-      // Split drafts carry their own pre-computed amount (remainingQty × rate)
-      // and must NOT be overwritten with the full GRN received total.
-      const isGrnSplitDraft =
-        typeof ERemarks === "string" &&
-        ERemarks.startsWith("Auto-created for remaining items from GRN");
-
-      if (!isGrnSplitDraft) {
-        bookingAmount = grnGst.totals.taxableAmount;
-        bookingNetAmount = grnGst.totals.netAmount;
-        // Existing schema stores only CGST/SGST rates. For inter-state GRNs the
-        // net amount includes IGST and the frontend reloads the IGST split by GRN.
-        bookingCgstRate = grnGst.cgstRate;
-        bookingSgstRate = grnGst.sgstRate;
-      }
+      bookingAmount = grnGst.totals.taxableAmount;
+      bookingNetAmount = grnGst.totals.netAmount;
+      bookingCgstRate = grnGst.cgstRate;
+      bookingSgstRate = grnGst.sgstRate;
     }
 
     if (EDocTypeId) {
@@ -1228,28 +1293,19 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
     await bumpCacheVersion("expense-booking-source-ids");
 
     // Auto-submit: transition Draft → Pending immediately after creation.
-    // Skip for GRN auto-created split drafts — those are reused as templates
-    // for the next expense booking on the same GRN and must remain Draft.
-    const isGrnAutoSplitDraft =
-      ESourceType === "GRN" &&
-      typeof ERemarks === "string" &&
-      ERemarks.startsWith("Auto-created for remaining items from GRN");
-
-    if (!isGrnAutoSplitDraft) {
-      try {
-        await transition(
-          "expense-booking",
-          parseInt(newExpenseId, 10),
-          "Pending",
-          req.user?.email,
-          req.user?.role,
-        );
-      } catch (submitErr) {
-        console.warn(
-          "Expense Booking auto-submit failed (non-fatal):",
-          submitErr.message,
-        );
-      }
+    try {
+      await transition(
+        "expense-booking",
+        parseInt(newExpenseId, 10),
+        "Pending",
+        req.user?.email,
+        req.user?.role,
+      );
+    } catch (submitErr) {
+      console.warn(
+        "Expense Booking auto-submit failed (non-fatal):",
+        submitErr.message,
+      );
     }
 
     res.status(201).json({
@@ -1862,21 +1918,52 @@ router.delete("/:id", async (req, res) => {
   try {
     const pool = getPool();
 
+    // ── 1. Debit Note guard ───────────────────────────────────────────────────
     const refCheck = await pool.request().input("Eid", sql.Int, numericId)
       .query(`
-        SELECT COUNT(*) AS cnt
-        FROM dbo.DebitNote
-        WHERE bill_id = @Eid
-      `);
-
+      SELECT COUNT(*) AS cnt FROM dbo.DebitNote WHERE bill_id = @Eid
+    `);
     const linkedDebitNoteCount = Number(refCheck.recordset[0]?.cnt) || 0;
     if (linkedDebitNoteCount > 0) {
       const message =
         "This booking cannot be deleted because it has linked Debit Notes. Please delete or unlink them first.";
+      return res
+        .status(409)
+        .json({ error: message, message, linkedDebitNoteCount });
+    }
+
+    // ── 2. BRS cleared payment guard ─────────────────────────────────────────
+    const brsCheck = await pool.request().input("Eid", sql.Int, numericId)
+      .query(`
+      SELECT COUNT(*) AS cnt
+      FROM dbo.ExpenseBooking eb
+      JOIN dbo.NewPayment np
+        ON np.PExpenseRef = eb.EDocNo
+      JOIN dbo.BankReconciliation brc
+        ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID AND brc.IsMatched = 1
+      WHERE eb.Eid = @Eid
+    `);
+    if (Number(brsCheck.recordset[0]?.cnt) > 0) {
       return res.status(409).json({
-        error: message,
-        message,
-        linkedDebitNoteCount,
+        error: "brs_cleared",
+        message:
+          "This expense booking has payments that are cleared in BRS. Unclear and delete the payment record first.",
+      });
+    }
+
+    // ── 3. Uncleared payment guard ────────────────────────────────────────────
+    const payCheck = await pool.request().input("Eid", sql.Int, numericId)
+      .query(`
+      SELECT COUNT(*) AS cnt
+      FROM dbo.ExpenseBooking eb
+      JOIN dbo.NewPayment np ON np.PExpenseRef = eb.EDocNo
+      WHERE eb.Eid = @Eid
+    `);
+    if (Number(payCheck.recordset[0]?.cnt) > 0) {
+      return res.status(409).json({
+        error: "has_payments",
+        message:
+          "This expense booking has linked payment records. Delete the payment records first.",
       });
     }
 

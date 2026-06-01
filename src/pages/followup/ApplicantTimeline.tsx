@@ -443,7 +443,7 @@ export default function ApplicantTimeline() {
           <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
-              onClick={() => navigate("/followup/sales/applicants")}
+              onClick={() => navigate("/followup/sales/applications")}
               className="gap-2"
             >
               <ArrowLeft className="w-4 h-4" />

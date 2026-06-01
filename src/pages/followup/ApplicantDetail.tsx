@@ -73,11 +73,20 @@ interface LegacyApplicant {
 interface FollowupApplicant {
   Id: number;
   ApplicantNo?: string | null;
+  CustomerId?: number | null;
   ApplicantName?: string | null;
   PrimaryMobile?: string | null;
   Email?: string | null;
+  PanNumber?: string | null;
+  ApplicantAddress?: string | null;
+  CoApplicantName?: string | null;
+  CoApplicantPhone?: string | null;
+  CorrespondenceAddress?: string | null;
+  ApplicationDate?: string | null;
   City?: string | null;
   Source?: string | null;
+  UnitName?: string | null;
+  BlockName?: string | null;
   ProjectName?: string | null;
   CompanyName?: string | null;
   PreferredUnitType?: string | null;
@@ -204,6 +213,15 @@ function avatarColor(name: string) {
 const STATUS_PILL: Record<number, string> = {
   1: "bg-emerald-500/10 text-emerald-600 border border-emerald-400/20",
   0: "bg-red-500/10 text-red-500 border border-red-400/20",
+};
+
+const APPLICATION_STATUS_PILL: Record<string, string> = {
+  New: "bg-blue-500/10 text-blue-600 border border-blue-400/20",
+  Qualified: "bg-emerald-500/10 text-emerald-600 border border-emerald-400/20",
+  Shortlisted: "bg-violet-500/10 text-violet-600 border border-violet-400/20",
+  "Document Pending":
+    "bg-amber-500/10 text-amber-600 border border-amber-400/20",
+  Rejected: "bg-red-500/10 text-red-500 border border-red-400/20",
 };
 
 const LOG_TYPE_CONFIG: Record<
@@ -600,28 +618,50 @@ export default function ApplicantDetail() {
     | LegacyApplicant
     | undefined;
 
-  // Use state data immediately; also fetch followup record if one exists by name match
-  const applicant = stateApplicant;
-  const name = applicant?.LHeadName || "Applicant";
-  const refId = applicant?.LHeadId ?? Number(id);
+  const numericId = Number(id);
+  const stateName = stateApplicant?.LHeadName || "";
+
+  const {
+    data: directFollowupRecord,
+    isLoading: applicantLoading,
+    isError: applicantError,
+  } = useQuery<FollowupApplicant | null>({
+    queryKey: ["followup-application-detail", id],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`/api/followup-applications/${id}`);
+      if (!r.ok) {
+        const e = (await r.json().catch(() => ({}))) as ApiErrorPayload;
+        throw new Error(e.error || "Failed to load applicant");
+      }
+      return r.json();
+    },
+    enabled: Boolean(id),
+    retry: false,
+  });
 
   // Try to find a matching FollowupApplicants record by LHeadId used as refId
-  const { data: followupRecord } = useQuery<FollowupApplicant | null>({
-    queryKey: ["followup-applicant-by-ref", refId],
+  const { data: matchedFollowupRecord } = useQuery<FollowupApplicant | null>({
+    queryKey: ["followup-applicant-by-ref", stateApplicant?.LHeadId],
     queryFn: async () => {
       const r = await fetchWithAuth(
-        `/api/followup-applications?search=${encodeURIComponent(name)}&pageSize=5`,
+        `/api/followup-applications?search=${encodeURIComponent(stateName)}&pageSize=5`,
       );
       if (!r.ok) return null;
       const d = await r.json();
       const list: FollowupApplicant[] = d.data ?? [];
-      return list.find((a) => a.ApplicantName === name) ?? null;
+      return list.find((a) => a.ApplicantName === stateName) ?? null;
     },
-    enabled: Boolean(name && name !== "Applicant"),
+    enabled: Boolean(stateName),
     retry: false,
   });
 
-  const followupId = followupRecord?.Id;
+  const followupRecord = directFollowupRecord ?? matchedFollowupRecord ?? null;
+  const applicant = stateApplicant ?? null;
+  const name =
+    followupRecord?.ApplicantName || stateApplicant?.LHeadName || "Applicant";
+  const refId = followupRecord?.Id ?? stateApplicant?.LHeadId ?? numericId;
+  const followupId =
+    followupRecord?.Id ?? (Number.isFinite(numericId) ? numericId : undefined);
 
   const { data: unitSelections = [] } = useQuery<UnitSelectionRecord[]>({
     queryKey: ["detail-units", followupId],
@@ -673,6 +713,9 @@ export default function ApplicantDetail() {
   });
 
   const refresh = () => {
+    queryClient.invalidateQueries({
+      queryKey: ["followup-application-detail", id],
+    });
     queryClient.invalidateQueries({ queryKey: ["detail-units", followupId] });
     queryClient.invalidateQueries({
       queryKey: ["detail-agreements", followupId],
@@ -683,7 +726,21 @@ export default function ApplicantDetail() {
 
   // ─── No state — nothing to show ───────────────────────────────────────────
 
-  if (!applicant) {
+  if (!applicant && applicantLoading) {
+    return (
+      <>
+        <DashboardBackground />
+        <div className="relative z-10 p-6 flex flex-col items-center justify-center min-h-[60vh] gap-3">
+          <Loader2 size={24} className="animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">
+            Loading applicant details...
+          </p>
+        </div>
+      </>
+    );
+  }
+
+  if (!applicant && (!followupRecord || applicantError)) {
     return (
       <>
         <DashboardBackground />
@@ -696,9 +753,9 @@ export default function ApplicantDetail() {
           </p>
           <Button
             variant="outline"
-            onClick={() => navigate("/followup/sales/applicants")}
+            onClick={() => navigate("/followup/sales/applications")}
           >
-            <ArrowLeft size={14} className="mr-2" /> Back to Applicants
+            <ArrowLeft size={14} className="mr-2" /> Back to Applications
           </Button>
         </div>
       </>
@@ -707,7 +764,16 @@ export default function ApplicantDetail() {
 
   // ─── Derived ──────────────────────────────────────────────────────────────
 
-  const isActive = applicant.LHeadStatus === 1;
+  const isActive = followupRecord
+    ? followupRecord.Status !== "Rejected"
+    : applicant?.LHeadStatus === 1;
+  const statusLabel =
+    followupRecord?.Status ?? (isActive ? "Active" : "Inactive");
+  const statusClass = followupRecord?.Status
+    ? APPLICATION_STATUS_PILL[followupRecord.Status] ??
+      "bg-muted text-muted-foreground border border-border"
+    : STATUS_PILL[applicant?.LHeadStatus ?? 0] ??
+      "bg-muted text-muted-foreground border border-border";
   const totalDealValue = agreements.reduce(
     (s, a) => s + (a.AgreementValue ?? 0),
     0,
@@ -728,13 +794,13 @@ export default function ApplicantDetail() {
             <Breadcrumbs
               items={[
                 { label: "Follow-Up", path: "/followup" },
-                { label: "Applicants", path: "/followup/sales/applicants" },
+                { label: "Applications", path: "/followup/sales/applications" },
                 { label: name, path: "#" },
               ]}
             />
             <div className="flex items-center gap-3 mt-2">
               <button
-                onClick={() => navigate("/followup/sales/applicants")}
+                onClick={() => navigate("/followup/sales/applications")}
                 className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
               >
                 <ArrowLeft size={16} />
@@ -751,9 +817,9 @@ export default function ApplicantDetail() {
                     {name}
                   </h1>
                   <span
-                    className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${STATUS_PILL[applicant.LHeadStatus] ?? "bg-muted text-muted-foreground border border-border"}`}
+                    className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${statusClass}`}
                   >
-                    {isActive ? "Active" : "Inactive"}
+                    {statusLabel}
                   </span>
                   {overdueCount > 0 && (
                     <span className="flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-500/10 text-red-500 border border-red-400/20">
@@ -762,8 +828,12 @@ export default function ApplicantDetail() {
                   )}
                 </div>
                 <p className="text-[12px] text-muted-foreground mt-0.5">
-                  {fmt(applicant.LHeadCode)}
-                  {applicant.LBranchName ? ` · ${applicant.LBranchName}` : ""}
+                  {fmt(followupRecord?.ApplicantNo ?? applicant?.LHeadCode)}
+                  {followupRecord?.ProjectName
+                    ? ` · ${followupRecord.ProjectName}`
+                    : applicant?.LBranchName
+                      ? ` · ${applicant.LBranchName}`
+                      : ""}
                 </p>
               </div>
             </div>
@@ -840,52 +910,66 @@ export default function ApplicantDetail() {
               <div>
                 <InfoRow
                   label="Mobile"
-                  value={fmt(applicant.LHeadPhone)}
+                  value={fmt(followupRecord?.PrimaryMobile ?? applicant?.LHeadPhone)}
                   icon={Phone}
                 />
                 <InfoRow
                   label="Email"
-                  value={fmt(applicant.LHeadEmail)}
+                  value={fmt(followupRecord?.Email ?? applicant?.LHeadEmail)}
                   icon={Mail}
                 />
                 <InfoRow
                   label="Address"
-                  value={fmt(applicant.LHeadAddress)}
+                  value={fmt(
+                    followupRecord?.ApplicantAddress ?? applicant?.LHeadAddress,
+                  )}
                   icon={MapPin}
                 />
                 <InfoRow
                   label="Contact Person"
-                  value={fmt(applicant.LHeadContactPerson)}
+                  value={fmt(
+                    followupRecord?.CoApplicantName ??
+                      applicant?.LHeadContactPerson,
+                  )}
                   icon={UserRound}
                 />
-                <InfoRow label="GST" value={fmt(applicant.LGST)} icon={Hash} />
+                <InfoRow
+                  label="PAN / GST"
+                  value={fmt(followupRecord?.PanNumber ?? applicant?.LGST)}
+                  icon={Hash}
+                />
+                <InfoRow
+                  label="Co-applicant Phone"
+                  value={fmt(followupRecord?.CoApplicantPhone)}
+                  icon={Phone}
+                />
                 <InfoRow
                   label="GST State"
-                  value={fmt(applicant.LGSTState)}
+                  value={fmt(applicant?.LGSTState)}
                   icon={Building2}
                 />
                 <InfoRow
                   label="Country"
-                  value={fmt(applicant.LCountry)}
+                  value={fmt(applicant?.LCountry)}
                   icon={Globe}
                 />
                 <InfoRow
                   label="Belongs To"
-                  value={fmt(applicant.LBelongsTo)}
+                  value={fmt(applicant?.LBelongsTo)}
                   icon={Layers}
                 />
                 <InfoRow
                   label="Payment Terms"
-                  value={fmt(applicant.LHeadPaymentTerms)}
+                  value={fmt(applicant?.LHeadPaymentTerms)}
                   icon={CreditCard}
                 />
                 <InfoRow
                   label="Branch"
-                  value={fmt(applicant.LBranchName)}
+                  value={fmt(applicant?.LBranchName)}
                   icon={Building2}
                 />
               </div>
-              {applicant.LDescription && (
+              {applicant?.LDescription && (
                 <div className="mt-3 bg-muted/40 rounded-lg p-3">
                   <p className="text-[11px] text-muted-foreground mb-1">
                     Description
@@ -898,6 +982,11 @@ export default function ApplicantDetail() {
               {/* Followup record extra info */}
               {followupRecord && (
                 <div className="mt-3 pt-3 border-t border-border space-y-0">
+                  <InfoRow
+                    label="Application Date"
+                    value={fmtDate(followupRecord.ApplicationDate)}
+                    icon={CalendarDays}
+                  />
                   <InfoRow
                     label="City"
                     value={fmt(followupRecord.City)}
@@ -915,7 +1004,11 @@ export default function ApplicantDetail() {
                   />
                   <InfoRow
                     label="Preferred Unit"
-                    value={fmt(followupRecord.PreferredUnitType)}
+                    value={fmt(
+                      followupRecord.UnitName
+                        ? `${followupRecord.BlockName ? `${followupRecord.BlockName} / ` : ""}${followupRecord.UnitName}`
+                        : followupRecord.PreferredUnitType,
+                    )}
                     icon={Home}
                   />
                   <InfoRow

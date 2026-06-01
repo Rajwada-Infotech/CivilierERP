@@ -1,5 +1,72 @@
 import { useEffect, useRef, useState } from "react";
 import { useIsFetching } from "@tanstack/react-query";
+import Lottie from "lottie-react";
+
+// Free wifi-signal animation from LottieFiles (lottie.host CDN)
+const WIFI_LOTTIE_URL =
+  "https://lottie.host/4db68bbd-31f6-4cd8-84eb-189de081159a/IGmMCqhzpt.lottie";
+
+// Fallback: simple pulsing wifi SVG if Lottie fails to load
+function WifiFallback() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+      <style>{`
+        @keyframes wf { 0%,100%{opacity:.25} 50%{opacity:1} }
+        .wa{animation:wf 1.4s ease-in-out infinite}
+        .wb{animation:wf 1.4s ease-in-out .25s infinite}
+        .wc{animation:wf 1.4s ease-in-out .5s infinite}
+      `}</style>
+      <path
+        className="wa"
+        d="M2.05 7.95a11.31 11.31 0 0 1 15.9 0"
+        stroke="#FFB400"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        className="wb"
+        d="M5.05 10.95a7.07 7.07 0 0 1 9.9 0"
+        stroke="#FFB400"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        className="wc"
+        d="M8.18 13.82a2.6 2.6 0 0 1 3.64 0"
+        stroke="#FFB400"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <circle cx="10" cy="17" r="1.5" fill="#FFB400" />
+    </svg>
+  );
+}
+
+function WifiLottie() {
+  const [animationData, setAnimationData] = useState<object | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    fetch(WIFI_LOTTIE_URL)
+      .then((r) => r.json())
+      .then(setAnimationData)
+      .catch(() => setFailed(true));
+  }, []);
+
+  if (failed) return <WifiFallback />;
+  if (!animationData) return <div style={{ width: 22, height: 22 }} />;
+
+  return (
+    <Lottie
+      animationData={animationData}
+      loop
+      autoplay
+      style={{ width: 22, height: 22, flexShrink: 0 }}
+    />
+  );
+}
+
+// ─── slow-connection hook ─────────────────────────────────────────────────────
 
 const SLOW_THRESHOLD_MS = 4000;
 const LINGER_MS = 2500;
@@ -9,16 +76,14 @@ function useSlowConnection() {
   const [slow, setSlow] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lingerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const slowRef = useRef(false); // track without causing effect re-runs
+  const slowRef = useRef(false);
 
   useEffect(() => {
     if (isFetching > 0) {
-      // Cancel linger — still fetching
       if (lingerRef.current) {
         clearTimeout(lingerRef.current);
         lingerRef.current = null;
       }
-      // Start slow timer only once
       if (!timerRef.current) {
         timerRef.current = setTimeout(() => {
           timerRef.current = null;
@@ -27,12 +92,10 @@ function useSlowConnection() {
         }, SLOW_THRESHOLD_MS);
       }
     } else {
-      // Done fetching — cancel slow timer if it hadn't fired yet
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
-      // Linger before hiding
       if (slowRef.current && !lingerRef.current) {
         lingerRef.current = setTimeout(() => {
           lingerRef.current = null;
@@ -41,18 +104,20 @@ function useSlowConnection() {
         }, LINGER_MS);
       }
     }
-  }, [isFetching]); // only isFetching — no slow in deps
+  }, [isFetching]);
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
+  useEffect(
+    () => () => {
       if (timerRef.current) clearTimeout(timerRef.current);
       if (lingerRef.current) clearTimeout(lingerRef.current);
-    };
-  }, []);
+    },
+    [],
+  );
 
   return slow;
 }
+
+// ─── banner ──────────────────────────────────────────────────────────────────
 
 export default function SlowConnectionBanner() {
   const slow = useSlowConnection();
@@ -99,16 +164,16 @@ export default function SlowConnectionBanner() {
     >
       <style>{`
         @keyframes scb-in {
-          from { opacity: 0; transform: translateX(-50%) translateY(16px) scale(0.95); }
-          to   { opacity: 1; transform: translateX(-50%) translateY(0)    scale(1);    }
+          from { opacity:0; transform:translateX(-50%) translateY(16px) scale(0.95); }
+          to   { opacity:1; transform:translateX(-50%) translateY(0)    scale(1);    }
         }
         @keyframes scb-out {
-          from { opacity: 1; transform: translateX(-50%) translateY(0)    scale(1);    }
-          to   { opacity: 0; transform: translateX(-50%) translateY(12px) scale(0.96); }
+          from { opacity:1; transform:translateX(-50%) translateY(0)    scale(1);    }
+          to   { opacity:0; transform:translateX(-50%) translateY(12px) scale(0.96); }
         }
-        @keyframes scb-pulse {
-          0%, 100% { opacity: 1; }
-          50%       { opacity: 0.35; }
+        @keyframes scb-dot {
+          0%,100% { opacity:1; }
+          50%      { opacity:0.35; }
         }
       `}</style>
 
@@ -119,14 +184,14 @@ export default function SlowConnectionBanner() {
           gap: "10px",
           padding: "10px 18px 10px 14px",
           borderRadius: "12px",
-          background: "rgba(15, 15, 20, 0.92)",
+          background: "rgba(15,15,20,0.92)",
           backdropFilter: "blur(12px)",
           WebkitBackdropFilter: "blur(12px)",
-          border: "1px solid rgba(255, 180, 0, 0.25)",
+          border: "1px solid rgba(255,180,0,0.25)",
           boxShadow:
-            "0 4px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,180,0,0.08)",
+            "0 4px 24px rgba(0,0,0,0.4),0 0 0 1px rgba(255,180,0,0.08)",
           color: "#fff",
-          fontFamily: "'DM Sans', 'Geist', system-ui, sans-serif",
+          fontFamily: "'DM Sans','Geist',system-ui,sans-serif",
           fontSize: "13px",
           fontWeight: 500,
           letterSpacing: "0.01em",
@@ -134,42 +199,12 @@ export default function SlowConnectionBanner() {
           userSelect: "none",
         }}
       >
-        {/* Signal bars */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "flex-end",
-            gap: "2px",
-            height: "16px",
-          }}
-        >
-          {[
-            { h: 6, delay: "0s", dim: true },
-            { h: 10, delay: "0.15s", dim: true },
-            { h: 14, delay: "0.3s", dim: false },
-            { h: 16, delay: "0.45s", dim: false },
-          ].map((bar, i) => (
-            <div
-              key={i}
-              style={{
-                width: "3px",
-                height: `${bar.h}px`,
-                borderRadius: "2px",
-                background: bar.dim ? "rgba(255, 180, 0, 0.35)" : "#FFB400",
-                animation: bar.dim
-                  ? `scb-pulse 1.4s ease-in-out ${bar.delay} infinite`
-                  : "none",
-                transformOrigin: "bottom",
-              }}
-            />
-          ))}
-        </div>
+        <WifiLottie />
 
         <span style={{ color: "rgba(255,255,255,0.85)" }}>
           Slow or spotty connection
         </span>
 
-        {/* Pulsing dots */}
         <div
           style={{
             display: "flex",
@@ -186,7 +221,7 @@ export default function SlowConnectionBanner() {
                 height: "3px",
                 borderRadius: "50%",
                 background: "rgba(255,180,0,0.7)",
-                animation: `scb-pulse 1.2s ease-in-out ${delay} infinite`,
+                animation: `scb-dot 1.2s ease-in-out ${delay} infinite`,
               }}
             />
           ))}
