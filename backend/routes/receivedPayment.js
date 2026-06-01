@@ -8,6 +8,7 @@ const {
   backPatchRecordId,
 } = require("../utils/docNumberLock");
 const { cache, localVersionCache } = require("../middleware/cache");
+const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
@@ -24,6 +25,13 @@ router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
 // (~2ms) instead of a SQL Server sys.columns scan (~200ms+).
 let _hasNewCols = null;
 const HAS_NEW_COLS_REDIS_KEY = "schema:ReceivedPayment:hasRPDocNo";
+
+const MUTATION_CACHE_KEYS = ["received-payment", "brs", "finance-dashboard"];
+
+async function invalidateReceivedPaymentWorkflowCaches() {
+  MUTATION_CACHE_KEYS.forEach((key) => localVersionCache.invalidate(key));
+  await Promise.all(MUTATION_CACHE_KEYS.map((key) => bumpCacheVersion(key)));
+}
 
 async function hasNewColumns(pool) {
   // 1. In-process memo — fastest path for warm requests
@@ -228,7 +236,7 @@ router.post("/", async (req, res) => {
       );
     }
 
-    localVersionCache.invalidate("received-payment");
+    await invalidateReceivedPaymentWorkflowCaches();
     res.status(201).json(row);
   } catch (err) {
     console.error("POST /received-payment error:", err);
@@ -332,7 +340,7 @@ router.put("/:id", async (req, res) => {
     `);
     if (result.recordset.length === 0)
       return res.status(404).json({ error: "Not found" });
-    localVersionCache.invalidate("received-payment");
+    await invalidateReceivedPaymentWorkflowCaches();
     res.json(result.recordset[0]);
   } catch (err) {
     console.error("PUT /received-payment error:", err);
@@ -342,18 +350,56 @@ router.put("/:id", async (req, res) => {
 
 // -- DELETE /:id ----------------------------------------------------------------
 router.delete("/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "Invalid payment id" });
+  }
+
+  const pool = getPool();
+  const tx = new sql.Transaction(pool);
+  let txDone = false;
+
   try {
-    const { id } = req.params;
-    const pool = getPool();
-    await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query(`DELETE FROM dbo.ReceivedPayment WHERE RPPaymentID=@id`);
-    localVersionCache.invalidate("received-payment");
-    res.json({ success: true });
+    await tx.begin();
+
+    const existing = await new sql.Request(tx).input("id", sql.Int, id).query(`
+      SELECT RPPaymentID
+      FROM dbo.ReceivedPayment
+      WHERE RPPaymentID = @id
+    `);
+
+    if (existing.recordset.length === 0) {
+      await tx.rollback();
+      txDone = true;
+      return res.status(404).json({ error: "Received payment not found" });
+    }
+
+    await new sql.Request(tx).input("id", sql.Int, id).query(`
+      DELETE FROM dbo.BankReconciliation
+      WHERE SourceType = 'RECEIVED' AND SourceID = @id
+    `);
+
+    const deleted = await new sql.Request(tx).input("id", sql.Int, id).query(`
+      DELETE FROM dbo.ReceivedPayment
+      WHERE RPPaymentID = @id
+    `);
+
+    if ((deleted.rowsAffected?.[0] || 0) === 0) {
+      await tx.rollback();
+      txDone = true;
+      return res.status(404).json({ error: "Received payment not found" });
+    }
+
+    await tx.commit();
+    txDone = true;
+    await invalidateReceivedPaymentWorkflowCaches();
+    res.json({ success: true, message: "Received payment deleted" });
   } catch (err) {
+    try {
+      if (!txDone) await tx.rollback();
+    } catch {}
     console.error("DELETE /received-payment error:", err);
-    res.status(500).json({ error: "Failed to delete" });
+    res.status(500).json({ error: err.message || "Failed to delete" });
   }
 });
 
@@ -390,7 +436,7 @@ router.patch("/:id/submit", async (req, res) => {
         WHERE RPPaymentID = @id
       `);
 
-    localVersionCache.invalidate("received-payment");
+    await invalidateReceivedPaymentWorkflowCaches();
     res.json({ success: true, message: "Submitted for approval" });
   } catch (err) {
     console.error("PATCH /submit error:", err);
@@ -411,7 +457,7 @@ router.put("/:id/approve", async (req, res) => {
       .query(
         `UPDATE dbo.ReceivedPayment SET RPStatus='Approved', RPApprovedBy=@by, RPApprovedAt=GETDATE() WHERE RPPaymentID=@id`,
       );
-    localVersionCache.invalidate("received-payment");
+    await invalidateReceivedPaymentWorkflowCaches();
     res.json({ success: true });
   } catch (err) {
     console.error("PUT /:id/approve error:", err);
@@ -434,7 +480,7 @@ router.put("/:id/reject", async (req, res) => {
       .query(
         `UPDATE dbo.ReceivedPayment SET RPStatus='Rejected', RPRejectedBy=@by, RPRejectedAt=GETDATE(), RPRejectionNote=@note WHERE RPPaymentID=@id`,
       );
-    localVersionCache.invalidate("received-payment");
+    await invalidateReceivedPaymentWorkflowCaches();
     res.json({ success: true });
   } catch (err) {
     console.error("PUT /:id/reject error:", err);
