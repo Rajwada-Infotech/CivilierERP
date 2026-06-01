@@ -272,7 +272,7 @@ router.delete("/:id", adminOnly, async (req, res) => {
       .query(`
       SELECT
         (SELECT COUNT(*) FROM dbo.PurchaseOrders   WHERE ProjectId = @ProjectId) AS POCount,
-        (SELECT COUNT(*) FROM dbo.WorkOrders        WHERE ProjectId = @ProjectId) AS WOCount,
+        (SELECT COUNT(*) FROM dbo.WorkOrderHeader        WHERE ProjectId = @ProjectId) AS WOCount,
         (SELECT COUNT(*) FROM dbo.GoodsReceiptNotes grn
            INNER JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
            WHERE po.ProjectId = @ProjectId)                                        AS GRNCount
