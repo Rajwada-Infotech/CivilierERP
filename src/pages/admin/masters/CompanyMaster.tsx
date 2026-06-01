@@ -15,6 +15,8 @@ import {
   X,
   Eye,
   Printer,
+  CalendarDays,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -710,20 +712,47 @@ export default function CompanyMaster() {
       <label className="block text-xs font-medium text-muted-foreground mb-1">
         {label}
       </label>
-      <input
-        type={type}
-        value={form[key] as string}
-        onChange={(e) => setForm((c) => ({ ...c, [key]: e.target.value }))}
-        placeholder={ph || label}
-        disabled={options?.disabled}
-        required={options?.required}
-        title={options?.title}
-        className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all disabled:bg-muted/60 disabled:text-muted-foreground disabled:cursor-not-allowed"
-      />
-      {options?.disabled && options?.title && (
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          {options.title}
-        </p>
+      {type === "date" ? (
+        <>
+          <div className="relative">
+            <CalendarDays
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+            />
+            <input
+              type="date"
+              value={form[key] as string}
+              onChange={(e) => setForm((c) => ({ ...c, [key]: e.target.value }))}
+              disabled={options?.disabled}
+              required={options?.required}
+              title={options?.title}
+              className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer disabled:bg-muted/60 disabled:text-muted-foreground disabled:cursor-not-allowed"
+            />
+          </div>
+          {options?.disabled && options?.title && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {options.title}
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <input
+            type={type}
+            value={form[key] as string}
+            onChange={(e) => setForm((c) => ({ ...c, [key]: e.target.value }))}
+            placeholder={ph || label}
+            disabled={options?.disabled}
+            required={options?.required}
+            title={options?.title}
+            className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all disabled:bg-muted/60 disabled:text-muted-foreground disabled:cursor-not-allowed"
+          />
+          {options?.disabled && options?.title && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {options.title}
+            </p>
+          )}
+        </>
       )}
     </div>
   );
@@ -733,15 +762,18 @@ export default function CompanyMaster() {
       <label className="block text-xs font-medium text-muted-foreground mb-1">
         {label}
       </label>
-      <select
-        value={form[key] as string}
-        onChange={(e) => setForm((c) => ({ ...c, [key]: e.target.value }))}
-        className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-      >
-        {options.map((o) => (
-          <option key={o}>{o}</option>
-        ))}
-      </select>
+      <div className="relative">
+        <select
+          value={form[key] as string}
+          onChange={(e) => setForm((c) => ({ ...c, [key]: e.target.value }))}
+          className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+        >
+          {options.map((o) => (
+            <option key={o}>{o}</option>
+          ))}
+        </select>
+        <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+      </div>
     </div>
   );
 
@@ -750,7 +782,7 @@ export default function CompanyMaster() {
   return (
     <>
       <Breadcrumbs items={["Admin", "Masters", "Company Master"]} />
-      <div className="p-6 space-y-6">
+      <div className="relative space-y-6 mt-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -768,7 +800,7 @@ export default function CompanyMaster() {
           </div>
           <button
             onClick={openNew}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-heading rounded-lg hover:bg-primary/90 transition-colors"
+            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
           >
             <Plus size={16} /> Add Company
           </button>
@@ -844,7 +876,7 @@ export default function CompanyMaster() {
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-1.5 rounded-md text-xs font-heading capitalize transition-colors ${activeTab === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${activeTab === tab ? "gradient-accent text-white" : "text-muted-foreground hover:bg-muted"}`}
                 >
                   {tab}
                 </button>
@@ -920,25 +952,28 @@ export default function CompanyMaster() {
                         (Parent)
                       </span>
                     </label>
-                    <select
-                      value={form.belongsTo as string}
-                      onChange={(e) =>
-                        setForm((c) => ({ ...c, belongsTo: e.target.value }))
-                      }
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                    >
-                      <option value="">— Select Enterprise —</option>
-                      {enterprises.map((e: any) => {
-                        const name = e.name ?? e.Name ?? "";
-                        const id = String(e.id ?? e.Id ?? "");
-                        return (
-                          // Store enterprise name in belongs_to (nvarchar column)
-                          <option key={id} value={name}>
-                            {name}
-                          </option>
-                        );
-                      })}
-                    </select>
+                    <div className="relative">
+                      <select
+                        value={form.belongsTo as string}
+                        onChange={(e) =>
+                          setForm((c) => ({ ...c, belongsTo: e.target.value }))
+                        }
+                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+                      >
+                        <option value="">— Select Enterprise —</option>
+                        {enterprises.map((e: any) => {
+                          const name = e.name ?? e.Name ?? "";
+                          const id = String(e.id ?? e.Id ?? "");
+                          return (
+                            // Store enterprise name in belongs_to (nvarchar column)
+                            <option key={id} value={name}>
+                              {name}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    </div>
                   </div>
                   {fi("Incorporation Date", "incorporationDate", "date")}
                   {se("Currency", "currency", currencies)}
@@ -1009,15 +1044,18 @@ export default function CompanyMaster() {
                     <label className="block text-xs font-medium text-muted-foreground mb-1">
                       GST Status
                     </label>
-                    <select
-                      value={form.gstType}
-                      onChange={(e) => setGstStatus(e.target.value)}
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                    >
-                      {gstStatuses.map((o) => (
-                        <option key={o}>{o}</option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <select
+                        value={form.gstType}
+                        onChange={(e) => setGstStatus(e.target.value)}
+                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+                      >
+                        {gstStatuses.map((o) => (
+                          <option key={o}>{o}</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    </div>
                   </div>
                   {fi("GST Number", "gstNumber", "text", "Enter GSTIN", {
                     disabled: form.gstType !== "Registered",
@@ -1065,7 +1103,7 @@ export default function CompanyMaster() {
               <button
                 onClick={() => saveMutation.mutate()}
                 disabled={!form.code || !form.name || saveMutation.isPending}
-                className="px-5 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                className="gradient-accent font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
               >
                 {saveMutation.isPending && (
                   <Loader2 size={13} className="animate-spin" />

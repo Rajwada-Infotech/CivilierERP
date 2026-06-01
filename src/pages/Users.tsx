@@ -433,27 +433,28 @@ const Users = () => {
     <>
       <Breadcrumbs items={["Dashboard", "Admin", "Users"]} />
 
+      <div className="relative space-y-6 mt-6">
       {/* ── Page header ── */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-heading font-bold text-foreground tracking-tight">
+          <h1 className="text-xl font-heading font-bold text-foreground">
             User Master
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <p className="text-xs text-muted-foreground mt-0.5">
             Manage system users and access roles
           </p>
         </div>
         <button
           onClick={openAddDrawer}
-          className="flex items-center gap-2 px-4 h-10 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition text-sm font-medium shadow-sm"
+          className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
         >
-          <UserPlus size={16} />
+          <UserPlus size={15} />
           Add User
         </button>
       </div>
 
       {/* ── Stats strip ── */}
-      <div className="grid grid-cols-3 gap-4 mb-7">
+      <div className="grid grid-cols-3 gap-3">
         {[
           {
             label: "Total Users",
@@ -501,6 +502,8 @@ const Users = () => {
           emptyMessage="No users added yet."
           defaultPageSize={25}
         />
+      </div>
+
       </div>
 
       {/* ── Add / Edit Drawer ── */}
@@ -687,7 +690,7 @@ const Users = () => {
                 <button
                   type="submit"
                   disabled={addMutation.isPending || updateMutation.isPending}
-                  className="flex-1 h-10 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition text-sm font-medium disabled:opacity-50"
+                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex-1 flex items-center justify-center rounded-lg disabled:opacity-50"
                 >
                   {addMutation.isPending || updateMutation.isPending
                     ? "Saving…"
@@ -775,7 +778,7 @@ const Users = () => {
 
             <button
               onClick={() => setViewUserId(null)}
-              className="mt-6 w-full h-10 bg-primary text-primary-foreground rounded-xl hover:opacity-90 transition text-sm font-medium"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto mt-6 w-full flex items-center justify-center rounded-lg"
             >
               Close
             </button>
