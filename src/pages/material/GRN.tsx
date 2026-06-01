@@ -242,16 +242,16 @@ function GRNChainBadge({ grnId }: { grnId: number }) {
 
   if (!chain || chain.expenseCount === 0) return null;
   return (
-    <>
-      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800">
+    <div className="flex flex-wrap gap-1.5">
+      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800 whitespace-nowrap">
         ✓ Exp. Booked
       </span>
       {chain.isPaid && (
-        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800 whitespace-nowrap">
           ✓ Paid
         </span>
       )}
-    </>
+    </div>
   );
 }
 
@@ -506,27 +506,27 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
     cell: ({ row }) => {
       const grn = row.original;
       return (
-        <div className="flex items-center justify-end gap-0.5">
+        <div className="flex items-center justify-end gap-1.5">
           <button
             onClick={() => onView(grn)}
-            className="text-muted-foreground hover:bg-muted p-1.5 rounded-lg transition-colors"
+            className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
             title="View"
           >
-            <Eye size={14} />
+            <Eye size={15} />
           </button>
           <button
             onClick={() => onEdit(grn)}
-            className="text-primary hover:bg-primary/10 p-1.5 rounded-lg transition-colors"
+            className="text-primary hover:bg-primary/10 p-2 rounded-lg transition-colors"
             title="Edit"
           >
-            <Edit3 size={14} />
+            <Edit3 size={15} />
           </button>
           <button
             onClick={() => deleteMutation.mutate(String(grn.GRNID))}
-            className="text-destructive hover:bg-destructive/10 p-1.5 rounded-lg transition-colors"
+            className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
             title="Delete"
           >
-            <Trash2 size={14} />
+            <Trash2 size={15} />
           </button>
         </div>
       );
