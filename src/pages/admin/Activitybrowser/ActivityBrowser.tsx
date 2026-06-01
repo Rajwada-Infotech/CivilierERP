@@ -564,7 +564,7 @@ const ActivityBrowser: React.FC = () => {
   }, [rawSessions, filterRole, quickFilter, q]);
 
   return (
-    <div className="space-y-6 p-6 pb-12">
+    <>
       <Breadcrumbs
         items={[
           { label: "Admin", path: "/admin" },
@@ -573,13 +573,15 @@ const ActivityBrowser: React.FC = () => {
         ]}
       />
 
+      <div className="relative space-y-6 mt-6">
+
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-heading font-bold tracking-tight text-foreground">
+          <h1 className="text-xl font-heading font-bold text-foreground">
             Activity Browser
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-0.5 text-xs text-muted-foreground">
             Real-time audit of user sessions, IP addresses, devices and all
             tracked actions
           </p>
@@ -587,7 +589,9 @@ const ActivityBrowser: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={handleRefresh}
-            className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+            disabled={refreshing}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            title="Refresh"
           >
             <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
             Refresh
@@ -643,10 +647,11 @@ const ActivityBrowser: React.FC = () => {
       <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4">
         <div className="flex flex-wrap items-center gap-2">
           {/* Period presets */}
+          <div className="relative">
           <select
             value={dateFilters.period || ""}
             onChange={(e) => setDateFilters({ period: e.target.value as any })}
-            className="h-8 rounded-lg border border-border bg-background px-2 text-xs outline-none focus:border-primary"
+            className="h-8 rounded-lg border border-border bg-background pl-3 pr-8 text-xs outline-none focus:border-primary appearance-none"
           >
             <option value="" disabled>
               Period
@@ -657,13 +662,16 @@ const ActivityBrowser: React.FC = () => {
               </option>
             ))}
           </select>
+          <ChevronDown size={12} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          </div>
 
+          <div className="relative">
           <select
             onChange={(e) => {
               const y = parseInt(e.target.value);
               setDateFilters({ dateFrom: `${y}-01-01`, dateTo: `${y}-12-31` });
             }}
-            className="h-8 rounded-lg border border-border bg-background px-2 text-xs outline-none focus:border-primary"
+            className="h-8 rounded-lg border border-border bg-background pl-3 pr-8 text-xs outline-none focus:border-primary appearance-none"
             defaultValue=""
           >
             <option value="" disabled>
@@ -675,7 +683,10 @@ const ActivityBrowser: React.FC = () => {
               </option>
             ))}
           </select>
+          <ChevronDown size={12} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          </div>
 
+          <div className="relative">
           <select
             onChange={(e) => {
               const m = parseInt(e.target.value);
@@ -687,7 +698,7 @@ const ActivityBrowser: React.FC = () => {
                 dateTo: format(to, "yyyy-MM-dd"),
               });
             }}
-            className="h-8 rounded-lg border border-border bg-background px-2 text-xs outline-none focus:border-primary"
+            className="h-8 rounded-lg border border-border bg-background pl-3 pr-8 text-xs outline-none focus:border-primary appearance-none"
             defaultValue=""
           >
             <option value="" disabled>
@@ -699,6 +710,8 @@ const ActivityBrowser: React.FC = () => {
               </option>
             ))}
           </select>
+          <ChevronDown size={12} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          </div>
 
           <button
             onClick={clearDateFilters}
@@ -710,29 +723,31 @@ const ActivityBrowser: React.FC = () => {
           <div className="mx-2 h-5 w-px bg-border" />
 
           {/* Action quick-filters */}
-          {(
-            [
-              "create",
-              "update",
-              "delete",
-              "read",
-              "export",
-            ] as ActivityActionType[]
-          ).map((act) => (
-            <button
-              key={act}
-              onClick={() =>
-                setQuickFilter((prev) => (prev === act ? null : act))
-              }
-              className={`h-7 rounded-lg border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
-                quickFilter === act
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-background text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {act}
-            </button>
-          ))}
+          <button
+              key="create"
+              onClick={() => setQuickFilter((prev) => (prev === "create" ? null : "create"))}
+              className={`h-7 rounded-lg border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${quickFilter === "create" ? "border-emerald-500 bg-emerald-500 text-white" : "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"}`}
+            >create</button>
+          <button
+              key="update"
+              onClick={() => setQuickFilter((prev) => (prev === "update" ? null : "update"))}
+              className={`h-7 rounded-lg border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${quickFilter === "update" ? "border-amber-500 bg-amber-500 text-white" : "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"}`}
+            >update</button>
+          <button
+              key="delete"
+              onClick={() => setQuickFilter((prev) => (prev === "delete" ? null : "delete"))}
+              className={`h-7 rounded-lg border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${quickFilter === "delete" ? "border-rose-500 bg-rose-500 text-white" : "border-rose-500/40 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20"}`}
+            >delete</button>
+          <button
+              key="read"
+              onClick={() => setQuickFilter((prev) => (prev === "read" ? null : "read"))}
+              className={`h-7 rounded-lg border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${quickFilter === "read" ? "border-sky-500 bg-sky-500 text-white" : "border-sky-500/40 bg-sky-500/10 text-sky-600 dark:text-sky-400 hover:bg-sky-500/20"}`}
+            >read</button>
+          <button
+              key="export"
+              onClick={() => setQuickFilter((prev) => (prev === "export" ? null : "export"))}
+              className={`h-7 rounded-lg border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${quickFilter === "export" ? "border-cyan-500 bg-cyan-500 text-white" : "border-cyan-500/40 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20"}`}
+            >export</button>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -751,16 +766,19 @@ const ActivityBrowser: React.FC = () => {
           </div>
 
           {/* Role filter */}
+          <div className="relative">
           <select
             value={filterRole}
             onChange={(e) => setFilterRole(e.target.value as typeof filterRole)}
-            className="h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary"
+            className="h-9 rounded-lg border border-border bg-background pl-3 pr-8 text-sm outline-none focus:border-primary appearance-none"
           >
             <option value="all">All Roles</option>
             <option value="super_admin">Super Admin</option>
             <option value="admin">Admin</option>
             <option value="user">User</option>
           </select>
+          <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          </div>
 
           <div className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
             <Filter size={12} />
@@ -858,7 +876,7 @@ const ActivityBrowser: React.FC = () => {
                 onClick={() => setPage(p)}
                 className={`rounded-lg border px-3 py-1.5 text-xs ${
                   p === activity.page
-                    ? "border-primary bg-primary text-primary-foreground"
+                    ? "border-primary gradient-accent text-white font-semibold"
                     : "border-border hover:bg-muted"
                 }`}
               >
@@ -944,7 +962,8 @@ const ActivityBrowser: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 };
 export default ActivityBrowser;

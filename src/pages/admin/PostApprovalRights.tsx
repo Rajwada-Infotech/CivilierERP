@@ -523,24 +523,21 @@ export default function PostApprovalRights() {
     <>
       <Breadcrumbs items={["Admin", "Approval", "Post Approval Rights"]} />
 
+      <div className="relative space-y-8 mt-6">
       {/* ── Page header ───────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between mb-6 gap-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2.5">
-            <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
-              <ShieldCheck size={16} className="text-primary" />
-            </span>
-            Post Approval Rights
+          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+          <ShieldCheck className="text-primary" /> Post Approval Rights
           </h1>
-          <p className="text-sm text-muted-foreground mt-1 ml-10">
+          <p className="text-xs text-muted-foreground mt-0.5">
             Control which users can perform actions after approval workflow
             completion
           </p>
         </div>
         <Button
           onClick={openAssign}
-          size="sm"
-          className="gradient-accent shrink-0 gap-1.5"
+          className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
         >
           <Plus size={14} />
           Assign Rights
@@ -671,59 +668,62 @@ export default function PostApprovalRights() {
               <Label className="text-xs font-heading font-semibold uppercase tracking-wider text-muted-foreground mb-2 block">
                 User
               </Label>
-              <select
-                value={selectedUser?.id ?? ""}
-                onChange={async (e) => {
-                  const raw = dropdownUsers.find(
-                    (u) => String(u.id) === e.target.value,
-                  );
-                  if (!raw) {
-                    setSelectedUser(null);
-                    setPending([]);
-                    return;
-                  }
-
-                  // Build an AppUser shell from the API-fetched dropdown record,
-                  // then load that user's stored permissions from the DB.
-                  setPermLoading(true);
-                  try {
-                    const perms = await getUserPermissions(raw.id);
-                    const shell: AppUser = {
-                      id: String(raw.id),
-                      name: raw.name,
-                      email: "",
-                      role: raw.role as AppUser["role"],
-                      initials: raw.name
-                        .split(" ")
-                        .map((w) => w[0])
-                        .join("")
-                        .toUpperCase()
-                        .slice(0, 2),
-                      pagePermissions: perms,
-                      isActive: true,
-                    };
-                    setSelectedUser(shell);
-                    setPending(
-                      perms.map((p) => ({
-                        page: p.page,
-                        actions: [...p.actions],
-                      })),
+              <div className="relative">
+                <select
+                  value={selectedUser?.id ?? ""}
+                  onChange={async (e) => {
+                    const raw = dropdownUsers.find(
+                      (u) => String(u.id) === e.target.value,
                     );
-                  } catch {
-                    toast.error("Failed to load user permissions");
-                  } finally {
-                    setPermLoading(false);
-                  }
-                }}
-                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-0 cursor-pointer"
-              >
-                <option value="">Choose a user…</option>
-                {dropdownUsers.map((u) => (
-                  <option key={u.id} value={String(u.id)}>
-                    {u.name} · {u.role}
-                  </option>
-                ))}
-              </select>
+                    if (!raw) {
+                      setSelectedUser(null);
+                      setPending([]);
+                      return;
+                    }
+
+                    // Build an AppUser shell from the API-fetched dropdown record,
+                    // then load that user's stored permissions from the DB.
+                    setPermLoading(true);
+                    try {
+                      const perms = await getUserPermissions(raw.id);
+                      const shell: AppUser = {
+                        id: String(raw.id),
+                        name: raw.name,
+                        email: "",
+                        role: raw.role as AppUser["role"],
+                        initials: raw.name
+                          .split(" ")
+                          .map((w) => w[0])
+                          .join("")
+                          .toUpperCase()
+                          .slice(0, 2),
+                        pagePermissions: perms,
+                        isActive: true,
+                      };
+                      setSelectedUser(shell);
+                      setPending(
+                        perms.map((p) => ({
+                          page: p.page,
+                          actions: [...p.actions],
+                        })),
+                      );
+                    } catch {
+                      toast.error("Failed to load user permissions");
+                    } finally {
+                      setPermLoading(false);
+                    }
+                  }}
+                  className="w-full rounded-lg border border-border/60 bg-muted/40 px-4 py-2.5 pr-10 text-sm text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-0 cursor-pointer hover:bg-muted/70 transition-colors"
+                >
+                  <option value="">Choose a user…</option>
+                  {dropdownUsers.map((u) => (
+                    <option key={u.id} value={String(u.id)}>
+                      {u.name} · {u.role}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={13} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              </div>
             </div>
 
             {/* Permissions list */}
@@ -766,8 +766,7 @@ export default function PostApprovalRights() {
                   Cancel
                 </Button>
                 <Button
-                  size="sm"
-                  className="gap-1.5 gradient-accent"
+                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
                   onClick={handleSave}
                   disabled={!selectedUser || saving || permLoading}
                 >
@@ -808,6 +807,7 @@ export default function PostApprovalRights() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      </div>{/* end relative space-y-8 mt-6 */}
     </>
   );
 }

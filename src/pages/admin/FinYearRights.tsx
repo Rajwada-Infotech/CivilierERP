@@ -211,21 +211,28 @@ export default function FinYearRights() {
   return (
     <>
       <Breadcrumbs items={["Admin", "Rights", "Fin Year Rights"]} />
-      <div className="mb-6 flex items-center justify-between">
+
+      <div className="relative space-y-6 mt-6">
+
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="flex items-center gap-3 text-2xl font-bold text-foreground">
-            <Calendar className="h-8 w-8 text-primary" />
+          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+            <Calendar className="h-5 w-5 text-primary" />
             Financial Year Rights
           </h1>
-          <p className="mt-1 text-muted-foreground">
+          <p className="text-xs text-muted-foreground mt-0.5">
             Manage financial years, dates, and lock status
           </p>
         </div>
 
-        <Button onClick={openAddDialog} disabled={isLoading}>
-          <Plus className="mr-2 h-4 w-4" />
+        <button
+          onClick={openAddDialog}
+          disabled={isLoading}
+          className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-50"
+        >
+          <Plus size={15} />
           New Financial Year
-        </Button>
+        </button>
       </div>
 
       <Dialog
@@ -262,7 +269,15 @@ export default function FinYearRights() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="startDate">Start Date</Label>
-                <Input id="startDate" type="date" {...register("startDate")} />
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none h-4 w-4" />
+                  <input
+                    id="startDate"
+                    type="date"
+                    {...register("startDate")}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
                 {errors.startDate && (
                   <p className="text-xs text-destructive">
                     {errors.startDate.message}
@@ -271,7 +286,15 @@ export default function FinYearRights() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="endDate">End Date</Label>
-                <Input id="endDate" type="date" {...register("endDate")} />
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none h-4 w-4" />
+                  <input
+                    id="endDate"
+                    type="date"
+                    {...register("endDate")}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
                 {errors.endDate && (
                   <p className="text-xs text-destructive">
                     {errors.endDate.message}
@@ -324,16 +347,17 @@ export default function FinYearRights() {
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSaving}>
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-50"
+              >
                 {isSaving ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Saving...
-                  </>
+                  <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</>
                 ) : (
                   "Save"
                 )}
-              </Button>
+              </button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -496,6 +520,8 @@ export default function FinYearRights() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      </div>
     </>
   );
 }

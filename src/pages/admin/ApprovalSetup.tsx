@@ -112,18 +112,14 @@ const formSchema = z.object({
   name: z.string().min(1, "Name is required"),
   module: z.string().min(1, "Module is required"),
   levels: z.number().min(1).max(5),
-  approvers: z.string().transform((val) =>
-    val
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s),
-  ),
+  approvers: z.string().min(1, "At least one approver is required"),
   status: z.enum(["Active", "Inactive"]),
   description: z.string().optional(),
 });
 
-type FormInput = z.input<typeof formSchema>;
-type FormData = z.output<typeof formSchema>;
+type FormInput = z.infer<typeof formSchema>;
+// Keep FormData as an alias for submit handlers that need approvers as string[]
+type FormData = Omit<FormInput, "approvers"> & { approvers: string[] };
 
 const defaultFormValues: FormInput = {
   name: "",
@@ -164,12 +160,12 @@ export default function ApprovalSetup() {
     refetchOnWindowFocus: false, // stop refetching every tab switch
   });
 
-  const createForm = useForm<FormInput, unknown, FormData>({
+  const createForm = useForm<FormInput>({
     resolver: zodResolver(formSchema),
     defaultValues: defaultFormValues,
   });
 
-  const editForm = useForm<FormInput, unknown, FormData>({
+  const editForm = useForm<FormInput>({
     resolver: zodResolver(formSchema),
     defaultValues: defaultFormValues,
   });
@@ -186,7 +182,11 @@ export default function ApprovalSetup() {
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
   const onCreateSubmit = useCallback(
-    async (data: FormData) => {
+    async (raw: FormInput) => {
+      const data: FormData = {
+        ...raw,
+        approvers: raw.approvers.split(",").map((s) => s.trim()).filter(Boolean),
+      };
       try {
         await apiCreate(data);
         toast.success("Workflow created successfully");
@@ -201,8 +201,12 @@ export default function ApprovalSetup() {
   );
 
   const onEditSubmit = useCallback(
-    async (data: FormData) => {
+    async (raw: FormInput) => {
       if (!editingWorkflow) return;
+      const data: FormData = {
+        ...raw,
+        approvers: raw.approvers.split(",").map((s) => s.trim()).filter(Boolean),
+      };
       try {
         await apiUpdate(editingWorkflow.id, data);
         toast.success("Workflow updated successfully");
@@ -261,7 +265,7 @@ export default function ApprovalSetup() {
   );
 
   // ── Shared form fields ─────────────────────────────────────────────────────────
-  const renderFormFields = (form: UseFormReturn<FormInput, unknown, FormData>) => (
+  const renderFormFields = (form: UseFormReturn<FormInput>) => (
     <>
       <FormField
         control={form.control}
@@ -390,23 +394,25 @@ export default function ApprovalSetup() {
   return (
     <>
       <Breadcrumbs items={["Admin", "Approval", "Approval Setup"]} />
-      <div className="flex items-center justify-between mb-6">
+      <div className="relative space-y-8 mt-6">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
+          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
             <CheckCircle className="text-primary" /> Approval Setup
           </h1>
-          <p className="text-muted-foreground text-sm">
+          <p className="text-xs text-muted-foreground mt-0.5">
             Configure approval workflows and levels
           </p>
         </div>
         {canDoAction("admin_approval_setup" as PageKey, "create") && (
           <Button
+            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             onClick={() => {
               createForm.reset(defaultFormValues);
               setOpenCreate(true);
             }}
           >
-            <Plus className="mr-2 h-4 w-4" /> New Workflow
+            <Plus className="h-4 w-4" /> New Workflow
           </Button>
         )}
       </div>
@@ -426,8 +432,8 @@ export default function ApprovalSetup() {
               className="space-y-4"
             >
               {renderFormFields(createForm)}
-              <Button type="submit" className="w-full">
-                Create Workflow
+              <Button type="submit" className="w-full gradient-accent gap-2 font-semibold text-white text-sm h-auto py-2">
+                <Plus className="h-4 w-4" /> Create Workflow
               </Button>
             </form>
           </Form>
@@ -639,6 +645,7 @@ export default function ApprovalSetup() {
           )}
         </CardContent>
       </Card>
+      </div>{/* end relative space-y-8 mt-6 */}
     </>
   );
 }
