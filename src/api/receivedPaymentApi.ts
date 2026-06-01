@@ -2,6 +2,11 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE = "/api/received-payment";
 
+async function readError(res: Response, fallback: string): Promise<Error> {
+  const body = await res.json().catch(() => null);
+  return new Error(body?.error || body?.message || fallback);
+}
+
 export interface ReceivedPaymentRecord {
   RPPaymentID: number;
   // Legacy fields (always present)
@@ -94,7 +99,7 @@ export async function updateReceivedPayment(
 
 export async function deleteReceivedPayment(id: number): Promise<void> {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("Failed to delete received payment");
+  if (!res.ok) throw await readError(res, "Failed to delete received payment");
 }
 
 export async function submitReceivedPaymentForApproval(
