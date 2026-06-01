@@ -392,7 +392,9 @@ router.get("/filtered", async (req, res) => {
              p.SourceMRDocNo,
              p.SourceWDDocNo,
              p.ProjectId, p.CompanyId,
-             p.GST AS ParentGST
+             p.GST AS ParentGST,
+             p.TotalAmount    AS POTotalAmount,
+             p.SubtotalAmount AS POSubtotalAmount
       FROM GoodsReceiptNotes grn
       LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
       LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
@@ -458,6 +460,8 @@ router.get("/", cache("grns", 300), async (req, res) => {
         p.SourceWDDocNo,
         p.ProjectId,
         p.CompanyId,
+        p.TotalAmount    AS POTotalAmount,
+        p.SubtotalAmount AS POSubtotalAmount,
         td.Prefix AS DocTypePrefix,
         td.Description AS DocTypeDescription,
         COUNT(*) OVER() AS _total
@@ -532,6 +536,8 @@ router.get("/:id", async (req, res) => {
           p.ProjectId,
           p.CompanyId,
           p.GST AS ParentGST,
+          p.TotalAmount    AS POTotalAmount,
+          p.SubtotalAmount AS POSubtotalAmount,
           td.Prefix AS DocTypePrefix,
           td.Description AS DocTypeDescription
         FROM GoodsReceiptNotes grn
@@ -670,30 +676,24 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
           .request()
           .input("POID", sql.Int, parseInt(poId, 10)).query(`
             SELECT
-              po.Status AS POStatus,
-              po.POItems,
+              po.Status          AS POStatus,
+              po.TotalAmount     AS POTotalAmount,
               ISNULL(SUM(grn.TotalAmount), 0) AS TotalReceived,
-              COUNT(grn.GRNID) AS GRNCount
+              COUNT(grn.GRNID)   AS GRNCount
             FROM PurchaseOrders po
             LEFT JOIN GoodsReceiptNotes grn ON grn.POID = po.PurchaseOrderID
               AND grn.Status != 'Rejected'
             WHERE po.PurchaseOrderID = @POID
-            GROUP BY po.Status, po.POItems
+            GROUP BY po.Status, po.TotalAmount
           `);
 
         if (poCheck.recordset.length > 0) {
           const poRow = poCheck.recordset[0];
-          const poItems = (() => {
-            try {
-              return JSON.parse(poRow.POItems || "[]");
-            } catch {
-              return [];
-            }
-          })();
-          const totalOrdered = poItems.reduce(
-            (s, i) => s + Number(i.quantity || 0) * Number(i.rate || 0),
-            0,
-          );
+          // Use PO's stored TotalAmount (incl. GST) as the ordered baseline,
+          // because grn.TotalAmount is also stored inclusive of GST.
+          // Previously this compared qty*rate (ex-GST) against GST-inclusive
+          // GRN totals, causing POs to never be marked Received.
+          const totalOrdered = Number(poRow.POTotalAmount || 0);
           // Only promote PO to "Received" when all items are fully received.
           // Never write "Partially Received" back to PO — that belongs on GRN.
           const newPOStatus =
@@ -850,10 +850,116 @@ router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
   }
 });
 
+// GET /:id/can-delete — check whether GRN can be safely deleted
+// Chain: GRN → ExpenseBooking → NewPayment → BankReconciliation
+router.get("/:id/can-delete", async (req, res) => {
+  const grnId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(grnId) || grnId <= 0)
+    return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = await getPool();
+
+    // ── 1. Linked expense bookings ────────────────────────────────────────────
+    const expCheck = await pool.request().input("GRNID", sql.Int, grnId).query(`
+        SELECT eb.Eid, eb.EDocNo, eb.EStatus
+        FROM dbo.ExpenseBooking eb
+        WHERE eb.ESourceType = 'GRN' AND eb.ESourceId = @GRNID
+          AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+      `);
+
+    if (expCheck.recordset.length === 0) return res.json({ deletable: true });
+
+    const expenseBookings = expCheck.recordset.map((e) => ({
+      id: e.Eid,
+      docNo: e.EDocNo,
+      status: e.EStatus,
+    }));
+
+    const expDocNos = expCheck.recordset
+      .map((e) => e.EDocNo)
+      .filter(Boolean)
+      .map((d) => `'${d.replace(/'/g, "''")}'`)
+      .join(",");
+
+    // ── 2. BRS-cleared payments ───────────────────────────────────────────────
+    if (expDocNos.length > 0) {
+      const brsCheck = await pool.request().query(`
+        SELECT np.PPaymentID, np.PPaymentName, np.PAmount, brc.BRSID, eb.EDocNo
+        FROM dbo.NewPayment np
+        JOIN dbo.BankReconciliation brc
+          ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID AND brc.IsMatched = 1
+        JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+        WHERE np.PExpenseRef IN (${expDocNos})
+      `);
+      if (brsCheck.recordset.length > 0) {
+        return res.json({
+          deletable: false,
+          reason: "brs_cleared",
+          expenseBookings,
+          clearedPayments: brsCheck.recordset.map((r) => ({
+            paymentId: r.PPaymentID,
+            paymentName: r.PPaymentName,
+            amount: r.PAmount,
+            brsId: r.BRSID,
+            expenseDocNo: r.EDocNo,
+          })),
+        });
+      }
+
+      // ── 3. Uncleared payments ─────────────────────────────────────────────
+      const payCheck = await pool.request().query(`
+        SELECT np.PPaymentID, np.PPaymentName, np.PAmount, eb.EDocNo
+        FROM dbo.NewPayment np
+        JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+        WHERE np.PExpenseRef IN (${expDocNos})
+      `);
+      if (payCheck.recordset.length > 0) {
+        return res.json({
+          deletable: false,
+          reason: "has_payments",
+          expenseBookings,
+          linkedPayments: payCheck.recordset.map((r) => ({
+            paymentId: r.PPaymentID,
+            paymentName: r.PPaymentName,
+            amount: r.PAmount,
+            expenseDocNo: r.EDocNo,
+          })),
+        });
+      }
+    }
+
+    // ── 4. Expense bookings exist but no payments yet ─────────────────────────
+    return res.json({
+      deletable: false,
+      reason: "has_expense",
+      expenseBookings,
+    });
+  } catch (err) {
+    console.error("GRN can-delete error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // DELETE
 router.delete("/:id", async (req, res) => {
   const grnId = parseInt(req.params.id, 10);
   const pool = await getPool();
+
+  // ── Guard: linked expense bookings ────────────────────────────────────────
+  const expGuard = await pool.request().input("GRNID", sql.Int, grnId).query(`
+      SELECT COUNT(*) AS cnt
+      FROM dbo.ExpenseBooking eb
+      WHERE eb.ESourceType = 'GRN' AND eb.ESourceId = @GRNID
+        AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+    `);
+  if (Number(expGuard.recordset[0]?.cnt) > 0) {
+    return res.status(409).json({
+      error: "has_expense",
+      message:
+        "This GRN has linked Expense Booking(s). Delete the expense booking(s) first, then delete the GRN.",
+    });
+  }
+
   const transaction = pool.transaction();
 
   try {
@@ -1127,7 +1233,13 @@ router.get("/:id/pending-items", async (req, res) => {
           grn.GRNItems, grn.SupplierID, grn.POID,
           s.LHeadName AS SupplierName,
           p.PurchaseOrderNo, p.TotalAmount AS POTotal,
-          p.CompanyId, p.ProjectId
+          p.CompanyId, p.ProjectId,
+          ISNULL((
+            SELECT SUM(g2.TotalAmount)
+            FROM dbo.GoodsReceiptNotes g2
+            WHERE g2.POID = grn.POID
+              AND g2.Status != 'Rejected'
+          ), 0) AS POTotalReceived
         FROM dbo.GoodsReceiptNotes grn
         LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId = grn.SupplierID
         LEFT JOIN dbo.PurchaseOrders p ON p.PurchaseOrderID = grn.POID
@@ -1154,10 +1266,15 @@ router.get("/:id/pending-items", async (req, res) => {
           Number(it.remainingQty || 0) * Number(it.rate || it.Rate || 0),
       }));
 
-    const totalPendingAmount = pendingItems.reduce(
-      (s, i) => s + i.pendingAmount,
-      0,
-    );
+    // Use PO's stored total (incl. GST) minus all GRN receipts against it
+    // as the true pending value — more accurate than summing remainingQty * rate
+    // which omits GST and any rate amendments made after GRN entry.
+    const poTotal = Number(row.POTotal || 0);
+    const poTotalReceived = Number(row.POTotalReceived || 0);
+    const totalPendingAmount =
+      poTotal > 0
+        ? Math.max(0, poTotal - poTotalReceived)
+        : pendingItems.reduce((s, i) => s + i.pendingAmount, 0);
 
     res.json({
       grnId: row.GRNID,

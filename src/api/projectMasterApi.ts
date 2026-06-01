@@ -48,6 +48,9 @@ export const updateProject = async (
 
 export const deleteProject = async (id: number) => {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("Failed to delete project");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.reason || err.error || "Failed to delete project");
+  }
   return res.json();
 };

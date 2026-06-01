@@ -722,20 +722,70 @@ router.get("/:id/can-delete", async (req, res) => {
 
   try {
     const pool = getPool();
-    const refCheck = await pool.request().input("Eid", sql.Int, id).query(`
-      SELECT COUNT(*) AS cnt
-      FROM dbo.DebitNote
-      WHERE bill_id = @Eid
-    `);
 
-    const linkedDebitNoteCount = Number(refCheck.recordset[0]?.cnt) || 0;
+    // ── 1. Debit Note guard ───────────────────────────────────────────────────
+    const dnCheck = await pool.request().input("Eid", sql.Int, id).query(`
+      SELECT COUNT(*) AS cnt FROM dbo.DebitNote WHERE bill_id = @Eid
+    `);
+    const linkedDebitNoteCount = Number(dnCheck.recordset[0]?.cnt) || 0;
     if (linkedDebitNoteCount > 0) {
-      const reason =
-        "This booking cannot be deleted because it has linked Debit Notes. Please delete or unlink them first.";
       return res.json({
         deletable: false,
-        reason,
+        reason:
+          "This booking has linked Debit Notes. Please delete or unlink them first.",
         linkedDebitNoteCount,
+      });
+    }
+
+    // ── 2. BRS cleared payment guard ─────────────────────────────────────────
+    // Chain: ExpenseBooking.EDocNo → NewPayment.PExpenseRef → BankReconciliation.SourceID (IsMatched=1)
+    const brsCheck = await pool.request().input("Eid", sql.Int, id).query(`
+      SELECT
+        np.PPaymentID,
+        np.PPaymentName,
+        np.PAmount,
+        brc.BRSID,
+        brc.IsMatched
+      FROM dbo.ExpenseBooking eb
+      JOIN dbo.NewPayment np
+        ON np.PExpenseRef = eb.EDocNo
+      JOIN dbo.BankReconciliation brc
+        ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID AND brc.IsMatched = 1
+      WHERE eb.Eid = @Eid
+    `);
+
+    if (brsCheck.recordset.length > 0) {
+      const clearedPayments = brsCheck.recordset.map((r) => ({
+        paymentId: r.PPaymentID,
+        paymentName: r.PPaymentName,
+        amount: r.PAmount,
+        brsId: r.BRSID,
+      }));
+      return res.json({
+        deletable: false,
+        reason: "brs_cleared",
+        clearedPayments,
+      });
+    }
+
+    // ── 3. Uncollected payments (not yet in BRS but exist) ───────────────────
+    const payCheck = await pool.request().input("Eid", sql.Int, id).query(`
+      SELECT np.PPaymentID, np.PPaymentName, np.PAmount
+      FROM dbo.ExpenseBooking eb
+      JOIN dbo.NewPayment np ON np.PExpenseRef = eb.EDocNo
+      WHERE eb.Eid = @Eid
+    `);
+
+    if (payCheck.recordset.length > 0) {
+      const linkedPayments = payCheck.recordset.map((r) => ({
+        paymentId: r.PPaymentID,
+        paymentName: r.PPaymentName,
+        amount: r.PAmount,
+      }));
+      return res.json({
+        deletable: false,
+        reason: "has_payments",
+        linkedPayments,
       });
     }
 
@@ -1868,21 +1918,52 @@ router.delete("/:id", async (req, res) => {
   try {
     const pool = getPool();
 
+    // ── 1. Debit Note guard ───────────────────────────────────────────────────
     const refCheck = await pool.request().input("Eid", sql.Int, numericId)
       .query(`
-        SELECT COUNT(*) AS cnt
-        FROM dbo.DebitNote
-        WHERE bill_id = @Eid
-      `);
-
+      SELECT COUNT(*) AS cnt FROM dbo.DebitNote WHERE bill_id = @Eid
+    `);
     const linkedDebitNoteCount = Number(refCheck.recordset[0]?.cnt) || 0;
     if (linkedDebitNoteCount > 0) {
       const message =
         "This booking cannot be deleted because it has linked Debit Notes. Please delete or unlink them first.";
+      return res
+        .status(409)
+        .json({ error: message, message, linkedDebitNoteCount });
+    }
+
+    // ── 2. BRS cleared payment guard ─────────────────────────────────────────
+    const brsCheck = await pool.request().input("Eid", sql.Int, numericId)
+      .query(`
+      SELECT COUNT(*) AS cnt
+      FROM dbo.ExpenseBooking eb
+      JOIN dbo.NewPayment np
+        ON np.PExpenseRef = eb.EDocNo
+      JOIN dbo.BankReconciliation brc
+        ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID AND brc.IsMatched = 1
+      WHERE eb.Eid = @Eid
+    `);
+    if (Number(brsCheck.recordset[0]?.cnt) > 0) {
       return res.status(409).json({
-        error: message,
-        message,
-        linkedDebitNoteCount,
+        error: "brs_cleared",
+        message:
+          "This expense booking has payments that are cleared in BRS. Unclear and delete the payment record first.",
+      });
+    }
+
+    // ── 3. Uncleared payment guard ────────────────────────────────────────────
+    const payCheck = await pool.request().input("Eid", sql.Int, numericId)
+      .query(`
+      SELECT COUNT(*) AS cnt
+      FROM dbo.ExpenseBooking eb
+      JOIN dbo.NewPayment np ON np.PExpenseRef = eb.EDocNo
+      WHERE eb.Eid = @Eid
+    `);
+    if (Number(payCheck.recordset[0]?.cnt) > 0) {
+      return res.status(409).json({
+        error: "has_payments",
+        message:
+          "This expense booking has linked payment records. Delete the payment records first.",
       });
     }
 

@@ -1,1852 +1,1074 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
-import { useQueryClient, useQuery } from "@tanstack/react-query";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { toast } from "sonner";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { Button } from "@/components/ui/button";
+import React, { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  BookOpen,
-  Plus,
-  Search,
-  X,
-  RefreshCw,
-  Phone,
-  Mail,
   Building2,
-  Home,
-  Calendar,
-  IndianRupee,
+  ChevronLeft,
   ChevronRight,
   Edit2,
-  Hash,
-  CalendarDays,
-  Clock,
-  User,
+  Eye,
   FileText,
-  CheckCircle,
-  AlertCircle,
   Loader2,
+  Mail,
+  Phone,
+  Plus,
+  RefreshCw,
+  Save,
+  Search,
+  Trash2,
+  X,
+  Sparkles,
+  UserCheck,
+  TrendingUp,
+  AlertTriangle,
   MapPin,
-  ChevronLeft,
-  CreditCard,
   Users,
   ChevronDown,
-  Save,
-  Banknote,
-  Trash2,
-  Layers,
+  SlidersHorizontal,
   ArrowUpRight,
-  Percent,
-  Minus,
-  ReceiptText,
-  Tag,
-  Info,
-  Check,
 } from "lucide-react";
-import { useLookup } from "@/hooks/useLookup";
+import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-interface PaymentTerm {
-  TermID: number;
-  TermName: string;
-  ValueType: "percent" | "fixed" | "deduction";
-  TermValue: number;
-  IsActive: boolean;
-}
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-interface SelectedTerm extends PaymentTerm {
-  computedAmount: number; // resolved ₹ amount for this booking
-  docRef: string; // e.g. PMT-BKG000042-001
-}
+const API = "/api/followup-applications";
 
-interface Booking {
+type ApplicationStatus =
+  | "New"
+  | "Qualified"
+  | "Shortlisted"
+  | "Document Pending"
+  | "Rejected";
+
+interface Application {
   Id: number;
-  BookingNo: string | null;
-  ApplicantId: number;
+  ApplicantNo: string | null;
+  CustomerId: number | null;
   ApplicantName: string;
   PrimaryMobile: string | null;
   Email: string | null;
-  UnitSelectionId: number | null;
+  PanNumber: string | null;
+  ApplicantAddress: string | null;
+  CoApplicantName: string | null;
+  CoApplicantPhone: string | null;
+  CorrespondenceAddress: string | null;
+  ApplicationDate: string | null;
+  City: string | null;
+  Source: string | null;
   ProjectId: number | null;
   ProjectName: string | null;
-  CompanyId: number | null;
-  CompanyName: string | null;
-  UnitNo: string;
+  UnitId: number | null;
+  UnitName: string | null;
   BlockName: string | null;
-  FloorName: string | null;
-  UnitType: string | null;
-  AreaSqFt: number | null;
-  RatePerSqFt: number | null;
-  TotalValue: number | null;
-  BookingAmount: number;
-  BookingDate: string;
-  PaymentMode: string | null;
-  ChequeNo: string | null;
-  BankName: string | null;
-  LoanApproved: boolean;
-  LoanBank: string | null;
-  LoanAmount: number | null;
+  CompanyId: number | null;
+  PreferredUnitType: string | null;
+  BudgetAmount: number | null;
+  Status: ApplicationStatus;
   AssignedTo: number | null;
   AssignedToName: string | null;
-  Status: string;
   Notes: string | null;
-  CreatedBy: string | null;
   CreatedAt: string | null;
-  UpdatedBy: string | null;
-  UpdatedAt: string | null;
 }
 
-interface Applicant {
+interface Option {
   Id: number;
   Name: string;
+}
+interface Customer extends Option {
   Phone: string | null;
   Email: string | null;
+  Address?: string | null;
+  PanNumber?: string | null;
+  ContactPerson?: string | null;
 }
-interface Project {
-  Id: number;
-  Name: string;
+interface UnitOption extends Option {
+  ProjectId: number | null;
+  BlockId: number | null;
+  BlockName: string | null;
+}
+interface ListResponse {
+  data: Application[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+}
+interface OptionsResponse {
+  projects: Option[];
+  companies: Option[];
+  users: Option[];
+  statusOptions: ApplicationStatus[];
+}
+interface FormState {
+  CustomerId: string;
+  ApplicantName: string;
+  PrimaryMobile: string;
+  Email: string;
+  PanNumber: string;
+  ApplicantAddress: string;
+  CoApplicantName: string;
+  CoApplicantPhone: string;
+  CorrespondenceAddress: string;
+  ApplicationDate: string;
+  City: string;
+  Source: string;
+  ProjectId: string;
+  UnitId: string;
+  CompanyId: string;
+  PreferredUnitType: string;
+  BudgetAmount: string;
+  Status: ApplicationStatus;
+  AssignedTo: string;
+  Notes: string;
 }
 
-const API = "/api/followup-bookings";
-const TERMS_API = "/api/payment-plan-master";
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const STATUS_CONFIG: Record<string, { dot: string; pill: string }> = {
-  Confirmed: {
-    dot: "bg-emerald-500",
-    pill: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/25",
-  },
-  Pending: {
-    dot: "bg-amber-500",
-    pill: "bg-amber-500/12 text-amber-700 dark:text-amber-300 ring-1 ring-amber-500/25",
-  },
-  Cancelled: {
-    dot: "bg-red-500",
-    pill: "bg-red-500/12 text-red-700 dark:text-red-300 ring-1 ring-red-500/25",
-  },
+const emptyForm: FormState = {
+  CustomerId: "",
+  ApplicantName: "",
+  PrimaryMobile: "",
+  Email: "",
+  PanNumber: "",
+  ApplicantAddress: "",
+  CoApplicantName: "",
+  CoApplicantPhone: "",
+  CorrespondenceAddress: "",
+  ApplicationDate: new Date().toISOString().slice(0, 10),
+  City: "",
+  Source: "",
+  ProjectId: "",
+  UnitId: "",
+  CompanyId: "",
+  PreferredUnitType: "",
+  BudgetAmount: "",
+  Status: "New",
+  AssignedTo: "",
+  Notes: "",
 };
 
-const TYPE_CONFIG: Record<
-  PaymentTerm["ValueType"],
-  { label: string; icon: React.ReactNode; color: string; pill: string }
+// Status visual config — each status gets a unique look
+const statusConfig: Record<
+  ApplicationStatus,
+  {
+    pill: string;
+    dot: string;
+    label: string;
+    track: string; // for the status pipeline bar
+    glow: string; // row hover glow
+  }
 > = {
-  percent: {
-    label: "Percent",
-    icon: <Percent size={10} />,
-    color: "text-blue-600 dark:text-blue-400",
-    pill: "bg-blue-500/10 text-blue-700 dark:text-blue-300 ring-1 ring-blue-500/20",
+  New: {
+    pill: "bg-sky-500/10 text-sky-400 ring-1 ring-sky-400/25",
+    dot: "bg-sky-400",
+    label: "New",
+    track: "bg-sky-500",
+    glow: "hover:shadow-[inset_3px_0_0_hsl(199_89%_48%)]",
   },
-  fixed: {
-    label: "Fixed",
-    icon: <IndianRupee size={10} />,
-    color: "text-violet-600 dark:text-violet-400",
-    pill: "bg-violet-500/10 text-violet-700 dark:text-violet-300 ring-1 ring-violet-500/20",
+  Qualified: {
+    pill: "bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-400/25",
+    dot: "bg-emerald-400",
+    label: "Qualified",
+    track: "bg-emerald-500",
+    glow: "hover:shadow-[inset_3px_0_0_hsl(160_84%_39%)]",
   },
-  deduction: {
-    label: "Deduction",
-    icon: <Minus size={10} />,
-    color: "text-red-600 dark:text-red-400",
-    pill: "bg-red-500/10 text-red-700 dark:text-red-300 ring-1 ring-red-500/20",
+  Shortlisted: {
+    pill: "bg-violet-500/10 text-violet-400 ring-1 ring-violet-400/25",
+    dot: "bg-violet-400",
+    label: "Shortlisted",
+    track: "bg-violet-500",
+    glow: "hover:shadow-[inset_3px_0_0_hsl(263_70%_58%)]",
+  },
+  "Document Pending": {
+    pill: "bg-amber-500/10 text-amber-400 ring-1 ring-amber-400/25",
+    dot: "bg-amber-400",
+    label: "Doc Pending",
+    track: "bg-amber-500",
+    glow: "hover:shadow-[inset_3px_0_0_hsl(38_92%_50%)]",
+  },
+  Rejected: {
+    pill: "bg-red-500/10 text-red-400 ring-1 ring-red-400/25",
+    dot: "bg-red-400",
+    label: "Rejected",
+    track: "bg-red-500",
+    glow: "hover:shadow-[inset_3px_0_0_hsl(0_72%_51%)]",
   },
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-const AVATAR_PALETTES = [
-  {
-    bg: "bg-blue-100 dark:bg-blue-900/40",
-    text: "text-blue-700 dark:text-blue-300",
-  },
-  {
-    bg: "bg-violet-100 dark:bg-violet-900/40",
-    text: "text-violet-700 dark:text-violet-300",
-  },
-  {
-    bg: "bg-cyan-100 dark:bg-cyan-900/40",
-    text: "text-cyan-700 dark:text-cyan-300",
-  },
-  {
-    bg: "bg-emerald-100 dark:bg-emerald-900/40",
-    text: "text-emerald-700 dark:text-emerald-300",
-  },
-  {
-    bg: "bg-amber-100 dark:bg-amber-900/40",
-    text: "text-amber-700 dark:text-amber-300",
-  },
-  {
-    bg: "bg-rose-100 dark:bg-rose-900/40",
-    text: "text-rose-700 dark:text-rose-300",
-  },
-  {
-    bg: "bg-pink-100 dark:bg-pink-900/40",
-    text: "text-pink-700 dark:text-pink-300",
-  },
-  {
-    bg: "bg-indigo-100 dark:bg-indigo-900/40",
-    text: "text-indigo-700 dark:text-indigo-300",
-  },
-];
-
-function avatarPalette(name: string) {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return AVATAR_PALETTES[h % AVATAR_PALETTES.length];
+function toNullable(v: string) {
+  return v.trim() === "" ? null : v.trim();
 }
-
-function initials(name: string) {
-  return name
-    .split(" ")
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase();
+function toNullableNumber(v: string) {
+  return v === "" ? null : Number(v);
 }
-
-function fmtDate(d: string | null) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-IN", {
+function formatDate(v: string | null) {
+  if (!v) return "—";
+  return new Date(v).toLocaleDateString("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
   });
 }
-
-function fmtCurrency(v: number | null | undefined) {
-  if (v == null) return null;
+function formatCurrency(v: number | null) {
+  if (v == null) return "—";
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0,
+    notation: v >= 10000000 ? "compact" : "standard",
   }).format(v);
 }
-
-function fmtCurrencyCompact(v: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(v);
+function initials(name: string) {
+  return name
+    .split(" ")
+    .slice(0, 2)
+    .map((p) => p[0])
+    .join("")
+    .toUpperCase();
+}
+const PALETTE = [
+  "from-blue-500 to-indigo-600",
+  "from-violet-500 to-purple-600",
+  "from-cyan-500 to-teal-600",
+  "from-emerald-500 to-green-600",
+  "from-orange-500 to-amber-600",
+  "from-rose-500 to-red-600",
+  "from-pink-500 to-fuchsia-600",
+  "from-indigo-500 to-blue-600",
+];
+function grad(name: string) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return PALETTE[h % PALETTE.length];
 }
 
-/** Resolve a term's ₹ amount given the booking total value */
-function resolveTermAmount(term: PaymentTerm, totalValue: number): number {
-  if (term.ValueType === "percent")
-    return Math.round((term.TermValue / 100) * totalValue);
-  if (term.ValueType === "fixed") return Math.round(term.TermValue);
-  if (term.ValueType === "deduction")
-    return -Math.round((term.TermValue / 100) * totalValue);
-  return 0;
-}
-
-/** Generate a doc reference: PMT-{BookingNo}-{seqIndex} */
-function makeDocRef(bookingNo: string | null, index: number): string {
-  const base = bookingNo ?? `BKG${String(Date.now()).slice(-6)}`;
-  return `PMT-${base}-${String(index + 1).padStart(3, "0")}`;
-}
-
-// ── Status Badge ──────────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: string }) {
-  const cfg = STATUS_CONFIG[status] ?? {
-    dot: "bg-muted-foreground",
-    pill: "bg-muted text-muted-foreground",
+// ─── Status Pipeline Strip ────────────────────────────────────────────────────
+// A thin horizontal bar at the top of the table showing status distribution
+function StatusPipeline({ apps }: { apps: Application[] }) {
+  const counts: Record<ApplicationStatus, number> = {
+    New: 0,
+    Qualified: 0,
+    Shortlisted: 0,
+    "Document Pending": 0,
+    Rejected: 0,
   };
+  apps.forEach((a) => {
+    counts[a.Status] = (counts[a.Status] ?? 0) + 1;
+  });
+  const total = apps.length;
+  if (total === 0) return null;
+  const statuses: ApplicationStatus[] = [
+    "New",
+    "Qualified",
+    "Shortlisted",
+    "Document Pending",
+    "Rejected",
+  ];
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full ${cfg.pill}`}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot} flex-shrink-0`} />
-      {status}
-    </span>
-  );
-}
-
-// ── Avatar ────────────────────────────────────────────────────────────────────
-function Avatar({
-  name,
-  size = "md",
-}: {
-  name: string;
-  size?: "sm" | "md" | "lg";
-}) {
-  const palette = avatarPalette(name);
-  const sizes = {
-    sm: "w-7 h-7 text-[10px]",
-    md: "w-9 h-9 text-[11px]",
-    lg: "w-12 h-12 text-[14px]",
-  };
-  return (
-    <div
-      className={`${sizes[size]} rounded-xl flex items-center justify-center font-bold flex-shrink-0 ${palette.bg} ${palette.text}`}
-    >
-      {initials(name)}
+    <div className="flex items-center gap-4 px-5 py-3 border-b border-border/50">
+      <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground shrink-0">
+        Pipeline
+      </span>
+      <div className="flex-1 flex rounded-full overflow-hidden h-1.5 gap-px">
+        {statuses.map((s) => {
+          const pct = total ? (counts[s] / total) * 100 : 0;
+          if (pct === 0) return null;
+          return (
+            <div
+              key={s}
+              title={`${s}: ${counts[s]}`}
+              className={`${statusConfig[s].track} transition-all duration-500`}
+              style={{ width: `${pct}%` }}
+            />
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-3 shrink-0">
+        {statuses
+          .filter((s) => counts[s] > 0)
+          .map((s) => (
+            <div key={s} className="flex items-center gap-1">
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${statusConfig[s].track}`}
+              />
+              <span className="text-[10px] text-muted-foreground">
+                {counts[s]} {statusConfig[s].label}
+              </span>
+            </div>
+          ))}
+      </div>
     </div>
   );
 }
 
-// ── Combobox ──────────────────────────────────────────────────────────────────
-function Combobox({
+// ─── Status Badge ─────────────────────────────────────────────────────────────
+function StatusBadge({ status }: { status: ApplicationStatus }) {
+  const c = statusConfig[status] ?? statusConfig.New;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${c.pill}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
+      {c.label}
+    </span>
+  );
+}
+
+// ─── Drawer primitives ────────────────────────────────────────────────────────
+function DrawerSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+          {title}
+        </p>
+        <div className="flex-1 h-px bg-border/60" />
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">{children}</div>
+    </div>
+  );
+}
+function Field({
   label,
+  children,
+  span2,
+}: {
+  label: string;
+  children: React.ReactNode;
+  span2?: boolean;
+}) {
+  return (
+    <label className={`space-y-1.5 text-sm ${span2 ? "sm:col-span-2" : ""}`}>
+      <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+const inputCls =
+  "h-9 w-full rounded-lg border border-border bg-background/60 px-3 text-sm text-foreground outline-none transition focus:border-primary/60 focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/40";
+const textareaCls =
+  "min-h-[80px] w-full rounded-lg border border-border bg-background/60 px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary/60 focus:ring-2 focus:ring-primary/10 resize-none placeholder:text-muted-foreground/40";
+
+// ─── Styled Select ────────────────────────────────────────────────────────────
+function StyledSelect({
   value,
   onChange,
   options,
-  placeholder = "Select...",
-  required,
-  disabled,
+  placeholder,
 }: {
-  label: string;
   value: string;
   onChange: (v: string) => void;
-  options: { value: string; label: string; sub?: string }[];
+  options: { value: string; label: string }[];
   placeholder?: string;
-  required?: boolean;
-  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!open) return;
     const h = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node))
         setOpen(false);
     };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
-  }, []);
-  const filtered = options.filter((o) =>
-    o.label.toLowerCase().includes(q.toLowerCase()),
-  );
-  const selected = options.find((o) => o.value === value);
-
+  }, [open]);
+  const sel = options.find((o) => o.value === value);
   return (
     <div ref={ref} className="relative">
-      <label className="block text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-        {label}
-        {required && <span className="text-red-500 ml-0.5">*</span>}
-      </label>
       <button
         type="button"
-        disabled={disabled}
-        onClick={() => {
-          setOpen(!open);
-          setQ("");
-        }}
-        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl border text-sm transition-all
-          ${disabled ? "opacity-50 cursor-not-allowed bg-muted" : "bg-background hover:border-primary/50 cursor-pointer"}
-          ${open ? "border-primary ring-2 ring-primary/10" : "border-border"}
-          ${!selected ? "text-muted-foreground" : "text-foreground"}`}
+        onClick={() => setOpen((p) => !p)}
+        className="h-9 w-full rounded-lg border border-border bg-background/60 px-3 text-sm text-foreground outline-none transition focus:border-primary/60 flex items-center justify-between gap-2 hover:border-border/80"
       >
-        <span className="truncate">{selected?.label ?? placeholder}</span>
+        <span className={sel ? "text-foreground" : "text-muted-foreground/50"}>
+          {sel?.label ?? placeholder ?? "Select…"}
+        </span>
         <ChevronDown
-          size={14}
-          className={`flex-shrink-0 text-muted-foreground transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          size={13}
+          className={`text-muted-foreground transition-transform flex-shrink-0 ${open ? "rotate-180" : ""}`}
         />
       </button>
       {open && (
-        <div className="absolute z-50 top-full mt-1.5 w-full bg-popover border border-border rounded-xl shadow-2xl overflow-hidden">
-          <div className="p-2 border-b border-border">
-            <input
-              autoFocus
-              className="w-full px-2.5 py-1.5 text-sm bg-muted rounded-lg outline-none"
-              placeholder="Search..."
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-          </div>
-          <div className="max-h-52 overflow-y-auto">
+        <div className="absolute top-full left-0 right-0 z-[200] mt-1 rounded-xl border border-border bg-card shadow-2xl overflow-hidden max-h-52 overflow-y-auto">
+          {placeholder && (
             <button
               type="button"
               onClick={() => {
                 onChange("");
                 setOpen(false);
               }}
-              className="w-full text-left px-3 py-2 text-sm text-muted-foreground hover:bg-muted"
+              className={`w-full text-left px-3 py-2 text-sm transition-colors hover:bg-muted ${value === "" ? "text-foreground bg-muted/60 font-medium" : "text-muted-foreground"}`}
             >
               {placeholder}
             </button>
-            {filtered.length === 0 ? (
-              <p className="px-3 py-4 text-sm text-muted-foreground text-center">
-                No results
-              </p>
-            ) : (
-              filtered.map((o) => (
-                <button
-                  key={o.value}
-                  type="button"
-                  onClick={() => {
-                    onChange(o.value);
-                    setOpen(false);
-                    setQ("");
-                  }}
-                  className={`w-full text-left px-3 py-2.5 text-sm hover:bg-muted transition-colors ${value === o.value ? "bg-primary/8 text-primary font-medium" : "text-foreground"}`}
-                >
-                  {o.label}
-                  {o.sub && (
-                    <span className="block text-[11px] text-muted-foreground mt-0.5">
-                      {o.sub}
-                    </span>
-                  )}
-                </button>
-              ))
-            )}
-          </div>
+          )}
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => {
+                onChange(o.value);
+                setOpen(false);
+              }}
+              className={`w-full text-left px-3 py-2 text-sm transition-colors hover:bg-muted flex items-center gap-2 ${value === o.value ? "text-primary bg-primary/5 font-medium" : "text-foreground"}`}
+            >
+              {value === o.value && (
+                <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
+              )}
+              {o.label}
+            </button>
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-// ── Payment Term Selector ─────────────────────────────────────────────────────
-function PaymentTermSelector({
-  terms,
-  selectedIds,
-  totalValue,
-  bookingNo,
+// ─── Drawer ───────────────────────────────────────────────────────────────────
+function ApplicationDrawer({
+  open,
+  editing,
+  form,
+  options,
+  customers,
+  units,
+  saving,
+  onClose,
+  onSubmit,
   onChange,
 }: {
-  terms: PaymentTerm[];
-  selectedIds: number[];
-  totalValue: number;
-  bookingNo: string | null;
-  onChange: (ids: number[]) => void;
-}) {
-  const activeTerms = terms.filter((t) => t.IsActive);
-
-  const toggle = (id: number) => {
-    if (selectedIds.includes(id)) onChange(selectedIds.filter((x) => x !== id));
-    else onChange([...selectedIds, id]);
-  };
-
-  const selectedTerms: SelectedTerm[] = useMemo(() => {
-    return selectedIds
-      .map((id, idx) => {
-        const t = terms.find((x) => x.TermID === id);
-        if (!t) return null;
-        return {
-          ...t,
-          computedAmount: resolveTermAmount(t, totalValue),
-          docRef: makeDocRef(bookingNo, idx),
-        };
-      })
-      .filter(Boolean) as SelectedTerm[];
-  }, [selectedIds, terms, totalValue, bookingNo]);
-
-  const totalCharged = selectedTerms
-    .filter((t) => t.ValueType !== "deduction")
-    .reduce((s, t) => s + t.computedAmount, 0);
-  const totalDeducted = selectedTerms
-    .filter((t) => t.ValueType === "deduction")
-    .reduce((s, t) => s + Math.abs(t.computedAmount), 0);
-  const netPayable = totalValue - totalDeducted;
-  const balance = totalValue - totalCharged + totalDeducted;
-
-  return (
-    <div className="space-y-4">
-      {/* Term picker */}
-      <div className="space-y-2">
-        {activeTerms.length === 0 ? (
-          <p className="text-xs text-muted-foreground text-center py-4 bg-muted/30 rounded-xl border border-dashed border-border">
-            No active payment terms — add them in Payment Plan Master
-          </p>
-        ) : (
-          <div className="grid gap-1.5">
-            {activeTerms.map((term) => {
-              const isSelected = selectedIds.includes(term.TermID);
-              const tc = TYPE_CONFIG[term.ValueType];
-              const amount = resolveTermAmount(term, totalValue);
-              return (
-                <button
-                  key={term.TermID}
-                  type="button"
-                  onClick={() => toggle(term.TermID)}
-                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-left transition-all group
-                    ${
-                      isSelected
-                        ? "border-primary/40 bg-primary/5 ring-1 ring-primary/15"
-                        : "border-border bg-background hover:border-border/80 hover:bg-muted/30"
-                    }`}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div
-                      className={`w-4 h-4 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all
-                      ${isSelected ? "border-primary bg-primary" : "border-border group-hover:border-primary/40"}`}
-                    >
-                      {isSelected && (
-                        <Check
-                          size={10}
-                          className="text-primary-foreground"
-                          strokeWidth={3}
-                        />
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[12px] font-semibold text-foreground truncate">
-                        {term.TermName}
-                      </p>
-                      <span
-                        className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md ${tc.pill}`}
-                      >
-                        {tc.icon}
-                        {term.ValueType === "percent" ||
-                        term.ValueType === "deduction"
-                          ? `${term.TermValue}%`
-                          : fmtCurrencyCompact(term.TermValue)}
-                        {term.ValueType === "deduction" && " off"}
-                      </span>
-                    </div>
-                  </div>
-                  {totalValue > 0 && (
-                    <p
-                      className={`text-[12px] font-bold flex-shrink-0 ml-3 ${term.ValueType === "deduction" ? "text-red-600 dark:text-red-400" : "text-foreground"}`}
-                    >
-                      {term.ValueType === "deduction" ? "−" : ""}
-                      {fmtCurrencyCompact(Math.abs(amount))}
-                    </p>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Breakdown panel — only show when terms selected and totalValue known */}
-      {selectedTerms.length > 0 && totalValue > 0 && (
-        <div className="rounded-xl border border-border bg-muted/20 overflow-hidden">
-          {/* Header */}
-          <div className="px-4 py-2.5 bg-muted/40 border-b border-border flex items-center gap-2">
-            <ReceiptText size={12} className="text-muted-foreground" />
-            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-              Payment Breakdown
-            </p>
-          </div>
-
-          {/* Line items */}
-          <div className="px-4 divide-y divide-border/50">
-            {/* Base */}
-            <div className="flex items-center justify-between py-2.5">
-              <span className="text-[11px] text-muted-foreground">
-                Total Property Value
-              </span>
-              <span className="text-[12px] font-semibold text-foreground">
-                {fmtCurrencyCompact(totalValue)}
-              </span>
-            </div>
-
-            {/* Each selected term */}
-            {selectedTerms.map((t) => (
-              <div key={t.TermID} className="py-2.5 space-y-1">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-medium text-foreground truncate">
-                      {t.TermName}
-                    </p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <code className="text-[9px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground border border-border/60">
-                        {t.docRef}
-                      </code>
-                      <span
-                        className={`inline-flex items-center gap-0.5 text-[9px] font-medium px-1 py-0.5 rounded ${TYPE_CONFIG[t.ValueType].pill}`}
-                      >
-                        {TYPE_CONFIG[t.ValueType].icon}
-                        {t.ValueType === "percent" ||
-                        t.ValueType === "deduction"
-                          ? `${t.TermValue}%`
-                          : fmtCurrencyCompact(t.TermValue)}
-                      </span>
-                    </div>
-                  </div>
-                  <p className="text-[12px] font-bold flex-shrink-0 text-foreground">
-                    −{fmtCurrencyCompact(Math.abs(t.computedAmount))}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Summary footer */}
-          <div className="border-t border-border bg-muted/40 px-4 py-3 space-y-2">
-            {totalDeducted > 0 && (
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] text-muted-foreground">
-                  After Deductions
-                </span>
-                <span className="text-[12px] font-semibold text-foreground">
-                  {fmtCurrencyCompact(netPayable)}
-                </span>
-              </div>
-            )}
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-muted-foreground">
-                Total Charged (this schedule)
-              </span>
-              <span className="text-[13px] font-bold text-emerald-600 dark:text-emerald-400">
-                {fmtCurrencyCompact(totalCharged)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between pt-2 border-t border-border/60">
-              <span className="text-[11px] font-bold text-foreground">
-                Balance Remaining
-              </span>
-              <span
-                className={`text-[14px] font-extrabold ${balance > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}
-              >
-                {fmtCurrencyCompact(Math.max(0, balance))}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {selectedTerms.length > 0 && totalValue === 0 && (
-        <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 text-[11px]">
-          <Info size={12} className="flex-shrink-0" />
-          Enter Total Value above to see ₹ breakdown
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Form helpers ──────────────────────────────────────────────────────────────
-function FormField({
-  label,
-  required,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="block text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-        {label}
-        {required && <span className="text-red-500 ml-0.5">*</span>}
-      </label>
-      {children}
-    </div>
-  );
-}
-
-function FormSection({
-  icon,
-  label,
-  color,
-  children,
-  fullWidth,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  color: string;
-  children: React.ReactNode;
-  fullWidth?: boolean;
-}) {
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2 pb-2 border-b border-border/60">
-        <div className={`p-1.5 rounded-lg ${color}`}>{icon}</div>
-        <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-          {label}
-        </p>
-      </div>
-      <div
-        className={`grid ${fullWidth ? "grid-cols-1" : "grid-cols-2"} gap-3`}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
-// ── Booking Form ──────────────────────────────────────────────────────────────
-const EMPTY_FORM = {
-  applicantId: "",
-  unitNo: "",
-  blockName: "",
-  floorName: "",
-  unitType: "",
-  areaSqFt: "",
-  ratePerSqFt: "",
-  totalValue: "",
-  bookingAmount: "",
-  bookingDate: "",
-  paymentMode: "",
-  chequeNo: "",
-  bankName: "",
-  loanApproved: false,
-  loanBank: "",
-  loanAmount: "",
-  projectId: "",
-  status: "Confirmed",
-  notes: "",
-};
-type FormData = typeof EMPTY_FORM;
-
-function BookingForm({
-  initial,
-  onSave,
-  onCancel,
-  applicants,
-  projects,
-  statusOptions,
-  paymentModes,
-  unitTypes,
-  editBookingNo,
-  editBookingId,
-}: {
-  initial?: Partial<FormData>;
-  onSave: (data: FormData, selectedTermIds: number[]) => Promise<void>;
-  onCancel: () => void;
-  applicants: Applicant[];
-  projects: Project[];
-  statusOptions: string[];
-  paymentModes: string[];
-  unitTypes: string[];
-  editBookingNo?: string | null;
-  editBookingId?: number | null;
-}) {
-  const [form, setForm] = useState<FormData>({ ...EMPTY_FORM, ...initial });
-  const [saving, setSaving] = useState(false);
-  const [selectedTermIds, setSelectedTermIds] = useState<number[]>([]);
-
-  // When editing an existing booking, pre-load its saved payment term IDs
-  const { data: existingTerms } = useQuery({
-    queryKey: ["booking-payment-terms", editBookingId],
-    queryFn: async () => {
-      const res = await fetchWithAuth(`${API}/${editBookingId}/payment-terms`);
-      if (!res.ok) return [];
-      return res.json() as Promise<{ TermID: number }[]>;
-    },
-    enabled: !!editBookingId,
-    staleTime: 0,
-  });
-
-  useEffect(() => {
-    if (existingTerms && existingTerms.length > 0) {
-      setSelectedTermIds(existingTerms.map((t) => t.TermID));
-    }
-  }, [existingTerms]);
-
-  const set = (k: keyof FormData) => (v: string | boolean) =>
-    setForm((prev) => ({ ...prev, [k]: v }));
-
-  // Auto-compute total value
-  useEffect(() => {
-    const area = parseFloat(form.areaSqFt);
-    const rate = parseFloat(form.ratePerSqFt);
-    if (area > 0 && rate > 0)
-      set("totalValue")(String(Math.round(area * rate)));
-  }, [form.areaSqFt, form.ratePerSqFt]);
-
-  // Fetch payment terms
-  const { data: paymentTerms = [] } = useQuery<PaymentTerm[]>({
-    queryKey: ["payment-terms"],
-    queryFn: async () => {
-      const res = await fetchWithAuth(TERMS_API);
-      if (!res.ok) throw new Error("Failed to load payment terms");
-      return res.json();
-    },
-    staleTime: 300_000,
-  });
-
-  const totalValue = parseFloat(form.totalValue) || 0;
-
-  const applicantOpts = applicants.map((a) => ({
-    value: String(a.Id),
-    label: a.Name,
-    sub: [a.Phone, a.Email].filter(Boolean).join(" · "),
-  }));
-  const projectOpts = projects.map((p) => ({
-    value: String(p.Id),
-    label: p.Name,
-  }));
-
-  const handleSave = async () => {
-    if (!form.applicantId) {
-      toast.error("Applicant is required");
-      return;
-    }
-    if (!form.unitNo.trim()) {
-      toast.error("Unit No is required");
-      return;
-    }
-    if (!form.bookingDate) {
-      toast.error("Booking date is required");
-      return;
-    }
-    setSaving(true);
-    try {
-      await onSave(form, selectedTermIds);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const inputCls =
-    "w-full px-3 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all placeholder:text-muted-foreground";
-
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto p-6 space-y-7">
-        {/* Applicant */}
-        <FormSection
-          icon={<User size={12} className="text-blue-600 dark:text-blue-400" />}
-          label="Applicant"
-          color="bg-blue-50 dark:bg-blue-900/30"
-        >
-          <div className="col-span-2">
-            <Combobox
-              label="Applicant"
-              required
-              value={form.applicantId}
-              onChange={set("applicantId")}
-              options={applicantOpts}
-              placeholder="Select applicant..."
-            />
-          </div>
-          <FormField label="Booking Date" required>
-            <div className="relative">
-              <CalendarDays
-                size={13}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-              <input
-                type="date"
-                className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                value={form.bookingDate}
-                onChange={(e) => set("bookingDate")(e.target.value)}
-              />
-            </div>
-          </FormField>
-          <FormField label="Status">
-            <div className="relative">
-              <select
-                className="w-full appearance-none px-3 py-2 pr-8 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all"
-                value={form.status}
-                onChange={(e) => set("status")(e.target.value)}
-              >
-                {statusOptions.map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </select>
-              <ChevronDown
-                size={13}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
-          </FormField>
-        </FormSection>
-
-        {/* Property */}
-        <FormSection
-          icon={
-            <Building2
-              size={12}
-              className="text-violet-600 dark:text-violet-400"
-            />
-          }
-          label="Property"
-          color="bg-violet-50 dark:bg-violet-900/30"
-        >
-          <div className="col-span-2">
-            <Combobox
-              label="Project"
-              value={form.projectId}
-              onChange={set("projectId")}
-              options={projectOpts}
-              placeholder="Select project..."
-            />
-          </div>
-          <FormField label="Unit No" required>
-            <input
-              className={inputCls}
-              placeholder="e.g. A-401"
-              value={form.unitNo}
-              onChange={(e) => set("unitNo")(e.target.value)}
-            />
-          </FormField>
-          <FormField label="Unit Type">
-            <div className="relative">
-              <select
-                className="w-full appearance-none px-3 py-2 pr-8 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all"
-                value={form.unitType}
-                onChange={(e) => set("unitType")(e.target.value)}
-              >
-                <option value="">Select type...</option>
-                {unitTypes.map((t) => (
-                  <option key={t}>{t}</option>
-                ))}
-              </select>
-              <ChevronDown
-                size={13}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
-          </FormField>
-          <FormField label="Block">
-            <input
-              className={inputCls}
-              placeholder="e.g. A"
-              value={form.blockName}
-              onChange={(e) => set("blockName")(e.target.value)}
-            />
-          </FormField>
-          <FormField label="Floor">
-            <input
-              className={inputCls}
-              placeholder="e.g. 4th"
-              value={form.floorName}
-              onChange={(e) => set("floorName")(e.target.value)}
-            />
-          </FormField>
-          <FormField label="Area (sq.ft)">
-            <input
-              type="number"
-              className={inputCls}
-              placeholder="0"
-              value={form.areaSqFt}
-              onChange={(e) => set("areaSqFt")(e.target.value)}
-            />
-          </FormField>
-          <FormField label="Rate / sq.ft (₹)">
-            <input
-              type="number"
-              className={inputCls}
-              placeholder="0"
-              value={form.ratePerSqFt}
-              onChange={(e) => set("ratePerSqFt")(e.target.value)}
-            />
-          </FormField>
-          <div className="col-span-2">
-            <FormField label="Total Value (₹)">
-              <div className="relative">
-                <input
-                  type="number"
-                  className={`${inputCls} bg-muted/40 font-medium`}
-                  placeholder="Auto-computed from area × rate"
-                  value={form.totalValue}
-                  onChange={(e) => set("totalValue")(e.target.value)}
-                />
-                {form.areaSqFt && form.ratePerSqFt && (
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
-                    auto
-                  </span>
-                )}
-              </div>
-            </FormField>
-          </div>
-        </FormSection>
-
-        {/* Payment Terms */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 pb-2 border-b border-border/60">
-            <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/30">
-              <Tag
-                size={12}
-                className="text-emerald-600 dark:text-emerald-400"
-              />
-            </div>
-            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-              Payment Schedule
-            </p>
-            {selectedTermIds.length > 0 && (
-              <span className="ml-auto text-[10px] font-semibold bg-primary/10 text-primary px-2 py-0.5 rounded-full">
-                {selectedTermIds.length} term
-                {selectedTermIds.length !== 1 ? "s" : ""} selected
-              </span>
-            )}
-          </div>
-          <PaymentTermSelector
-            terms={paymentTerms}
-            selectedIds={selectedTermIds}
-            totalValue={totalValue}
-            bookingNo={editBookingNo ?? null}
-            onChange={setSelectedTermIds}
-          />
-        </div>
-
-        {/* Payment */}
-        <FormSection
-          icon={
-            <CreditCard
-              size={12}
-              className="text-cyan-600 dark:text-cyan-400"
-            />
-          }
-          label="Booking Payment"
-          color="bg-cyan-50 dark:bg-cyan-900/30"
-        >
-          <FormField label="Payment Mode">
-            <div className="relative">
-              <select
-                className="w-full appearance-none px-3 py-2 pr-8 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all"
-                value={form.paymentMode}
-                onChange={(e) => set("paymentMode")(e.target.value)}
-              >
-                <option value="">Select mode...</option>
-                {paymentModes.map((m) => (
-                  <option key={m}>{m}</option>
-                ))}
-              </select>
-              <ChevronDown
-                size={13}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
-          </FormField>
-          {(form.paymentMode === "Cheque" || form.paymentMode === "DD") && (
-            <>
-              <FormField label="Cheque / DD No">
-                <input
-                  className={inputCls}
-                  placeholder="XXXXXXXXXX"
-                  value={form.chequeNo}
-                  onChange={(e) => set("chequeNo")(e.target.value)}
-                />
-              </FormField>
-              <FormField label="Bank Name">
-                <input
-                  className={inputCls}
-                  placeholder="Bank name"
-                  value={form.bankName}
-                  onChange={(e) => set("bankName")(e.target.value)}
-                />
-              </FormField>
-            </>
-          )}
-        </FormSection>
-
-        {/* Loan */}
-        <FormSection
-          icon={
-            <Banknote
-              size={12}
-              className="text-amber-600 dark:text-amber-400"
-            />
-          }
-          label="Home Loan (Optional)"
-          color="bg-amber-50 dark:bg-amber-900/30"
-        >
-          <div className="col-span-2">
-            <label className="flex items-center gap-2.5 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={form.loanApproved as boolean}
-                onChange={(e) => set("loanApproved")(e.target.checked)}
-                className="sr-only"
-              />
-              <div
-                className={`relative w-9 h-5 rounded-full border transition-colors flex-shrink-0 ${form.loanApproved ? "bg-primary border-primary" : "bg-muted border-border"}`}
-              >
-                <div
-                  className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all duration-200 shadow-sm ${form.loanApproved ? "left-[18px]" : "left-0.5"}`}
-                />
-              </div>
-              <span className="text-sm text-foreground">Loan approved</span>
-            </label>
-          </div>
-          {form.loanApproved && (
-            <>
-              <FormField label="Loan Bank">
-                <input
-                  className={inputCls}
-                  placeholder="e.g. SBI Home Loans"
-                  value={form.loanBank}
-                  onChange={(e) => set("loanBank")(e.target.value)}
-                />
-              </FormField>
-              <FormField label="Loan Amount (₹)">
-                <input
-                  type="number"
-                  className={inputCls}
-                  placeholder="0"
-                  value={form.loanAmount}
-                  onChange={(e) => set("loanAmount")(e.target.value)}
-                />
-              </FormField>
-            </>
-          )}
-        </FormSection>
-
-        {/* Notes */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 pb-2 border-b border-border/60">
-            <div className="p-1.5 rounded-lg bg-muted">
-              <FileText size={12} className="text-muted-foreground" />
-            </div>
-            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-              Notes
-            </p>
-          </div>
-          <textarea
-            rows={3}
-            className={inputCls}
-            placeholder="Any additional notes..."
-            value={form.notes}
-            onChange={(e) => set("notes")(e.target.value)}
-          />
-        </div>
-      </div>
-
-      <div className="flex-shrink-0 flex items-center justify-between gap-2 px-6 py-4 border-t border-border bg-muted/20">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="px-4 py-2 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto rounded-lg flex items-center disabled:opacity-60"
-        >
-          {saving ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            <Save size={14} />
-          )}
-          {saving ? "Saving…" : "Save Booking"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Detail Drawer ─────────────────────────────────────────────────────────────
-function InfoRow({
-  label,
-  value,
-  icon,
-}: {
-  label: string;
-  value: React.ReactNode;
-  icon?: React.ReactNode;
-}) {
-  if (!value) return null;
-  return (
-    <div className="flex items-start gap-3 py-2.5 border-b border-border/40 last:border-0">
-      {icon && (
-        <span className="text-muted-foreground/60 mt-0.5 w-3.5 flex-shrink-0">
-          {icon}
-        </span>
-      )}
-      <div className="flex-1 min-w-0 flex items-start justify-between gap-2">
-        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex-shrink-0 mt-0.5">
-          {label}
-        </p>
-        <p className="text-[12px] text-foreground text-right break-words">
-          {value}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function InfoSection({
-  title,
-  icon,
-  children,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mb-4">
-      <div className="flex items-center gap-1.5 mb-2">
-        <span className="text-muted-foreground/50">{icon}</span>
-        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-          {title}
-        </p>
-      </div>
-      <div className="rounded-xl bg-muted/20 border border-border/50 px-4">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-interface BookingPaymentTerm {
-  Id: number;
-  TermID: number;
-  TermName: string;
-  ValueType: "percent" | "fixed" | "deduction";
-  TermValue: number;
-  ComputedAmount: number;
-  DocRef: string | null;
-  SortOrder: number;
-  DueDate: string | null;
-  IsPaid: boolean;
-}
-
-function BookingDrawer({
-  booking,
-  onClose,
-  onEdit,
-}: {
-  booking: Booking;
+  open: boolean;
+  editing: Application | null;
+  form: FormState;
+  options: OptionsResponse | undefined;
+  customers: Customer[];
+  units: UnitOption[];
+  saving: boolean;
   onClose: () => void;
-  onEdit: () => void;
+  onSubmit: () => void;
+  onChange: (p: Partial<FormState>) => void;
 }) {
-  const { data: paymentSchedule = [], isLoading: scheduleLoading } = useQuery<
-    BookingPaymentTerm[]
-  >({
-    queryKey: ["booking-payment-terms", booking.Id],
-    queryFn: async () => {
-      const res = await fetchWithAuth(`${API}/${booking.Id}/payment-terms`);
-      if (!res.ok) return [];
-      return res.json();
-    },
-    staleTime: 60_000,
-  });
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [showDrop, setShowDrop] = useState(false);
+  const autoFilled = !!form.CustomerId;
+  const selectedCustomer = customers.find(
+    (c) => String(c.Id) === form.CustomerId,
+  );
+  const filtered = customers
+    .filter(
+      (c) =>
+        c.Name.toLowerCase().includes(customerSearch.toLowerCase()) ||
+        c.Phone?.includes(customerSearch),
+    )
+    .slice(0, 8);
+
+  function pickCustomer(c: Customer) {
+    onChange({
+      CustomerId: String(c.Id),
+      ApplicantName: c.Name,
+      PrimaryMobile: c.Phone ?? form.PrimaryMobile,
+      Email: c.Email ?? form.Email,
+      PanNumber: c.PanNumber ?? form.PanNumber,
+    });
+    setCustomerSearch(c.Name);
+    setShowDrop(false);
+  }
+  function clearCustomer() {
+    onChange({
+      CustomerId: "",
+      ApplicantName: "",
+      PrimaryMobile: "",
+      Email: "",
+    });
+    setCustomerSearch("");
+  }
+  if (!open) return null;
 
   return (
-    <>
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-[2px]">
       <div
-        className="fixed inset-0 z-40 bg-black/25 backdrop-blur-[2px]"
-        onClick={onClose}
-      />
-      <div className="fixed right-0 top-0 bottom-0 z-50 w-[520px] max-w-[95vw] bg-card border-l border-border shadow-2xl flex flex-col">
-        <div className="flex-shrink-0 px-6 pt-6 pb-4 border-b border-border">
-          <div className="flex items-start justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <Avatar name={booking.ApplicantName} size="lg" />
-              <div>
-                <h2 className="text-[16px] font-bold text-foreground leading-tight">
-                  {booking.ApplicantName}
-                </h2>
-                {booking.BookingNo && (
-                  <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
-                    {booking.BookingNo}
-                  </p>
-                )}
-              </div>
+        className="h-full w-full max-w-[700px] flex flex-col border-l border-border bg-card shadow-2xl"
+        style={{ animation: "slideIn 0.22s cubic-bezier(0.16,1,0.3,1)" }}
+      >
+        <div className="flex items-center justify-between border-b border-border px-6 py-4 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+              <FileText size={14} className="text-primary" />
             </div>
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              <button
-                onClick={onEdit}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-[12px] font-semibold hover:bg-primary/90 transition-colors"
-              >
-                <Edit2 size={11} /> Edit
-              </button>
-              <button
-                onClick={onClose}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
-                <X size={16} />
-              </button>
+            <div>
+              <h2 className="text-[15px] font-semibold text-foreground leading-tight">
+                {editing ? "Edit Application" : "New Application"}
+              </h2>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {editing?.ApplicantNo ??
+                  "Fill in applicant and project details"}
+              </p>
             </div>
           </div>
-          <div className="flex items-center flex-wrap gap-2">
-            <StatusBadge status={booking.Status} />
-            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground bg-muted/60 rounded-full px-2.5 py-1 border border-border/60">
-              <Calendar size={10} /> {fmtDate(booking.BookingDate)}
-            </span>
-            {booking.TotalValue && (
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-full px-2.5 py-1">
-                <IndianRupee size={10} /> {fmtCurrency(booking.TotalValue)}
-              </span>
-            )}
-          </div>
-          {(booking.PrimaryMobile || booking.Email) && (
-            <div className="flex flex-wrap gap-3 mt-3">
-              {booking.PrimaryMobile && (
-                <a
-                  href={`tel:${booking.PrimaryMobile}`}
-                  className="flex items-center gap-1.5 text-[12px] text-primary hover:underline"
-                >
-                  <Phone size={11} /> {booking.PrimaryMobile}
-                </a>
-              )}
-              {booking.Email && (
-                <a
-                  href={`mailto:${booking.Email}`}
-                  className="flex items-center gap-1.5 text-[12px] text-primary hover:underline"
-                >
-                  <Mail size={11} /> {booking.Email}
-                </a>
-              )}
-            </div>
-          )}
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+          >
+            <X size={15} />
+          </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-1">
-          <InfoSection title="Booking" icon={<BookOpen size={11} />}>
-            <InfoRow
-              label="Booking No"
-              value={booking.BookingNo}
-              icon={<Hash size={11} />}
-            />
-            <InfoRow
-              label="Date"
-              value={fmtDate(booking.BookingDate)}
-              icon={<Calendar size={11} />}
-            />
-            <InfoRow
-              label="Booking Amount"
-              value={fmtCurrency(booking.BookingAmount)}
-              icon={<IndianRupee size={11} />}
-            />
-            <InfoRow
-              label="Total Value"
-              value={fmtCurrency(booking.TotalValue)}
-              icon={<IndianRupee size={11} />}
-            />
-            <InfoRow
-              label="Payment Mode"
-              value={booking.PaymentMode}
-              icon={<CreditCard size={11} />}
-            />
-            {booking.ChequeNo && (
-              <InfoRow
-                label="Cheque / DD No"
-                value={booking.ChequeNo}
-                icon={<Hash size={11} />}
-              />
-            )}
-            {booking.BankName && (
-              <InfoRow
-                label="Bank"
-                value={booking.BankName}
-                icon={<Building2 size={11} />}
-              />
-            )}
-          </InfoSection>
-          <InfoSection title="Property" icon={<Home size={11} />}>
-            <InfoRow
-              label="Project"
-              value={booking.ProjectName}
-              icon={<Building2 size={11} />}
-            />
-            <InfoRow
-              label="Unit"
-              value={[booking.BlockName, booking.UnitNo]
-                .filter(Boolean)
-                .join(" › ")}
-              icon={<Home size={11} />}
-            />
-            <InfoRow
-              label="Floor"
-              value={booking.FloorName}
-              icon={<Layers size={11} />}
-            />
-            <InfoRow
-              label="Type"
-              value={booking.UnitType}
-              icon={<Home size={11} />}
-            />
-            <InfoRow
-              label="Area"
-              value={
-                booking.AreaSqFt
-                  ? `${booking.AreaSqFt.toLocaleString("en-IN")} sq.ft`
-                  : null
-              }
-              icon={<MapPin size={11} />}
-            />
-            <InfoRow
-              label="Rate/sqft"
-              value={
-                booking.RatePerSqFt ? fmtCurrency(booking.RatePerSqFt) : null
-              }
-              icon={<IndianRupee size={11} />}
-            />
-          </InfoSection>
-          {booking.LoanApproved && (
-            <InfoSection title="Home Loan" icon={<Banknote size={11} />}>
-              <InfoRow
-                label="Status"
-                value={
-                  <span className="text-emerald-600 font-semibold">
-                    Approved
-                  </span>
-                }
-                icon={<CheckCircle size={11} />}
-              />
-              <InfoRow
-                label="Bank"
-                value={booking.LoanBank}
-                icon={<Building2 size={11} />}
-              />
-              <InfoRow
-                label="Loan Amount"
-                value={fmtCurrency(booking.LoanAmount)}
-                icon={<IndianRupee size={11} />}
-              />
-            </InfoSection>
-          )}
-          {(booking.AssignedToName || booking.Notes) && (
-            <InfoSection title="Other" icon={<FileText size={11} />}>
-              <InfoRow
-                label="Assigned To"
-                value={booking.AssignedToName}
-                icon={<Users size={11} />}
-              />
-              <InfoRow
-                label="Notes"
-                value={booking.Notes}
-                icon={<FileText size={11} />}
-              />
-            </InfoSection>
-          )}
-          {/* Payment Schedule */}
-          <div className="space-y-3 pt-1">
-            <div className="flex items-center gap-2 pb-2 border-b border-border/60">
-              <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/30">
-                <Tag
-                  size={12}
-                  className="text-emerald-600 dark:text-emerald-400"
-                />
-              </div>
-              <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-                Payment Schedule
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+          {/* Customer lookup */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                Customer Lookup
               </p>
-              {paymentSchedule.length > 0 && (
-                <span className="ml-auto text-[10px] font-semibold bg-primary/10 text-primary px-2 py-0.5 rounded-full">
-                  {paymentSchedule.length} term
-                  {paymentSchedule.length !== 1 ? "s" : ""}
-                </span>
+              <div className="flex-1 h-px bg-border/60" />
+              {autoFilled && (
+                <button
+                  onClick={clearCustomer}
+                  className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1"
+                >
+                  <X size={10} /> Clear
+                </button>
               )}
             </div>
-            {scheduleLoading ? (
-              <div className="flex items-center gap-2 py-3 text-[12px] text-muted-foreground">
-                <Loader2 size={12} className="animate-spin" /> Loading schedule…
+            {autoFilled ? (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/8 border border-emerald-400/20 text-emerald-400 text-xs font-medium">
+                <Sparkles size={12} /> Auto-filled from customer master ·{" "}
+                <span className="font-bold">{selectedCustomer?.Name}</span>
               </div>
-            ) : paymentSchedule.length === 0 ? (
-              <p className="text-[12px] text-muted-foreground text-center py-4 bg-muted/30 rounded-xl border border-dashed border-border">
-                No payment schedule — attach terms while editing this booking.
-              </p>
             ) : (
-              <div className="rounded-xl border border-border bg-muted/20 overflow-hidden">
-                <div className="px-4 divide-y divide-border/50">
-                  {paymentSchedule.map((t) => {
-                    const tc = TYPE_CONFIG[t.ValueType] ?? TYPE_CONFIG["fixed"];
-                    return (
-                      <div
-                        key={t.Id}
-                        className="py-3 flex items-start justify-between gap-3"
+              <div className="relative">
+                <Search
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+                <input
+                  className={`${inputCls} pl-9 pr-9`}
+                  placeholder="Search by name or phone to auto-fill…"
+                  value={customerSearch}
+                  onChange={(e) => {
+                    setCustomerSearch(e.target.value);
+                    setShowDrop(true);
+                  }}
+                  onFocus={() => setShowDrop(true)}
+                />
+                <ChevronDown
+                  size={13}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+                {showDrop && filtered.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-xl border border-border bg-card shadow-xl overflow-hidden">
+                    {filtered.map((c) => (
+                      <button
+                        key={c.Id}
+                        onClick={() => pickCustomer(c)}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-muted transition-colors text-left"
                       >
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[12px] font-semibold text-foreground truncate">
-                            {t.TermName}
-                          </p>
-                          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                            {t.DocRef && (
-                              <code className="text-[9px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground border border-border/60">
-                                {t.DocRef}
-                              </code>
-                            )}
-                            <span
-                              className={`inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-md ${tc.pill}`}
-                            >
-                              {tc.icon}
-                              {t.ValueType === "percent" ||
-                              t.ValueType === "deduction"
-                                ? `${t.TermValue}%`
-                                : fmtCurrencyCompact(t.TermValue)}
-                            </span>
-                            {t.DueDate && (
-                              <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                                <Calendar size={9} /> Due {fmtDate(t.DueDate)}
-                              </span>
-                            )}
-                          </div>
+                        <div
+                          className={`w-7 h-7 rounded-lg bg-gradient-to-br ${grad(c.Name)} flex items-center justify-center text-[10px] font-bold text-white shrink-0`}
+                        >
+                          {initials(c.Name)}
                         </div>
-                        <div className="flex-shrink-0 text-right">
-                          <p
-                            className={`text-[13px] font-bold ${t.ValueType === "deduction" ? "text-red-600 dark:text-red-400" : "text-foreground"}`}
-                          >
-                            {t.ValueType === "deduction" ? "−" : ""}
-                            {fmtCurrencyCompact(Math.abs(t.ComputedAmount))}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-foreground truncate">
+                            {c.Name}
                           </p>
-                          {t.IsPaid ? (
-                            <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 justify-end mt-0.5">
-                              <CheckCircle size={9} /> Paid
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-amber-600 dark:text-amber-400 flex items-center gap-0.5 justify-end mt-0.5">
-                              <Clock size={9} /> Pending
-                            </span>
+                          {c.Phone && (
+                            <p className="text-xs text-muted-foreground">
+                              {c.Phone}
+                            </p>
                           )}
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                {/* Total footer */}
-                {(() => {
-                  const totalCharged = paymentSchedule
-                    .filter((t) => t.ValueType !== "deduction")
-                    .reduce((s, t) => s + t.ComputedAmount, 0);
-                  const totalDeducted = paymentSchedule
-                    .filter((t) => t.ValueType === "deduction")
-                    .reduce((s, t) => s + Math.abs(t.ComputedAmount), 0);
-                  const balance =
-                    (booking.TotalValue ?? 0) - totalCharged + totalDeducted;
-                  return (
-                    <div className="border-t border-border bg-muted/40 px-4 py-3 space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-muted-foreground">
-                          Total Scheduled
-                        </span>
-                        <span className="text-[13px] font-bold text-emerald-600 dark:text-emerald-400">
-                          {fmtCurrencyCompact(totalCharged)}
-                        </span>
-                      </div>
-                      {booking.TotalValue != null && (
-                        <div className="flex items-center justify-between pt-1.5 border-t border-border/60">
-                          <span className="text-[11px] font-bold text-foreground">
-                            Balance Remaining
-                          </span>
-                          <span
-                            className={`text-[14px] font-extrabold ${balance > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}
-                          >
-                            {fmtCurrencyCompact(Math.max(0, balance))}
-                          </span>
-                        </div>
-                      )}
+                      </button>
+                    ))}
+                    <div className="px-4 py-2 border-t border-border">
+                      <p className="text-[11px] text-muted-foreground">
+                        Or fill in manually below for a walk-in
+                      </p>
                     </div>
-                  );
-                })()}
+                  </div>
+                )}
+                {showDrop && customerSearch && filtered.length === 0 && (
+                  <div
+                    className="absolute top-full left-0 right-0 z-50 mt-1 rounded-xl border border-border bg-card shadow-xl overflow-hidden"
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    <div className="px-4 py-3 text-sm text-muted-foreground">
+                      No matching customers — fill in manually below
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
 
-          <InfoSection title="Audit" icon={<Clock size={11} />}>
-            <InfoRow
-              label="Created"
-              value={
-                booking.CreatedBy
-                  ? `${booking.CreatedBy} · ${fmtDate(booking.CreatedAt)}`
-                  : fmtDate(booking.CreatedAt)
-              }
-              icon={<Clock size={11} />}
-            />
-            {booking.UpdatedBy && (
-              <InfoRow
-                label="Last Updated"
-                value={`${booking.UpdatedBy} · ${fmtDate(booking.UpdatedAt)}`}
-                icon={<Clock size={11} />}
+          <DrawerSection title="Applicant Info">
+            <Field label="Full Name">
+              <input
+                className={inputCls}
+                value={form.ApplicantName}
+                placeholder="Enter applicant name"
+                onChange={(e) => onChange({ ApplicantName: e.target.value })}
               />
-            )}
-          </InfoSection>
-        </div>
-      </div>
-    </>
-  );
-}
+            </Field>
+            <Field label="Mobile">
+              <input
+                className={inputCls}
+                value={form.PrimaryMobile}
+                placeholder="+91 00000 00000"
+                onChange={(e) => onChange({ PrimaryMobile: e.target.value })}
+              />
+            </Field>
+            <Field label="Email">
+              <input
+                className={inputCls}
+                type="email"
+                value={form.Email}
+                placeholder="applicant@email.com"
+                onChange={(e) => onChange({ Email: e.target.value })}
+              />
+            </Field>
+            <Field label="PAN">
+              <input
+                className={inputCls}
+                value={form.PanNumber}
+                placeholder="ABCDE1234F"
+                onChange={(e) =>
+                  onChange({ PanNumber: e.target.value.toUpperCase() })
+                }
+              />
+            </Field>
+            <Field label="City">
+              <input
+                className={inputCls}
+                value={form.City}
+                placeholder="City"
+                onChange={(e) => onChange({ City: e.target.value })}
+              />
+            </Field>
+            <Field label="Application Date">
+              <input
+                className={inputCls}
+                type="date"
+                value={form.ApplicationDate}
+                onChange={(e) => onChange({ ApplicationDate: e.target.value })}
+              />
+            </Field>
+            <Field label="Applicant Address" span2>
+              <textarea
+                className={textareaCls}
+                value={form.ApplicantAddress}
+                placeholder="Residential address"
+                onChange={(e) => onChange({ ApplicantAddress: e.target.value })}
+              />
+            </Field>
+          </DrawerSection>
 
-// ── Booking Card (grid view) ───────────────────────────────────────────────────
-function BookingCard({
-  booking,
-  isSelected,
-  onClick,
-}: {
-  booking: Booking;
-  isSelected: boolean;
-  onClick: () => void;
-}) {
-  const palette = avatarPalette(booking.ApplicantName);
-  return (
-    <div
-      onClick={onClick}
-      className={`group relative rounded-2xl border cursor-pointer transition-all duration-200
-        ${isSelected ? "border-primary/40 bg-primary/3 shadow-sm shadow-primary/10" : "border-border bg-card hover:border-border/80 hover:shadow-md hover:shadow-black/5 hover:-translate-y-0.5"}`}
-    >
-      <div className="p-4">
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div
-              className={`w-9 h-9 rounded-xl flex items-center justify-center text-[11px] font-bold flex-shrink-0 ${palette.bg} ${palette.text}`}
-            >
-              {initials(booking.ApplicantName)}
-            </div>
-            <div className="min-w-0">
-              <p className="text-[13px] font-semibold text-foreground truncate leading-tight">
-                {booking.ApplicantName}
-              </p>
-              <p className="text-[10px] font-mono text-muted-foreground mt-0.5">
-                {booking.BookingNo ?? "—"}
-              </p>
-            </div>
-          </div>
-          <StatusBadge status={booking.Status} />
+          <DrawerSection title="Co-Applicant">
+            <Field label="Co-applicant Name">
+              <input
+                className={inputCls}
+                value={form.CoApplicantName}
+                placeholder="Co-applicant full name"
+                onChange={(e) => onChange({ CoApplicantName: e.target.value })}
+              />
+            </Field>
+            <Field label="Co-applicant Phone">
+              <input
+                className={inputCls}
+                value={form.CoApplicantPhone}
+                placeholder="+91 00000 00000"
+                onChange={(e) => onChange({ CoApplicantPhone: e.target.value })}
+              />
+            </Field>
+            <Field label="Correspondence Address" span2>
+              <textarea
+                className={textareaCls}
+                value={form.CorrespondenceAddress}
+                placeholder="Correspondence / mailing address"
+                onChange={(e) =>
+                  onChange({ CorrespondenceAddress: e.target.value })
+                }
+              />
+            </Field>
+          </DrawerSection>
+
+          <DrawerSection title="Project & Preferences">
+            <Field label="Project">
+              <StyledSelect
+                value={form.ProjectId}
+                onChange={(v) => onChange({ ProjectId: v, UnitId: "" })}
+                placeholder="Select project"
+                options={(options?.projects ?? []).map((p) => ({
+                  value: String(p.Id),
+                  label: p.Name,
+                }))}
+              />
+            </Field>
+            <Field label="Preferred Unit">
+              <StyledSelect
+                value={form.UnitId}
+                onChange={(v) => onChange({ UnitId: v })}
+                placeholder="No unit selected"
+                options={units.map((u) => ({
+                  value: String(u.Id),
+                  label: u.BlockName ? `${u.BlockName} – ${u.Name}` : u.Name,
+                }))}
+              />
+            </Field>
+            <Field label="Company">
+              <StyledSelect
+                value={form.CompanyId}
+                onChange={(v) => onChange({ CompanyId: v })}
+                placeholder="Select company"
+                options={(options?.companies ?? []).map((c) => ({
+                  value: String(c.Id),
+                  label: c.Name,
+                }))}
+              />
+            </Field>
+            <Field label="Preferred Type">
+              <input
+                className={inputCls}
+                placeholder="2 BHK, 3 BHK, Villa…"
+                value={form.PreferredUnitType}
+                onChange={(e) =>
+                  onChange({ PreferredUnitType: e.target.value })
+                }
+              />
+            </Field>
+            <Field label="Budget (₹)">
+              <input
+                className={inputCls}
+                type="number"
+                min="0"
+                value={form.BudgetAmount}
+                placeholder="0"
+                onChange={(e) => onChange({ BudgetAmount: e.target.value })}
+              />
+            </Field>
+            <Field label="Source">
+              <input
+                className={inputCls}
+                value={form.Source}
+                placeholder="Referral, Website, Site Visit…"
+                onChange={(e) => onChange({ Source: e.target.value })}
+              />
+            </Field>
+          </DrawerSection>
+
+          <DrawerSection title="Status & Assignment">
+            <Field label="Status">
+              <StyledSelect
+                value={form.Status}
+                onChange={(v) => onChange({ Status: v as ApplicationStatus })}
+                options={(options?.statusOptions ?? []).map((s) => ({
+                  value: s,
+                  label: s,
+                }))}
+              />
+            </Field>
+            <Field label="Assigned To">
+              <StyledSelect
+                value={form.AssignedTo}
+                onChange={(v) => onChange({ AssignedTo: v })}
+                placeholder="Unassigned"
+                options={(options?.users ?? []).map((u) => ({
+                  value: String(u.Id),
+                  label: u.Name,
+                }))}
+              />
+            </Field>
+            <Field label="Notes" span2>
+              <textarea
+                className={textareaCls}
+                value={form.Notes}
+                placeholder="Any additional notes or observations…"
+                onChange={(e) => onChange({ Notes: e.target.value })}
+              />
+            </Field>
+          </DrawerSection>
         </div>
-        <div className="flex items-center gap-1.5 mb-3">
-          <div className="p-1 rounded-md bg-muted/60">
-            <Building2 size={10} className="text-muted-foreground" />
-          </div>
-          <span className="text-[11px] text-muted-foreground truncate">
-            {[booking.ProjectName, booking.BlockName, booking.UnitNo]
-              .filter(Boolean)
-              .join(" · ")}
-            {booking.UnitType && (
-              <span className="ml-1 font-medium text-foreground/70">
-                {booking.UnitType}
-              </span>
+
+        <div className="flex justify-end gap-2 border-t border-border px-6 py-4 shrink-0">
+          <Button variant="outline" onClick={onClose} className="h-9">
+            Cancel
+          </Button>
+          <Button
+            onClick={onSubmit}
+            disabled={saving}
+            className="gradient-accent text-white h-9 px-5 font-semibold"
+          >
+            {saving ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
             )}
-          </span>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-lg bg-muted/40 px-2.5 py-2">
-            <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
-              Booking Amt
-            </p>
-            <p className="text-[12px] font-bold text-foreground">
-              {fmtCurrency(booking.BookingAmount) ?? "—"}
-            </p>
-          </div>
-          <div className="rounded-lg bg-muted/40 px-2.5 py-2">
-            <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
-              Total Value
-            </p>
-            <p className="text-[12px] font-bold text-emerald-600 dark:text-emerald-400">
-              {booking.TotalValue ? fmtCurrency(booking.TotalValue) : "—"}
-            </p>
-          </div>
+            {editing ? "Update" : "Create Application"}
+          </Button>
         </div>
       </div>
-      <div className="px-4 pb-3 flex items-center justify-between">
-        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-          <Calendar size={10} /> {fmtDate(booking.BookingDate)}
-        </span>
-        {booking.PaymentMode && (
-          <span className="text-[10px] font-medium text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-md">
-            {booking.PaymentMode}
-          </span>
-        )}
-      </div>
-      <div
-        className={`absolute right-4 top-4 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? "opacity-100" : ""}`}
-      >
-        <ArrowUpRight size={13} className="text-primary" />
-      </div>
+      <style>{`@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`}</style>
     </div>
   );
 }
 
-// ── KPI Card ──────────────────────────────────────────────────────────────────
-function KpiCard({
+// ─── Bento Stat Card ──────────────────────────────────────────────────────────
+function BentoCard({
+  icon,
   label,
   value,
-  icon,
-  accent,
-  bg,
+  sub,
+  accentFrom,
+  accentTo,
+  iconColor,
 }: {
-  label: string;
-  value: React.ReactNode;
   icon: React.ReactNode;
-  accent: string;
-  bg: string;
+  label: string;
+  value: string | number;
+  sub?: string;
+  accentFrom: string;
+  accentTo: string;
+  iconColor: string;
 }) {
   return (
-    <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
-      <div className={`p-2.5 rounded-xl ${bg} flex-shrink-0`}>
-        <span className={accent}>{icon}</span>
+    <div className="relative rounded-2xl border border-border bg-card p-5 overflow-hidden group transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:border-border/80">
+      {/* Gradient mesh background */}
+      <div
+        className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-br ${accentFrom} ${accentTo}`}
+        style={{ opacity: 0.04 }}
+      />
+      {/* Top-right glow orb */}
+      <div
+        className={`absolute -top-6 -right-6 w-20 h-20 rounded-full blur-2xl opacity-20 ${accentFrom.replace("from-", "bg-")}`}
+      />
+
+      <div className="relative flex items-start justify-between gap-3">
+        <div
+          className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br ${accentFrom} ${accentTo} bg-opacity-10`}
+          style={{
+            background: "transparent",
+            border: "1px solid",
+            borderColor: `color-mix(in srgb, currentColor 15%, transparent)`,
+          }}
+        >
+          <span className={iconColor}>{icon}</span>
+        </div>
+        <ArrowUpRight
+          size={13}
+          className="text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors mt-0.5"
+        />
       </div>
-      <div className="min-w-0">
-        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
-          {label}
-        </p>
-        <p className="text-lg font-bold font-heading text-foreground leading-tight mt-0.5 truncate">
+
+      <div className="relative mt-4">
+        <p className="text-[26px] font-bold tracking-tight text-foreground leading-none font-heading">
           {value}
         </p>
+        {sub && (
+          <p className="text-[10px] text-muted-foreground/60 mt-0.5 font-mono">
+            {sub}
+          </p>
+        )}
+        <p className="text-[11px] text-muted-foreground mt-2">{label}</p>
       </div>
     </div>
   );
 }
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
-const PAGE_SIZE = 20;
-
-export default function BookingsPage() {
+// ─── Main Page ────────────────────────────────────────────────────────────────
+export default function ApplicationsPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string | undefined>(
-    undefined,
-  );
-  const [projectFilter, setProjectFilter] = useState<string | undefined>(
-    undefined,
-  );
-  const [showForm, setShowForm] = useState(false);
-  const [editBooking, setEditBooking] = useState<Booking | null>(null);
-  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
-  const [page, setPage] = useState(1);
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [viewMode, setViewMode] = useState<"table" | "grid">("table");
-
-  const statusOptions = useLookup("BOOKING_STATUS", ["Confirmed", "Pending", "Cancelled"]);
-  const paymentModes = useLookup("PAYMENT_MODE", ["Cheque", "NEFT", "RTGS", "DD", "Cash", "Online"]);
-  const unitTypes = useLookup("UNIT_TYPE", ["1BHK", "2BHK", "3BHK", "4BHK", "Studio", "Duplex", "Villa", "Shop", "Office"]);
+  const [status, setStatus] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [page, setPage] = useState(1);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editing, setEditing] = useState<Application | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<FormState>(emptyForm);
 
   useEffect(() => {
-    const t = setTimeout(() => {
+    const t = window.setTimeout(() => {
       setDebouncedSearch(search);
       setPage(1);
     }, 300);
-    return () => clearTimeout(t);
+    return () => window.clearTimeout(t);
   }, [search]);
-  useEffect(() => {
-    setPage(1);
-  }, [statusFilter, projectFilter]);
 
-  const {
-    data: bookingData,
-    isLoading,
-    refetch,
-  } = useQuery({
-    queryKey: [
-      "followup-bookings",
-      debouncedSearch,
-      statusFilter,
-      projectFilter,
-      page,
-    ],
+  const { data: options } = useQuery<OptionsResponse>({
+    queryKey: ["followup-applications-options"],
     queryFn: async () => {
-      const p = new URLSearchParams();
-      if (debouncedSearch) p.set("search", debouncedSearch);
-      if (statusFilter) p.set("status", statusFilter);
-      if (projectFilter) p.set("projectId", projectFilter);
-      p.set("page", String(page));
-      p.set("pageSize", String(PAGE_SIZE));
-      const res = await fetchWithAuth(`${API}?${p}`);
-      if (!res.ok) throw new Error("Failed to load");
-      return res.json() as Promise<{
-        data: Booking[];
-        pagination: { total: number; totalPages: number };
-      }>;
+      const r = await fetchWithAuth(`${API}/options`);
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
     },
-    staleTime: 60_000,
+  });
+  const { data: customers = [] } = useQuery<Customer[]>({
+    queryKey: ["followup-application-customers"],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${API}/customers`);
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+  });
+  const { data: units = [] } = useQuery<UnitOption[]>({
+    queryKey: ["followup-application-units", form.ProjectId],
+    queryFn: async () => {
+      const p = form.ProjectId ? `?projectId=${form.ProjectId}` : "";
+      const r = await fetchWithAuth(`${API}/units${p}`);
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
+    },
+    enabled: drawerOpen,
   });
 
-  const { data: applicants = [] } = useQuery<Applicant[]>({
-    queryKey: ["followup-booking-applicants"],
+  const queryParams = useMemo(() => {
+    const q = new URLSearchParams();
+    q.set("page", String(page));
+    q.set("pageSize", "20");
+    if (debouncedSearch) q.set("search", debouncedSearch);
+    if (status) q.set("status", status);
+    if (projectId) q.set("projectId", projectId);
+    return q.toString();
+  }, [debouncedSearch, page, projectId, status]);
+
+  const { data, isLoading, isFetching, refetch } = useQuery<ListResponse>({
+    queryKey: ["followup-applications", queryParams],
     queryFn: async () => {
-      const res = await fetchWithAuth(`${API}/applicants`);
-      if (!res.ok) throw new Error("Failed");
-      return res.json();
+      const r = await fetchWithAuth(`${API}?${queryParams}`);
+      if (!r.ok) throw new Error("Failed");
+      return r.json();
     },
-    staleTime: 300_000,
   });
 
-  const { data: projects = [] } = useQuery<Project[]>({
-    queryKey: ["followup-booking-projects"],
-    queryFn: async () => {
-      const res = await fetchWithAuth(`${API}/projects`);
-      if (!res.ok) throw new Error("Failed");
-      return res.json();
-    },
-    staleTime: 600_000,
-  });
+  const applications = data?.data ?? [];
+  const pagination = data?.pagination;
+  const totalPages = pagination?.totalPages ?? 1;
 
-  const bookings = bookingData?.data ?? [];
-  const totalPages = bookingData?.pagination?.totalPages ?? 1;
-  const total = bookingData?.pagination?.total ?? 0;
-  const hasFilters = !!(search || statusFilter || projectFilter);
-  const confirmed = bookings.filter((b) => b.Status === "Confirmed").length;
-  const pending = bookings.filter((b) => b.Status === "Pending").length;
-  const totalValue = bookings
-    .filter((b) => b.Status === "Confirmed")
-    .reduce((s, b) => s + (b.TotalValue ?? 0), 0);
-
-  const handleSave = async (form: FormData, selectedTermIds: number[]) => {
-    const payload = {
-      ApplicantId: form.applicantId ? parseInt(form.applicantId) : null,
-      ProjectId: form.projectId ? parseInt(form.projectId) : null,
-      UnitNo: form.unitNo,
-      BlockName: form.blockName || null,
-      FloorName: form.floorName || null,
-      UnitType: form.unitType || null,
-      AreaSqFt: form.areaSqFt ? parseFloat(form.areaSqFt) : null,
-      RatePerSqFt: form.ratePerSqFt ? parseFloat(form.ratePerSqFt) : null,
-      TotalValue: form.totalValue ? parseFloat(form.totalValue) : null,
-      BookingAmount: form.bookingAmount ? parseFloat(form.bookingAmount) : null,
-      BookingDate: form.bookingDate,
-      PaymentMode: form.paymentMode || null,
-      ChequeNo: form.chequeNo || null,
-      BankName: form.bankName || null,
-      LoanApproved: form.loanApproved,
-      LoanBank: form.loanBank || null,
-      LoanAmount: form.loanAmount ? parseFloat(form.loanAmount) : null,
-      Status: form.status,
-      Notes: form.notes || null,
-      PaymentTermIds: selectedTermIds.length > 0 ? selectedTermIds : undefined,
-    };
-
-    if (editBooking) {
-      const res = await fetchWithAuth(`${API}/${editBooking.Id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const j = await res.json();
-        throw new Error(j.error || "Update failed");
-      }
-      toast.success("Booking updated");
-      const updated = await fetchWithAuth(`${API}/${editBooking.Id}`)
-        .then((r) => r.json())
-        .catch(() => null);
-      if (updated) setSelectedBooking(updated);
-    } else {
-      const res = await fetchWithAuth(API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const j = await res.json();
-        throw new Error(j.error || "Create failed");
-      }
-      toast.success("Booking created");
-    }
-    await queryClient.invalidateQueries({ queryKey: ["followup-bookings"] });
-    setShowForm(false);
-    setEditBooking(null);
-  };
-
-  const openNew = () => {
-    setEditBooking(null);
-    setSelectedBooking(null);
-    setShowForm(true);
-  };
-  const openEdit = (b: Booking) => {
-    setEditBooking(b);
-    setSelectedBooking(null);
-    setShowForm(true);
-  };
-  const closeForm = () => {
-    setShowForm(false);
-    setEditBooking(null);
-  };
-
-  const EmptyState = () => (
-    <div className="flex flex-col items-center gap-4 py-24">
-      <div className="p-5 rounded-2xl bg-muted/60 border border-border">
-        <BookOpen size={28} className="text-muted-foreground" />
-      </div>
-      <div className="text-center">
-        <p className="text-sm font-semibold text-foreground">
-          No bookings found
-        </p>
-        <p className="text-xs text-muted-foreground mt-1">
-          {hasFilters
-            ? "Try adjusting your filters"
-            : "Get started by creating your first booking"}
-        </p>
-      </div>
-      {!hasFilters && (
-        <button
-          onClick={openNew}
-          className="flex items-center gap-1.5 text-xs bg-primary text-primary-foreground rounded-xl px-4 py-2 hover:bg-primary/90 transition-colors font-semibold"
-        >
-          <Plus size={13} /> New Booking
-        </button>
-      )}
-    </div>
+  const totals = useMemo(
+    () => ({
+      total: pagination?.total ?? 0,
+      active: applications.filter((a) => a.Status !== "Rejected").length,
+      pendingDocs: applications.filter((a) => a.Status === "Document Pending")
+        .length,
+      budget: applications.reduce((s, a) => s + Number(a.BudgetAmount ?? 0), 0),
+    }),
+    [applications, pagination?.total],
   );
+
+  function resetAndOpen() {
+    setEditing(null);
+    setForm(emptyForm);
+    setDrawerOpen(true);
+  }
+
+  function editApplication(app: Application) {
+    setEditing(app);
+    setForm({
+      CustomerId: app.CustomerId ? String(app.CustomerId) : "",
+      ApplicantName: app.ApplicantName ?? "",
+      PrimaryMobile: app.PrimaryMobile ?? "",
+      Email: app.Email ?? "",
+      PanNumber: app.PanNumber ?? "",
+      ApplicantAddress: app.ApplicantAddress ?? "",
+      CoApplicantName: app.CoApplicantName ?? "",
+      CoApplicantPhone: app.CoApplicantPhone ?? "",
+      CorrespondenceAddress: app.CorrespondenceAddress ?? "",
+      ApplicationDate:
+        app.ApplicationDate ?? new Date().toISOString().slice(0, 10),
+      City: app.City ?? "",
+      Source: app.Source ?? "",
+      ProjectId: app.ProjectId ? String(app.ProjectId) : "",
+      UnitId: app.UnitId ? String(app.UnitId) : "",
+      CompanyId: app.CompanyId ? String(app.CompanyId) : "",
+      PreferredUnitType: app.PreferredUnitType ?? "",
+      BudgetAmount: app.BudgetAmount == null ? "" : String(app.BudgetAmount),
+      Status: app.Status,
+      AssignedTo: app.AssignedTo ? String(app.AssignedTo) : "",
+      Notes: app.Notes ?? "",
+    });
+    setDrawerOpen(true);
+  }
+
+  async function saveApplication() {
+    if (!form.ApplicantName.trim()) {
+      toast.error("Applicant name is required");
+      return;
+    }
+    const payload = {
+      CustomerId: toNullableNumber(form.CustomerId),
+      ApplicantName: form.ApplicantName.trim(),
+      PrimaryMobile: toNullable(form.PrimaryMobile),
+      Email: toNullable(form.Email),
+      PanNumber: toNullable(form.PanNumber),
+      ApplicantAddress: toNullable(form.ApplicantAddress),
+      CoApplicantName: toNullable(form.CoApplicantName),
+      CoApplicantPhone: toNullable(form.CoApplicantPhone),
+      CorrespondenceAddress: toNullable(form.CorrespondenceAddress),
+      ApplicationDate: toNullable(form.ApplicationDate),
+      City: toNullable(form.City),
+      Source: toNullable(form.Source),
+      ProjectId: toNullableNumber(form.ProjectId),
+      UnitId: toNullableNumber(form.UnitId),
+      CompanyId: toNullableNumber(form.CompanyId),
+      PreferredUnitType: toNullable(form.PreferredUnitType),
+      BudgetAmount: toNullableNumber(form.BudgetAmount),
+      Status: form.Status,
+      AssignedTo: toNullableNumber(form.AssignedTo),
+      Notes: toNullable(form.Notes),
+    };
+    setSaving(true);
+    try {
+      const r = await fetchWithAuth(editing ? `${API}/${editing.Id}` : API, {
+        method: editing ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error((e as { error?: string }).error || "Failed");
+      }
+      toast.success(editing ? "Application updated" : "Application created");
+      setDrawerOpen(false);
+      await queryClient.invalidateQueries({
+        queryKey: ["followup-applications"],
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteApplication(app: Application) {
+    if (!window.confirm(`Delete application for ${app.ApplicantName}?`)) return;
+    try {
+      const r = await fetchWithAuth(`${API}/${app.Id}`, { method: "DELETE" });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error((e as { error?: string }).error || "Failed");
+      }
+      toast.success("Application deleted");
+      await queryClient.invalidateQueries({
+        queryKey: ["followup-applications"],
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete");
+    }
+  }
+
+  const hasFilters = !!(search || status || projectId);
 
   return (
     <>
@@ -1854,501 +1076,454 @@ export default function BookingsPage() {
         items={[
           { label: "Follow-Up", path: "/followup" },
           { label: "Sales" },
-          { label: "Bookings", path: "/followup/sales/bookings" },
+          { label: "Applications", path: "/followup/sales/applications" },
         ]}
       />
-      <div className="relative space-y-8 mt-6">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
+
+      <div className="space-y-6 mt-4">
+        {/* ── Header ─────────────────────────────────────────────────────── */}
+        <div className="flex items-end justify-between gap-4">
           <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Bookings
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Unit bookings and sales agreements
+            <div className="flex items-center gap-2.5 mb-1">
+              <div className="w-1 h-5 rounded-full gradient-accent" />
+              <h1 className="text-[22px] font-heading font-bold text-foreground tracking-tight leading-none">
+                Applications
+              </h1>
+              {isFetching && (
+                <Loader2
+                  size={13}
+                  className="animate-spin text-muted-foreground"
+                />
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground pl-3.5">
+              Track and manage sales applications before unit selection and
+              booking.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
-              disabled={isLoading}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              disabled={isFetching}
+              className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-lg border border-border hover:bg-muted/60 transition-colors disabled:opacity-40 text-muted-foreground hover:text-foreground"
             >
               <RefreshCw
-                size={13}
-                className={isLoading ? "animate-spin" : ""}
-              />
+                size={12}
+                className={isFetching ? "animate-spin" : ""}
+              />{" "}
               Refresh
             </button>
             <Button
-              onClick={openNew}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+              onClick={resetAndOpen}
+              className="gradient-accent gap-1.5 font-semibold text-white text-sm h-9 px-4 rounded-xl shadow-lg shadow-primary/20"
             >
-              <Plus size={13} />
-              New Booking
+              <Plus size={14} /> New Application
             </Button>
           </div>
         </div>
 
-        {/* KPI Strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <KpiCard
-            label="Total Bookings"
-            value={total}
-            icon={<BookOpen size={16} />}
-            accent="text-blue-600 dark:text-blue-400"
-            bg="bg-blue-50 dark:bg-blue-900/30"
+        {/* ── Bento Stats ─────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <BentoCard
+            icon={<Users size={15} />}
+            label="Total Applications"
+            value={totals.total}
+            sub={`across all projects`}
+            accentFrom="from-blue-500/5"
+            accentTo="to-indigo-500/5"
+            iconColor="text-blue-400"
           />
-          <KpiCard
-            label="Confirmed"
-            value={confirmed}
-            icon={<CheckCircle size={16} />}
-            accent="text-emerald-600 dark:text-emerald-400"
-            bg="bg-emerald-50 dark:bg-emerald-900/30"
+          <BentoCard
+            icon={<UserCheck size={15} />}
+            label="Active on Page"
+            value={totals.active}
+            sub={`${totals.total > 0 ? Math.round((totals.active / applications.length) * 100) : 0}% of this page`}
+            accentFrom="from-emerald-500/5"
+            accentTo="to-teal-500/5"
+            iconColor="text-emerald-400"
           />
-          <KpiCard
-            label="Pending"
-            value={pending}
-            icon={<AlertCircle size={16} />}
-            accent="text-amber-600 dark:text-amber-400"
-            bg="bg-amber-50 dark:bg-amber-900/30"
+          <BentoCard
+            icon={<AlertTriangle size={15} />}
+            label="Docs Pending"
+            value={totals.pendingDocs}
+            sub="needs attention"
+            accentFrom="from-amber-500/5"
+            accentTo="to-orange-500/5"
+            iconColor="text-amber-400"
           />
-          <KpiCard
-            label="Confirmed Value"
-            value={fmtCurrency(totalValue) ?? "—"}
-            icon={<IndianRupee size={16} />}
-            accent="text-violet-600 dark:text-violet-400"
-            bg="bg-violet-50 dark:bg-violet-900/30"
+          <BentoCard
+            icon={<TrendingUp size={15} />}
+            label="Budget on Page"
+            value={formatCurrency(totals.budget)}
+            sub="combined applicant budget"
+            accentFrom="from-violet-500/5"
+            accentTo="to-purple-500/5"
+            iconColor="text-violet-400"
           />
         </div>
 
-        {/* Filters */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <button
-              onClick={() => {
-                setStatusFilter(undefined);
-                setPage(1);
-              }}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-all ${!statusFilter ? "bg-foreground text-background border-foreground shadow-sm" : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
-            >
-              All <span className="font-mono ml-1">{total}</span>
-            </button>
-            {statusOptions.map((s) => {
-              const cfg = STATUS_CONFIG[s];
-              return cfg ? (
-                <button
-                  key={s}
-                  onClick={() => {
-                    setStatusFilter(statusFilter === s ? undefined : s);
-                    setPage(1);
-                  }}
-                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-all ${statusFilter === s ? `${cfg.pill} border-current shadow-sm` : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
-                >
-                  <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} /> {s}
-                </button>
-              ) : (
-                <button
-                  key={s}
-                  onClick={() => {
-                    setStatusFilter(statusFilter === s ? undefined : s);
-                    setPage(1);
-                  }}
-                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-all
-                    ${statusFilter === s ? "bg-muted text-foreground border-current shadow-sm" : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
-                >
-                  {s}
-                </button>
-              );
-            })}
-          </div>
-          <div className="flex items-center gap-2 ml-auto">
-            <div className="relative">
-              <Search
-                size={13}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
+        {/* ── Table Card ───────────────────────────────────────────────────── */}
+        <div className="rounded-2xl border border-border bg-card overflow-hidden">
+          {/* Filter bar */}
+          <div className="flex flex-col gap-3 px-4 py-3 border-b border-border sm:flex-row sm:items-center">
+            <div className="relative flex-1 min-w-0">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60" />
               <input
-                className="pl-9 pr-9 py-2 border border-border rounded-xl text-sm bg-card text-foreground outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/10 transition-all w-64"
-                placeholder="Search name, unit, project…"
+                className="h-9 w-full rounded-lg border border-border bg-muted/30 pl-9 pr-3 text-sm text-foreground outline-none transition focus:border-primary/60 focus:ring-2 focus:ring-primary/10 focus:bg-background/60 placeholder:text-muted-foreground/40"
+                placeholder="Search name, mobile, email, PAN…"
                 value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setPage(1);
-                }}
+                onChange={(e) => setSearch(e.target.value)}
               />
-              {search && (
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <SlidersHorizontal
+                size={13}
+                className="text-muted-foreground/50"
+              />
+              <div className="relative">
+                <select
+                  className="h-9 appearance-none rounded-lg border border-border bg-muted/30 px-3 pr-7 text-sm text-foreground outline-none focus:border-primary/60 min-w-[140px] cursor-pointer"
+                  value={status}
+                  onChange={(e) => {
+                    setStatus(e.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="">All Statuses</option>
+                  {options?.statusOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={11}
+                  className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60"
+                />
+              </div>
+              <div className="relative">
+                <select
+                  className="h-9 appearance-none rounded-lg border border-border bg-muted/30 px-3 pr-7 text-sm text-foreground outline-none focus:border-primary/60 min-w-[150px] cursor-pointer"
+                  value={projectId}
+                  onChange={(e) => {
+                    setProjectId(e.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="">All Projects</option>
+                  {options?.projects.map((p) => (
+                    <option key={p.Id} value={p.Id}>
+                      {p.Name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={11}
+                  className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60"
+                />
+              </div>
+              {hasFilters && (
                 <button
                   onClick={() => {
                     setSearch("");
+                    setStatus("");
+                    setProjectId("");
                     setPage(1);
                   }}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="h-9 px-2.5 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 text-xs"
                 >
-                  <X size={13} />
+                  <X size={11} /> Clear
                 </button>
               )}
             </div>
-            <div className="relative">
-              <select
-                className="appearance-none px-3 py-2 pr-8 border border-border rounded-xl text-sm bg-card text-muted-foreground outline-none cursor-pointer focus:border-primary/60 min-w-[130px]"
-                value={projectFilter ?? ""}
-                onChange={(e) => setProjectFilter(e.target.value || undefined)}
+          </div>
+
+          {/* Status pipeline visualization */}
+          {applications.length > 0 && <StatusPipeline apps={applications} />}
+
+          {/* Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/20">
+                  {/* Empty col for status accent bar */}
+                  <th className="w-1 pl-0" />
+                  {[
+                    "Applicant",
+                    "Contact",
+                    "Project / Unit",
+                    "Date",
+                    "Budget",
+                    "Status",
+                    "Assigned To",
+                    "",
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      className="px-3 py-2.5 text-[10px] font-bold text-muted-foreground uppercase tracking-widest whitespace-nowrap first:pl-4"
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {isLoading ? (
+                  <tr>
+                    <td
+                      colSpan={9}
+                      className="px-4 py-16 text-center text-muted-foreground"
+                    >
+                      <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" />
+                      <p className="text-sm">Loading applications…</p>
+                    </td>
+                  </tr>
+                ) : applications.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-16 text-center">
+                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                        <div className="w-12 h-12 rounded-2xl bg-muted/50 flex items-center justify-center mb-1">
+                          <FileText size={22} className="opacity-30" />
+                        </div>
+                        <p className="text-sm font-medium">
+                          No applications found
+                        </p>
+                        <p className="text-xs text-muted-foreground/60">
+                          {hasFilters
+                            ? "Try adjusting your filters"
+                            : "Create your first application to get started"}
+                        </p>
+                        {hasFilters && (
+                          <button
+                            onClick={() => {
+                              setSearch("");
+                              setStatus("");
+                              setProjectId("");
+                            }}
+                            className="mt-1 text-xs text-primary hover:underline"
+                          >
+                            Clear filters
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  applications.map((app, idx) => {
+                    const cfg = statusConfig[app.Status] ?? statusConfig.New;
+                    return (
+                      <tr
+                        key={app.Id}
+                        className={`group cursor-pointer transition-colors border-b border-border/40 last:border-0 hover:bg-muted/20 ${idx % 2 === 1 ? "bg-muted/[0.025]" : ""}`}
+                        onClick={() =>
+                          navigate(`/followup/sales/applications/${app.Id}`)
+                        }
+                      >
+                        {/* Status accent bar */}
+                        <td className="w-1 p-0 relative">
+                          <div
+                            className={`absolute inset-y-0 left-0 w-[3px] ${cfg.track} opacity-0 group-hover:opacity-80 transition-opacity rounded-r-full`}
+                          />
+                        </td>
+
+                        {/* Applicant */}
+                        <td className="pl-3 pr-3 py-3">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className={`h-8 w-8 shrink-0 rounded-xl bg-gradient-to-br ${grad(app.ApplicantName)} flex items-center justify-center text-[10px] font-bold text-white shadow-sm`}
+                            >
+                              {initials(app.ApplicantName)}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-foreground text-[13px] leading-tight group-hover:text-primary transition-colors">
+                                {app.ApplicantName}
+                              </p>
+                              <p className="text-[10px] font-mono text-muted-foreground/60 mt-0.5">
+                                {app.ApplicantNo ?? `APP-${app.Id}`}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Contact */}
+                        <td className="px-3 py-3">
+                          <div className="space-y-0.5">
+                            {app.PrimaryMobile && (
+                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <Phone size={10} className="shrink-0" />
+                                {app.PrimaryMobile}
+                              </div>
+                            )}
+                            {app.Email && (
+                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <Mail size={10} className="shrink-0" />
+                                <span className="truncate max-w-[130px]">
+                                  {app.Email}
+                                </span>
+                              </div>
+                            )}
+                            {app.City && (
+                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <MapPin size={10} className="shrink-0" />
+                                {app.City}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Project / Unit */}
+                        <td className="px-3 py-3">
+                          <div className="flex items-start gap-2">
+                            <Building2
+                              size={11}
+                              className="text-muted-foreground/50 mt-0.5 shrink-0"
+                            />
+                            <div>
+                              <p className="text-[13px] font-medium text-foreground leading-tight">
+                                {app.ProjectName ?? "—"}
+                              </p>
+                              <p className="text-[11px] text-muted-foreground/60 mt-0.5">
+                                {app.UnitName
+                                  ? `${app.BlockName ? `${app.BlockName} / ` : ""}${app.UnitName}`
+                                  : (app.PreferredUnitType ?? "No preference")}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Date */}
+                        <td className="px-3 py-3 text-[12px] text-muted-foreground whitespace-nowrap tabular-nums">
+                          {formatDate(app.ApplicationDate)}
+                        </td>
+
+                        {/* Budget */}
+                        <td className="px-3 py-3">
+                          <span className="text-[13px] font-bold text-foreground whitespace-nowrap tabular-nums">
+                            {formatCurrency(app.BudgetAmount)}
+                          </span>
+                        </td>
+
+                        {/* Status */}
+                        <td className="px-3 py-3">
+                          <StatusBadge status={app.Status} />
+                        </td>
+
+                        {/* Assigned */}
+                        <td className="px-3 py-3 text-[12px] text-muted-foreground">
+                          {app.AssignedToName ? (
+                            <div className="flex items-center gap-1.5">
+                              <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-[8px] font-bold text-primary shrink-0">
+                                {initials(app.AssignedToName)}
+                              </div>
+                              <span className="truncate max-w-[90px]">
+                                {app.AssignedToName}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground/25 select-none">
+                              —
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Actions */}
+                        <td
+                          className="px-3 py-3"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground"
+                              onClick={() =>
+                                navigate(
+                                  `/followup/sales/applications/${app.Id}`,
+                                )
+                              }
+                              title="View"
+                            >
+                              <Eye size={13} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground"
+                              onClick={() => editApplication(app)}
+                              title="Edit"
+                            >
+                              <Edit2 size={13} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 rounded-lg text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={() => deleteApplication(app)}
+                              title="Delete"
+                            >
+                              <Trash2 size={13} />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          <div className="flex flex-col gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <span className="tabular-nums">
+              Page{" "}
+              <span className="text-foreground font-medium">
+                {pagination?.page ?? 1}
+              </span>{" "}
+              of{" "}
+              <span className="text-foreground font-medium">{totalPages}</span>
+              <span className="mx-1.5 text-border">·</span>
+              <span className="text-foreground font-medium">
+                {pagination?.total ?? 0}
+              </span>{" "}
+              total
+            </span>
+            <div className="flex gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage((c) => Math.max(1, c - 1))}
+                className="h-8 rounded-lg text-xs px-3"
               >
-                <option value="">All Projects</option>
-                {projects.map((p) => (
-                  <option key={p.Id} value={p.Id}>
-                    {p.Name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={13}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
-            {hasFilters && (
-              <button
-                onClick={() => {
-                  setSearch("");
-                  setStatusFilter(undefined);
-                  setProjectFilter(undefined);
-                  setPage(1);
-                }}
-                className="flex items-center gap-1 px-3 py-2 border border-red-400/30 bg-red-500/5 text-red-500 rounded-xl text-xs font-semibold hover:bg-red-500/10 transition-colors"
+                <ChevronLeft size={12} className="mr-1" /> Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages}
+                onClick={() => setPage((c) => c + 1)}
+                className="h-8 rounded-lg text-xs px-3"
               >
-                <X size={11} /> Clear
-              </button>
-            )}
-            <div className="flex items-center border border-border rounded-xl overflow-hidden">
-              {(["table", "grid"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => setViewMode(mode)}
-                  className={`px-2.5 py-2 text-xs transition-colors ${viewMode === mode ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  {mode === "table" ? (
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <rect x="1" y="1" width="12" height="2.5" rx="0.5" fill="currentColor" opacity="0.4" />
-                      <rect x="1" y="5.5" width="12" height="2.5" rx="0.5" fill="currentColor" />
-                      <rect x="1" y="10" width="12" height="2.5" rx="0.5" fill="currentColor" opacity="0.4" />
-                    </svg>
-                  ) : (
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <rect x="1" y="1" width="5.5" height="5.5" rx="1" fill="currentColor" />
-                      <rect x="7.5" y="1" width="5.5" height="5.5" rx="1" fill="currentColor" opacity="0.4" />
-                      <rect x="1" y="7.5" width="5.5" height="5.5" rx="1" fill="currentColor" opacity="0.4" />
-                      <rect x="7.5" y="7.5" width="5.5" height="5.5" rx="1" fill="currentColor" />
-                    </svg>
-                  )}
-                </button>
-              ))}
+                Next <ChevronRight size={12} className="ml-1" />
+              </Button>
             </div>
           </div>
         </div>
-
-        {/* Content */}
-        {viewMode === "grid" ? (
-          <div>
-            {isLoading ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="rounded-2xl border border-border bg-card p-4 animate-pulse space-y-3"
-                  >
-                    <div className="flex gap-2">
-                      <div className="w-9 h-9 rounded-xl bg-muted" />
-                      <div className="space-y-1.5 flex-1">
-                        <div className="h-3.5 bg-muted rounded w-3/4" />
-                        <div className="h-2.5 bg-muted rounded w-1/2" />
-                      </div>
-                    </div>
-                    <div className="h-2.5 bg-muted rounded w-full" />
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="h-12 bg-muted rounded-lg" />
-                      <div className="h-12 bg-muted rounded-lg" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : bookings.length === 0 ? (
-              <EmptyState />
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {bookings.map((b) => (
-                  <BookingCard
-                    key={b.Id}
-                    booking={b}
-                    isSelected={selectedBooking?.Id === b.Id}
-                    onClick={() =>
-                      setSelectedBooking((prev) =>
-                        prev?.Id === b.Id ? null : b,
-                      )
-                    }
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="border-b border-border bg-muted/30">
-                    {[
-                      "Applicant",
-                      "Project / Unit",
-                      "Booking Date",
-                      "Booking Amt",
-                      "Total Value",
-                      "Payment",
-                      "Status",
-                      "",
-                    ].map((h) => (
-                      <th
-                        key={h}
-                        className="px-4 py-3 text-[10px] font-bold text-muted-foreground uppercase tracking-widest whitespace-nowrap"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {isLoading ? (
-                    Array.from({ length: 8 }).map((_, i) => (
-                      <tr key={i} className="border-b border-border/40">
-                        {Array.from({ length: 8 }).map((_, j) => (
-                          <td key={j} className="px-4 py-3.5">
-                            <div
-                              className="h-3.5 bg-muted rounded animate-pulse"
-                              style={{ width: `${55 + ((i * j * 7) % 35)}%` }}
-                            />
-                          </td>
-                        ))}
-                      </tr>
-                    ))
-                  ) : bookings.length === 0 ? (
-                    <tr>
-                      <td colSpan={8}>
-                        <EmptyState />
-                      </td>
-                    </tr>
-                  ) : (
-                    bookings.map((b) => {
-                      const palette = avatarPalette(b.ApplicantName);
-                      const isSelected = selectedBooking?.Id === b.Id;
-                      return (
-                        <tr
-                          key={b.Id}
-                          onClick={() =>
-                            setSelectedBooking((prev) =>
-                              prev?.Id === b.Id ? null : b,
-                            )
-                          }
-                          className={`group cursor-pointer border-b border-border/40 transition-all ${isSelected ? "bg-primary/4" : "hover:bg-muted/40"}`}
-                        >
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-2.5">
-                              <div
-                                className={`w-8 h-8 rounded-xl flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${palette.bg} ${palette.text}`}
-                              >
-                                {initials(b.ApplicantName)}
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-[13px] font-semibold text-foreground truncate">
-                                  {b.ApplicantName}
-                                </p>
-                                <p className="text-[10px] font-mono text-muted-foreground">
-                                  {b.BookingNo ?? "—"}
-                                </p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <p className="text-[12px] font-medium text-foreground">
-                              {b.ProjectName ?? "—"}
-                            </p>
-                            <p className="text-[11px] text-muted-foreground">
-                              {[b.BlockName, b.UnitNo]
-                                .filter(Boolean)
-                                .join(" › ")}
-                              {b.UnitType && (
-                                <span className="ml-1 font-medium">
-                                  {b.UnitType}
-                                </span>
-                              )}
-                            </p>
-                          </td>
-                          <td className="px-4 py-3.5 whitespace-nowrap">
-                            <span className="text-[12px] text-muted-foreground">
-                              {fmtDate(b.BookingDate)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5 whitespace-nowrap">
-                            <span className="text-[12px] font-semibold text-foreground">
-                              {fmtCurrency(b.BookingAmount)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5 whitespace-nowrap">
-                            <span className="text-[12px] font-bold text-emerald-600 dark:text-emerald-400">
-                              {b.TotalValue ? (
-                                fmtCurrency(b.TotalValue)
-                              ) : (
-                                <span className="text-muted-foreground font-normal">
-                                  —
-                                </span>
-                              )}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            {b.PaymentMode ? (
-                              <span className="text-[11px] font-medium text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-md">
-                                {b.PaymentMode}
-                              </span>
-                            ) : (
-                              <span className="text-[12px] text-muted-foreground">
-                                —
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <StatusBadge status={b.Status} />
-                          </td>
-                          <td className="px-3 py-3.5 w-8">
-                            <ChevronRight
-                              size={14}
-                              className={`text-muted-foreground/30 transition-all group-hover:text-primary group-hover:translate-x-0.5 ${isSelected ? "text-primary" : ""}`}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-            {(totalPages > 1 || total > 0) && (
-              <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-muted/10">
-                <p className="text-xs text-muted-foreground">
-                  {total} booking{total !== 1 ? "s" : ""}
-                  {totalPages > 1 && (
-                    <>
-                      {" "}
-                      · Page {page} of {totalPages}
-                    </>
-                  )}
-                </p>
-                {totalPages > 1 && (
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => setPage((p) => Math.max(1, p - 1))}
-                      disabled={page === 1}
-                      className="flex items-center gap-1 px-3 py-1.5 text-xs border border-border rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-                    >
-                      <ChevronLeft size={12} /> Prev
-                    </button>
-                    <button
-                      onClick={() =>
-                        setPage((p) => Math.min(totalPages, p + 1))
-                      }
-                      disabled={page === totalPages}
-                      className="flex items-center gap-1 px-3 py-1.5 text-xs border border-border rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-                    >
-                      Next <ChevronRight size={12} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
-      {/* Slide-over form */}
-      {showForm && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[3px]"
-            onClick={closeForm}
-          />
-          <div className="fixed right-0 top-0 bottom-0 z-50 w-[620px] max-w-[95vw] bg-card border-l border-border shadow-2xl flex flex-col">
-            <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-border">
-              <div className="flex items-center gap-2.5">
-                <div className="p-1.5 rounded-lg bg-primary/10">
-                  {editBooking ? (
-                    <Edit2 size={14} className="text-primary" />
-                  ) : (
-                    <Plus size={14} className="text-primary" />
-                  )}
-                </div>
-                <h2 className="text-[14px] font-bold text-foreground">
-                  {editBooking
-                    ? `Edit — ${editBooking.BookingNo ?? `Booking #${editBooking.Id}`}`
-                    : "New Booking"}
-                </h2>
-              </div>
-              <button
-                onClick={closeForm}
-                className="p-1.5 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <BookingForm
-                key={editBooking?.Id ?? "new"}
-                initial={
-                  editBooking
-                    ? {
-                        applicantId: String(editBooking.ApplicantId),
-                        projectId: String(editBooking.ProjectId ?? ""),
-                        unitNo: editBooking.UnitNo,
-                        blockName: editBooking.BlockName ?? "",
-                        floorName: editBooking.FloorName ?? "",
-                        unitType: editBooking.UnitType ?? "",
-                        areaSqFt: String(editBooking.AreaSqFt ?? ""),
-                        ratePerSqFt: String(editBooking.RatePerSqFt ?? ""),
-                        totalValue: String(editBooking.TotalValue ?? ""),
-                        bookingAmount: String(editBooking.BookingAmount),
-                        bookingDate:
-                          editBooking.BookingDate?.slice(0, 10) ?? "",
-                        paymentMode: editBooking.PaymentMode ?? "",
-                        chequeNo: editBooking.ChequeNo ?? "",
-                        bankName: editBooking.BankName ?? "",
-                        loanApproved: Boolean(editBooking.LoanApproved),
-                        loanBank: editBooking.LoanBank ?? "",
-                        loanAmount: String(editBooking.LoanAmount ?? ""),
-                        status: editBooking.Status,
-                        notes: editBooking.Notes ?? "",
-                      }
-                    : undefined
-                }
-                onSave={handleSave}
-                onCancel={closeForm}
-                applicants={applicants}
-                projects={projects}
-                statusOptions={statusOptions}
-                paymentModes={paymentModes}
-                unitTypes={unitTypes}
-                editBookingNo={editBooking?.BookingNo}
-                editBookingId={editBooking?.Id ?? null}
-              />
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Detail drawer */}
-      {selectedBooking && !showForm && (
-        <BookingDrawer
-          booking={selectedBooking}
-          onClose={() => setSelectedBooking(null)}
-          onEdit={() => openEdit(selectedBooking)}
-        />
-      )}
+      <ApplicationDrawer
+        open={drawerOpen}
+        editing={editing}
+        form={form}
+        options={options}
+        customers={customers}
+        units={units}
+        saving={saving}
+        onClose={() => setDrawerOpen(false)}
+        onSubmit={saveApplication}
+        onChange={(patch) => setForm((c) => ({ ...c, ...patch }))}
+      />
     </>
   );
 }
