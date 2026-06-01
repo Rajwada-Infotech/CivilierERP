@@ -12,6 +12,8 @@ import {
   X,
   Eye,
   Printer,
+  CalendarDays,
+  ChevronDown,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -586,13 +588,28 @@ export default function EnterpriseMaster() {
       <label className="block text-xs font-medium text-muted-foreground mb-1">
         {label}
       </label>
-      <input
-        type={type}
-        value={(form[key] as string) ?? ""}
-        onChange={(e) => set(key, e.target.value)}
-        placeholder={placeholder || label}
-        className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
-      />
+      {type === "date" ? (
+        <div className="relative">
+          <CalendarDays
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+          <input
+            type="date"
+            value={(form[key] as string) ?? ""}
+            onChange={(e) => set(key, e.target.value)}
+            className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+          />
+        </div>
+      ) : (
+        <input
+          type={type}
+          value={(form[key] as string) ?? ""}
+          onChange={(e) => set(key, e.target.value)}
+          placeholder={placeholder || label}
+          className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+        />
+      )}
     </div>
   );
 
@@ -601,16 +618,19 @@ export default function EnterpriseMaster() {
       <label className="block text-xs font-medium text-muted-foreground mb-1">
         {label}
       </label>
-      <select
-        value={(form[key] as string) ?? ""}
-        onChange={(e) => set(key, e.target.value)}
-        className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-      >
-        <option value="">— Select —</option>
-        {options.map((o) => (
-          <option key={o}>{o}</option>
-        ))}
-      </select>
+      <div className="relative">
+        <select
+          value={(form[key] as string) ?? ""}
+          onChange={(e) => set(key, e.target.value)}
+          className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+        >
+          <option value="">— Select —</option>
+          {options.map((o) => (
+            <option key={o}>{o}</option>
+          ))}
+        </select>
+        <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+      </div>
     </div>
   );
 
@@ -618,12 +638,13 @@ export default function EnterpriseMaster() {
     return <div className="p-6 text-red-500">Failed to load enterprises.</div>;
 
   return (
-    <div className="p-6 space-y-6">
+    <>
       <Breadcrumbs
         items={["Dashboard", "Admin", "Masters", "Enterprise Master"]}
       />
 
       {/* Header */}
+      <div className="relative space-y-6 mt-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
@@ -641,7 +662,7 @@ export default function EnterpriseMaster() {
         {!showForm && (
           <button
             onClick={openNew}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-heading rounded-lg hover:bg-primary/90 transition-colors"
+            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
           >
             <Plus size={16} /> Add Enterprise
           </button>
@@ -717,7 +738,7 @@ export default function EnterpriseMaster() {
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className={`px-4 py-1.5 rounded-md text-xs font-heading capitalize transition-colors ${tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${tab === t ? "gradient-accent text-white" : "text-muted-foreground hover:bg-muted"}`}
               >
                 {t === "legal" ? "Legal / Compliance" : t}
               </button>
@@ -867,7 +888,7 @@ export default function EnterpriseMaster() {
             <button
               onClick={handleSave}
               disabled={saving || !form.name?.trim()}
-              className="px-5 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="gradient-accent font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               {saving ? "Saving…" : editId ? "Update" : "Save"}
             </button>
@@ -917,6 +938,7 @@ export default function EnterpriseMaster() {
           </div>
         </div>
       )}
-    </div>
+      </div>{/* end space-y-6 mt-6 */}
+    </>
   );
 }
