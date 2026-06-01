@@ -234,14 +234,71 @@ router.put("/:id", adminOnly, async (req, res) => {
   }
 });
 
-// ── DELETE — hard delete ──────────────────────────────────────────────────────
+// ── DELETE — blocked if project is linked to a company, enterprise, PO, WO, or GRN ──
 router.delete("/:id", adminOnly, async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid project ID" });
+
   try {
     const pool = getPool();
+
+    // 1. Check if the project itself has a parent company or enterprise set
+    const projectRow = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query(
+        "SELECT id, name, enterprise_id, company_id FROM dbo.enterprise WHERE id=@id AND business_type='P'",
+      );
+
+    if (!projectRow.recordset.length)
+      return res.status(404).json({ error: "Project not found" });
+
+    const proj = projectRow.recordset[0];
+
+    if (proj.enterprise_id || proj.company_id) {
+      return res.status(409).json({
+        error: "Cannot delete project",
+        reason:
+          "This project is linked to a parent " +
+          [proj.enterprise_id && "enterprise", proj.company_id && "company"]
+            .filter(Boolean)
+            .join(" and ") +
+          ". Unlink it first before deleting.",
+      });
+    }
+
+    // 2. Check for any Purchase Orders, Work Orders, or GRNs referencing this project
+    const usageCheck = await pool.request().input("ProjectId", sql.Int, id)
+      .query(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.PurchaseOrders   WHERE ProjectId = @ProjectId) AS POCount,
+        (SELECT COUNT(*) FROM dbo.WorkOrders        WHERE ProjectId = @ProjectId) AS WOCount,
+        (SELECT COUNT(*) FROM dbo.GoodsReceiptNotes grn
+           INNER JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
+           WHERE po.ProjectId = @ProjectId)                                        AS GRNCount
+    `);
+
+    const { POCount, WOCount, GRNCount } = usageCheck.recordset[0];
+    const linked = [];
+    if (POCount > 0)
+      linked.push(`${POCount} Purchase Order${POCount > 1 ? "s" : ""}`);
+    if (WOCount > 0)
+      linked.push(`${WOCount} Work Order${WOCount > 1 ? "s" : ""}`);
+    if (GRNCount > 0) linked.push(`${GRNCount} GRN${GRNCount > 1 ? "s" : ""}`);
+
+    if (linked.length > 0) {
+      return res.status(409).json({
+        error: "Cannot delete project",
+        reason: `This project has ${linked.join(", ")} linked to it and cannot be deleted.`,
+      });
+    }
+
+    // 3. Safe to delete
     await pool
       .request()
-      .input("id", sql.Int, parseInt(req.params.id))
+      .input("id", sql.Int, id)
       .query("DELETE FROM dbo.enterprise WHERE id=@id AND business_type='P'");
+
     await bumpCacheVersion("enterprises");
     await bumpCacheVersion("project-master");
     res.json({ success: true });
@@ -251,7 +308,3 @@ router.delete("/:id", adminOnly, async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
