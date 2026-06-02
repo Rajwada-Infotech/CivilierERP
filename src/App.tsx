@@ -347,15 +347,19 @@ function RequireRole({
 // ─── Admin Protected Route ────────────────────────────────────────────────────
 function ProtectedProviders({ children }: { children: React.ReactNode }) {
   return (
-    <RecordsProvider>
-      <TdsProvider>
-        <DebitNoteProvider>
-          <BillingTermsProvider>
-            <TaskProvider>{children}</TaskProvider>
-          </BillingTermsProvider>
-        </DebitNoteProvider>
-      </TdsProvider>
-    </RecordsProvider>
+    <FinYearProvider>
+      <HsnProvider>
+        <RecordsProvider>
+          <TdsProvider>
+            <DebitNoteProvider>
+              <BillingTermsProvider>
+                <TaskProvider>{children}</TaskProvider>
+              </BillingTermsProvider>
+            </DebitNoteProvider>
+          </TdsProvider>
+        </RecordsProvider>
+      </HsnProvider>
+    </FinYearProvider>
   );
 }
 
@@ -1581,11 +1585,7 @@ function App() {
             >
               <ModuleProvider>
                 <ThemeProvider>
-                  <FinYearProvider>
-                    <HsnProvider>
-                      <AppRoutes />
-                    </HsnProvider>
-                  </FinYearProvider>
+                  <AppRoutes />
                 </ThemeProvider>
               </ModuleProvider>
             </Router>
