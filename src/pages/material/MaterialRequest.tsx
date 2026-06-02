@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -162,6 +162,10 @@ export default function MaterialRequest() {
   const [viewingRecord, setViewingRecord] = useState<any>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [statusFilter, setStatusFilter] = useState<string>(
+    searchParams.get("status") ?? "",
+  );
   const limit = 10;
 
   const [header, setHeader] = useState<FormHeader>(defaultHeader);
@@ -231,8 +235,9 @@ export default function MaterialRequest() {
   });
 
   const { data: listData, isLoading: loadingList } = useQuery({
-    queryKey: ["mr-list", page, search],
-    queryFn: () => mrApi.getMaterialRequests({ page, limit, search }),
+    queryKey: ["mr-list", page, search, statusFilter],
+    queryFn: () =>
+      mrApi.getMaterialRequests({ page, limit, search, status: statusFilter }),
   });
 
   // ── Auto-select active fin year ──────────────────────────────────────────────
@@ -340,7 +345,9 @@ export default function MaterialRequest() {
   const createMutation = useMutation({
     mutationFn: mrApi.createMaterialRequest,
     onSuccess: (rec: any) => {
-      toast.success(`Material Request ${rec?.DocNo || ""} created and sent for approval`);
+      toast.success(
+        `Material Request ${rec?.DocNo || ""} created and sent for approval`,
+      );
       invalidate();
       goToList();
     },
@@ -647,20 +654,60 @@ export default function MaterialRequest() {
                 </p>
               )}
             </div>
-            <div className="relative w-full sm:w-64">
-              <Search
-                size={13}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setPage(1);
-                }}
-                placeholder="Search doc no, company…"
-                className="pl-9 h-9 text-sm"
-              />
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+              {/* Status filter chips */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {[
+                  "",
+                  "Pending",
+                  "Approved",
+                  "Ordered",
+                  "Partially Ordered",
+                  "Draft",
+                ].map((s) => (
+                  <button
+                    key={s || "all"}
+                    onClick={() => {
+                      setStatusFilter(s);
+                      setPage(1);
+                      if (s) setSearchParams({ status: s });
+                      else setSearchParams({});
+                    }}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                      statusFilter === s
+                        ? s === "Approved"
+                          ? "bg-emerald-500/15 text-emerald-600 border-emerald-400/40"
+                          : s === "Pending"
+                            ? "bg-amber-500/15 text-amber-600 border-amber-400/40"
+                            : s === "Draft"
+                              ? "bg-slate-500/15 text-slate-600 border-slate-400/40"
+                              : s === "Ordered"
+                                ? "bg-violet-500/15 text-violet-600 border-violet-400/40"
+                                : s === "Partially Ordered"
+                                  ? "bg-purple-500/15 text-purple-600 border-purple-400/40"
+                                  : "bg-primary/10 text-primary border-primary/30"
+                        : "bg-transparent text-muted-foreground border-border hover:bg-muted"
+                    }`}
+                  >
+                    {s || "All"}
+                  </button>
+                ))}
+              </div>
+              <div className="relative w-full sm:w-64">
+                <Search
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(1);
+                  }}
+                  placeholder="Search doc no, company…"
+                  className="pl-9 h-9 text-sm"
+                />
+              </div>
             </div>
           </div>
         </CardHeader>
