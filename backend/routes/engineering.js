@@ -517,6 +517,14 @@ router.post("/work-done", async (req, res) => {
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");
 
+    // Auto-submit: move Draft → Pending so it appears in approval inbox
+    try {
+      await transition("work-done", newId, "Pending", req.user?.email, req.user?.role);
+      await bumpCacheVersion(WORK_DONE_CACHE);
+    } catch (e) {
+      console.warn("[Work Done auto-submit]", e.message);
+    }
+
     res.status(201).json({
       message: "Work Done entry created",
       ID: newId,
@@ -641,6 +649,20 @@ router.put("/work-done/:id", async (req, res) => {
 
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");
+
+    // Re-submit to Pending if still in Draft/Rejected
+    try {
+      const pool = getPool();
+      const r = await pool.request().input("id", sql.Int, parseInt(req.params.id, 10)).query(`SELECT Status FROM dbo.WorkDone WHERE ID = @id`);
+      const st = r.recordset[0]?.Status;
+      if (st === "Draft" || st === "Rejected") {
+        await transition("work-done", parseInt(req.params.id, 10), "Pending", req.user?.email, req.user?.role);
+        await bumpCacheVersion(WORK_DONE_CACHE);
+      }
+    } catch (e) {
+      console.warn("[Work Done auto-submit on update]", e.message);
+    }
+
     res.json({ message: "Work Done entry updated" });
   } catch (err) {
     console.error("[PUT /engineering/work-done/:id]", err);
