@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
+  DocNumberPreview,
   fetchNextDocNumber,
   fetchDocTypes,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
