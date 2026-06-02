@@ -1174,6 +1174,14 @@ router.post("/:id/save-full", async (req, res) => {
 
     await bumpCacheVersion("work-orders");
 
+    // Auto-submit: move Draft → Pending so it appears in approval inbox
+    try {
+      await transition("work-orders", headerId, "Pending", req.user?.email, req.user?.role);
+      await bumpCacheVersion("work-orders");
+    } catch (e) {
+      console.warn("[WO auto-submit]", e.message);
+    }
+
     // ── Auto-create WO-POs from material items ────────────────────────────────
     // After every save-full we regenerate WO-POs for this work order:
     //   1. Delete any draft WO-POs previously auto-generated from this WO
