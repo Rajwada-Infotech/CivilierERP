@@ -153,9 +153,23 @@ export function DocNumberPreview({
     setDocTypesLoading(true);
     fetchDocTypes(module)
       .then((types) => {
-        setDocTypes(types);
-        if (!readOnly && !selectedDocTypeId && types.length > 0) {
-          const first = types[0];
+        // For the WO dropdown, exclude ExB-* (Expense Booking variants) and
+        // WO-PO* (Work Order for Materials) — they share the same links_to tag
+        // but belong to separate workflows with their own module codes.
+        const filtered =
+          module === "WO"
+            ? types.filter((dt) => {
+                const label = dt.DocNoPrefix ?? dt.FullPrefix ?? dt.Prefix;
+                return (
+                  !label.startsWith("ExB-") &&
+                  !label.startsWith("WO-PO") &&
+                  !label.startsWith("WO_PO")
+                );
+              })
+            : types;
+        setDocTypes(filtered);
+        if (!readOnly && !selectedDocTypeId && filtered.length > 0) {
+          const first = filtered[0];
           fetchNextDocNumber(first.TypeOfDocId, finYear).then((next) => {
             onSelect(first.TypeOfDocId, next);
           });
@@ -173,7 +187,18 @@ export function DocNumberPreview({
     fetchDocTypes() // no module filter → all types
       .then((all) => {
         const match = all.find((d) => d.TypeOfDocId === selectedDocTypeId);
-        if (match) setDocTypes((prev) => [match, ...prev]);
+        if (match) {
+          // For WO, never inject ExB-* or WO-PO* even via the fallback path
+          const label = match.DocNoPrefix ?? match.FullPrefix ?? match.Prefix;
+          if (
+            module === "WO" &&
+            (label.startsWith("ExB-") ||
+              label.startsWith("WO-PO") ||
+              label.startsWith("WO_PO"))
+          )
+            return;
+          setDocTypes((prev) => [match, ...prev]);
+        }
       })
       .catch(() => {});
   }, [readOnly, selectedDocTypeId, docTypes, docTypesLoading]);
