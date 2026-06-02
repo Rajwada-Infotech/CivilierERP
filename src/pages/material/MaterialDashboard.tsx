@@ -670,7 +670,7 @@ export default function MaterialDashboard() {
     queryKey: ["modalRequests"],
     queryFn: async () => {
       const res = await fetchWithAuth(
-        "/api/material-requests?page=1&limit=200&status=Pending",
+        "/api/material-requests?page=1&limit=200",
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
@@ -825,14 +825,14 @@ export default function MaterialDashboard() {
           onClick: () => open("issues"),
         },
         {
-          label: "Pending Requests",
-          value: fmtNum(data.materialRequests.pending),
-          sub: `${data.materialRequests.thisMonth} this month · ${data.materialRequests.total} total`,
+          label: "Material Requests",
+          value: fmtNum(data.materialRequests.total),
+          sub: `${data.materialRequests.thisMonth} this month · ${data.materialRequests.pending} pending`,
           icon: Send,
           iconColor: "text-indigo-600",
           iconBg: "bg-indigo-500/10",
           trend:
-            data.materialRequests.pending > 0
+            data.materialRequests.total > 0
               ? ("down" as const)
               : ("neutral" as const),
           onClick: () => open("requests"),
@@ -1362,8 +1362,8 @@ export default function MaterialDashboard() {
               )}
               {openModal === "requests" && (
                 <>
-                  <Send size={16} className="text-indigo-600" /> Pending
-                  Material Requests{" "}
+                  <Send size={16} className="text-indigo-600" /> Material
+                  Requests{" "}
                   {requestsData && (
                     <span className="ml-1 text-xs font-normal text-muted-foreground">
                       ({requestsData.length} records)
