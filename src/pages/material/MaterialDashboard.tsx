@@ -74,6 +74,8 @@ interface DashboardData {
     pending: number;
     approved: number;
     draft: number;
+    ordered: number;
+    partiallyOrdered: number;
     thisMonth: number;
   };
   recentGRNs: any[];
@@ -115,6 +117,8 @@ const statusColors: Record<string, string> = {
   Approved: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
   Closed: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
   "Fully Received": "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
+  Ordered: "bg-violet-500/10 text-violet-600 border-violet-400/20",
+  "Partially Ordered": "bg-purple-500/10 text-purple-600 border-purple-400/20",
   Pending: "bg-amber-500/10 text-amber-600 border-amber-400/20",
   Draft: "bg-muted text-muted-foreground border-border",
   Open: "bg-blue-500/10 text-blue-600 border-blue-400/20",
@@ -729,6 +733,8 @@ export default function MaterialDashboard() {
             pending: 0,
             approved: 0,
             draft: 0,
+            ordered: 0,
+            partiallyOrdered: 0,
             thisMonth: 0,
           },
           recentGRNs: raw.recentGRNs ?? [],
@@ -783,7 +789,7 @@ export default function MaterialDashboard() {
           onClick: () => open("pos"),
         },
         {
-          label: "Pending Expenses",
+          label: "Expenses",
           value: fmtNum(data.expenses.pending),
           sub: `${fmt(data.expenses.pendingAmount)} pending approval`,
           icon: Receipt,
@@ -1087,6 +1093,7 @@ export default function MaterialDashboard() {
               icon={Send}
               title="Material Requests"
               sub="by status"
+              action="View all"
               onAction={() => navigate("/material/material-request")}
             />
             {isLoading ? (
@@ -1109,6 +1116,16 @@ export default function MaterialDashboard() {
                     color: "bg-emerald-500",
                   },
                   {
+                    label: "Ordered",
+                    count: data.materialRequests.ordered,
+                    color: "bg-violet-500",
+                  },
+                  {
+                    label: "Partially Ordered",
+                    count: data.materialRequests.partiallyOrdered,
+                    color: "bg-purple-500",
+                  },
+                  {
                     label: "Draft",
                     count: data.materialRequests.draft,
                     color: "bg-slate-400",
@@ -1117,9 +1134,15 @@ export default function MaterialDashboard() {
                   const total = data.materialRequests.total || 1;
                   const pct = Math.round((count / total) * 100);
                   return (
-                    <div key={label} className="space-y-0.5">
+                    <div
+                      key={label}
+                      className="space-y-0.5 cursor-pointer group rounded-md px-1 py-0.5 -mx-1 hover:bg-muted/60 transition-colors"
+                      onClick={() =>
+                        navigate(`/material/material-request?status=${label}`)
+                      }
+                    >
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-foreground font-medium">
+                        <span className="text-foreground font-medium group-hover:text-primary transition-colors">
                           {label}
                         </span>
                         <span className="text-muted-foreground">
@@ -1308,8 +1331,7 @@ export default function MaterialDashboard() {
               )}
               {openModal === "expenses" && (
                 <>
-                  <Receipt size={16} className="text-red-600" /> Pending
-                  Expenses{" "}
+                  <Receipt size={16} className="text-red-600" /> Expenses{" "}
                   {expensesData && (
                     <span className="ml-1 text-xs font-normal text-muted-foreground">
                       ({expensesData.length} records)
