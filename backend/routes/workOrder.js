@@ -1186,10 +1186,10 @@ router.post("/:id/save-full", async (req, res) => {
       const userEmail = req.user?.name || req.user?.email || "system";
       const { finYear } = req.body;
 
-      // Resolve WO_PO doc type id
+      // Resolve WO-PO doc type id — accept both 'WO-PO' (canonical) and 'WO_PO' (legacy)
       const dtRow = await pool.request().query(`
         SELECT TOP 1 TypeOfDocId FROM dbo.TypeOfDoc
-        WHERE Prefix = 'WO-PO' AND IsActive = 1
+        WHERE Prefix IN ('WO-PO', 'WO_PO') AND IsActive = 1
         ORDER BY TypeOfDocId
       `);
       const woPODocTypeId = dtRow.recordset[0]?.TypeOfDocId || null;
@@ -1344,11 +1344,15 @@ router.post("/:id/save-full", async (req, res) => {
           });
         }
 
-        await bumpCacheVersion("purchase-orders");
       }
+      // Always bump purchase-orders cache — deletion of old draft WO-POs also
+      // changes what users see in the PO list, even when no new POs are created.
+      await bumpCacheVersion("purchase-orders");
     } catch (woPoErr) {
       // Non-fatal — WO save succeeded; log and surface in response
       console.error("[POST /:id/save-full WO-PO auto-create]", woPoErr.message);
+      // Still try to bump cache so stale WO-PO deletions become visible
+      try { await bumpCacheVersion("purchase-orders"); } catch (_) {}
     }
 
     res.json({
