@@ -223,9 +223,17 @@ router.get(
 
       const fyId = req.query.fyId ? parseInt(req.query.fyId, 10) : null;
 
+      // ?poType=WO_PO  → show only WO-POs
+      // ?poType=Direct → show only direct POs (excludes WO-POs)
+      // (no param)     → show ALL types (default: includes WO-POs)
+      const poTypeFilter = req.query.poType
+        ? req.query.poType.toString().trim()
+        : null;
+
       const whereConditions = [];
       if (sourceWOId) whereConditions.push("po.SourceWOId = @sourceWOId");
       if (fyId) whereConditions.push("po.fy_id = @fyId");
+      if (poTypeFilter) whereConditions.push("po.POType = @poTypeFilter");
       const whereClause = whereConditions.length
         ? `WHERE ${whereConditions.join(" AND ")}`
         : "";
@@ -235,7 +243,8 @@ router.get(
         .input("offset", sql.Int, offset)
         .input("limit", sql.Int, limit)
         .input("sourceWOId", sql.Int, sourceWOId)
-        .input("fyId", sql.Int, fyId).query(`
+        .input("fyId", sql.Int, fyId)
+        .input("poTypeFilter", sql.NVarChar(20), poTypeFilter).query(`
         SELECT *, COUNT(*) OVER() AS _total FROM (
           ${PO_SELECT}
           ${whereClause}
