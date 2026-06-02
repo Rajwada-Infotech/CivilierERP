@@ -8,11 +8,10 @@ import {
   saveCommunicatorConfig,
 } from "@/api/communicatorConfigApi";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Edit3, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Edit3, Loader2, Plus, RefreshCw, Trash2, Link2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   apiIntegrationSchema,
@@ -41,7 +40,6 @@ const buildId = () => {
   ) {
     return crypto.randomUUID();
   }
-
   return `api-${Date.now()}`;
 };
 
@@ -178,7 +176,6 @@ export default function ApiIntegration() {
 
   const saveEdit = async (values: ApiIntegrationForm) => {
     if (!editingId) return;
-
     const nextApis = apis.map((api) =>
       api.id === editingId
         ? {
@@ -189,7 +186,6 @@ export default function ApiIntegration() {
           }
         : api,
     );
-
     const saved = await saveApis(
       nextApis,
       `API "${values.name.trim()}" updated`,
@@ -200,238 +196,303 @@ export default function ApiIntegration() {
   };
 
   const isSaving = persistApis.isPending;
+  const activeCount = apis.filter((a) => a.status === "active").length;
 
   return (
     <>
       <Breadcrumbs items={["Admin", "API Integration"]} />
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">
-              API Integration
-            </h1>
-            <p className="mt-2 text-muted-foreground">
-              Manage external API connections persisted via communicator config
-            </p>
+      <div className="space-y-8 mt-6">
+
+        {/* ── Page header ─────────────────────────────────────────────── */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+              <Link2 size={17} className="text-primary" />
+            </div>
+            <div>
+              <h1 className="text-xl font-heading font-bold text-foreground">
+                API Integration
+              </h1>
+              <p className="text-xs font-body text-muted-foreground mt-0.5">
+                Manage external API connections persisted via communicator config
+              </p>
+            </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              queryClient.invalidateQueries({ queryKey: QUERY_KEY })
-            }
-            disabled={isFetching}
-          >
-            {isFetching ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 text-xs font-body text-muted-foreground">
+              <span className="px-2.5 py-1 rounded-full bg-muted border border-border">
+                {apis.length} total
+              </span>
+              <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                {activeCount} active
+              </span>
+            </div>
+            {/* Refresh button — ApprovalInbox style */}
+            <button
+              onClick={() => queryClient.invalidateQueries({ queryKey: QUERY_KEY })}
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              title="Refresh"
+            >
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              Refresh
+            </button>
+          </div>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Add New API</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 p-6">
+        {/* ── Add New API card ─────────────────────────────────────────── */}
+        <div className="rounded-2xl border border-border bg-card overflow-hidden">
+          <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
+            <Plus size={14} className="text-primary" />
+            <span className="text-sm font-heading font-semibold text-foreground">
+              Add New API
+            </span>
+          </div>
+          <div className="p-6">
             <form className="space-y-4" onSubmit={handleNewApiSubmit(addApi)}>
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                <div>
-                  <Label htmlFor="name">API Name</Label>
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="name"
+                    className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground"
+                  >
+                    API Name <span className="text-destructive">*</span>
+                  </Label>
                   <Input
                     id="name"
                     placeholder="Payment Gateway API"
+                    className="font-body"
                     {...registerNewApi("name")}
                   />
                   {newApiErrors.name && (
-                    <p className="mt-1 text-xs text-destructive">
-                      {newApiErrors.name.message}
-                    </p>
+                    <p className="text-xs text-destructive">{newApiErrors.name.message}</p>
                   )}
                 </div>
-                <div>
-                  <Label htmlFor="baseUrl">Base URL</Label>
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="baseUrl"
+                    className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground"
+                  >
+                    Base URL <span className="text-destructive">*</span>
+                  </Label>
                   <Input
                     id="baseUrl"
                     placeholder="https://api.example.com"
+                    className="font-body"
                     {...registerNewApi("baseUrl")}
                   />
                   {newApiErrors.baseUrl && (
-                    <p className="mt-1 text-xs text-destructive">
-                      {newApiErrors.baseUrl.message}
-                    </p>
+                    <p className="text-xs text-destructive">{newApiErrors.baseUrl.message}</p>
                   )}
                 </div>
-                <div>
-                  <Label htmlFor="apiKey">API Key</Label>
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="apiKey"
+                    className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground"
+                  >
+                    API Key <span className="text-destructive">*</span>
+                  </Label>
                   <Input
                     id="apiKey"
                     type="password"
                     placeholder="sk-..."
+                    className="font-body"
                     {...registerNewApi("apiKey")}
                   />
                   {newApiErrors.apiKey && (
-                    <p className="mt-1 text-xs text-destructive">
-                      {newApiErrors.apiKey.message}
-                    </p>
+                    <p className="text-xs text-destructive">{newApiErrors.apiKey.message}</p>
                   )}
                 </div>
               </div>
-              <Button
-                type="submit"
-                disabled={
-                  isSaving || !newApi.name || !newApi.baseUrl || !newApi.apiKey
-                }
-              >
-                {isSaving ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="mr-2 h-4 w-4" />
-                )}
-                Add API
-              </Button>
+              <div className="flex items-center gap-3 pt-2">
+                <Button
+                  type="submit"
+                  disabled={isSaving || !newApi.name || !newApi.baseUrl || !newApi.apiKey}
+                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                >
+                  {isSaving ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Plus size={14} />
+                  )}
+                  Add API
+                </Button>
+              </div>
             </form>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Configured APIs ({apis.length})</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {error ? (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-                {(error as Error).message || "Failed to load API integrations."}
+        {/* ── Configured APIs card ─────────────────────────────────────── */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <h2 className="text-base font-heading font-semibold text-foreground">
+              Configured APIs
+            </h2>
+            <span className="text-xs font-body text-muted-foreground">
+              ({apis.length})
+            </span>
+          </div>
+
+          {error ? (
+            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+              {(error as Error).message || "Failed to load API integrations."}
+            </div>
+          ) : isLoading ? (
+            <div className="flex justify-center py-16">
+              <Loader2 size={24} className="animate-spin text-muted-foreground" />
+            </div>
+          ) : apis.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 rounded-2xl border-2 border-dashed border-border bg-muted/10">
+              <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-4">
+                <Link2 size={24} className="text-muted-foreground/40" />
               </div>
-            ) : isLoading ? (
-              <div className="flex items-center justify-center py-12 text-muted-foreground">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Loading API configurations...
-              </div>
-            ) : apis.length === 0 ? (
-              <div className="py-12 text-center text-muted-foreground">
-                <p>No API configurations found.</p>
-                <p className="mt-2 text-sm">Add your first API above.</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {apis.map((api) => (
-                  <div
-                    key={api.id}
-                    className="rounded-lg border p-6 transition-colors hover:bg-muted/50"
-                  >
-                    {editingId === api.id ? (
-                      <div className="space-y-4">
+              <p className="text-sm font-heading font-semibold text-muted-foreground">
+                No API configurations found
+              </p>
+              <p className="text-xs font-body text-muted-foreground/60 mt-1">
+                Use the form above to add your first API
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {apis.map((api) => (
+                <div
+                  key={api.id}
+                  className={`rounded-2xl border bg-card overflow-hidden transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5 ${
+                    editingId === api.id
+                      ? "border-primary shadow-lg shadow-primary/10 ring-1 ring-primary/20"
+                      : "border-border hover:border-primary/30"
+                  }`}
+                >
+                  {editingId === api.id ? (
+                    <div>
+                      <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
+                        <Edit3 size={14} className="text-primary" />
+                        <span className="text-sm font-heading font-semibold text-foreground">
+                          Edit API
+                        </span>
+                        <Badge className="ml-auto text-[10px] font-heading bg-primary/10 text-primary border border-primary/20 px-2">
+                          Editing
+                        </Badge>
+                      </div>
+                      <div className="p-6">
                         <form
                           className="space-y-4"
                           onSubmit={handleEditApiSubmit(saveEdit)}
                         >
                           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                            <div>
-                              <Label>Name</Label>
-                              <Input {...registerEditApi("name")} />
+                            <div className="space-y-1.5">
+                              <Label className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                                API Name
+                              </Label>
+                              <Input className="font-body" {...registerEditApi("name")} />
                               {editApiErrors.name && (
-                                <p className="mt-1 text-xs text-destructive">
-                                  {editApiErrors.name.message}
-                                </p>
+                                <p className="text-xs text-destructive">{editApiErrors.name.message}</p>
                               )}
                             </div>
-                            <div>
-                              <Label>Base URL</Label>
-                              <Input {...registerEditApi("baseUrl")} />
+                            <div className="space-y-1.5">
+                              <Label className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                                Base URL
+                              </Label>
+                              <Input className="font-body" {...registerEditApi("baseUrl")} />
                               {editApiErrors.baseUrl && (
-                                <p className="mt-1 text-xs text-destructive">
-                                  {editApiErrors.baseUrl.message}
-                                </p>
+                                <p className="text-xs text-destructive">{editApiErrors.baseUrl.message}</p>
                               )}
                             </div>
-                            <div>
-                              <Label>API Key</Label>
+                            <div className="space-y-1.5">
+                              <Label className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                                API Key
+                              </Label>
                               <Input
                                 type="password"
+                                className="font-body"
                                 {...registerEditApi("apiKey")}
                               />
                               {editApiErrors.apiKey && (
-                                <p className="mt-1 text-xs text-destructive">
-                                  {editApiErrors.apiKey.message}
-                                </p>
+                                <p className="text-xs text-destructive">{editApiErrors.apiKey.message}</p>
                               )}
                             </div>
                           </div>
-                          <div className="flex gap-2">
-                            <Button type="submit" disabled={isSaving}>
-                              {isSaving ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              ) : null}
+                          <div className="flex items-center gap-3 pt-2">
+                            <Button
+                              type="submit"
+                              disabled={isSaving}
+                              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                            >
+                              {isSaving && <Loader2 size={14} className="animate-spin" />}
                               Save Changes
                             </Button>
                             <Button
                               variant="outline"
                               onClick={cancelEdit}
                               disabled={isSaving}
+                              className="font-heading text-sm"
                             >
                               Cancel
                             </Button>
                           </div>
                         </form>
                       </div>
-                    ) : (
-                      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
-                        <div>
-                          <h3 className="text-xl font-bold">{api.name}</h3>
-                          <p className="mt-1 text-sm text-muted-foreground">
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3 p-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="text-sm font-heading font-semibold text-foreground truncate">
+                            {api.name}
+                          </p>
+                          <p className="text-xs font-body text-muted-foreground mt-0.5 truncate">
                             {api.baseUrl}
                           </p>
                         </div>
-                        <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center sm:justify-between">
-                          <code className="rounded bg-muted px-3 py-1 text-xs font-mono">
+                        <div className="flex items-center gap-2 shrink-0">
+                          <code className="rounded-lg bg-muted px-2.5 py-1 text-xs font-mono border border-border">
                             {maskApiKey(api.apiKey)}
                           </code>
                           <Badge
-                            variant={
-                              api.status === "active" ? "default" : "secondary"
-                            }
+                            variant={api.status === "active" ? "default" : "secondary"}
+                            className="text-[10px] font-heading uppercase tracking-wide px-2 py-0.5"
                           >
-                            {api.status.toUpperCase()}
+                            {api.status}
                           </Badge>
-                          <div className="flex gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => startEdit(api)}
-                              disabled={isSaving}
-                            >
-                              <Edit3 className="mr-1 h-4 w-4" />
-                              Edit
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => toggleStatus(api.id)}
-                              disabled={isSaving}
-                            >
-                              Toggle Status
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              onClick={() => deleteApi(api.id)}
-                              disabled={isSaving}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
                         </div>
                       </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                      <div className="flex items-center justify-between border-t border-border/50 pt-3 mt-0.5">
+                        <button
+                          onClick={() => toggleStatus(api.id)}
+                          disabled={isSaving}
+                          className="text-[11px] font-body text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                        >
+                          Toggle status
+                        </button>
+                        <div className="flex gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => startEdit(api)}
+                            disabled={isSaving}
+                            className="h-8 w-8 p-0 hover:bg-primary/10 hover:text-primary"
+                          >
+                            <Edit3 size={13} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => deleteApi(api.id)}
+                            disabled={isSaving}
+                            className="h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive"
+                          >
+                            <Trash2 size={13} />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </>
   );

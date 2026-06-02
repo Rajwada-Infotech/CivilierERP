@@ -150,12 +150,15 @@ export function ApprovalActions({
 
           <Button
             size="sm"
-            variant="outline"
-            className="gap-1.5 border-red-200 text-red-700 hover:bg-red-50"
+            className="gap-1.5 bg-red-600 hover:bg-red-700 text-white border-0"
             disabled={loading !== null}
             onClick={() => setRejectOpen(true)}
           >
-            <XCircle className="w-3.5 h-3.5" />
+            {loading === "reject" ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <XCircle className="w-3.5 h-3.5" />
+            )}
             Reject
           </Button>
         </>

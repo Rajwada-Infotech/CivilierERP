@@ -215,7 +215,7 @@ export default function IntegrationChannelsAdmin() {
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl mx-auto">
+    <div className="p-6 space-y-5 max-w-5xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -229,7 +229,7 @@ export default function IntegrationChannelsAdmin() {
             </p>
           </div>
         </div>
-        <Button onClick={openAdd} className="gap-2">
+        <Button onClick={openAdd} className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto">
           <Plus className="h-4 w-4" />
           Add Channel
         </Button>
@@ -412,7 +412,7 @@ export default function IntegrationChannelsAdmin() {
             <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
               Cancel
             </Button>
-            <Button onClick={handleSave} disabled={saving}>
+            <Button onClick={handleSave} disabled={saving} className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto">
               {saving ? "Saving…" : editing ? "Save Changes" : "Create Channel"}
             </Button>
           </DialogFooter>

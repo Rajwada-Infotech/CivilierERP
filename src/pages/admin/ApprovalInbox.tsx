@@ -233,73 +233,57 @@ const InboxRow: React.FC<{
   const rejectedBy = item.RejectedBy?.trim();
 
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 py-3.5 border-b border-border last:border-0 hover:bg-muted/30 transition-colors group">
-      {/* Module icon + label */}
-      <div className="flex items-center gap-3 min-w-[160px]">
-        <div
-          className={`p-2 rounded-lg shrink-0 ${
-            cfg?.color ?? "bg-muted text-muted-foreground"
-          }`}
-        >
+    <div className="grid grid-cols-[190px_100px_1fr_100px_140px_130px_170px] items-center gap-2 px-4 py-3.5 border-b border-border last:border-0 hover:bg-muted/30 transition-colors group">
+
+      {/* Col 1 — Module icon + label */}
+      <div className="flex items-center gap-3 min-w-0">
+        <div className={`p-2 rounded-lg shrink-0 ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>
           <Icon size={14} />
         </div>
         <div className="min-w-0">
-          <p className="text-xs font-semibold text-foreground">
-            {item.ModuleLabel}
-          </p>
-          <p className="text-[11px] text-muted-foreground font-mono truncate">
-            {item.Reference || `#${item.RecordId}`}
-          </p>
+          <p className="text-xs font-semibold text-foreground truncate">{item.ModuleLabel}</p>
+          <p className="text-[11px] text-muted-foreground font-mono truncate">{item.Reference || `#${item.RecordId}`}</p>
         </div>
       </div>
 
-      {/* Date */}
-      <div className="hidden md:block min-w-[100px]">
-        <p className="text-[11px] text-muted-foreground">Date</p>
+      {/* Col 2 — Date */}
+      <div className="min-w-0">
         <p className="text-xs text-foreground">{fmtDate(item.RecordDate)}</p>
       </div>
 
-      {/* Party */}
-      <div className="hidden lg:block flex-1 min-w-0">
-        <p className="text-[11px] text-muted-foreground">Party</p>
+      {/* Col 3 — Party */}
+      <div className="min-w-0">
         <p className="text-xs text-foreground truncate">
           {item.SupplierName || item.ContractorName || item.CreatedBy || "—"}
         </p>
       </div>
 
-      {/* Amount */}
-      <div className="hidden md:block min-w-[100px]">
-        <p className="text-[11px] text-muted-foreground">Amount</p>
-        <p className="text-xs font-mono font-semibold text-foreground">
-          {fmtAmount(item.Amount)}
-        </p>
+      {/* Col 4 — Amount */}
+      <div className="min-w-0">
+        <p className="text-xs font-mono font-semibold text-foreground">{fmtAmount(item.Amount)}</p>
       </div>
 
-      {/* ApprovedBy / RejectedBy indicator */}
-      {(approvedBy || rejectedBy) && (
-        <div className="hidden lg:flex items-center gap-1.5 min-w-[140px]">
-          {approvedBy && (
-            <span className="flex items-center gap-1 text-[10px] text-emerald-600 bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full font-heading truncate max-w-[130px]">
-              <CheckCircle2 size={9} />
-              {approvedBy}
-            </span>
-          )}
-          {rejectedBy && (
-            <span className="flex items-center gap-1 text-[10px] text-red-600 bg-red-500/10 border border-red-400/20 px-2 py-0.5 rounded-full font-heading truncate max-w-[130px]">
-              <XCircle size={9} />
-              {rejectedBy}
-            </span>
-          )}
-        </div>
-      )}
+      {/* Col 5 — Approved/Rejected By */}
+      <div className="flex items-center gap-1.5 min-w-0">
+        {approvedBy && (
+          <span className="flex items-center gap-1 text-[10px] text-emerald-600 bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full font-heading truncate max-w-[130px]">
+            <CheckCircle2 size={9} /> {approvedBy}
+          </span>
+        )}
+        {rejectedBy && (
+          <span className="flex items-center gap-1 text-[10px] text-red-600 bg-red-500/10 border border-red-400/20 px-2 py-0.5 rounded-full font-heading truncate max-w-[130px]">
+            <XCircle size={9} /> {rejectedBy}
+          </span>
+        )}
+      </div>
 
-      {/* Status */}
-      <div className="shrink-0">
+      {/* Col 6 — Status */}
+      <div className="flex items-center">
         <StatusBadge status={item.Status} />
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center gap-2 shrink-0 ml-auto">
+      {/* Col 7 — Actions */}
+      <div className="flex items-center gap-2 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
         <ApprovalActions
           status={item.Status}
           recordId={item.RecordId}
@@ -321,6 +305,7 @@ const InboxRow: React.FC<{
           </button>
         )}
       </div>
+
     </div>
   );
 };
@@ -424,7 +409,7 @@ const ApprovalInbox: React.FC = () => {
       </div>
 
       {/* Content */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="rounded-xl border border-border bg-card overflow-x-auto">
         {isLoading ? (
           <div className="divide-y divide-border">
             {Array.from({ length: 5 }).map((_, i) => (
@@ -458,8 +443,9 @@ const ApprovalInbox: React.FC = () => {
           </div>
         ) : (
           <>
+            <div className="min-w-[900px]">
             {/* Table header — desktop */}
-            <div className="hidden sm:grid grid-cols-[160px_100px_1fr_100px_140px_120px_auto] gap-4 px-4 py-2.5 bg-muted/40 border-b border-border">
+            <div className="grid grid-cols-[190px_100px_1fr_100px_140px_130px_170px] gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                 Module / Ref
               </p>
@@ -496,6 +482,7 @@ const ApprovalInbox: React.FC = () => {
                     onOptimisticUpdate={handleOptimisticUpdate}
                   />
                 ))}
+            </div>
             </div>
 
             <div className="px-4 py-2.5 border-t border-border bg-muted/20">
