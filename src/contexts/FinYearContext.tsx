@@ -62,14 +62,16 @@ export const FinYearProvider = ({ children }: { children: ReactNode }) => {
   });
 
   const finYears: FinYear[] = Array.isArray(dbData)
-    ? dbData.map((item: any) => ({
-        id: String(item.FId),
-        year: item.FName || "",
-        startDate: item.FStartDate ? toLocalDateStr(item.FStartDate) : "",
-        endDate: item.FEndDate ? toLocalDateStr(item.FEndDate) : "",
-        status: item.FStatus ? "Active" : "Closed",
-        locked: !!item.FisLocked,
-      }))
+    ? dbData
+        .map((item: any) => ({
+          id: String(item.FId),
+          year: item.FName || "",
+          startDate: item.FStartDate ? toLocalDateStr(item.FStartDate) : "",
+          endDate: item.FEndDate ? toLocalDateStr(item.FEndDate) : "",
+          status: item.FStatus ? "Active" : "Closed",
+          locked: !!item.FisLocked,
+        }))
+        .sort((a, b) => b.year.localeCompare(a.year))
     : [];
 
   const invalidate = useCallback(
