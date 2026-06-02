@@ -35,15 +35,23 @@ function parseGRNItems(grnItems) {
   return [];
 }
 
-/** Sum rate × quantity for every line item, falling back to stored totalAmount. */
+/**
+ * Sum (base + GST) for every line item.
+ * base     = rate × billingQty  (or stored totalAmount when positive)
+ * gstPct   = per-item GST % carried from PO → GRN line (field: gstPct)
+ * The result is stored in GoodsReceiptNotes.TotalAmount (incl. GST) so
+ * it can be directly compared with PurchaseOrders.TotalAmount (also incl. GST).
+ */
 function computeGRNTotal(grnItems) {
   const items = parseGRNItems(grnItems);
   return items.reduce((sum, item) => {
-    const lineTotal =
+    const base =
       Number(item.totalAmount) > 0
         ? Number(item.totalAmount)
         : Number(item.rate || 0) * Number(item.quantity || 0);
-    return sum + lineTotal;
+    const gstPct = Number(item.gstPct || 0);
+    const gstAmt = base * (gstPct / 100);
+    return sum + base + gstAmt;
   }, 0);
 }
 

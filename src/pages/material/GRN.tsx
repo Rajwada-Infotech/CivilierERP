@@ -43,10 +43,17 @@ import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import type {
   GRNFormDataPayload,
-  GRNItemLine,
+  GRNItemLine as GRNItemLineBase,
   PurchaseOrder,
   UOM,
 } from "@/api/grnApi";
+
+// Extend the base type with GST fields sourced from PurchaseOrderItems.TaxPct
+// (which itself comes from ItemMaster / HSN master at PO creation time).
+type GRNItemLine = GRNItemLineBase & {
+  gstPct: number;    // GST % from PO line (TaxPct) ← HSN master
+  gstAmount: number; // base (rate × qty) × gstPct / 100
+};
 
 // ─── Remaining Items Panel ─────────────────────────────────────────────────────
 // Shows GRN items that still have remainingQty > 0 (not yet fully expense-booked).
@@ -204,6 +211,8 @@ const createEmptyItem = (): GRNItemLine => ({
   rate: 0,
   quantity: 0,
   totalAmount: 0,
+  gstPct: 0,      // GST % sourced from PurchaseOrderItems.TaxPct (HSN master)
+  gstAmount: 0,   // computed: totalAmount × gstPct / 100
 });
 
 const parseJsonArray = <T,>(val: unknown): T[] => {
@@ -786,10 +795,18 @@ export default function GRN() {
     );
   });
 
+  // base total (excl. GST) — used for stock ledger and line display
   const grandTotal = formData.items.reduce(
     (sum, i) => sum + (i.totalAmount || 0),
     0,
   );
+  // GST amount per item comes from PO's TaxPct (HSN master) × billing value
+  const grandGSTAmount = formData.items.reduce(
+    (sum, i) => sum + (i.gstAmount || 0),
+    0,
+  );
+  // GRN total incl. GST — compared against poTotalAmount (also incl. GST)
+  const grnTotalWithGST = grandTotal + grandGSTAmount;
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
   const createMutation = useMutation({
@@ -888,6 +905,8 @@ export default function GRN() {
       const lineItems: GRNItemLine[] = (po.LineItems ?? []).map((li: any) => {
         const rate = Number(li.Rate ?? 0);
         const quantity = Number(li.Quantity ?? 0);
+        // TaxPct is stored per line in PurchaseOrderItems, sourced from ItemMaster (HSN master)
+        const gstPct = Number(li.TaxPct ?? 0);
         return {
           itemId: String(li.ItemId ?? ""),
           itemName: li.ItemName ?? li.Description ?? "",
@@ -898,6 +917,8 @@ export default function GRN() {
           rate,
           quantity: 0,
           totalAmount: 0,
+          gstPct,
+          gstAmount: 0,
         };
       });
 
@@ -988,6 +1009,8 @@ export default function GRN() {
       }
       current.totalAmount =
         Number(current.rate || 0) * Number(current.quantity || 0);
+      current.gstAmount =
+        current.totalAmount * (Number(current.gstPct || 0) / 100);
       nextItems[index] = current;
       return { ...prev, items: nextItems };
     });
@@ -1042,6 +1065,8 @@ export default function GRN() {
       supplierName: fullGrn.SupplierName || "",
       poId: String(fullGrn.POID || ""),
       poNumber: fullGrn.PONumber || "",
+      poTotalAmount: Number(fullGrn.POTotalAmount ?? 0),
+      poSubtotalAmount: Number(fullGrn.POSubtotalAmount ?? 0),
       remarks: fullGrn.Remarks || "",
       status: (fullGrn.Status as any) || "Draft",
       items: parsedItems.length ? parsedItems : [createEmptyItem()],
@@ -1419,19 +1444,19 @@ export default function GRN() {
                     </div>
                   ))
                 )}
-                {formData.poId && grandTotal > 0 && (
+                {formData.poId && grnTotalWithGST > 0 && (
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-center px-4 py-3 rounded-xl bg-primary/5 border border-primary/20">
                       <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                         GRN Total (this receipt)
                       </span>
                       <span className="font-bold text-primary">
-                        ₹{fmt(grandTotal)}
+                        ₹{fmt(grnTotalWithGST)}
                       </span>
                     </div>
                     {formData.poTotalAmount > 0 &&
                       (() => {
-                        const diff = formData.poTotalAmount - grandTotal;
+                        const diff = formData.poTotalAmount - grnTotalWithGST;
                         return (
                           <div className="grid grid-cols-2 gap-1.5">
                             <div className="flex flex-col px-3 py-2.5 rounded-xl bg-muted/40 border border-border">
@@ -1588,7 +1613,7 @@ export default function GRN() {
                       ))
                     )}
                   </tbody>
-                  {formData.poId && grandTotal > 0 && (
+                  {formData.poId && grnTotalWithGST > 0 && (
                     <tfoot>
                       <tr className="bg-primary/5 border-t-2 border-primary/20">
                         <td
@@ -1598,12 +1623,12 @@ export default function GRN() {
                           GRN Total (this receipt)
                         </td>
                         <td className="px-4 py-3 text-right font-bold text-primary text-sm">
-                          ₹{fmt(grandTotal)}
+                          ₹{fmt(grnTotalWithGST)}
                         </td>
                       </tr>
                       {formData.poTotalAmount > 0 &&
                         (() => {
-                          const diff = formData.poTotalAmount - grandTotal;
+                          const diff = formData.poTotalAmount - grnTotalWithGST;
                           return (
                             <>
                               <tr className="bg-muted/30 border-t border-border/50">

@@ -141,7 +141,7 @@ export default function Signature() {
   return (
     <>
       <Breadcrumbs items={["Admin", "Signatures"]} />
-      <div className="space-y-8">
+      <div className="space-y-8 mt-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -229,7 +229,7 @@ export default function Signature() {
                       !formData.owner.trim() ||
                       saveMutation.isPending
                     }
-                    className="gap-2 font-heading text-sm"
+                    className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
                   >
                     {saveMutation.isPending ? (
                       <Loader2 size={14} className="animate-spin" />
