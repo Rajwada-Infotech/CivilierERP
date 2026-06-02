@@ -1,14 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { DashboardBackground } from "@/components/DashboardBackground";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -46,9 +38,9 @@ import {
   Play,
   StopCircle,
   CheckCircle2,
-  XCircle,
   Loader2,
   AlertTriangle,
+  type LucideIcon,
 } from "lucide-react";
 import { fetchMetrics, getDemoMetrics } from "@/api/metricsApi";
 import { cn } from "@/lib/utils";
@@ -169,61 +161,99 @@ const MetricsDashboard = () => {
   }: {
     title: string;
     status: boolean;
-    Icon: React.ComponentType<{ className?: string }>;
+    Icon: LucideIcon;
   }) => (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+    <div
+      className={cn(
+        "rounded-xl border px-4 py-3 flex items-center justify-between transition-colors",
+        status
+          ? "border-emerald-500/20 bg-emerald-500/5"
+          : "border-destructive/20 bg-destructive/5",
+      )}
+    >
+      <div className="flex items-center gap-2">
         <Icon
-          className={cn(
-            "h-4 w-4",
-            status ? "text-green-500" : "text-destructive",
-          )}
+          size={14}
+          className={cn(status ? "text-emerald-400" : "text-destructive")}
         />
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold">{status ? "OK" : "DOWN"}</div>
-      </CardContent>
-    </Card>
+        <span className="text-sm font-heading font-semibold text-foreground">
+          {title}
+        </span>
+      </div>
+      <span
+        className={cn(
+          "text-xs font-heading uppercase tracking-wide px-2 py-0.5 rounded-full border",
+          status
+            ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+            : "text-destructive bg-destructive/10 border-destructive/20",
+        )}
+      >
+        {status ? "OK" : "DOWN"}
+      </span>
+    </div>
   );
 
   return (
     <>
       <Breadcrumbs items={["Admin", "Live Metrics"]} />
 
-      <div className="relative space-y-6">
-        <DashboardBackground />
-        {/* Connect Panel */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5" />
-              Live Metrics Dashboard
-            </CardTitle>
-            <CardDescription>
-              Enter your backend URL and Bearer token to connect. "Start live"
-              polls every 10 seconds.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      <div className="space-y-6 mt-6">
+        {/* ── Page header ─────────────────────────────────────────────── */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+              <TrendingUp size={17} className="text-primary" />
+            </div>
+            <div>
+              <h1 className="text-xl font-heading font-bold text-foreground">
+                Live Metrics Dashboard
+              </h1>
+              <p className="text-xs font-body text-muted-foreground mt-0.5">
+                Enter your backend URL and Bearer token to connect. "Start live" polls every 10 seconds.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Connect Panel ────────────────────────────────────────────── */}
+        <div className="rounded-2xl border border-border bg-card overflow-hidden">
+          <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
+            <TrendingUp size={14} className="text-primary" />
+            <span className="text-sm font-heading font-semibold text-foreground">
+              Connection
+            </span>
+          </div>
+          <div className="p-6 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="baseURL">Base URL</Label>
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor="baseURL"
+                  className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground"
+                >
+                  Base URL
+                </Label>
                 <Input
                   id="baseURL"
                   value={baseURL}
                   onChange={(e) => setBaseURL(e.target.value)}
                   placeholder="http://localhost:5000"
+                  className="font-body"
                 />
               </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="token">Bearer Token (optional)</Label>
+              <div className="space-y-1.5 md:col-span-2">
+                <Label
+                  htmlFor="token"
+                  className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground"
+                >
+                  Bearer Token <span className="text-muted-foreground/50">(optional)</span>
+                </Label>
                 <Input
                   id="token"
                   type="password"
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
                   placeholder="Bearer your-token-here"
+                  className="font-body"
                 />
               </div>
             </div>
@@ -231,63 +261,60 @@ const MetricsDashboard = () => {
               <Button
                 onClick={() => fetchData(false)}
                 disabled={loading}
-                className="flex-1"
+                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
               >
                 {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Connecting...
-                  </>
-                ) : (
-                  "Connect"
-                )}
+                  <Loader2 size={14} className="animate-spin" />
+                ) : null}
+                {loading ? "Connecting..." : "Connect"}
               </Button>
               <Button
-                variant={live ? "destructive" : "default"}
+                variant={live ? "destructive" : "outline"}
                 onClick={toggleLive}
                 disabled={!metrics || loading}
+                className="gap-1.5 shrink-0 font-semibold text-sm px-5 py-2 h-auto"
               >
                 {live ? (
-                  <StopCircle className="mr-2 h-4 w-4" />
+                  <StopCircle size={14} />
                 ) : (
-                  <Play className="mr-2 h-4 w-4" />
+                  <Play size={14} />
                 )}
-                {live ? "Stop live" : "Start live"}
+                {live ? "Stop Live" : "Start Live"}
               </Button>
               {import.meta.env.DEV && (
                 <Button
                   variant="outline"
                   onClick={() => fetchData(true)}
                   disabled={loading}
+                  className="gap-1.5 shrink-0 font-semibold text-sm px-5 py-2 h-auto"
                 >
                   Demo
                 </Button>
               )}
             </div>
             {error && (
-              <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-md">
+              <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
                 <AlertTriangle className="h-4 w-4 mr-2 inline" />
                 {error}
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         {metrics && (
           <>
-            {/* RPM Chart */}
-            <Card className="col-span-full">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5" />
+            {/* ── RPM Chart ───────────────────────────────────────────────── */}
+            <div className="rounded-2xl border border-border bg-card overflow-hidden col-span-full">
+              <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
+                <TrendingUp size={14} className="text-primary" />
+                <span className="text-sm font-heading font-semibold text-foreground">
                   RPM: Actual vs Predicted (12h history)
-                </CardTitle>
-                <CardDescription>
-                  Live requests per minute vs model predictions. Dashed line
-                  anticipates spikes.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="aspect-video">
+                </span>
+                <p className="text-xs font-body text-muted-foreground ml-2">
+                  Live requests per minute vs model predictions. Dashed line anticipates spikes.
+                </p>
+              </div>
+              <div className="p-6 aspect-video">
                 <ChartContainer config={chartConfig}>
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={chartData} margin={{ left: -20 }}>
@@ -321,27 +348,27 @@ const MetricsDashboard = () => {
                     </LineChart>
                   </ResponsiveContainer>
                 </ChartContainer>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
 
-            {/* Grid: Cache + Status + Top Users */}
+            {/* ── Grid: Cache + Status + Top Users ───────────────────────── */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Cache Hit Rate */}
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">
+              <div className="rounded-2xl border border-border bg-card overflow-hidden transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5 hover:border-primary/30">
+                <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
+                  <Database size={14} className="text-primary" />
+                  <span className="text-sm font-heading font-semibold text-foreground">
                     Cache Hit Rate
-                  </CardTitle>
-                  <Database className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
+                  </span>
+                </div>
+                <div className="p-6">
                   <div className="text-2xl font-bold">
                     {(metrics.cacheHitRate * 100).toFixed(0)}%
                   </div>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs font-body text-muted-foreground mt-1">
                     Target: 70%+ | TTLs may be too short if lower
                   </p>
-                  <div className="flex items-center pt-2 gap-2">
+                  <div className="flex items-center pt-3 gap-2">
                     <div className="flex-1 h-2 bg-muted rounded-full">
                       <div
                         className="h-2 bg-primary rounded-full transition-all"
@@ -354,99 +381,96 @@ const MetricsDashboard = () => {
                       variant={
                         metrics.cacheHitRate > 0.7 ? "default" : "secondary"
                       }
+                      className="text-[10px] font-heading uppercase tracking-wide px-2 py-0.5"
                     >
                       {metrics.cacheHitRate > 0.7 ? "Good" : "Improve"}
                     </Badge>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
 
               {/* Status Grid */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm font-medium flex items-center gap-1">
-                    System Health{" "}
-                    <CheckCircle2 className="h-4 w-4 text-green-500" />
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <StatusCard
-                    title="Redis"
-                    status={metrics.redisOk}
-                    Icon={Database}
-                  />
-                  <StatusCard
-                    title="Worker"
-                    status={metrics.workerOk}
-                    Icon={Cpu}
-                  />
-                  <StatusCard
-                    title="Persistence"
-                    status={metrics.aofOk}
-                    Icon={HardDrive}
-                  />
-                </CardContent>
-              </Card>
+              <div className="rounded-2xl border border-border bg-card overflow-hidden transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5 hover:border-primary/30">
+                <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
+                  <CheckCircle2 size={14} className="text-green-500" />
+                  <span className="text-sm font-heading font-semibold text-foreground">
+                    System Health
+                  </span>
+                </div>
+                <div className="p-6 space-y-2">
+                  <StatusCard title="Redis" status={metrics.redisOk} Icon={Database} />
+                  <StatusCard title="Worker" status={metrics.workerOk} Icon={Cpu} />
+                  <StatusCard title="Persistence" status={metrics.aofOk} Icon={HardDrive} />
+                </div>
+              </div>
 
               {/* Top Engaged Users */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-sm font-medium">
-                    <Users className="h-4 w-4" />
+              <div className="rounded-2xl border border-border bg-card overflow-hidden transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5 hover:border-primary/30">
+                <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
+                  <Users size={14} className="text-primary" />
+                  <span className="text-sm font-heading font-semibold text-foreground">
                     Top Engaged Users
-                  </CardTitle>
-                  <CardDescription>
+                  </span>
+                  <p className="text-xs font-body text-muted-foreground ml-2">
                     Power users driving ZSET score
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>User</TableHead>
-                        <TableHead className="text-right">Score</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {topUsers.slice(0, 5).map((user, i) => (
-                        <TableRow key={i}>
-                          <TableCell className="font-medium">
-                            {user.name}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Badge>{user.score.toFixed(0)}</Badge>
-                          </TableCell>
+                  </p>
+                </div>
+                <div className="p-6">
+                  {topUsers.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-10 rounded-2xl border-2 border-dashed border-border bg-muted/10">
+                      <Users size={24} className="text-muted-foreground/40 mb-2" />
+                      <p className="text-sm font-heading font-semibold text-muted-foreground">
+                        No engagement data yet
+                      </p>
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">User</TableHead>
+                          <TableHead className="text-right text-[11px] font-heading uppercase tracking-widest text-muted-foreground">Score</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  {topUsers.length === 0 && (
-                    <p className="text-sm text-muted-foreground text-center py-8">
-                      No engagement data yet
-                    </p>
+                      </TableHeader>
+                      <TableBody>
+                        {topUsers.slice(0, 5).map((user, i) => (
+                          <TableRow key={i} className="hover:bg-muted/30 transition-colors">
+                            <TableCell className="font-heading font-semibold text-sm">
+                              {user.name}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Badge className="text-[10px] font-heading uppercase tracking-wide px-2 py-0.5">
+                                {user.score.toFixed(0)}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             </div>
 
-            {/* Live Stats */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>Live Stats</CardTitle>
+            {/* ── Live Stats ──────────────────────────────────────────────── */}
+            <div className="rounded-2xl border border-border bg-card overflow-hidden transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5 hover:border-primary/30">
+              <div className="flex items-center justify-between gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
+                <span className="text-sm font-heading font-semibold text-foreground">
+                  Live Stats
+                </span>
                 {live && (
-                  <Badge variant="outline" className="flex items-center gap-1">
-                    <Play className="h-3 w-3" />
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] font-heading uppercase tracking-wide">
+                    <Play size={10} />
                     Live (10s)
-                  </Badge>
+                  </span>
                 )}
-              </CardHeader>
-              <CardContent>
+              </div>
+              <div className="p-6">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
                   <div>
                     <div className="text-2xl font-bold text-primary">
                       {metrics.rpm}
                     </div>
-                    <p className="text-xs text-muted-foreground uppercase font-heading">
+                    <p className="text-xs text-muted-foreground uppercase font-heading tracking-widest mt-1">
                       RPM
                     </p>
                   </div>
@@ -454,7 +478,7 @@ const MetricsDashboard = () => {
                     <div className="text-2xl font-bold">
                       {metrics.activeUsers}
                     </div>
-                    <p className="text-xs text-muted-foreground uppercase font-heading">
+                    <p className="text-xs text-muted-foreground uppercase font-heading tracking-widest mt-1">
                       Active
                     </p>
                   </div>
@@ -462,7 +486,7 @@ const MetricsDashboard = () => {
                     <div className="text-2xl font-bold">
                       {(metrics.memoryUsage * 100).toFixed(0)}%
                     </div>
-                    <p className="text-xs text-muted-foreground uppercase font-heading">
+                    <p className="text-xs text-muted-foreground uppercase font-heading tracking-widest mt-1">
                       Memory
                     </p>
                   </div>
@@ -470,27 +494,36 @@ const MetricsDashboard = () => {
                     <div className="text-2xl font-bold text-primary">
                       {new Date(metrics.lastUpdated || 0).toLocaleTimeString()}
                     </div>
-                    <p className="text-xs text-muted-foreground uppercase font-heading">
+                    <p className="text-xs text-muted-foreground uppercase font-heading tracking-widest mt-1">
                       Updated
                     </p>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           </>
         )}
 
         {!metrics && !loading && (
-          <Card className="text-center py-12">
-            <TrendingUp className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">Ready to monitor</h3>
-            <p className="text-muted-foreground mb-6">
+          <div className="flex flex-col items-center justify-center py-24 rounded-2xl border-2 border-dashed border-border bg-muted/10">
+            <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-4">
+              <TrendingUp size={24} className="text-muted-foreground/40" />
+            </div>
+            <p className="text-sm font-heading font-semibold text-muted-foreground">
+              Ready to monitor
+            </p>
+            <p className="text-xs font-body text-muted-foreground/60 mt-1">
               Connect to your backend and watch your metrics live
             </p>
             {import.meta.env.DEV && (
-              <Button onClick={() => fetchData(true)}>Try Demo Mode</Button>
+              <Button
+                onClick={() => fetchData(true)}
+                className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto mt-6"
+              >
+                Try Demo Mode
+              </Button>
             )}
-          </Card>
+          </div>
         )}
       </div>
     </>
