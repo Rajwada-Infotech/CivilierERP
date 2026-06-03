@@ -1,0 +1,16 @@
+node_modules
+dist
+.git
+.gitignore
+*.log
+npm-debug.log*
+backend
+README*
+SECURITY.md
+postman
+.vscode
+.idea
+*.local
+.env
+.env.*
+!.env.example
