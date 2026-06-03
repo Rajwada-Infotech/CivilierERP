@@ -1,14 +1,27 @@
 services:
+  frontend-build:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm ci && npm run build && rm -rf /frontend-dist/* && cp -R dist/. /frontend-dist/"
+    volumes:
+      - .:/app
+      - frontend_node_modules:/app/node_modules
+      - frontend_dist:/frontend-dist
+    profiles:
+      - build
+
   backend:
     build: ./backend
-    ports:
-      - "5000" # For direct access/debug, remove in prod
     env_file:
-      - backend/.env # DB creds, JWT, Redis password, health token
+      - ${CIVILIER_ENV_FILE:-backend/.env}
     environment:
-      - NODE_ENV=production
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      NODE_ENV: production
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    expose:
+      - "5000"
+    volumes:
+      - backend_uploads:/app/uploads
     depends_on:
       redis:
         condition: service_healthy
@@ -19,11 +32,9 @@ services:
       test:
         [
           "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://localhost:5000/health/live",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:5000/health/live', (r)=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))",
         ]
       interval: 30s
       timeout: 10s
@@ -33,7 +44,7 @@ services:
   redis:
     image: redis:7-alpine
     env_file:
-      - backend/.env # Provides REDIS_PASSWORD
+      - ${CIVILIER_ENV_FILE:-backend/.env}
     volumes:
       - redis_data:/data
     command:
@@ -42,8 +53,6 @@ services:
         "-c",
         "redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD:?REDIS_PASSWORD is required}\"",
       ]
-    environment:
-      - REDIS_DB=0
     networks:
       - civilier-network
     restart: unless-stopped
@@ -58,16 +67,14 @@ services:
       retries: 5
 
   nginx:
-    image: nginx:alpine
+    image: nginx:1.27-alpine
     ports:
       - "80:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./dist:/usr/share/nginx/html
+      - frontend_dist:/usr/share/nginx/html:ro
     depends_on:
       backend:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     networks:
       - civilier-network
@@ -75,6 +82,9 @@ services:
 
 volumes:
   redis_data:
+  frontend_dist:
+  frontend_node_modules:
+  backend_uploads:
 
 networks:
   civilier-network:
