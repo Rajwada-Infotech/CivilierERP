@@ -2,6 +2,12 @@ const logger = require("./logger");
 require("./config/env").loadEnv();
 const sql = require("mssql");
 
+function envBool(name, defaultValue) {
+  const value = process.env[name];
+  if (value === undefined || value === "") return defaultValue;
+  return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
+}
+
 // POOL_BURST: connections to pre-open at startup.
 // On page load the app fires ~12-15 concurrent queries per socket reconnect.
 // min=15 keeps that many connections alive; max=30 gives headroom for burst
@@ -15,8 +21,11 @@ const config = {
   port: Number(process.env.DB_PORT || 1433),
   database: process.env.DB_NAME,
   options: {
-    encrypt: false,
-    trustServerCertificate: true,
+    encrypt: envBool("DB_ENCRYPT", process.env.NODE_ENV === "production"),
+    trustServerCertificate: envBool(
+      "DB_TRUST_SERVER_CERTIFICATE",
+      process.env.NODE_ENV !== "production",
+    ),
     enableArithAbort: true,
     packetSize: 32768,
   },
