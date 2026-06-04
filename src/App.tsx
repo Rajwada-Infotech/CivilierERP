@@ -282,7 +282,7 @@ const ConstructionUpdatesPage = lazy(
   () => import("./pages/followup/ConstructionUpdates"),
 );
 const FinanceDemandsPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
+  import("./pages/followup/FinanceDemands").then((module) => ({
     default: module.FinanceDemandsPage,
   })),
 );

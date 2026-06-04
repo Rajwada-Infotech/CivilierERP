@@ -6,6 +6,7 @@ import {
   FileText,
   CheckCircle2,
   HardHat,
+  IndianRupee,
 } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
@@ -73,5 +74,13 @@ export const followupNavItems: NavItem[] = [
     label: "Construction",
     icon: HardHat,
     children: [{ label: "Updates", path: "/followup/construction/updates" }],
+  },
+  {
+    label: "Finance",
+    icon: IndianRupee,
+    children: [
+      { label: "Demands", path: "/followup/finance/demands" },
+      { label: "Payments", path: "/followup/finance/payments" },
+    ],
   },
 ];
