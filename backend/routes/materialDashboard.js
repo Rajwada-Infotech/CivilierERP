@@ -225,9 +225,11 @@ router.get("/", async (req, res) => {
       safeQuery(`
         SELECT
           COUNT(*) AS TotalCount,
-          COUNT(CASE WHEN ISNULL(Status,'') = 'Pending'  THEN 1 END) AS PendingCount,
-          COUNT(CASE WHEN ISNULL(Status,'') = 'Approved' THEN 1 END) AS ApprovedCount,
-          COUNT(CASE WHEN ISNULL(Status,'') = 'Draft'    THEN 1 END) AS DraftCount,
+          COUNT(CASE WHEN ISNULL(Status,'') = 'Pending'           THEN 1 END) AS PendingCount,
+          COUNT(CASE WHEN ISNULL(Status,'') = 'Approved'          THEN 1 END) AS ApprovedCount,
+          COUNT(CASE WHEN ISNULL(Status,'') IN ('Draft','')        THEN 1 END) AS DraftCount,
+          COUNT(CASE WHEN ISNULL(Status,'') = 'Ordered'           THEN 1 END) AS OrderedCount,
+          COUNT(CASE WHEN ISNULL(Status,'') = 'Partially Ordered' THEN 1 END) AS PartiallyOrderedCount,
           COUNT(CASE WHEN YEAR(CreatedAt) = YEAR(GETDATE())
                       AND MONTH(CreatedAt) = MONTH(GETDATE()) THEN 1 END) AS ThisMonthCount
         FROM dbo.MaterialRequests
@@ -329,6 +331,8 @@ router.get("/", async (req, res) => {
         pending: mr.PendingCount ?? 0,
         approved: mr.ApprovedCount ?? 0,
         draft: mr.DraftCount ?? 0,
+        ordered: mr.OrderedCount ?? 0,
+        partiallyOrdered: mr.PartiallyOrderedCount ?? 0,
         thisMonth: mr.ThisMonthCount ?? 0,
       },
       recentIssues: recentIssues?.recordset ?? [],
@@ -347,7 +351,3 @@ router.get("/", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-

@@ -302,10 +302,27 @@ export interface WorkOrderFullPayload {
   activities: ActivityPayload[];
 }
 
+export interface WOPOSummary {
+  PurchaseOrderID: number;
+  PurchaseOrderNo: string;
+  SupplierName: string | null;
+  subtotal: number;
+  totalGst: number;
+  totalAmount: number;
+  lineCount: number;
+}
+
+export interface SaveFullWOResult {
+  message: string;
+  activityCount: number;
+  /** WO-POs auto-created from material items on this save */
+  woPOs: WOPOSummary[];
+}
+
 export const saveFullWorkOrder = async (
   id: number,
   payload: WorkOrderFullPayload,
-) => {
+): Promise<SaveFullWOResult> => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}/save-full`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

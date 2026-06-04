@@ -157,7 +157,7 @@ export default function WhatsAppSetup() {
                 <Button
                   onClick={() => saveMutation.mutate()}
                   disabled={saveMutation.isPending}
-                  className="gap-2"
+                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
                 >
                   {saveMutation.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />

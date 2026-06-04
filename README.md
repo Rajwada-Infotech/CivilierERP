@@ -6,12 +6,14 @@
 [![Status](https://img.shields.io/badge/status-under%20active%20development-orange)](https://rajwadainfotech.com)
 [![License](https://img.shields.io/badge/license-proprietary-red)](#license)
 [![Stack](https://img.shields.io/badge/stack-React%20%2B%20Node.js%20%2B%20MSSQL-blue)](#tech-stack)
+[![Docs](https://img.shields.io/badge/docs-PDF%20Reference-informational)](https://github.com/Rajwada-Infotech/CivilierERP/blob/main/CivilierERP%20Documentation.pdf)
 
 ---
 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Documentation](#documentation)
 - [About Rajwada Infotech](#about-rajwada-infotech)
 - [Core Modules](#core-modules)
 - [Key Features](#key-features)
@@ -41,6 +43,31 @@ The platform integrates all critical business functions — project management, 
 
 > **⚠️ Status: Under Active Development**
 > This project is a work-in-progress. Production deployment preparation lives in [DEPLOYMENT.md](DEPLOYMENT.md).
+
+---
+
+## Documentation
+
+The full developer documentation is available as a PDF reference covering all modules, APIs, database schema, infrastructure, and deployment procedures.
+
+📄 **[CivilierERP Developer Documentation (PDF)](https://github.com/Rajwada-Infotech/CivilierERP/blob/main/CivilierERP%20Documentation.pdf)**
+
+The documentation covers:
+
+| Section | Topics |
+|---|---|
+| Finance Module | Payments, Receipts, BRS, Trial Balance, Setup masters |
+| Material Module | Purchase Orders, GRN, Issues, Stock, Transfers |
+| Follow-Up Module | Applications, Bookings, Agreements, Closure, Construction Updates |
+| Engineering Module | BOQ, Work Orders, Work Done |
+| Ticket Module | Support lifecycle, real-time chat, escalation, SLA |
+| Admin Module | Authorization layers, RBAC, user management, rights |
+| Authentication | JWT flow, Redis blacklist, brute-force protection |
+| Redis Infrastructure | Caching, rate limiting, graceful degradation |
+| Deployment & Infrastructure | AWS, Docker, CI/CD, health endpoints |
+| Document Numbering | Three-tier format, atomic locking, lineage |
+| Approval Workflow Engine | Multi-level approvals, audit trail, guardEdit |
+| Reports & Widgets | Data export, dashboard widgets, access control |
 
 ---
 
@@ -312,6 +339,8 @@ Draft  ──► Pending  ──► Approved
 
 This separation ensures that approval authority is centralized and auditable.
 
+> For full details on the approval engine, workflow configuration, and the `guardEdit()` guard, see the [Developer Documentation](https://github.com/Rajwada-Infotech/CivilierERP/blob/main/CivilierERP%20Documentation.pdf).
+
 ---
 
 ## Role-Based Access Control
@@ -328,6 +357,8 @@ Access in CivilierERP is governed by roles assigned to each user. Each role has 
 | `engineering` | Project and engineering module access |
 
 Permissions are checked server-side on every request via middleware. Frontend sidebar navigation and UI elements are also conditionally rendered based on the authenticated user's role.
+
+> For the full authorization architecture — including the two-layer permission model (`allowRoles()` + `checkPermission()`), role aliases, and the `UserPageRightsJson` override system — see the [Developer Documentation](https://github.com/Rajwada-Infotech/CivilierERP/blob/main/CivilierERP%20Documentation.pdf).
 
 ---
 

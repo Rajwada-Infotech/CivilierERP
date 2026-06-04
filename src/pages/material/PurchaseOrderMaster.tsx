@@ -7,6 +7,15 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { AlertTriangle } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import {
   DocNumberPreview,
   fetchNextDocNumber,
@@ -156,6 +165,8 @@ interface POListItem {
   status: string;
   docNo: string;
   remarks: string;
+  poType: string;
+  sourceWODocNo: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -316,6 +327,7 @@ const PurchaseOrderMaster: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const limit = 10;
+  const [poTypeFilter, setPoTypeFilter] = useState<string>(""); // "" = All
 
   // ── Doc number state ──────────────────────────────────────────────────────
   const [poDocTypeId, setPoDocTypeId] = useState<number | null>(null);
@@ -340,6 +352,25 @@ const PurchaseOrderMaster: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [deleteBlockInfo, setDeleteBlockInfo] = useState<{
+    reason: string;
+    grns?: { grnId: number; grnNo: string; status: string }[];
+    expenseBookings?: { id: number; docNo: string; status: string }[];
+    clearedPayments?: {
+      paymentId: number;
+      paymentName: string;
+      amount: number;
+      brsId: number;
+      expenseDocNo: string;
+    }[];
+    linkedPayments?: {
+      paymentId: number;
+      paymentName: string;
+      amount: number;
+      expenseDocNo: string;
+    }[];
+  } | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [, setSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTCs, setSelectedTCs] = useState<TCRecord[]>([]);
@@ -377,8 +408,8 @@ const PurchaseOrderMaster: React.FC = () => {
 
   // ── Remote data ───────────────────────────────────────────────────────────
   const { data: dbData, isLoading } = useQuery({
-    queryKey: ["purchase-orders", page, limit],
-    queryFn: () => getPurchaseOrders({ page, limit }),
+    queryKey: ["purchase-orders", page, limit, poTypeFilter],
+    queryFn: () => getPurchaseOrders({ page, limit, poType: poTypeFilter || undefined }),
   });
 
   const { data: suppliersRaw = [] } = useQuery({
@@ -666,6 +697,8 @@ const PurchaseOrderMaster: React.FC = () => {
     status: item.Status ?? "Draft",
     docNo: item.DocNo ?? "",
     remarks: item.Remarks ?? "",
+    poType: item.POType ?? "Direct",
+    sourceWODocNo: item.SourceWODocNo ?? null,
   }));
 
   // ── Pre-populate form when arriving from Material Request ─────────────────
@@ -1048,8 +1081,11 @@ const PurchaseOrderMaster: React.FC = () => {
   useEffect(() => {
     if (!sourceWO || poDocTypeId) return; // already selected or not a WO-sourced form
     fetchDocTypes("WO_PO").then(async (docTypes) => {
-      // Lock to the doc type whose Prefix is exactly "WO_PO"
-      const woPo = docTypes.find((d) => d.Prefix === "WO_PO");
+      // Lock to the doc type whose Prefix is "WO-PO" (dash, as seeded in TypeOfDoc)
+      // Fall back to "WO_PO" (underscore) for legacy installs
+      const woPo =
+        docTypes.find((d) => d.Prefix === "WO-PO") ??
+        docTypes.find((d) => d.Prefix === "WO_PO");
       if (!woPo) return;
       const nextDocNo = await fetchNextDocNumber(
         woPo.TypeOfDocId,
@@ -1251,13 +1287,32 @@ const PurchaseOrderMaster: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this purchase order?")) return;
     try {
-      await deletePurchaseOrder(id);
+      const token = localStorage.getItem("token") ?? "";
+      const res = await fetch(`/api/purchase-orders/${id}/can-delete`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!data.deletable) {
+        setDeleteBlockInfo(data);
+        return;
+      }
+      setDeleteConfirmId(id);
+    } catch (err: any) {
+      toast.error(`Check failed: ${err.message}`);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return;
+    try {
+      await deletePurchaseOrder(deleteConfirmId);
       await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
       toast.success("Purchase Order deleted.");
     } catch (err: any) {
       toast.error(`Delete failed: ${err.message}`);
+    } finally {
+      setDeleteConfirmId(null);
     }
   };
 
@@ -1516,6 +1571,28 @@ const PurchaseOrderMaster: React.FC = () => {
           </button>
         </div>
 
+        {/* PO Type Filter Tabs */}
+        <div className="flex items-center gap-1 mb-3 bg-muted/30 rounded-xl p-1 w-fit">
+          {[
+            { value: "", label: "All POs" },
+            { value: "WO_PO", label: "WO-POs" },
+            { value: "Direct", label: "Direct" },
+            { value: "Normal", label: "From MR" },
+          ].map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => { setPoTypeFilter(tab.value); setPage(1); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                poTypeFilter === tab.value
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
         {/* Search */}
         <div className="relative mb-4">
           <Search
@@ -1592,8 +1669,20 @@ const PurchaseOrderMaster: React.FC = () => {
                       key={item._id}
                       className="hover:bg-muted/20 transition-colors group"
                     >
-                      <td className="px-4 py-3 font-mono text-xs font-semibold text-foreground">
-                        {item.poNumber || item.docNo || "—"}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-xs font-semibold text-foreground">
+                            {item.poNumber || item.docNo || "—"}
+                          </span>
+                          {item.poType === "WO_PO" && (
+                            <span
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
+                              title={item.sourceWODocNo ? `From Work Order: ${item.sourceWODocNo}` : "Auto-generated from Work Order"}
+                            >
+                              WO-PO
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">
                         {fmtDate(item.poDate)}
@@ -1677,6 +1766,214 @@ const PurchaseOrderMaster: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* ── PO Delete Block Dialog ─────────────────────────────────────────── */}
+        <Dialog
+          open={!!deleteBlockInfo}
+          onOpenChange={() => setDeleteBlockInfo(null)}
+        >
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-amber-600">
+                <AlertTriangle size={18} className="shrink-0" />
+                Cannot Delete Purchase Order
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              {deleteBlockInfo?.reason === "grn_expense_brs_cleared" && (
+                <div className="space-y-2">
+                  <p className="font-medium text-destructive">
+                    This PO has GRNs with expense bookings cleared in BRS.
+                    Follow these steps to delete:
+                  </p>
+                  <ol className="list-decimal ml-5 space-y-1 text-muted-foreground">
+                    <li>
+                      Go to <strong>BRS</strong> and <strong>unclear</strong>{" "}
+                      the matched payment entries.
+                    </li>
+                    <li>
+                      Go to <strong>Payment Management</strong> and{" "}
+                      <strong>delete</strong> the payment records.
+                    </li>
+                    <li>
+                      Go to <strong>Expense Booking</strong> and{" "}
+                      <strong>delete</strong> the expense booking(s).
+                    </li>
+                    <li>
+                      Go to <strong>GRN</strong> and <strong>delete</strong> the
+                      GRN(s).
+                    </li>
+                    <li>Return here and delete this Purchase Order.</li>
+                  </ol>
+                  {deleteBlockInfo.clearedPayments &&
+                    deleteBlockInfo.clearedPayments.length > 0 && (
+                      <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
+                        <p className="font-semibold">
+                          Cleared payments blocking deletion:
+                        </p>
+                        {deleteBlockInfo.clearedPayments.map((p) => (
+                          <div
+                            key={p.paymentId}
+                            className="flex justify-between"
+                          >
+                            <span>
+                              {p.paymentName || "Payment #" + p.paymentId} (Exp:{" "}
+                              {p.expenseDocNo})
+                            </span>
+                            <span className="font-medium">
+                              {Number(p.amount).toLocaleString()}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                </div>
+              )}
+              {deleteBlockInfo?.reason === "grn_expense_has_payments" && (
+                <div className="space-y-2">
+                  <p className="font-medium text-amber-700">
+                    This PO has GRNs with expense bookings that have linked
+                    payment records.
+                  </p>
+                  <ol className="list-decimal ml-5 space-y-1 text-muted-foreground">
+                    <li>
+                      Go to <strong>Payment Management</strong> and{" "}
+                      <strong>delete</strong> the payment records.
+                    </li>
+                    <li>
+                      Go to <strong>Expense Booking</strong> and{" "}
+                      <strong>delete</strong> the expense booking(s).
+                    </li>
+                    <li>
+                      Go to <strong>GRN</strong> and <strong>delete</strong> the
+                      GRN(s).
+                    </li>
+                    <li>Return here and delete this Purchase Order.</li>
+                  </ol>
+                  {deleteBlockInfo.linkedPayments &&
+                    deleteBlockInfo.linkedPayments.length > 0 && (
+                      <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
+                        <p className="font-semibold">Linked payments:</p>
+                        {deleteBlockInfo.linkedPayments.map((p) => (
+                          <div
+                            key={p.paymentId}
+                            className="flex justify-between"
+                          >
+                            <span>
+                              {p.paymentName || "Payment #" + p.paymentId} (Exp:{" "}
+                              {p.expenseDocNo})
+                            </span>
+                            <span className="font-medium">
+                              {Number(p.amount).toLocaleString()}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                </div>
+              )}
+              {deleteBlockInfo?.reason === "grn_has_expense" && (
+                <div className="space-y-2">
+                  <p className="font-medium text-amber-700">
+                    This PO has GRNs with linked expense bookings.
+                  </p>
+                  <ol className="list-decimal ml-5 space-y-1 text-muted-foreground">
+                    <li>
+                      Go to <strong>Expense Booking</strong> and{" "}
+                      <strong>delete</strong> the expense booking(s).
+                    </li>
+                    <li>
+                      Go to <strong>GRN</strong> and <strong>delete</strong> the
+                      GRN(s).
+                    </li>
+                    <li>Return here and delete this Purchase Order.</li>
+                  </ol>
+                  {deleteBlockInfo.expenseBookings &&
+                    deleteBlockInfo.expenseBookings.length > 0 && (
+                      <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
+                        {deleteBlockInfo.expenseBookings.map((e) => (
+                          <div key={e.id} className="flex justify-between">
+                            <span>{e.docNo || "Expense #" + e.id}</span>
+                            <span className="text-muted-foreground">
+                              {e.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                </div>
+              )}
+              {deleteBlockInfo?.reason === "has_grns" && (
+                <div className="space-y-2">
+                  <p className="font-medium text-amber-700">
+                    This PO has linked GRN(s). Delete the GRN(s) first, then
+                    delete the PO.
+                  </p>
+                  <ol className="list-decimal ml-5 space-y-1 text-muted-foreground">
+                    <li>
+                      Go to <strong>GRN</strong> and <strong>delete</strong>{" "}
+                      each linked GRN.
+                    </li>
+                    <li>Return here and delete this Purchase Order.</li>
+                  </ol>
+                  {deleteBlockInfo.grns && deleteBlockInfo.grns.length > 0 && (
+                    <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
+                      {deleteBlockInfo.grns.map((g) => (
+                        <div key={g.grnId} className="flex justify-between">
+                          <span>{g.grnNo || "GRN #" + g.grnId}</span>
+                          <span className="text-muted-foreground">
+                            {g.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {deleteBlockInfo?.reason === "has_expense" && (
+                <div className="space-y-2">
+                  <p className="font-medium text-amber-700">
+                    This PO has linked expense bookings. Delete them first.
+                  </p>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setDeleteBlockInfo(null)}
+              >
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ── PO Delete Confirm Dialog ───────────────────────────────────────── */}
+        <Dialog
+          open={!!deleteConfirmId}
+          onOpenChange={() => setDeleteConfirmId(null)}
+        >
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Delete Purchase Order?</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              This action cannot be undone.
+            </p>
+            <DialogFooter className="gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setDeleteConfirmId(null)}
+              >
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={confirmDelete}>
+                Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </>
     );
   }
@@ -1811,7 +2108,10 @@ const PurchaseOrderMaster: React.FC = () => {
                       </option>
                     ))}
                   </select>
-                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <ChevronDown
+                    size={13}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
                   {mrDropdownError && (
                     <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
                       <AlertCircle size={11} />
@@ -1901,7 +2201,10 @@ const PurchaseOrderMaster: React.FC = () => {
                       </option>
                     ))}
                   </select>
-                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <ChevronDown
+                    size={13}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
                 </div>
               </div>
               <div>
@@ -1979,7 +2282,10 @@ const PurchaseOrderMaster: React.FC = () => {
                       </option>
                     ))}
                   </select>
-                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <ChevronDown
+                    size={13}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
                 </div>
               )}
               {errors.companyId && (
@@ -2011,7 +2317,10 @@ const PurchaseOrderMaster: React.FC = () => {
                       </option>
                     ))}
                   </select>
-                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <ChevronDown
+                    size={13}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
                 </div>
               )}
               {errors.projectId && (
@@ -2042,7 +2351,10 @@ const PurchaseOrderMaster: React.FC = () => {
                       </option>
                     ))}
                   </select>
-                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <ChevronDown
+                    size={13}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
                 </div>
               )}
             </div>
@@ -2073,7 +2385,10 @@ const PurchaseOrderMaster: React.FC = () => {
             <div>
               <FieldLabel required>PO Date</FieldLabel>
               <div className="relative">
-                <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                <CalendarDays
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
                 <input
                   type="date"
                   value={form.poDate}
@@ -2088,7 +2403,10 @@ const PurchaseOrderMaster: React.FC = () => {
             <div>
               <FieldLabel>Expected Delivery</FieldLabel>
               <div className="relative">
-                <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                <CalendarDays
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
                 <input
                   type="date"
                   value={form.expectedDate}
@@ -2195,7 +2513,10 @@ const PurchaseOrderMaster: React.FC = () => {
                               </option>
                             ))}
                           </select>
-                          <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                          <ChevronDown
+                            size={11}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                          />
                         </div>
                       )}
                     </td>
@@ -2254,7 +2575,8 @@ const PurchaseOrderMaster: React.FC = () => {
                                 (u) =>
                                   u.name.toLowerCase() ===
                                     li.unit.toLowerCase() ||
-                                  u.code.toLowerCase() === li.unit.toLowerCase(),
+                                  u.code.toLowerCase() ===
+                                    li.unit.toLowerCase(),
                               )?.id ??
                               ""
                             }
@@ -2276,7 +2598,10 @@ const PurchaseOrderMaster: React.FC = () => {
                               </option>
                             ))}
                           </select>
-                          <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                          <ChevronDown
+                            size={11}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                          />
                         </div>
                       )}
                     </td>

@@ -15,7 +15,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -122,40 +121,43 @@ export default function PasswordReset() {
       <Breadcrumbs
         items={["Dashboard", "Admin", "Security", "Password Reset"]}
       />
-      <div className="space-y-5">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-lg sm:text-xl font-heading font-bold text-foreground flex items-center gap-2">
-              <Shield size={20} className="text-primary shrink-0" />
-              Password Reset
-            </h1>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-              Manage and reset user passwords from here
-            </p>
+      <div className="relative space-y-6 mt-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+              <Shield size={20} className="text-primary" />
+            </div>
+            <div>
+              <h1 className="text-xl font-heading font-semibold text-foreground">
+                Password Reset
+              </h1>
+              <p className="text-xs text-muted-foreground">
+                Manage and reset user passwords from here
+              </p>
+            </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2 text-xs shrink-0"
+          <button
             onClick={handleRefresh}
             disabled={refreshing}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            title="Refresh"
           >
             <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
             {refreshing ? "Loading…" : "Refresh"}
-          </Button>
+          </button>
         </div>
 
         {/* Search */}
         <div className="relative max-w-sm">
           <Search
-            size={14}
+            size={15}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
           />
-          <Input
+          <input
             placeholder="Search by name or email..."
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="pl-9"
+            className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
           />
         </div>
 
@@ -178,10 +180,8 @@ export default function PasswordReset() {
                 )}
               </div>
               {!filter && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 text-xs mt-1"
+                <button
+                  className="flex items-center gap-2 px-4 py-2 mt-1 text-xs font-semibold rounded-lg border border-border hover:bg-muted transition-colors"
                   onClick={handleRefresh}
                   disabled={refreshing}
                 >
@@ -190,13 +190,13 @@ export default function PasswordReset() {
                     className={refreshing ? "animate-spin" : ""}
                   />
                   {refreshing ? "Loading…" : "Try loading users"}
-                </Button>
+                </button>
               )}
             </div>
           )}
           {filtered.map((user) => (
-            <Card key={user.id} className="border-border/60">
-              <CardContent className="pt-5 pb-4 px-5 space-y-3">
+            <div key={user.id} className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="pt-5 pb-4 px-5 space-y-3">
                 <div className="flex items-start gap-3">
                   <div className="flex items-center justify-center w-9 h-9 rounded-full bg-primary/10 shrink-0">
                     <User size={16} className="text-primary" />
@@ -222,10 +222,8 @@ export default function PasswordReset() {
                     {user.isActive ? "Active" : "Inactive"}
                   </span>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full gap-2 text-xs"
+                <button
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg border border-border hover:bg-muted transition-colors"
                   onClick={() =>
                     openReset({
                       id: user.id,
@@ -236,9 +234,9 @@ export default function PasswordReset() {
                 >
                   <KeyRound size={13} />
                   Reset Password
-                </Button>
-              </CardContent>
-            </Card>
+                </button>
+              </div>
+            </div>
           ))}
         </div>
       </div>
@@ -261,14 +259,14 @@ export default function PasswordReset() {
           </DialogHeader>
           <div className="space-y-4 py-1">
             <div className="space-y-1.5">
-              <Label className="text-xs">New Password</Label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">New Password</label>
               <div className="relative">
-                <Input
+                <input
                   type={showNew ? "text" : "password"}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   placeholder="Min 6 characters"
-                  className="pr-9"
+                  className="w-full px-3 py-2 pr-9 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
                 />
                 <button
                   type="button"
@@ -280,14 +278,14 @@ export default function PasswordReset() {
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Confirm Password</Label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Confirm Password</label>
               <div className="relative">
-                <Input
+                <input
                   type={showConfirm ? "text" : "password"}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="Re-enter password"
-                  className="pr-9"
+                  className="w-full px-3 py-2 pr-9 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
                 />
                 <button
                   type="button"
@@ -300,17 +298,15 @@ export default function PasswordReset() {
             </div>
           </div>
           <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              size="sm"
+            <button
+              className="px-4 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
               onClick={() => setDialogOpen(false)}
               disabled={loading}
             >
               Cancel
-            </Button>
-            <Button
-              size="sm"
-              className="gradient-accent gap-2"
+            </button>
+            <button
+              className="gradient-accent font-semibold text-white text-sm px-5 py-2 rounded-lg flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
               onClick={handleReset}
               disabled={loading}
             >
@@ -320,7 +316,7 @@ export default function PasswordReset() {
                 <KeyRound size={13} />
               )}
               {loading ? "Resetting…" : "Reset Password"}
-            </Button>
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

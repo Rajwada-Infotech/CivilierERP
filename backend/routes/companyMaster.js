@@ -9,8 +9,7 @@ const { cache } = require("../middleware/cache");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 const GST_STATUSES = new Set(["Registered", "Unregistered"]);
-const GSTIN_REGEX =
-  /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
 function normalizeCompanyGst(f) {
   const gstType = f.gstType || "Unregistered";
@@ -265,16 +264,58 @@ router.put("/:id", adminOnly, async (req, res) => {
   }
 });
 
-// DELETE — soft delete via discontinue flag
+// DELETE — blocked if company has linked projects, POs, or WOs
 router.delete("/:id", adminOnly, async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid company ID" });
+
   try {
     const pool = getPool();
+
+    // 1. Confirm the record exists
+    const companyRow = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query(
+        "SELECT id, name FROM dbo.enterprise WHERE id=@id AND business_type='C'",
+      );
+
+    if (!companyRow.recordset.length)
+      return res.status(404).json({ error: "Company not found" });
+
+    // 2. Check for linked projects, POs, and WOs
+    const usageCheck = await pool.request().input("CompanyId", sql.Int, id)
+      .query(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.enterprise      WHERE company_id   = @CompanyId AND business_type = 'P') AS ProjectCount,
+        (SELECT COUNT(*) FROM dbo.PurchaseOrders  WHERE CompanyId    = @CompanyId) AS POCount,
+        (SELECT COUNT(*) FROM dbo.WorkOrderHeader      WHERE CompanyId    = @CompanyId) AS WOCount
+    `);
+
+    const { ProjectCount, POCount, WOCount } = usageCheck.recordset[0];
+    const linked = [];
+    if (ProjectCount > 0)
+      linked.push(`${ProjectCount} Project${ProjectCount > 1 ? "s" : ""}`);
+    if (POCount > 0)
+      linked.push(`${POCount} Purchase Order${POCount > 1 ? "s" : ""}`);
+    if (WOCount > 0)
+      linked.push(`${WOCount} Work Order${WOCount > 1 ? "s" : ""}`);
+
+    if (linked.length > 0) {
+      return res.status(409).json({
+        error: "Cannot delete company",
+        reason: `This company has ${linked.join(", ")} linked to it and cannot be deleted.`,
+      });
+    }
+
+    // 3. Safe to soft-delete
     await pool
       .request()
-      .input("id", sql.Int, parseInt(req.params.id))
+      .input("id", sql.Int, id)
       .query(
         "UPDATE dbo.enterprise SET discontinue=1 WHERE id=@id AND business_type='C'",
       );
+
     await bumpCacheVersion("enterprises");
     await bumpCacheVersion("company-master");
     res.json({ success: true });
@@ -284,7 +325,3 @@ router.delete("/:id", adminOnly, async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-

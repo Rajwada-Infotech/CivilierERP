@@ -74,14 +74,7 @@ router.get("/", cache("received-payment", 30), async (req, res) => {
     const limit = Math.min(100, parseInt(req.query.limit) || 20);
     const offset = (page - 1) * limit;
     const pool = getPool();
-    const newCols = await hasNewColumns(pool);
-
-    const extraSelect = newCols
-      ? `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId,
-           RPCustomerName, RPDepositBankId, RPDepositBankName`
-      : "";
-
-    // Single query: COUNT(*) OVER() avoids a separate round-trip
+    // All new schema columns always present (migration 017+)
     const result = await pool
       .request()
       .input("offset", sql.Int, offset)
@@ -92,8 +85,9 @@ router.get("/", cache("received-payment", 30), async (req, res) => {
           RPRemarks, RPIsEmi, RPEmiTotal, RPEmiMonths, RPEmiStartDate,
           RPEmiSchedule, RPEmiPaying, RPStatus, RPCreatedBy, RPCreatedAt,
           RPUpdatedBy, RPUpdatedAt, RPApprovedBy, RPApprovedAt,
-          RPRejectedBy, RPRejectedAt, RPRejectionNote
-          ${extraSelect},
+          RPRejectedBy, RPRejectedAt, RPRejectionNote,
+          RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId,
+          RPCustomerName, RPDepositBankId, RPDepositBankName,
           COUNT(*) OVER() AS _total
         FROM dbo.ReceivedPayment
         ORDER BY RPCreatedAt DESC
@@ -148,10 +142,8 @@ router.post("/", async (req, res) => {
 
     const createdBy = req.user?.name || req.user?.email || null;
     const pool = getPool();
-    const newCols = await hasNewColumns(pool);
-
     let finalDocNo = null;
-    if (newCols && RPDocTypeId) {
+    if (RPDocTypeId) {
       finalDocNo = await lockNextDocNumber(pool, sql, {
         docTypeId: Number(RPDocTypeId),
         finYear: RPFinYear || null,
@@ -190,26 +182,17 @@ router.post("/", async (req, res) => {
       )
       .input("RPCreatedBy", sql.NVarChar(100), createdBy);
 
-    let extraCols = "";
-    let extraVals = "";
-    if (newCols) {
-      req2
-        .input("RPDocNo", sql.NVarChar(100), finalDocNo || null)
-        .input("RPFinYear", sql.NVarChar(20), RPFinYear || null)
-        .input("RPDocTypeId", sql.Int, RPDocTypeId || null)
-        .input("RPCompanyId", sql.Int, RPCompanyId || null)
-        .input("RPProjectId", sql.Int, RPProjectId || null)
-        .input("RPCustomerName", sql.NVarChar(255), RPCustomerName || null)
-        .input("RPDepositBankId", sql.Int, RPDepositBankId || null)
-        .input(
-          "RPDepositBankName",
-          sql.NVarChar(255),
-          RPDepositBankName || null,
-        );
-
-      extraCols = `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId, RPCustomerName, RPDepositBankId, RPDepositBankName`;
-      extraVals = `, @RPDocNo, @RPFinYear, @RPDocTypeId, @RPCompanyId, @RPProjectId, @RPCustomerName, @RPDepositBankId, @RPDepositBankName`;
-    }
+    req2
+      .input("RPDocNo", sql.NVarChar(100), finalDocNo || null)
+      .input("RPFinYear", sql.NVarChar(20), RPFinYear || null)
+      .input("RPDocTypeId", sql.Int, RPDocTypeId || null)
+      .input("RPCompanyId", sql.Int, RPCompanyId || null)
+      .input("RPProjectId", sql.Int, RPProjectId || null)
+      .input("RPCustomerName", sql.NVarChar(255), RPCustomerName || null)
+      .input("RPDepositBankId", sql.Int, RPDepositBankId || null)
+      .input("RPDepositBankName", sql.NVarChar(255), RPDepositBankName || null);
+    const extraCols = `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId, RPCustomerName, RPDepositBankId, RPDepositBankName`;
+    const extraVals = `, @RPDocNo, @RPFinYear, @RPDocTypeId, @RPCompanyId, @RPProjectId, @RPCustomerName, @RPDepositBankId, @RPDepositBankName`;
 
     const result = await req2.query(`
       INSERT INTO dbo.ReceivedPayment (
@@ -226,7 +209,7 @@ router.post("/", async (req, res) => {
     `);
 
     const row = result.recordset[0];
-    if (newCols && finalDocNo && row?.RPPaymentID) {
+    if (finalDocNo && row?.RPPaymentID) {
       await backPatchRecordId(
         pool,
         sql,
@@ -275,8 +258,6 @@ router.put("/:id", async (req, res) => {
 
     const updatedBy = req.user?.name || req.user?.email || null;
     const pool = getPool();
-    const newCols = await hasNewColumns(pool);
-
     const req2 = pool
       .request()
       .input("id", sql.Int, id)
@@ -306,24 +287,16 @@ router.put("/:id", async (req, res) => {
       )
       .input("RPUpdatedBy", sql.NVarChar(150), updatedBy);
 
-    let extraSet = "";
-    if (newCols) {
-      req2
-        .input("RPCompanyId", sql.Int, RPCompanyId || null)
-        .input("RPProjectId", sql.Int, RPProjectId || null)
-        .input("RPCustomerName", sql.NVarChar(255), RPCustomerName || null)
-        .input("RPDepositBankId", sql.Int, RPDepositBankId || null)
-        .input(
-          "RPDepositBankName",
-          sql.NVarChar(255),
-          RPDepositBankName || null,
-        )
-        .input("RPFinYear", sql.NVarChar(20), RPFinYear || null);
-
-      extraSet = `RPCompanyId=@RPCompanyId, RPProjectId=@RPProjectId,
-                  RPCustomerName=@RPCustomerName, RPFinYear=@RPFinYear,
-                  RPDepositBankId=@RPDepositBankId, RPDepositBankName=@RPDepositBankName,`;
-    }
+    req2
+      .input("RPCompanyId", sql.Int, RPCompanyId || null)
+      .input("RPProjectId", sql.Int, RPProjectId || null)
+      .input("RPCustomerName", sql.NVarChar(255), RPCustomerName || null)
+      .input("RPDepositBankId", sql.Int, RPDepositBankId || null)
+      .input("RPDepositBankName", sql.NVarChar(255), RPDepositBankName || null)
+      .input("RPFinYear", sql.NVarChar(20), RPFinYear || null);
+    const extraSet = `RPCompanyId=@RPCompanyId, RPProjectId=@RPProjectId,
+                RPCustomerName=@RPCustomerName, RPFinYear=@RPFinYear,
+                RPDepositBankId=@RPDepositBankId, RPDepositBankName=@RPDepositBankName,`;
 
     const result = await req2.query(`
       UPDATE dbo.ReceivedPayment SET
@@ -444,7 +417,7 @@ router.patch("/:id/submit", async (req, res) => {
   }
 });
 
-// -- PUT /:id/approve (admin only — called from Approval Inbox) ---------------
+// -- PUT /:id/approve (admin only &#65533; called from Approval Inbox) ---------------
 router.put("/:id/approve", async (req, res) => {
   try {
     const { id } = req.params;
@@ -465,7 +438,7 @@ router.put("/:id/approve", async (req, res) => {
   }
 });
 
-// -- PUT /:id/reject (admin only — called from Approval Inbox) ----------------
+// -- PUT /:id/reject (admin only &#65533; called from Approval Inbox) ----------------
 router.put("/:id/reject", async (req, res) => {
   try {
     const { id } = req.params;
@@ -489,7 +462,3 @@ router.put("/:id/reject", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
