@@ -287,8 +287,8 @@ const FinanceDemandsPage = lazy(() =>
   })),
 );
 const FollowupPaymentsPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
-    default: module.FollowupPaymentsPage,
+  import("./pages/followup/FinancePayments").then((module) => ({
+    default: module.FinancePaymentsPage,
   })),
 );
 const CustomerReportPage = lazy(() =>

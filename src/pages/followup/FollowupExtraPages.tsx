@@ -764,18 +764,6 @@ export function ConstructionUpdatesPage() {
   );
 }
 
-export function FollowupPaymentsPage() {
-  return (
-    <ScopedLogPage
-      title="Follow-up Payments"
-      description="Track payment confirmations and outstanding follow-up activity."
-      moduleName="followup_payments"
-      defaultType="payment"
-      helpText="Store payment confirmations directly against the follow-up module."
-    />
-  );
-}
-
 export function CustomerReportPage() {
   return (
     <ReportPage

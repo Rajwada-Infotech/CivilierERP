@@ -80,6 +80,21 @@ interface NOC {
   Notes: string | null;
   CreatedBy: string;
   CreatedAt: string;
+  // Bank NOC / Loan tracking
+  BankName: string | null;
+  LoanAccountNo: string | null;
+  LoanSanctionStatus: "Pending" | "Sanctioned" | "Rejected" | null;
+  LoanSanctionDate: string | null;
+  LoanDisbursementStatus:
+    | "Pending"
+    | "PartiallyDisbursed"
+    | "FullyDisbursed"
+    | null;
+  LoanDisbursementDate: string | null;
+  LoanAmount: number | null;
+  BankNOCStatus: "NotApplicable" | "Pending" | "Applied" | "Received" | null;
+  BankNOCDate: string | null;
+  BankNOCNotes: string | null;
 }
 
 interface OptionApplicant {
@@ -135,6 +150,17 @@ interface FormState {
   Reason: string;
   Status: NOCStatus;
   Notes: string;
+  // Bank NOC / Loan tracking
+  BankName: string;
+  LoanAccountNo: string;
+  LoanSanctionStatus: string;
+  LoanSanctionDate: string;
+  LoanDisbursementStatus: string;
+  LoanDisbursementDate: string;
+  LoanAmount: string;
+  BankNOCStatus: string;
+  BankNOCDate: string;
+  BankNOCNotes: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -150,6 +176,16 @@ const EMPTY_FORM: FormState = {
   Reason: "",
   Status: "Pending",
   Notes: "",
+  BankName: "",
+  LoanAccountNo: "",
+  LoanSanctionStatus: "",
+  LoanSanctionDate: "",
+  LoanDisbursementStatus: "",
+  LoanDisbursementDate: "",
+  LoanAmount: "",
+  BankNOCStatus: "",
+  BankNOCDate: "",
+  BankNOCNotes: "",
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -421,7 +457,12 @@ export function NOCPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: result, isLoading, isFetching, refetch } = useQuery({
+  const {
+    data: result,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useQuery({
     queryKey: ["nocs", page, search, statusFilter],
     queryFn: () =>
       fetchNOCs({ page, pageSize: PAGE_SIZE, search, status: statusFilter }),
@@ -531,6 +572,16 @@ export function NOCPage() {
       Reason: noc.Reason ?? "",
       Status: noc.Status,
       Notes: noc.Notes ?? "",
+      BankName: noc.BankName ?? "",
+      LoanAccountNo: noc.LoanAccountNo ?? "",
+      LoanSanctionStatus: noc.LoanSanctionStatus ?? "",
+      LoanSanctionDate: noc.LoanSanctionDate ?? "",
+      LoanDisbursementStatus: noc.LoanDisbursementStatus ?? "",
+      LoanDisbursementDate: noc.LoanDisbursementDate ?? "",
+      LoanAmount: noc.LoanAmount != null ? String(noc.LoanAmount) : "",
+      BankNOCStatus: noc.BankNOCStatus ?? "",
+      BankNOCDate: noc.BankNOCDate ?? "",
+      BankNOCNotes: noc.BankNOCNotes ?? "",
     });
     setDialogOpen(true);
   }
@@ -549,6 +600,16 @@ export function NOCPage() {
       Reason: form.Reason || null,
       Status: form.Status,
       Notes: form.Notes || null,
+      BankName: form.BankName || null,
+      LoanAccountNo: form.LoanAccountNo || null,
+      LoanSanctionStatus: form.LoanSanctionStatus || null,
+      LoanSanctionDate: form.LoanSanctionDate || null,
+      LoanDisbursementStatus: form.LoanDisbursementStatus || null,
+      LoanDisbursementDate: form.LoanDisbursementDate || null,
+      LoanAmount: form.LoanAmount ? parseFloat(form.LoanAmount) : null,
+      BankNOCStatus: form.BankNOCStatus || null,
+      BankNOCDate: form.BankNOCDate || null,
+      BankNOCNotes: form.BankNOCNotes || null,
     };
   }
 
@@ -878,7 +939,10 @@ export function NOCPage() {
           { label: "NOC", path: "/followup/closure/noc" },
         ]}
       />
-      <div className="noc-page relative space-y-8 mt-6" onClick={() => setOpenMenuId(null)}>
+      <div
+        className="noc-page relative space-y-8 mt-6"
+        onClick={() => setOpenMenuId(null)}
+      >
         {/* ── Header ── */}
         <div className="flex items-start justify-between gap-4">
           <div className="noc-title-row">
@@ -894,7 +958,10 @@ export function NOCPage() {
               disabled={isFetching}
               className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
-              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              <RefreshCw
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
+              />
               Refresh
             </button>
             <Button
@@ -909,58 +976,58 @@ export function NOCPage() {
 
         {/* Filter + search */}
         <div className="noc-filter-bar">
-            <div className="noc-search-wrap">
-              <Search size={14} />
-              <input
-                className="noc-search"
-                placeholder="Search by applicant, NOC no, unit…"
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
+          <div className="noc-search-wrap">
+            <Search size={14} />
+            <input
+              className="noc-search"
+              placeholder="Search by applicant, NOC no, unit…"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+            />
+            {search && (
+              <button
+                className="noc-search-clear"
+                onClick={() => {
+                  setSearch("");
                   setPage(1);
                 }}
-              />
-              {search && (
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+          <div className="noc-pills">
+            {STATUS_FILTERS.map((s) => {
+              const isActive = statusFilter === s;
+              const pillClass = isActive
+                ? s === ""
+                  ? "noc-pill active"
+                  : s === "Pending"
+                    ? "noc-pill active-pending"
+                    : s === "Approved"
+                      ? "noc-pill active-approved"
+                      : s === "Issued"
+                        ? "noc-pill active-issued"
+                        : "noc-pill active-rejected"
+                : "noc-pill";
+              return (
                 <button
-                  className="noc-search-clear"
+                  key={s}
+                  className={pillClass}
                   onClick={() => {
-                    setSearch("");
+                    setStatusFilter(s);
                     setPage(1);
                   }}
                 >
-                  <X size={13} />
+                  {STATUS_LABELS[s]}
                 </button>
-              )}
-            </div>
-            <div className="noc-pills">
-              {STATUS_FILTERS.map((s) => {
-                const isActive = statusFilter === s;
-                const pillClass = isActive
-                  ? s === ""
-                    ? "noc-pill active"
-                    : s === "Pending"
-                      ? "noc-pill active-pending"
-                      : s === "Approved"
-                        ? "noc-pill active-approved"
-                        : s === "Issued"
-                          ? "noc-pill active-issued"
-                          : "noc-pill active-rejected"
-                  : "noc-pill";
-                return (
-                  <button
-                    key={s}
-                    className={pillClass}
-                    onClick={() => {
-                      setStatusFilter(s);
-                      setPage(1);
-                    }}
-                  >
-                    {STATUS_LABELS[s]}
-                  </button>
-                );
-              })}
-            </div>
+              );
+            })}
           </div>
+        </div>
 
         {/* Stats bar */}
         <div className="noc-stats">
@@ -990,6 +1057,7 @@ export function NOCPage() {
                       "Unit",
                       "Dates",
                       "Approved By",
+                      "Bank / Loan",
                       "Status",
                       "",
                     ].map((h) => (
@@ -1000,7 +1068,7 @@ export function NOCPage() {
                 <tbody>
                   {Array.from({ length: 6 }).map((_, i) => (
                     <tr key={i}>
-                      {[80, 160, 100, 110, 110, 80, 40].map((w, j) => (
+                      {[80, 160, 100, 110, 110, 100, 80, 40].map((w, j) => (
                         <td key={j}>
                           <div
                             className="noc-skel"
@@ -1047,6 +1115,7 @@ export function NOCPage() {
                       <th>Unit / Project</th>
                       <th>NOC Date</th>
                       <th>Approved By</th>
+                      <th>Bank / Loan</th>
                       <th>Status</th>
                       <th></th>
                     </tr>
@@ -1130,6 +1199,66 @@ export function NOCPage() {
                             {noc.ApprovedBy ? (
                               <div className="noc-approved-by">
                                 {noc.ApprovedBy}
+                              </div>
+                            ) : (
+                              <div
+                                style={{
+                                  color: "hsl(var(--muted-foreground))",
+                                  fontSize: 13,
+                                }}
+                              >
+                                —
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Bank / Loan */}
+                          <td>
+                            {noc.BankName ? (
+                              <div>
+                                <div
+                                  style={{
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                    color: "hsl(var(--foreground))",
+                                  }}
+                                >
+                                  {noc.BankName}
+                                </div>
+                                {noc.BankNOCStatus && (
+                                  <div
+                                    style={{
+                                      fontSize: 11,
+                                      color:
+                                        noc.BankNOCStatus === "Received"
+                                          ? "hsl(142 72% 38%)"
+                                          : noc.BankNOCStatus === "Applied"
+                                            ? "hsl(var(--primary))"
+                                            : "hsl(var(--muted-foreground))",
+                                    }}
+                                  >
+                                    NOC:{" "}
+                                    {noc.BankNOCStatus === "NotApplicable"
+                                      ? "N/A"
+                                      : noc.BankNOCStatus}
+                                  </div>
+                                )}
+                                {noc.LoanSanctionStatus && (
+                                  <div
+                                    style={{
+                                      fontSize: 11,
+                                      color:
+                                        noc.LoanSanctionStatus === "Sanctioned"
+                                          ? "hsl(142 72% 38%)"
+                                          : noc.LoanSanctionStatus ===
+                                              "Rejected"
+                                            ? "hsl(0 84% 50%)"
+                                            : "hsl(var(--muted-foreground))",
+                                    }}
+                                  >
+                                    Loan: {noc.LoanSanctionStatus}
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               <div
@@ -1420,6 +1549,131 @@ export function NOCPage() {
                 onChange={(e) => set("Reason", e.target.value)}
                 placeholder="Purpose of the NOC…"
               />
+            </div>
+
+            <div className="noc-form-section">Bank NOC / Loan Tracking</div>
+
+            {/* Bank Name + Loan Account */}
+            <div className="noc-form-grid">
+              <div className="space-y-2">
+                <Label>Bank Name</Label>
+                <Input
+                  value={form.BankName}
+                  onChange={(e) => set("BankName", e.target.value)}
+                  placeholder="e.g. HDFC Bank"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Loan Account No</Label>
+                <Input
+                  value={form.LoanAccountNo}
+                  onChange={(e) => set("LoanAccountNo", e.target.value)}
+                  placeholder="Loan account number…"
+                />
+              </div>
+            </div>
+
+            {/* Loan Amount + Sanction Status */}
+            <div className="noc-form-grid">
+              <div className="space-y-2">
+                <Label>Loan Amount (₹)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.LoanAmount}
+                  onChange={(e) => set("LoanAmount", e.target.value)}
+                  placeholder="0.00"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Loan Sanction Status</Label>
+                <select
+                  className="noc-status-select"
+                  value={form.LoanSanctionStatus}
+                  onChange={(e) => set("LoanSanctionStatus", e.target.value)}
+                >
+                  <option value="">— Not set —</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Sanctioned">Sanctioned</option>
+                  <option value="Rejected">Rejected</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Sanction Date + Disbursement Status */}
+            <div className="noc-form-grid">
+              <div className="space-y-2">
+                <Label>Sanction Date</Label>
+                <Input
+                  type="date"
+                  value={form.LoanSanctionDate}
+                  onChange={(e) => set("LoanSanctionDate", e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Disbursement Status</Label>
+                <select
+                  className="noc-status-select"
+                  value={form.LoanDisbursementStatus}
+                  onChange={(e) =>
+                    set("LoanDisbursementStatus", e.target.value)
+                  }
+                >
+                  <option value="">— Not set —</option>
+                  <option value="Pending">Pending</option>
+                  <option value="PartiallyDisbursed">
+                    Partially Disbursed
+                  </option>
+                  <option value="FullyDisbursed">Fully Disbursed</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Disbursement Date + Bank NOC Status */}
+            <div className="noc-form-grid">
+              <div className="space-y-2">
+                <Label>Disbursement Date</Label>
+                <Input
+                  type="date"
+                  value={form.LoanDisbursementDate}
+                  onChange={(e) => set("LoanDisbursementDate", e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Bank NOC Status</Label>
+                <select
+                  className="noc-status-select"
+                  value={form.BankNOCStatus}
+                  onChange={(e) => set("BankNOCStatus", e.target.value)}
+                >
+                  <option value="">— Not set —</option>
+                  <option value="NotApplicable">Not Applicable</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Applied">Applied</option>
+                  <option value="Received">Received</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Bank NOC Date + Notes */}
+            <div className="noc-form-grid">
+              <div className="space-y-2">
+                <Label>Bank NOC Date</Label>
+                <Input
+                  type="date"
+                  value={form.BankNOCDate}
+                  onChange={(e) => set("BankNOCDate", e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Bank NOC Notes</Label>
+                <Input
+                  value={form.BankNOCNotes}
+                  onChange={(e) => set("BankNOCNotes", e.target.value)}
+                  placeholder="Any remarks on bank NOC…"
+                />
+              </div>
             </div>
 
             {/* Notes */}
