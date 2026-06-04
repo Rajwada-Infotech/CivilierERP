@@ -1,4 +1,4 @@
-import { BarChart3, Receipt } from "lucide-react";
+import { BarChart3, Receipt, ClipboardList } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const engineeringNavItems: NavItem[] = [
@@ -11,5 +11,10 @@ export const engineeringNavItems: NavItem[] = [
       { label: "Work Order", path: "/engineering/work-order" },
       { label: "Work Done", path: "/engineering/work-done" },
     ],
+  },
+  {
+    label: "DPR",
+    icon: ClipboardList,
+    path: "/engineering/dpr",
   },
 ];

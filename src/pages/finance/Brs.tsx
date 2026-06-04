@@ -139,22 +139,27 @@ function PayStatusBadge({ status }: { status: string | null }) {
         Draft
       </span>
     );
-  if (status === "Approved") {
+  if (status === "Approved")
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20">
         <ShieldCheck size={9} strokeWidth={2.5} />
         Approved
       </span>
     );
-  }
-  if (status === "Pending") {
+  if (status === "Pending")
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-        <Hourglass size={9} strokeWidth={2.5} />
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 animate-pulse" />
         Pending
       </span>
     );
-  }
+  if (status === "Rejected")
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
+        <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+        Rejected
+      </span>
+    );
   return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-muted text-muted-foreground border border-border">
       {status}

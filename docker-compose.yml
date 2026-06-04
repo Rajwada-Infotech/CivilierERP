@@ -51,7 +51,7 @@ services:
       [
         "sh",
         "-c",
-        "redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD:?REDIS_PASSWORD is required}\"",
+        'redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD:?REDIS_PASSWORD is required}"',
       ]
     networks:
       - civilier-network
@@ -60,7 +60,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "redis-cli -a \"$${REDIS_PASSWORD}\" --no-auth-warning ping | grep PONG",
+          'redis-cli -a "$${REDIS_PASSWORD}" --no-auth-warning ping | grep PONG',
         ]
       interval: 30s
       timeout: 5s

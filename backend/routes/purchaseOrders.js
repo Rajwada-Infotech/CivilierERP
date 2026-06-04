@@ -223,9 +223,17 @@ router.get(
 
       const fyId = req.query.fyId ? parseInt(req.query.fyId, 10) : null;
 
+      // ?poType=WO_PO  → show only WO-POs
+      // ?poType=Direct → show only direct POs (excludes WO-POs)
+      // (no param)     → show ALL types (default: includes WO-POs)
+      const poTypeFilter = req.query.poType
+        ? req.query.poType.toString().trim()
+        : null;
+
       const whereConditions = [];
       if (sourceWOId) whereConditions.push("po.SourceWOId = @sourceWOId");
       if (fyId) whereConditions.push("po.fy_id = @fyId");
+      if (poTypeFilter) whereConditions.push("po.POType = @poTypeFilter");
       const whereClause = whereConditions.length
         ? `WHERE ${whereConditions.join(" AND ")}`
         : "";
@@ -235,7 +243,8 @@ router.get(
         .input("offset", sql.Int, offset)
         .input("limit", sql.Int, limit)
         .input("sourceWOId", sql.Int, sourceWOId)
-        .input("fyId", sql.Int, fyId).query(`
+        .input("fyId", sql.Int, fyId)
+        .input("poTypeFilter", sql.NVarChar(20), poTypeFilter).query(`
         SELECT *, COUNT(*) OVER() AS _total FROM (
           ${PO_SELECT}
           ${whereClause}
@@ -714,13 +723,181 @@ router.put(
   },
 );
 
+// ── GET /:id/can-delete ───────────────────────────────────────────────────────
+// Checks the full PO → GRN → ExpenseBooking → Payment → BRS chain before delete.
+// Returns { deletable: true } or { deletable: false, reason, ... } with detail.
+router.get("/:id/can-delete", async (req, res) => {
+  const id = requireValidId(req, res);
+  if (!id) return;
+  try {
+    const pool = getPool();
+
+    // ── 1. Check for linked GRNs ──────────────────────────────────────────────
+    const grnCheck = await pool
+      .request()
+      .input("POID", sql.Int, id)
+      .query(
+        "SELECT GRNID, GRNNo, Status FROM dbo.GoodsReceiptNotes WHERE POID = @POID",
+      );
+
+    if (grnCheck.recordset.length > 0) {
+      const grns = grnCheck.recordset.map((g) => ({
+        grnId: g.GRNID,
+        grnNo: g.GRNNo,
+        status: g.Status,
+      }));
+
+      // For each GRN, check if it has an expense booking
+      const grnIds = grns.map((g) => g.grnId);
+      const idList = grnIds.join(",");
+
+      const expCheck = await pool.request().query(`
+        SELECT eb.Eid, eb.EDocNo, eb.EStatus, eb.ESourceId
+        FROM dbo.ExpenseBooking eb
+        WHERE eb.ESourceType = 'GRN'
+          AND eb.ESourceId IN (${idList})
+          AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+      `);
+
+      if (expCheck.recordset.length > 0) {
+        // Check if any of those expense bookings have cleared BRS payments
+        const expDocNos = expCheck.recordset
+          .map((e) => e.EDocNo)
+          .filter(Boolean)
+          .map((d) => `'${d.replace(/'/g, "''")}'`)
+          .join(",");
+
+        let brsCleared = [];
+        if (expDocNos.length > 0) {
+          const brsCheck = await pool.request().query(`
+            SELECT np.PPaymentID, np.PPaymentName, np.PAmount, brc.BRSID, eb.EDocNo
+            FROM dbo.NewPayment np
+            JOIN dbo.BankReconciliation brc
+              ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID AND brc.IsMatched = 1
+            JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+            WHERE np.PExpenseRef IN (${expDocNos})
+          `);
+          brsCleared = brsCheck.recordset;
+        }
+
+        if (brsCleared.length > 0) {
+          return res.json({
+            deletable: false,
+            reason: "grn_expense_brs_cleared",
+            grns,
+            expenseBookings: expCheck.recordset.map((e) => ({
+              id: e.Eid,
+              docNo: e.EDocNo,
+              status: e.EStatus,
+            })),
+            clearedPayments: brsCleared.map((r) => ({
+              paymentId: r.PPaymentID,
+              paymentName: r.PPaymentName,
+              amount: r.PAmount,
+              brsId: r.BRSID,
+              expenseDocNo: r.EDocNo,
+            })),
+          });
+        }
+
+        // Check for uncleared payments
+        let linkedPayments = [];
+        if (expDocNos.length > 0) {
+          const payCheck = await pool.request().query(`
+            SELECT np.PPaymentID, np.PPaymentName, np.PAmount, eb.EDocNo
+            FROM dbo.NewPayment np
+            JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+            WHERE np.PExpenseRef IN (${expDocNos})
+          `);
+          linkedPayments = payCheck.recordset;
+        }
+
+        if (linkedPayments.length > 0) {
+          return res.json({
+            deletable: false,
+            reason: "grn_expense_has_payments",
+            grns,
+            expenseBookings: expCheck.recordset.map((e) => ({
+              id: e.Eid,
+              docNo: e.EDocNo,
+              status: e.EStatus,
+            })),
+            linkedPayments: linkedPayments.map((r) => ({
+              paymentId: r.PPaymentID,
+              paymentName: r.PPaymentName,
+              amount: r.PAmount,
+              expenseDocNo: r.EDocNo,
+            })),
+          });
+        }
+
+        // GRNs have expense bookings but no payments — block, must delete expense first
+        return res.json({
+          deletable: false,
+          reason: "grn_has_expense",
+          grns,
+          expenseBookings: expCheck.recordset.map((e) => ({
+            id: e.Eid,
+            docNo: e.EDocNo,
+            status: e.EStatus,
+          })),
+        });
+      }
+
+      // GRNs exist but no expense bookings — must delete GRNs first
+      return res.json({
+        deletable: false,
+        reason: "has_grns",
+        grns,
+      });
+    }
+
+    res.json({ deletable: true });
+  } catch (err) {
+    console.error("PO can-delete check error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── DELETE /:id ───────────────────────────────────────────────────────────────
-// PurchaseOrderItems child rows are cascade-deleted by FK constraint
+// PurchaseOrderItems child rows are cascade-deleted by FK constraint.
+// Guard: block if linked GRNs exist (those must be deleted first).
 router.delete("/:id", async (req, res) => {
   try {
     const id = requireValidId(req, res);
     if (!id) return;
     const pool = getPool();
+
+    // ── Guard: linked GRNs ────────────────────────────────────────────────────
+    const grnCheck = await pool
+      .request()
+      .input("POID", sql.Int, id)
+      .query(
+        "SELECT COUNT(*) AS cnt FROM dbo.GoodsReceiptNotes WHERE POID = @POID",
+      );
+    if (Number(grnCheck.recordset[0]?.cnt) > 0) {
+      return res.status(409).json({
+        error: "has_grns",
+        message:
+          "This Purchase Order has linked GRN(s). Delete the GRN(s) first, then delete the PO.",
+      });
+    }
+
+    // ── Guard: expense bookings linked directly to PO (non-GRN path) ─────────
+    const expCheck = await pool.request().input("POID", sql.Int, id).query(`
+        SELECT COUNT(*) AS cnt
+        FROM dbo.ExpenseBooking eb
+        WHERE eb.ESourceType = 'PO' AND eb.ESourceId = @POID
+          AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+      `);
+    if (Number(expCheck.recordset[0]?.cnt) > 0) {
+      return res.status(409).json({
+        error: "has_expense",
+        message:
+          "This Purchase Order has linked Expense Booking(s). Delete the expense bookings first.",
+      });
+    }
+
     const result = await pool
       .request()
       .input("PurchaseOrderID", sql.Int, id)
@@ -807,7 +984,3 @@ router.put("/:id/reject", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-

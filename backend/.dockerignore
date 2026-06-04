@@ -10,4 +10,6 @@ README.md
 coverage
 *.log
 dist
+migrations
+worker.js
 tmp

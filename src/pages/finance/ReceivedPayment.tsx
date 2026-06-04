@@ -94,7 +94,7 @@ export type ReceivedPayment = {
   transactionId?: string;
   checkNumber?: string;
   remarks?: string;
-  status: "Draft" | "Approved" | "Rejected";
+  status: "Draft" | "Pending" | "Approved" | "Rejected";
   createdAt: string;
 };
 
@@ -274,6 +274,40 @@ function CustomerCombobox({
 }
 
 // ─── Empty State ──────────────────────────────────────────────────────────────
+
+// ─── Status Badge ─────────────────────────────────────────────────────────────
+function StatusBadge({ status }: { status: string }) {
+  if (status === "Draft")
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-muted text-muted-foreground border border-border">
+        Draft
+      </span>
+    );
+  if (status === "Pending")
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 animate-pulse" />
+        Pending
+      </span>
+    );
+  if (status === "Approved")
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20">
+        ✓ Approved
+      </span>
+    );
+  if (status === "Rejected")
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
+        ✕ Rejected
+      </span>
+    );
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-muted text-muted-foreground border border-border">
+      {status}
+    </span>
+  );
+}
 
 function EmptyState() {
   return (
@@ -636,6 +670,7 @@ export default function ReceivedPaymentPage() {
 
   const totalReceived = payments.reduce((s, p) => s + p.amount, 0);
   const approved = payments.filter((p) => p.status === "Approved").length;
+  const submitted = payments.filter((p) => p.status === "Pending").length;
   const pending = payments.filter((p) => p.status === "Draft").length;
 
   const stats = [
@@ -667,8 +702,8 @@ export default function ReceivedPaymentPage() {
       color: "text-emerald-500",
     },
     {
-      label: "Pending",
-      value: String(pending),
+      label: "Submitted",
+      value: String(submitted),
       sub: "awaiting approval",
       icon: Clock,
       ring: "ring-amber-500/20",
@@ -685,6 +720,7 @@ export default function ReceivedPaymentPage() {
   const handlePrintPayment = (p: ReceivedPayment) => {
     const statusColor: Record<string, string> = {
       Draft: "#64748b",
+      Pending: "#d97706",
       Approved: "#059669",
       Rejected: "#dc2626",
     };
@@ -775,350 +811,349 @@ export default function ReceivedPaymentPage() {
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Received Payments"]} />
       <div className="relative space-y-8 mt-6">
-
-      {/* ── Page header ── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
-            Received Payments
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            All inbound payments received from clients &amp; customers
-          </p>
-        </div>
-        <Button onClick={openAdd} className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-5 py-2 text-sm h-auto">
-          <Plus size={15} className="mr-1" />
-          Add Payment
-        </Button>
-      </div>
-
-      {/* ── Stats ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {stats.map((s) => (
-          <div
-            key={s.label}
-            className={`glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 ${s.ring}`}
+        {/* ── Page header ── */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Received Payments
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              All inbound payments received from clients &amp; customers
+            </p>
+          </div>
+          <Button
+            onClick={openAdd}
+            className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-5 py-2 text-sm h-auto"
           >
-            <div className={`p-2 rounded-lg ${s.bg} ${s.color} shrink-0`}>
-              <s.icon size={16} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-lg font-bold font-heading text-foreground leading-none">
-                {s.value}
-              </p>
-              <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
-                {s.label}
-              </p>
-              <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
-                {s.sub}
-              </p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        <Input
-          placeholder="Search by customer, company, project, doc no…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="h-8 text-xs max-w-72 flex-1 min-w-0 sm:flex-none"
-        />
-        <Select value={filterMode} onValueChange={setFilterMode}>
-          <SelectTrigger className="h-8 text-xs w-32">
-            <SelectValue placeholder="Mode" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="All">All Modes</SelectItem>
-            {PAYMENT_MODES.map((m) => (
-              <SelectItem key={m} value={m}>
-                {m}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="h-8 text-xs w-32">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="All">All Statuses</SelectItem>
-            <SelectItem value="Draft">Draft</SelectItem>
-            <SelectItem value="Approved">Approved</SelectItem>
-            <SelectItem value="Rejected">Rejected</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Table */}
-      <div className="rounded-xl bg-card border border-border overflow-hidden">
-        <div className="p-4 border-b border-border flex items-center justify-between">
-          <h2 className="font-heading font-semibold text-foreground text-sm">
-            All Received Payments
-          </h2>
-          <span className="text-xs text-muted-foreground">
-            {filtered.length} entries
-          </span>
+            <Plus size={15} className="mr-1" />
+            Add Payment
+          </Button>
         </div>
 
-        {apiLoading ? (
-          <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground text-sm">
-            <Loader2 size={18} className="animate-spin" />
-            Loading payments…
-          </div>
-        ) : payments.length === 0 ? (
-          <EmptyState />
-        ) : filtered.length === 0 ? (
-          <div className="p-10 text-center text-muted-foreground text-sm">
-            No results match your filters.
-          </div>
-        ) : (
-          <>
-            {/* Desktop */}
-            <div className="hidden sm:block overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border">
-                    {[
-                      "Doc No.",
-                      "Date",
-                      "Fin Year",
-                      "Company",
-                      "Project",
-                      "Customer",
-                      "Mode",
-                      "Deposit Bank",
-                      "Amount (₹)",
-                      "Status",
-                      "",
-                    ].map((h) => (
-                      <th
-                        key={h}
-                        className="px-4 py-3 text-left text-xs font-heading text-muted-foreground font-semibold whitespace-nowrap"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((p, i) => (
-                    <tr
-                      key={p.id}
-                      className={`border-b border-border hover:bg-muted/50 transition-colors ${i % 2 === 1 ? "bg-muted/20" : ""}`}
-                    >
-                      <td className="px-4 py-3 text-primary font-heading text-xs font-medium whitespace-nowrap">
-                        {p.docNo}
-                      </td>
-                      <td className="px-4 py-3 text-foreground whitespace-nowrap text-xs">
-                        {format(new Date(p.docDate), "dd/MM/yyyy")}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs">
-                        {p.finYear || "—"}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
-                        {p.companyName}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
-                        {p.projectName}
-                      </td>
-                      <td className="px-4 py-3 font-medium text-foreground text-xs max-w-[120px] truncate">
-                        {p.customerName || p.receivedFrom}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit ${modeColor[p.mode]}`}
-                        >
-                          {modeIcon(p.mode)}
-                          {p.mode}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
-                        {p.depositBankName || "—"}
-                      </td>
-                      <td className="px-4 py-3 font-heading font-semibold text-emerald-600 whitespace-nowrap text-xs">
-                        +{fmt(p.amount)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-xs font-heading ${
-                            p.status === "Approved"
-                              ? "bg-green-500/15 text-green-600"
-                              : p.status === "Rejected"
-                                ? "bg-red-500/15 text-red-600"
-                                : "bg-yellow-500/15 text-yellow-600"
-                          }`}
-                        >
-                          {p.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => setViewingPayment(p)}
-                            title="View"
-                            className="p-1.5 rounded-md text-muted-foreground/50 hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors"
-                          >
-                            <Eye size={13} />
-                          </button>
-                          <button
-                            onClick={() => handlePrintPayment(p)}
-                            title="Print"
-                            className="p-1.5 rounded-md text-muted-foreground/50 hover:text-sky-600 hover:bg-sky-500/10 transition-colors"
-                          >
-                            <Printer size={13} />
-                          </button>
-                          {p.status === "Draft" && (
-                            <button
-                              onClick={() => openEdit(p)}
-                              title="Edit"
-                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-blue-500 hover:bg-blue-500/10 transition-colors"
-                            >
-                              <Pencil size={13} />
-                            </button>
-                          )}
-                          {p.status === "Draft" && (
-                            <button
-                              onClick={() => setSubmitTarget(p)}
-                              title="Submit for Approval"
-                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-primary hover:bg-primary/10 transition-colors"
-                            >
-                              <SendHorizontal size={13} />
-                            </button>
-                          )}
-                          <button
-                            onClick={() => deletePayment(p.id)}
-                            title="Delete"
-                            className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {/* ── Stats ── */}
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+          {stats.map((s) => (
+            <div
+              key={s.label}
+              className={`glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 ${s.ring}`}
+            >
+              <div className={`p-2 rounded-lg ${s.bg} ${s.color} shrink-0`}>
+                <s.icon size={16} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-lg font-bold font-heading text-foreground leading-none">
+                  {s.value}
+                </p>
+                <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+                  {s.label}
+                </p>
+                <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
+                  {s.sub}
+                </p>
+              </div>
             </div>
+          ))}
+        </div>
 
-            {/* Mobile */}
-            <div className="sm:hidden divide-y divide-border">
-              {filtered.map((p) => (
-                <div key={p.id} className="p-4 space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-xs text-primary font-heading font-medium">
-                        {p.docNo}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {p.companyName} · {p.finYear}
-                      </p>
-                      <p className="text-sm font-semibold text-foreground">
-                        {p.customerName || p.receivedFrom}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {p.projectName} ·{" "}
-                        {format(new Date(p.docDate), "dd/MM/yyyy")}
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-base font-heading font-bold text-emerald-600">
-                        +{fmt(p.amount)}
-                      </p>
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-xs font-heading ${
-                          p.status === "Approved"
-                            ? "bg-green-500/15 text-green-600"
-                            : p.status === "Rejected"
-                              ? "bg-red-500/15 text-red-600"
-                              : "bg-yellow-500/15 text-yellow-600"
-                        }`}
-                      >
-                        {p.status}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span
-                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit ${modeColor[p.mode]}`}
-                    >
-                      {modeIcon(p.mode)}
-                      {p.mode}
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => setViewingPayment(p)}
-                        className="p-1.5 text-muted-foreground/50 hover:text-emerald-600"
-                        title="View"
-                      >
-                        <Eye size={13} />
-                      </button>
-                      <button
-                        onClick={() => handlePrintPayment(p)}
-                        className="p-1.5 text-muted-foreground/50 hover:text-sky-600"
-                        title="Print"
-                      >
-                        <Printer size={13} />
-                      </button>
-                      {p.status === "Draft" && (
-                        <button
-                          onClick={() => openEdit(p)}
-                          className="p-1.5 text-muted-foreground/50 hover:text-blue-500"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                      )}
-                      {p.status === "Draft" && (
-                        <button
-                          onClick={() => setSubmitTarget(p)}
-                          className="p-1.5 text-muted-foreground/50 hover:text-primary"
-                          title="Submit for Approval"
-                        >
-                          <SendHorizontal size={13} />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => deletePayment(p.id)}
-                        className="p-1.5 text-muted-foreground/50 hover:text-destructive"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
+        {/* Filters */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          <Input
+            placeholder="Search by customer, company, project, doc no…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8 text-xs max-w-72 flex-1 min-w-0 sm:flex-none"
+          />
+          <Select value={filterMode} onValueChange={setFilterMode}>
+            <SelectTrigger className="h-8 text-xs w-32">
+              <SelectValue placeholder="Mode" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="All">All Modes</SelectItem>
+              {PAYMENT_MODES.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {m}
+                </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="h-8 text-xs w-32">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="All">All Statuses</SelectItem>
+              <SelectItem value="Draft">Draft</SelectItem>
+              <SelectItem value="Pending">Pending Approval</SelectItem>
+              <SelectItem value="Approved">Approved</SelectItem>
+              <SelectItem value="Rejected">Rejected</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Table */}
+        <div className="rounded-xl bg-card border border-border overflow-hidden">
+          <div className="p-4 border-b border-border flex items-center justify-between">
+            <h2 className="font-heading font-semibold text-foreground text-sm">
+              All Received Payments
+            </h2>
+            <span className="text-xs text-muted-foreground">
+              {filtered.length} entries
+            </span>
+          </div>
+
+          {apiLoading ? (
+            <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground text-sm">
+              <Loader2 size={18} className="animate-spin" />
+              Loading payments…
             </div>
-          </>
+          ) : payments.length === 0 ? (
+            <EmptyState />
+          ) : filtered.length === 0 ? (
+            <div className="p-10 text-center text-muted-foreground text-sm">
+              No results match your filters.
+            </div>
+          ) : (
+            <>
+              {/* Desktop */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border">
+                      {[
+                        "Doc No.",
+                        "Date",
+                        "Fin Year",
+                        "Company",
+                        "Project",
+                        "Customer",
+                        "Mode",
+                        "Deposit Bank",
+                        "Amount (₹)",
+                        "Status",
+                        "",
+                      ].map((h) => (
+                        <th
+                          key={h}
+                          className="px-4 py-3 text-left text-xs font-heading text-muted-foreground font-semibold whitespace-nowrap"
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((p, i) => (
+                      <tr
+                        key={p.id}
+                        className={`border-b border-border hover:bg-muted/50 transition-colors ${i % 2 === 1 ? "bg-muted/20" : ""}`}
+                      >
+                        <td className="px-4 py-3 text-primary font-heading text-xs font-medium whitespace-nowrap">
+                          {p.docNo}
+                        </td>
+                        <td className="px-4 py-3 text-foreground whitespace-nowrap text-xs">
+                          {format(new Date(p.docDate), "dd/MM/yyyy")}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground text-xs">
+                          {p.finYear || "—"}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
+                          {p.companyName}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
+                          {p.projectName}
+                        </td>
+                        <td className="px-4 py-3 font-medium text-foreground text-xs max-w-[120px] truncate">
+                          {p.customerName || p.receivedFrom}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit ${modeColor[p.mode]}`}
+                          >
+                            {modeIcon(p.mode)}
+                            {p.mode}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
+                          {p.depositBankName || "—"}
+                        </td>
+                        <td className="px-4 py-3 font-heading font-semibold text-emerald-600 whitespace-nowrap text-xs">
+                          +{fmt(p.amount)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge status={p.status} />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => setViewingPayment(p)}
+                              title="View"
+                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors"
+                            >
+                              <Eye size={13} />
+                            </button>
+                            <button
+                              onClick={() => handlePrintPayment(p)}
+                              title="Print"
+                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-sky-600 hover:bg-sky-500/10 transition-colors"
+                            >
+                              <Printer size={13} />
+                            </button>
+                            {p.status === "Draft" && (
+                              <button
+                                onClick={() => openEdit(p)}
+                                title="Edit"
+                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-blue-500 hover:bg-blue-500/10 transition-colors"
+                              >
+                                <Pencil size={13} />
+                              </button>
+                            )}
+                            {p.status === "Draft" && (
+                              <button
+                                onClick={() => setSubmitTarget(p)}
+                                title="Submit for Approval"
+                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-primary hover:bg-primary/10 transition-colors"
+                              >
+                                <SendHorizontal size={13} />
+                              </button>
+                            )}
+                            {p.status === "Pending" && (
+                              <span
+                                title="Awaiting admin approval"
+                                className="p-1.5 rounded-md text-amber-500/60 cursor-default inline-flex"
+                              >
+                                <Clock size={13} />
+                              </span>
+                            )}
+                            <button
+                              onClick={() => deletePayment(p.id)}
+                              title="Delete"
+                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile */}
+              <div className="sm:hidden divide-y divide-border">
+                {filtered.map((p) => (
+                  <div key={p.id} className="p-4 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs text-primary font-heading font-medium">
+                          {p.docNo}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {p.companyName} · {p.finYear}
+                        </p>
+                        <p className="text-sm font-semibold text-foreground">
+                          {p.customerName || p.receivedFrom}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {p.projectName} ·{" "}
+                          {format(new Date(p.docDate), "dd/MM/yyyy")}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-base font-heading font-bold text-emerald-600">
+                          +{fmt(p.amount)}
+                        </p>
+                        <StatusBadge status={p.status} />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit ${modeColor[p.mode]}`}
+                      >
+                        {modeIcon(p.mode)}
+                        {p.mode}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setViewingPayment(p)}
+                          className="p-1.5 text-muted-foreground/50 hover:text-emerald-600"
+                          title="View"
+                        >
+                          <Eye size={13} />
+                        </button>
+                        <button
+                          onClick={() => handlePrintPayment(p)}
+                          className="p-1.5 text-muted-foreground/50 hover:text-sky-600"
+                          title="Print"
+                        >
+                          <Printer size={13} />
+                        </button>
+                        {p.status === "Draft" && (
+                          <button
+                            onClick={() => openEdit(p)}
+                            className="p-1.5 text-muted-foreground/50 hover:text-blue-500"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                        )}
+                        {p.status === "Draft" && (
+                          <button
+                            onClick={() => setSubmitTarget(p)}
+                            className="p-1.5 text-muted-foreground/50 hover:text-primary"
+                            title="Submit for Approval"
+                          >
+                            <SendHorizontal size={13} />
+                          </button>
+                        )}
+                        {p.status === "Pending" && (
+                          <span
+                            title="Awaiting admin approval"
+                            className="p-1.5 text-amber-500/60 cursor-default inline-flex"
+                          >
+                            <Clock size={13} />
+                          </span>
+                        )}
+                        <button
+                          onClick={() => deletePayment(p.id)}
+                          className="p-1.5 text-muted-foreground/50 hover:text-destructive"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between mt-4 px-1">
+            <span className="text-xs text-muted-foreground">
+              Page {currentPage} of {totalPages} · {totalCount} total
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => loadPayments(currentPage - 1)}
+                disabled={currentPage <= 1 || apiLoading}
+                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <button
+                onClick={() => loadPayments(currentPage + 1)}
+                disabled={currentPage >= totalPages || apiLoading}
+                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          </div>
         )}
       </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-4 px-1">
-          <span className="text-xs text-muted-foreground">
-            Page {currentPage} of {totalPages} · {totalCount} total
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => loadPayments(currentPage - 1)}
-              disabled={currentPage <= 1 || apiLoading}
-              className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              <ChevronLeft size={14} />
-            </button>
-            <button
-              onClick={() => loadPayments(currentPage + 1)}
-              disabled={currentPage >= totalPages || apiLoading}
-              className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              <ChevronRight size={14} />
-            </button>
-          </div>
-        </div>
-      )}
-
-      </div>{/* end p-6 space-y-8 */}
+      {/* end p-6 space-y-8 */}
 
       {/* ── Add / Edit Dialog ────────────────────────────────────────────────── */}
       <Dialog
@@ -1475,7 +1510,11 @@ export default function ReceivedPaymentPage() {
             >
               Cancel
             </Button>
-            <Button onClick={handleSubmit} disabled={actionLoading} className="px-5 py-2 text-sm h-auto font-heading font-semibold gradient-accent text-white">
+            <Button
+              onClick={handleSubmit}
+              disabled={actionLoading}
+              className="px-5 py-2 text-sm h-auto font-heading font-semibold gradient-accent text-white"
+            >
               {actionLoading ? (
                 <Loader2 size={14} className="animate-spin mr-1.5" />
               ) : null}
@@ -1613,17 +1652,7 @@ export default function ReceivedPaymentPage() {
                         )
                       : "—"}
                   </p>
-                  <span
-                    className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold ${
-                      viewingPayment.status === "Approved"
-                        ? "bg-green-500/15 text-green-600"
-                        : viewingPayment.status === "Rejected"
-                          ? "bg-red-500/15 text-red-600"
-                          : "bg-yellow-500/15 text-yellow-600"
-                    }`}
-                  >
-                    {viewingPayment.status}
-                  </span>
+                  <StatusBadge status={viewingPayment.status} />
                   <span
                     className={`ml-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading ${modeColor[viewingPayment.mode]}`}
                   >
@@ -1705,16 +1734,34 @@ export default function ReceivedPaymentPage() {
                     })
                   : "—"}
               </p>
+              {viewingPayment.status === "Pending" && (
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-amber-600 font-heading font-medium">
+                  <Clock size={12} className="text-amber-500 animate-pulse" />
+                  Awaiting admin approval
+                </span>
+              )}
               {viewingPayment.status === "Draft" && (
-                <button
-                  onClick={() => {
-                    setViewingPayment(null);
-                    openEdit(viewingPayment);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
-                >
-                  <Pencil size={12} /> Edit
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setViewingPayment(null);
+                      openEdit(viewingPayment);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                  >
+                    <Pencil size={12} /> Edit
+                  </button>
+                  <button
+                    onClick={() => {
+                      const p = viewingPayment;
+                      setViewingPayment(null);
+                      setSubmitTarget(p);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors"
+                  >
+                    <SendHorizontal size={12} /> Submit
+                  </button>
+                </div>
               )}
             </div>
           </div>

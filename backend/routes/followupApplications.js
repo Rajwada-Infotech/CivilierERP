@@ -174,10 +174,13 @@ router.get(
     try {
       const result = await getPool().request().query(`
         SELECT
-          LHeadId   AS Id,
+          LHeadId              AS Id,
           ISNULL(DisplayName, LHeadName) AS Name,
-          LHeadPhone AS Phone,
-          LHeadEmail AS Email
+          LHeadPhone           AS Phone,
+          LHeadEmail           AS Email,
+          LHeadAddress         AS Address,
+          LHeadContactPerson   AS ContactPerson,
+          LGST                 AS PanNumber
         FROM dbo.AccountHeadMaster
         WHERE LHeadType = 'A' AND ISNULL(LHeadStatus, 1) = 1
         ORDER BY LHeadName
@@ -608,7 +611,3 @@ router.delete(
 );
 
 module.exports = router;
-
-
-
-
