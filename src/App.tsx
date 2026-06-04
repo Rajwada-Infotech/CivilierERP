@@ -165,6 +165,9 @@ const EnterpriseMasterPage = lazy(
   () => import("./pages/admin/masters/EnterpriseMaster"),
 );
 const BOQ = lazy(() => import("./pages/engineering/BOQ"));
+const DailyProgressReport = lazy(
+  () => import("./pages/engineering/DailyProgressReport"),
+);
 
 // Admin Pages
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -1113,6 +1116,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <BOQ />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/engineering/dpr"
+        element={
+          <ProtectedRoute>
+            <DailyProgressReport />
           </ProtectedRoute>
         }
       />
