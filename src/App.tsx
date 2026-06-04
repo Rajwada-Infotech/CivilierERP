@@ -268,6 +268,11 @@ const NocPage = lazy(() =>
     default: module.NOCPage,
   })),
 );
+const BankNocPage = lazy(() =>
+  import("./pages/followup/BankNOC").then((module) => ({
+    default: module.BankNOCPage,
+  })),
+);
 const SalesDeedPage = lazy(() =>
   import("./pages/followup/SalesDeed").then((module) => ({
     default: module.SalesDeedPage,
@@ -770,6 +775,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <NocPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/closure/bank-noc"
+        element={
+          <ProtectedRoute>
+            <BankNocPage />
           </ProtectedRoute>
         }
       />

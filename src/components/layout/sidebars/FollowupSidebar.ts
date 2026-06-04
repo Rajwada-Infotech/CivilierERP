@@ -55,6 +55,7 @@ export const followupNavItems: NavItem[] = [
     icon: CheckCircle2,
     children: [
       { label: "NOC", path: "/followup/closure/noc" },
+      { label: "Bank NOC", path: "/followup/closure/bank-noc" },
       { label: "Sales Deed", path: "/followup/closure/sales-deed" },
       { label: "Handover", path: "/followup/closure/handover" },
     ],

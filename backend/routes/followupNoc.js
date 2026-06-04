@@ -255,6 +255,7 @@ router.get("/", async (req, res) => {
     const offset = (page - 1) * pageSize;
     const search = normalizeText(req.query.search);
     const status = normalizeText(req.query.status);
+    const bankNocStatus = normalizeText(req.query.bankNocStatus);
     const applicantId = normalizeNumber(req.query.applicantId);
 
     if (Number.isNaN(applicantId)) {
@@ -273,10 +274,12 @@ router.get("/", async (req, res) => {
           OR fus.UnitNo                               LIKE @Search
           OR fag.AgreementNo                          LIKE @Search
           OR ep.name                                  LIKE @Search
+          OR fn.BankName                              LIKE @Search
         )
       `);
     }
     if (status) filters.push("fn.Status = @Status");
+    if (bankNocStatus) filters.push("fn.BankNOCStatus = @BankNOCStatus");
     if (applicantId) filters.push("fn.ApplicantId = @ApplicantId");
 
     const whereClause = `WHERE ${filters.join(" AND ")}`;
@@ -295,6 +298,7 @@ router.get("/", async (req, res) => {
       const request = pool.request();
       if (search) request.input("Search", sql.NVarChar(255), `%${search}%`);
       if (status) request.input("Status", sql.NVarChar(30), status);
+      if (bankNocStatus) request.input("BankNOCStatus", sql.NVarChar(30), bankNocStatus);
       if (applicantId) request.input("ApplicantId", sql.Int, applicantId);
       return request;
     };

@@ -265,6 +265,12 @@ const followupSetupItems: SetupItem[] = [
     path: "/followup/setup/customer-master",
     color: "text-violet-500",
   },
+  {
+    icon: ClipboardList,
+    label: "Payment Plan",
+    path: "/followup/setup/payment-plan-master",
+    color: "text-emerald-500",
+  },
 ];
 
 const engineeringSetupItems: SetupItem[] = [
