@@ -764,18 +764,6 @@ export function ConstructionUpdatesPage() {
   );
 }
 
-export function FinanceDemandsPage() {
-  return (
-    <ScopedLogPage
-      title="Finance Demands"
-      description="Track payment demand letters and demand follow-ups."
-      moduleName="finance_demands"
-      defaultType="payment"
-      helpText="Use payment entries to record installment demand progress."
-    />
-  );
-}
-
 export function FollowupPaymentsPage() {
   return (
     <ScopedLogPage

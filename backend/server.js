@@ -134,6 +134,7 @@ const ALL_ROUTES = [
     path: "/api/followup-construction-updates",
     file: "./routes/followupConstructionUpdates",
   },
+  { path: "/api/followup-demands", file: "./routes/followupDemands" },
   { path: "/api/company-master", file: "./routes/companyMaster" },
   { path: "/api/project-master", file: "./routes/projectMaster" },
   { path: "/api/block-master", file: "./routes/blockMaster" },
