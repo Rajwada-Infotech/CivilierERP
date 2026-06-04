@@ -197,7 +197,7 @@ const MetricsDashboard = () => {
     <>
       <Breadcrumbs items={["Admin", "Live Metrics"]} />
 
-      <div className="space-y-6 mt-6">
+      <div className="space-y-8 mt-6">
         {/* ── Page header ─────────────────────────────────────────────── */}
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
