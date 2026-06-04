@@ -252,6 +252,7 @@ const FollowupAgreements = lazy(() =>
   })),
 );
 const ApplicantDetail = lazy(() => import("./pages/followup/ApplicantDetail"));
+const ApplicantTimeline = lazy(() => import("./pages/followup/ApplicantTimeline"));
 const FollowupApplications = lazy(
   () => import("./pages/followup/Applications"),
 );
@@ -277,6 +278,15 @@ const HandoverPage = lazy(() =>
 );
 const ConstructionUpdatesPage = lazy(
   () => import("./pages/followup/ConstructionUpdates"),
+);
+const LegalMilestonesPage = lazy(
+  () => import("./pages/followup/LegalMilestones"),
+);
+const PrePossessionPage = lazy(
+  () => import("./pages/followup/PrePossessionClearance"),
+);
+const PossessionNoticePage = lazy(
+  () => import("./pages/followup/PossessionNotice"),
 );
 const FinanceDemandsPage = lazy(() =>
   import("./pages/followup/FollowupExtraPages").then((module) => ({
@@ -714,7 +724,7 @@ function AppRoutes() {
         path="/applicant-timeline/:id"
         element={
           <ProtectedRoute>
-            <ApplicantDetail />
+            <ApplicantTimeline />
           </ProtectedRoute>
         }
       />
@@ -779,6 +789,30 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <HandoverPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/legal/milestones"
+        element={
+          <ProtectedRoute>
+            <LegalMilestonesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/closure/pre-possession"
+        element={
+          <ProtectedRoute>
+            <PrePossessionPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/closure/possession-notice"
+        element={
+          <ProtectedRoute>
+            <PossessionNoticePage />
           </ProtectedRoute>
         }
       />
