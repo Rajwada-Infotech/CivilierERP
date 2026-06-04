@@ -11,5 +11,5 @@ coverage
 *.log
 dist
 migrations
-worker.js
+
 tmp
