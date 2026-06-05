@@ -39,5 +39,7 @@
 
   "include": ["src", "backend/**/*.ts", "backend/utils/loadRoutes.js"],
 
-  "exclude": ["node_modules", "backend/dist"]
+  "exclude": ["node_modules", "backend/dist"],
+
+  "references": [{ "path": "./tsconfig.node.json" }]
 }

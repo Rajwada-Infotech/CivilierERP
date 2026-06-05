@@ -255,6 +255,7 @@ async function createCall(payload: {
       (err as { error?: string }).error || "Failed to create entry",
     );
   }
+  return res.json();
 }
 
 async function deleteCall(id: string) {
@@ -400,8 +401,14 @@ export function WelcomeCallsPage() {
 
   const createMutation = useMutation({
     mutationFn: createCall,
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       toast.success("Call logged");
+      if (data?.autoDraftNocNo) {
+        toast.info(`Organisation NOC draft created: ${data.autoDraftNocNo}`, {
+          description: "Go to Closure → NOC to fill in the details.",
+          duration: 6000,
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ["welcome-calls"] });
       setForm(EMPTY_FORM);
       setDialogOpen(false);
