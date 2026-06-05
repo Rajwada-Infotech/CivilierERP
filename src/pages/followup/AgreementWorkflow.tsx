@@ -1,10 +1,7 @@
 /**
- * AgreementWorkflow.tsx
- *
- * Track B: 7-step agreement sub-workflow tracker per applicant/agreement.
- * Mirrors LegalMilestones.tsx UI — expandable rows with vertical stepper.
- * Steps: Drafting → Internal Review → Customer Sharing → Customer Approval
- *        → Execution → Registration → Archival
+ * AgreementWorkflow.tsx — responsive rewrite
+ * Desktop: table with expandable stepper rows
+ * Mobile: card list with expandable stepper
  */
 
 import { useState } from "react";
@@ -32,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -100,7 +98,6 @@ interface WorkflowRecord {
   CurrentStep: number;
   OverallStatus: string;
   Notes: string | null;
-  // Step columns — indexed dynamically
   [key: string]: unknown;
 }
 
@@ -167,7 +164,6 @@ const STEP_STATUS_OPTIONS = [
   "Blocked",
   "Waived",
 ];
-
 const OVERALL_STATUS_OPTIONS = [
   "In Progress",
   "Completed",
@@ -197,13 +193,13 @@ function fmtDate(d: string | null | undefined) {
 }
 
 // ── Progress bar ───────────────────────────────────────────────────────────────
-function ProgressBar({ record }: { record: any }) {
+function ProgressBar({ record }: { record: WorkflowRecord }) {
   const completed = STEPS.filter(
     (s) => record[`${s.field}Status`] === "Completed",
   ).length;
   const pct = Math.round((completed / STEPS.length) * 100);
   return (
-    <div className="flex items-center gap-2 min-w-[120px]">
+    <div className="flex items-center gap-2 min-w-[90px]">
       <div className="flex-1 h-1.5 rounded-full bg-border overflow-hidden">
         <div
           className="h-full rounded-full bg-blue-500 transition-all"
@@ -217,68 +213,64 @@ function ProgressBar({ record }: { record: any }) {
   );
 }
 
-// ── Stepper sub-component ──────────────────────────────────────────────────────
+// ── Stepper ────────────────────────────────────────────────────────────────────
 function WorkflowStepper({
   record,
   onStepUpdate,
 }: {
-  record: any;
-  onStepUpdate: (id: number, step: any) => void;
+  record: WorkflowRecord;
+  onStepUpdate: (id: number, step: unknown) => void;
 }) {
   const [editingStep, setEditingStep] = useState<string | null>(null);
   const [form, setForm] = useState({ status: "", doneDate: "", notes: "" });
   const [signatureId, setSignatureId] = useState<number | null>(null);
 
   return (
-    <div className="py-4 px-6 bg-muted/30 border-t border-border">
+    <div className="py-4 px-4 sm:px-6 bg-muted/30 border-t border-border">
       <div className="relative">
         {STEPS.map((step, idx) => {
-          const statusKey = `${step.field}Status` as keyof typeof record;
-          const doneKey = `${step.field}Done` as keyof typeof record;
-          const dueKey = `${step.field}Due` as keyof typeof record;
-          const notesKey = `${step.field}Notes` as keyof typeof record;
+          const statusKey = `${step.field}Status`;
+          const doneKey = `${step.field}Done`;
+          const dueKey = `${step.field}Due`;
+          const notesKey = `${step.field}Notes`;
           const status = (record[statusKey] as string) || "Pending";
           const isLast = idx === STEPS.length - 1;
           const StepIcon = step.icon;
 
           return (
-            <div key={step.field} className="flex gap-4 mb-2">
-              {/* Step dot + connector */}
-              <div className="flex flex-col items-center w-8 shrink-0">
+            <div key={step.field} className="flex gap-3 sm:gap-4 mb-2">
+              {/* dot + connector */}
+              <div className="flex flex-col items-center w-7 shrink-0">
                 <div
                   className={`w-7 h-7 rounded-full border-2 flex items-center justify-center text-[11px] font-bold shrink-0
-                    ${
-                      status === "Completed"
-                        ? "bg-emerald-500 border-emerald-500 text-white"
-                        : status === "In Progress"
-                          ? "bg-blue-500 border-blue-500 text-white"
-                          : status === "Blocked"
-                            ? "bg-red-500 border-red-500 text-white"
-                            : status === "Waived"
-                              ? "bg-amber-400 border-amber-400 text-white"
-                              : "bg-card border-border text-muted-foreground"
-                    }`}
+                  ${
+                    status === "Completed"
+                      ? "bg-emerald-500 border-emerald-500 text-white"
+                      : status === "In Progress"
+                        ? "bg-blue-500 border-blue-500 text-white"
+                        : status === "Blocked"
+                          ? "bg-red-500 border-red-500 text-white"
+                          : status === "Waived"
+                            ? "bg-amber-400 border-amber-400 text-white"
+                            : "bg-card border-border text-muted-foreground"
+                  }`}
                 >
-                  {status === "Completed" ? (
-                    "✓"
-                  ) : (
-                    <StepIcon size={12} />
-                  )}
+                  {status === "Completed" ? "✓" : <StepIcon size={12} />}
                 </div>
                 {!isLast && <div className="w-0.5 flex-1 bg-border mt-1" />}
               </div>
 
-              {/* Step content */}
-              <div className="flex-1 pb-5">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
+              {/* content */}
+              <div className="flex-1 pb-5 min-w-0">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                  <div className="min-w-0">
                     <p className="text-sm font-semibold text-foreground">
                       {step.label}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {step.desc}
                     </p>
-                    <div className="flex gap-3 mt-1">
+                    <div className="flex flex-wrap gap-3 mt-1">
                       {record[dueKey] && (
                         <span className="text-xs text-muted-foreground">
                           Due: {fmtDate(record[dueKey] as string)}
@@ -298,10 +290,7 @@ function WorkflowStepper({
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                        STEP_STATUS_COLOR[status] ||
-                        STEP_STATUS_COLOR["Pending"]
-                      }`}
+                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${STEP_STATUS_COLOR[status] || STEP_STATUS_COLOR["Pending"]}`}
                     >
                       {status}
                     </span>
@@ -325,7 +314,7 @@ function WorkflowStepper({
                 </div>
               </div>
 
-              {/* Inline step update dialog */}
+              {/* step update dialog */}
               {editingStep === step.field && (
                 <Dialog open onOpenChange={() => setEditingStep(null)}>
                   <DialogContent
@@ -336,6 +325,9 @@ function WorkflowStepper({
                       <DialogTitle className="text-sm font-bold">
                         Update: {step.label}
                       </DialogTitle>
+                      <DialogDescription className="sr-only">
+                        Update the status and details for this workflow step.
+                      </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-3 py-1">
                       <div className="space-y-1">
@@ -381,10 +373,11 @@ function WorkflowStepper({
                           }
                         />
                       </div>
-                      {/* Signature stamp — only on Execution step */}
                       {editingStep === "Execution" && (
                         <div className="space-y-1">
-                          <Label className="text-xs">Signature Stamp (optional)</Label>
+                          <Label className="text-xs">
+                            Signature Stamp (optional)
+                          </Label>
                           <SignaturePicker
                             value={signatureId}
                             onChange={setSignatureId}
@@ -411,7 +404,8 @@ function WorkflowStepper({
                             status: form.status,
                             doneDate: form.doneDate || undefined,
                             notes: form.notes || undefined,
-                            ...(step.field === "Execution" && signatureId !== null
+                            ...(step.field === "Execution" &&
+                            signatureId !== null
                               ? { signatureId }
                               : {}),
                           });
@@ -433,11 +427,82 @@ function WorkflowStepper({
   );
 }
 
+// ── Row card (mobile) ──────────────────────────────────────────────────────────
+function MobileCard({
+  row,
+  expanded,
+  onToggle,
+  onDelete,
+  onAudit,
+  onStepUpdate,
+}: {
+  row: WorkflowRecord;
+  expanded: boolean;
+  onToggle: () => void;
+  onDelete: () => void;
+  onAudit: () => void;
+  onStepUpdate: (id: number, step: unknown) => void;
+}) {
+  return (
+    <div className="border border-border rounded-xl overflow-hidden bg-card mb-2">
+      <button
+        className="w-full text-left p-3.5 flex items-start gap-3 hover:bg-muted/30 transition-colors"
+        onClick={onToggle}
+      >
+        <div className="mt-0.5 text-muted-foreground shrink-0">
+          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-mono text-xs font-semibold text-foreground">
+              {row.WorkflowNo}
+            </span>
+            <span
+              className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${OVERALL_STATUS_COLOR[row.OverallStatus] || OVERALL_STATUS_COLOR["In Progress"]}`}
+            >
+              {row.OverallStatus}
+            </span>
+          </div>
+          <p className="text-sm font-medium text-foreground mt-0.5 truncate">
+            {row.ApplicantName}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {row.ApplicantNo}
+            {row.AgreementNo ? ` · ${row.AgreementNo}` : ""}
+          </p>
+          <div className="mt-2">
+            <ProgressBar record={row} />
+          </div>
+        </div>
+        <div
+          className="flex gap-1 shrink-0"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            title="History"
+            onClick={onAudit}
+            className="p-1.5 rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+          >
+            <Clock size={14} />
+          </button>
+          <button
+            title="Delete"
+            onClick={onDelete}
+            className="p-1.5 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </button>
+      {expanded && <WorkflowStepper record={row} onStepUpdate={onStepUpdate} />}
+    </div>
+  );
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────────
 export default function AgreementWorkflowPage() {
   const qc = useQueryClient();
 
-  // List state
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
   const [search, setSearch] = useState("");
@@ -445,15 +510,15 @@ export default function AgreementWorkflowPage() {
   const [filterStatus, setFilterStatus] = useState("");
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
 
-  // Create dialog
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState<Record<string, any>>({});
-
-  // Delete confirm
+  const [form, setForm] = useState<Record<string, string>>({});
   const [deleteTarget, setDeleteTarget] = useState<WorkflowRecord | null>(null);
-  const [auditTarget, setAuditTarget] = useState<{ id: number; no: string } | null>(null);
+  const [auditTarget, setAuditTarget] = useState<{
+    id: number;
+    no: string;
+  } | null>(null);
 
-  // ── Queries ────────────────────────────────────────────────────────────────
+  // ── Queries ──────────────────────────────────────────────────────────────
   const { data: meta } = useQuery<MetaOptions>({
     queryKey: ["agWorkflow-meta"],
     queryFn: fetchAgreementWorkflowOptions,
@@ -481,7 +546,7 @@ export default function AgreementWorkflowPage() {
   const rows: WorkflowRecord[] = listData?.data ?? [];
   const pagination = listData?.pagination;
 
-  // ── Mutations ──────────────────────────────────────────────────────────────
+  // ── Mutations ─────────────────────────────────────────────────────────────
   const createMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       createAgreementWorkflow(payload),
@@ -491,17 +556,17 @@ export default function AgreementWorkflowPage() {
       setDialogOpen(false);
       setForm({});
     },
-    onError: (err: any) => toast.error(err.message),
+    onError: (err: Error) => toast.error(err.message),
   });
 
   const stepMutation = useMutation({
-    mutationFn: ({ id, step }: { id: number; step: any }) =>
+    mutationFn: ({ id, step }: { id: number; step: unknown }) =>
       updateWorkflowStep(id, step),
     onSuccess: () => {
       toast.success("Step updated");
       qc.invalidateQueries({ queryKey: ["agWorkflow-list"] });
     },
-    onError: (err: any) => toast.error(err.message),
+    onError: (err: Error) => toast.error(err.message),
   });
 
   const deleteMutation = useMutation({
@@ -511,16 +576,14 @@ export default function AgreementWorkflowPage() {
       qc.invalidateQueries({ queryKey: ["agWorkflow-list"] });
       setDeleteTarget(null);
     },
-    onError: (err: any) => toast.error(err.message),
+    onError: (err: Error) => toast.error(err.message),
   });
 
-  // ── Toggle expand ──────────────────────────────────────────────────────────
   function toggleExpand(id: number) {
     setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
     });
   }
 
@@ -536,26 +599,12 @@ export default function AgreementWorkflowPage() {
       />
 
       {/* ── Toolbar ── */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          marginBottom: 18,
-          flexWrap: "wrap",
-        }}
-      >
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
         {/* Search */}
-        <div style={{ position: "relative", flex: "1 1 220px", maxWidth: 320 }}>
+        <div className="relative flex-1 min-w-[180px] max-w-xs">
           <Search
             size={14}
-            style={{
-              position: "absolute",
-              left: 10,
-              top: "50%",
-              transform: "translateY(-50%)",
-              color: "var(--muted-foreground)",
-            }}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
           />
           <input
             value={searchInput}
@@ -566,20 +615,8 @@ export default function AgreementWorkflowPage() {
                 setPage(1);
               }
             }}
-            placeholder="Search workflow, applicant, agreement…"
-            style={{
-              width: "100%",
-              paddingLeft: 32,
-              paddingRight: searchInput ? 32 : 12,
-              paddingTop: 7,
-              paddingBottom: 7,
-              borderRadius: 9,
-              border: "1px solid var(--border)",
-              background: "var(--background)",
-              color: "var(--foreground)",
-              fontSize: 13,
-              outline: "none",
-            }}
+            placeholder="Search workflow, applicant…"
+            className="w-full pl-8 pr-8 py-1.5 rounded-[9px] border border-border bg-background text-foreground text-[13px] outline-none focus:ring-2 focus:ring-primary/25"
           />
           {searchInput && (
             <button
@@ -588,39 +625,21 @@ export default function AgreementWorkflowPage() {
                 setSearch("");
                 setPage(1);
               }}
-              style={{
-                position: "absolute",
-                right: 8,
-                top: "50%",
-                transform: "translateY(-50%)",
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                color: "var(--muted-foreground)",
-                padding: 0,
-              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
               <X size={13} />
             </button>
           )}
         </div>
 
-        {/* Overall Status filter */}
+        {/* Status filter */}
         <select
           value={filterStatus}
           onChange={(e) => {
             setFilterStatus(e.target.value);
             setPage(1);
           }}
-          style={{
-            padding: "7px 10px",
-            borderRadius: 9,
-            border: "1px solid var(--border)",
-            background: "var(--background)",
-            color: "var(--foreground)",
-            fontSize: 13,
-            outline: "none",
-          }}
+          className="h-[34px] px-2.5 rounded-[9px] border border-border bg-background text-foreground text-[13px] outline-none"
         >
           <option value="">All statuses</option>
           {OVERALL_STATUS_OPTIONS.map((s) => (
@@ -633,297 +652,213 @@ export default function AgreementWorkflowPage() {
         <button
           onClick={() => refetch()}
           title="Refresh"
-          style={{
-            padding: "7px 10px",
-            borderRadius: 9,
-            border: "1px solid var(--border)",
-            background: "var(--background)",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-          }}
+          className="h-[34px] px-2.5 rounded-[9px] border border-border bg-background flex items-center hover:bg-accent transition-colors"
         >
           <RefreshCw
             size={14}
-            className={isFetching ? "animate-spin" : ""}
-            style={{ color: "var(--muted-foreground)" }}
+            className={`text-muted-foreground${isFetching ? " animate-spin" : ""}`}
           />
         </button>
 
         <Button
           onClick={() => setDialogOpen(true)}
-          className="gradient-accent text-white rounded-[9px] gap-1.5 font-semibold text-sm px-4 h-9 ml-auto"
+          className="gradient-accent text-white rounded-[9px] gap-1.5 font-semibold text-sm px-4 h-[34px] ml-auto"
         >
-          <Plus size={15} />
-          New Workflow
+          <Plus size={15} />{" "}
+          <span className="hidden sm:inline">New Workflow</span>
+          <span className="sm:hidden">New</span>
         </Button>
       </div>
 
-      {/* ── Table ── */}
-      <div
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          overflow: "hidden",
-          background: "var(--card)",
-        }}
-      >
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr
-              style={{
-                background: "var(--muted)",
-                borderBottom: "1px solid var(--border)",
-              }}
-            >
-              {[
-                "",
-                "Workflow No",
-                "Applicant",
-                "Agreement",
-                "Overall Status",
-                "Progress",
-                "Actions",
-              ].map((h) => (
-                <th
-                  key={h}
-                  style={{
-                    padding: "10px 14px",
-                    textAlign: "left",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: "var(--muted-foreground)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              <tr>
-                <td
-                  colSpan={7}
-                  style={{
-                    padding: "48px 0",
-                    textAlign: "center",
-                    color: "var(--muted-foreground)",
-                    fontSize: 13,
-                  }}
-                >
-                  Loading…
-                </td>
+      {/* ── Mobile card list (hidden on md+) ── */}
+      <div className="md:hidden">
+        {isLoading ? (
+          <p className="text-center text-muted-foreground text-sm py-12">
+            Loading…
+          </p>
+        ) : rows.length === 0 ? (
+          <p className="text-center text-muted-foreground text-sm py-12">
+            No workflows found
+          </p>
+        ) : (
+          rows.map((row) => (
+            <MobileCard
+              key={row.Id}
+              row={row}
+              expanded={expandedIds.has(row.Id)}
+              onToggle={() => toggleExpand(row.Id)}
+              onDelete={() => setDeleteTarget(row)}
+              onAudit={() =>
+                setAuditTarget({
+                  id: row.Id,
+                  no: row.WorkflowNo ?? `#${row.Id}`,
+                })
+              }
+              onStepUpdate={(id, step) => stepMutation.mutate({ id, step })}
+            />
+          ))
+        )}
+      </div>
+
+      {/* ── Desktop table (hidden below md) ── */}
+      <div className="hidden md:block border border-border rounded-xl overflow-hidden bg-card">
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[13px]">
+            <thead>
+              <tr className="bg-muted border-b border-border">
+                {[
+                  "",
+                  "Workflow No",
+                  "Applicant",
+                  "Agreement",
+                  "Overall Status",
+                  "Progress",
+                  "Actions",
+                ].map((h) => (
+                  <th
+                    key={h}
+                    className="px-3.5 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"
+                  >
+                    {h}
+                  </th>
+                ))}
               </tr>
-            ) : rows.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={7}
-                  style={{
-                    padding: "48px 0",
-                    textAlign: "center",
-                    color: "var(--muted-foreground)",
-                    fontSize: 13,
-                  }}
-                >
-                  No workflows found
-                </td>
-              </tr>
-            ) : (
-              rows.map((row) => {
-                const expanded = expandedIds.has(row.Id);
-                return (
-                  <>
-                    <tr
-                      key={row.Id}
-                      style={{
-                        borderBottom: expanded
-                          ? "none"
-                          : "1px solid var(--border)",
-                        background: expanded
-                          ? "var(--muted/40)"
-                          : "var(--card)",
-                        cursor: "pointer",
-                        transition: "background 0.15s",
-                      }}
-                      onClick={() => toggleExpand(row.Id)}
-                    >
-                      {/* Expand toggle */}
-                      <td style={{ padding: "10px 8px 10px 14px", width: 28 }}>
-                        {expanded ? (
-                          <ChevronDown size={15} style={{ color: "var(--muted-foreground)" }} />
-                        ) : (
-                          <ChevronRight size={15} style={{ color: "var(--muted-foreground)" }} />
-                        )}
-                      </td>
-
-                      {/* Workflow No */}
-                      <td style={{ padding: "10px 14px" }}>
-                        <span
-                          style={{
-                            fontFamily: "monospace",
-                            fontSize: 12,
-                            fontWeight: 600,
-                            color: "var(--foreground)",
-                          }}
-                        >
-                          {row.WorkflowNo}
-                        </span>
-                      </td>
-
-                      {/* Applicant */}
-                      <td style={{ padding: "10px 14px" }}>
-                        <p
-                          style={{
-                            fontSize: 13,
-                            fontWeight: 500,
-                            color: "var(--foreground)",
-                            margin: 0,
-                          }}
-                        >
-                          {row.ApplicantName}
-                        </p>
-                        <p
-                          style={{
-                            fontSize: 11,
-                            color: "var(--muted-foreground)",
-                            margin: 0,
-                          }}
-                        >
-                          {row.ApplicantNo}
-                        </p>
-                      </td>
-
-                      {/* Agreement */}
-                      <td style={{ padding: "10px 14px" }}>
-                        <p
-                          style={{
-                            fontSize: 12,
-                            color: "var(--foreground)",
-                            margin: 0,
-                            fontFamily: "monospace",
-                          }}
-                        >
-                          {row.AgreementNo ?? "—"}
-                        </p>
-                        {row.UnitNo && (
-                          <p
-                            style={{
-                              fontSize: 11,
-                              color: "var(--muted-foreground)",
-                              margin: 0,
-                            }}
-                          >
-                            Unit: {row.UnitNo}
+            </thead>
+            <tbody>
+              {isLoading ? (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="py-12 text-center text-muted-foreground text-sm"
+                  >
+                    Loading…
+                  </td>
+                </tr>
+              ) : rows.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="py-12 text-center text-muted-foreground text-sm"
+                  >
+                    No workflows found
+                  </td>
+                </tr>
+              ) : (
+                rows.map((row) => {
+                  const expanded = expandedIds.has(row.Id);
+                  return (
+                    <>
+                      <tr
+                        key={row.Id}
+                        className="border-b border-border hover:bg-muted/30 cursor-pointer transition-colors"
+                        style={{ borderBottom: expanded ? "none" : undefined }}
+                        onClick={() => toggleExpand(row.Id)}
+                      >
+                        <td className="px-3.5 py-2.5 w-7">
+                          {expanded ? (
+                            <ChevronDown
+                              size={15}
+                              className="text-muted-foreground"
+                            />
+                          ) : (
+                            <ChevronRight
+                              size={15}
+                              className="text-muted-foreground"
+                            />
+                          )}
+                        </td>
+                        <td className="px-3.5 py-2.5">
+                          <span className="font-mono text-xs font-semibold">
+                            {row.WorkflowNo}
+                          </span>
+                        </td>
+                        <td className="px-3.5 py-2.5">
+                          <p className="font-medium text-foreground">
+                            {row.ApplicantName}
                           </p>
-                        )}
-                      </td>
-
-                      {/* Overall Status */}
-                      <td
-                        style={{ padding: "10px 14px" }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                            OVERALL_STATUS_COLOR[row.OverallStatus] ||
-                            OVERALL_STATUS_COLOR["In Progress"]
-                          }`}
-                        >
-                          {row.OverallStatus}
-                        </span>
-                      </td>
-
-                      {/* Progress */}
-                      <td
-                        style={{ padding: "10px 14px" }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <ProgressBar record={row} />
-                      </td>
-
-                      {/* Actions */}
-                      <td
-                        style={{ padding: "10px 14px" }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          title="Delete"
-                          onClick={() => setDeleteTarget(row)}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            cursor: "pointer",
-                            color: "var(--muted-foreground)",
-                            padding: 4,
-                            borderRadius: 6,
-                            display: "flex",
-                            alignItems: "center",
-                          }}
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                        <button
-                          title="History"
-                          onClick={() => setAuditTarget({ id: row.Id, no: row.WorkflowNo ?? `#${row.Id}` })}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            cursor: "pointer",
-                            color: "var(--muted-foreground)",
-                            padding: 4,
-                            borderRadius: 6,
-                            display: "flex",
-                            alignItems: "center",
-                          }}
-                        >
-                          <Clock size={14} />
-                        </button>
-                      </td>
-                    </tr>
-
-                    {/* Expanded stepper row */}
-                    {expanded && (
-                      <tr key={`${row.Id}-stepper`}>
+                          <p className="text-[11px] text-muted-foreground">
+                            {row.ApplicantNo}
+                          </p>
+                        </td>
+                        <td className="px-3.5 py-2.5">
+                          <p className="font-mono text-xs text-foreground">
+                            {row.AgreementNo ?? "—"}
+                          </p>
+                          {row.UnitNo && (
+                            <p className="text-[11px] text-muted-foreground">
+                              Unit: {row.UnitNo}
+                            </p>
+                          )}
+                        </td>
                         <td
-                          colSpan={7}
-                          style={{
-                            padding: 0,
-                            borderBottom: "1px solid var(--border)",
-                          }}
+                          className="px-3.5 py-2.5"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <WorkflowStepper
-                            record={row}
-                            onStepUpdate={(id, step) =>
-                              stepMutation.mutate({ id, step })
-                            }
-                          />
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${OVERALL_STATUS_COLOR[row.OverallStatus] || OVERALL_STATUS_COLOR["In Progress"]}`}
+                          >
+                            {row.OverallStatus}
+                          </span>
+                        </td>
+                        <td
+                          className="px-3.5 py-2.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ProgressBar record={row} />
+                        </td>
+                        <td
+                          className="px-3.5 py-2.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center gap-1">
+                            <button
+                              title="History"
+                              onClick={() =>
+                                setAuditTarget({
+                                  id: row.Id,
+                                  no: row.WorkflowNo ?? `#${row.Id}`,
+                                })
+                              }
+                              className="p-1 rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                            >
+                              <Clock size={14} />
+                            </button>
+                            <button
+                              title="Delete"
+                              onClick={() => setDeleteTarget(row)}
+                              className="p-1 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
-                    )}
-                  </>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                      {expanded && (
+                        <tr key={`${row.Id}-stepper`}>
+                          <td
+                            colSpan={7}
+                            className="p-0 border-b border-border"
+                          >
+                            <WorkflowStepper
+                              record={row}
+                              onStepUpdate={(id, step) =>
+                                stepMutation.mutate({ id, step })
+                              }
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
 
         {/* Pagination */}
         {pagination && pagination.totalPages > 1 && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "10px 16px",
-              borderTop: "1px solid var(--border)",
-              fontSize: 12,
-              color: "var(--muted-foreground)",
-            }}
-          >
+          <div className="flex items-center justify-between px-4 py-2.5 border-t border-border text-xs text-muted-foreground">
             <span>
               {(pagination.page - 1) * pagination.pageSize + 1}–
               {Math.min(
@@ -932,39 +867,18 @@ export default function AgreementWorkflowPage() {
               )}{" "}
               of {pagination.total}
             </span>
-            <div style={{ display: "flex", gap: 6 }}>
+            <div className="flex gap-1.5">
               <button
                 disabled={pagination.page <= 1}
                 onClick={() => setPage((p) => p - 1)}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: 7,
-                  border: "1px solid var(--border)",
-                  background: "var(--background)",
-                  cursor: pagination.page <= 1 ? "not-allowed" : "pointer",
-                  fontSize: 12,
-                  color: "var(--foreground)",
-                  opacity: pagination.page <= 1 ? 0.4 : 1,
-                }}
+                className="px-3 py-1 rounded-lg border border-border bg-background text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent transition-colors"
               >
                 Prev
               </button>
               <button
                 disabled={pagination.page >= pagination.totalPages}
                 onClick={() => setPage((p) => p + 1)}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: 7,
-                  border: "1px solid var(--border)",
-                  background: "var(--background)",
-                  cursor:
-                    pagination.page >= pagination.totalPages
-                      ? "not-allowed"
-                      : "pointer",
-                  fontSize: 12,
-                  color: "var(--foreground)",
-                  opacity: pagination.page >= pagination.totalPages ? 0.4 : 1,
-                }}
+                className="px-3 py-1 rounded-lg border border-border bg-background text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent transition-colors"
               >
                 Next
               </button>
@@ -973,26 +887,46 @@ export default function AgreementWorkflowPage() {
         )}
       </div>
 
+      {/* Mobile pagination */}
+      {pagination && pagination.totalPages > 1 && (
+        <div className="md:hidden flex items-center justify-between px-1 py-3 text-xs text-muted-foreground">
+          <span>
+            {(pagination.page - 1) * pagination.pageSize + 1}–
+            {Math.min(pagination.page * pagination.pageSize, pagination.total)}{" "}
+            of {pagination.total}
+          </span>
+          <div className="flex gap-1.5">
+            <button
+              disabled={pagination.page <= 1}
+              onClick={() => setPage((p) => p - 1)}
+              className="px-3 py-1 rounded-lg border border-border bg-background text-foreground disabled:opacity-40 hover:bg-accent transition-colors"
+            >
+              Prev
+            </button>
+            <button
+              disabled={pagination.page >= pagination.totalPages}
+              onClick={() => setPage((p) => p + 1)}
+              className="px-3 py-1 rounded-lg border border-border bg-background text-foreground disabled:opacity-40 hover:bg-accent transition-colors"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Create Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent
-          style={{ maxWidth: 600, maxHeight: "90vh", overflowY: "auto" }}
-          aria-describedby={undefined}
-        >
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>New Agreement Workflow</DialogTitle>
+            <DialogDescription className="sr-only">
+              Create a new agreement workflow for an applicant.
+            </DialogDescription>
           </DialogHeader>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 14,
-              paddingTop: 4,
-            }}
-          >
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
             {/* Applicant */}
-            <div className="col-span-2 space-y-1">
+            <div className="col-span-full space-y-1">
               <Label className="text-xs">
                 Applicant <span className="text-destructive">*</span>
               </Label>
@@ -1012,7 +946,7 @@ export default function AgreementWorkflowPage() {
                   <SelectValue placeholder="Select applicant…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(meta?.applicants ?? []).map((a: any) => (
+                  {(meta?.applicants ?? []).map((a: OptionItem) => (
                     <SelectItem key={a.Id} value={String(a.Id)}>
                       {a.ApplicantName} ({a.ApplicantNo})
                     </SelectItem>
@@ -1022,11 +956,13 @@ export default function AgreementWorkflowPage() {
             </div>
 
             {/* Agreement */}
-            <div className="col-span-2 space-y-1">
+            <div className="col-span-full space-y-1">
               <Label className="text-xs">Agreement</Label>
               <Select
                 value={form.AgreementId || ""}
-                onValueChange={(v) => setForm((f) => ({ ...f, AgreementId: v }))}
+                onValueChange={(v) =>
+                  setForm((f) => ({ ...f, AgreementId: v }))
+                }
                 disabled={!form.ApplicantId}
               >
                 <SelectTrigger className="rounded-[9px]">
@@ -1041,11 +977,11 @@ export default function AgreementWorkflowPage() {
                 <SelectContent>
                   {(meta?.agreements ?? [])
                     .filter(
-                      (ag: any) =>
+                      (ag: OptionItem) =>
                         !form.ApplicantId ||
                         String(ag.ApplicantId) === form.ApplicantId,
                     )
-                    .map((ag: any) => (
+                    .map((ag: OptionItem) => (
                       <SelectItem key={ag.Id} value={String(ag.Id)}>
                         {ag.AgreementNo}
                       </SelectItem>
@@ -1068,11 +1004,11 @@ export default function AgreementWorkflowPage() {
                 <SelectContent>
                   {(meta?.bookings ?? [])
                     .filter(
-                      (b: any) =>
+                      (b: OptionItem) =>
                         !form.ApplicantId ||
                         String(b.ApplicantId) === form.ApplicantId,
                     )
-                    .map((b: any) => (
+                    .map((b: OptionItem) => (
                       <SelectItem key={b.Id} value={String(b.Id)}>
                         {b.BookingNo}
                       </SelectItem>
@@ -1097,11 +1033,11 @@ export default function AgreementWorkflowPage() {
                 <SelectContent>
                   {(meta?.unitSelections ?? [])
                     .filter(
-                      (u: any) =>
+                      (u: OptionItem) =>
                         !form.ApplicantId ||
                         String(u.ApplicantId) === form.ApplicantId,
                     )
-                    .map((u: any) => (
+                    .map((u: OptionItem) => (
                       <SelectItem key={u.Id} value={String(u.Id)}>
                         {u.SelectionNo} — {u.UnitNo}
                       </SelectItem>
@@ -1121,7 +1057,7 @@ export default function AgreementWorkflowPage() {
                   <SelectValue placeholder="Select…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(meta?.projects ?? []).map((p: any) => (
+                  {(meta?.projects ?? []).map((p: OptionItem) => (
                     <SelectItem key={p.Id} value={String(p.Id)}>
                       {p.Name}
                     </SelectItem>
@@ -1141,7 +1077,7 @@ export default function AgreementWorkflowPage() {
                   <SelectValue placeholder="Select…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(meta?.companies ?? []).map((c: any) => (
+                  {(meta?.companies ?? []).map((c: OptionItem) => (
                     <SelectItem key={c.Id} value={String(c.Id)}>
                       {c.Name}
                     </SelectItem>
@@ -1151,7 +1087,7 @@ export default function AgreementWorkflowPage() {
             </div>
 
             {/* Step due dates */}
-            <div className="col-span-2 border-t border-border pt-3">
+            <div className="col-span-full border-t border-border pt-3">
               <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">
                 Step Due Dates (optional)
               </p>
@@ -1174,7 +1110,7 @@ export default function AgreementWorkflowPage() {
             ))}
 
             {/* Notes */}
-            <div className="col-span-2 space-y-1">
+            <div className="col-span-full space-y-1">
               <Label className="text-xs">Notes</Label>
               <Textarea
                 rows={2}
@@ -1188,7 +1124,7 @@ export default function AgreementWorkflowPage() {
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="mt-2">
             <Button
               variant="outline"
               className="rounded-[9px]"
@@ -1237,15 +1173,15 @@ export default function AgreementWorkflowPage() {
       </Dialog>
 
       {/* ── Delete Confirm ── */}
-      <Dialog
-        open={!!deleteTarget}
-        onOpenChange={() => setDeleteTarget(null)}
-      >
-        <DialogContent className="max-w-sm" aria-describedby={undefined}>
+      <Dialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-sm font-bold">
               Delete Workflow
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Confirm deletion of this workflow record.
+            </DialogDescription>
           </DialogHeader>
           <p className="text-sm text-muted-foreground py-2">
             Are you sure you want to delete{" "}
@@ -1268,7 +1204,9 @@ export default function AgreementWorkflowPage() {
               variant="destructive"
               className="rounded-[9px]"
               disabled={deleteMutation.isPending}
-              onClick={() => deleteMutation.mutate(deleteTarget.Id)}
+              onClick={() =>
+                deleteTarget && deleteMutation.mutate(deleteTarget.Id)
+              }
             >
               {deleteMutation.isPending ? "Deleting…" : "Delete"}
             </Button>
