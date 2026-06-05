@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { AuditLogDrawer } from "@/components/AuditLogDrawer";
 import {
   Plus,
   RefreshCw,
@@ -18,6 +19,7 @@ import {
   FileText,
   Scale,
   Trash2,
+  Clock,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
@@ -268,6 +270,7 @@ export function LegalMilestonesPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [auditTarget, setAuditTarget] = useState<{ id: number; no: string } | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
 
   // ── Queries ────────────────────────────────────────────────────────────────
@@ -462,6 +465,13 @@ export function LegalMilestonesPage() {
                           className="p-1 rounded hover:bg-red-50 hover:text-red-500 text-muted-foreground transition-colors"
                         >
                           <Trash2 size={13} />
+                        </button>
+                        <button
+                          title="History"
+                          onClick={() => setAuditTarget({ id: rec.Id, no: rec.MilestoneNo ?? `#${rec.Id}` })}
+                          className="p-1 rounded hover:bg-primary/10 hover:text-primary text-muted-foreground transition-colors"
+                        >
+                          <Clock size={13} />
                         </button>
                       </td>
                     </tr>
@@ -725,6 +735,14 @@ export function LegalMilestonesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AuditLogDrawer
+        open={!!auditTarget}
+        onClose={() => setAuditTarget(null)}
+        module="LegalMilestone"
+        recordId={auditTarget?.id ?? null}
+        recordNo={auditTarget?.no}
+      />
     </>
   );
 }

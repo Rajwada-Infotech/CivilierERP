@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ListTodo,
   BellRing,
+  Send,
 } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
@@ -30,8 +31,11 @@ export const followupNavItems: NavItem[] = [
     label: "Agreement",
     icon: FileText,
     children: [
-      { label: "Agreements", path: "/followup/agreement/agreements" },
-      { label: "Legal Milestones", path: "/followup/legal/milestones" },
+      { label: "Agreements",         path: "/followup/agreement/agreements" },
+      { label: "Agreement Workflow", path: "/followup/agreement/workflow" },
+      { label: "Legal Milestones",   path: "/followup/legal/milestones" },
+      { label: "Document Vault",     path: "/followup/agreement/document-vault" },
+      { label: "Communicator",       path: "/followup/agreement/communicator" },
     ],
   },
 

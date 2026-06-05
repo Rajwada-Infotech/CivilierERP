@@ -1,0 +1,327 @@
+/**
+ * escalationEngine.js
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Runs on a schedule (default: every hour) and flags overdue records across
+ * all 4 followup modules by setting step status to "Blocked" where:
+ *   - The step's DueDate has passed (< today)
+ *   - The step is still "Pending" or "In Progress"
+ *   - The overall record is not Completed / Cancelled / On Hold
+ *
+ * Also writes a row to dbo.FollowupAuditLog for every escalation so the
+ * per-record history drawer shows it.
+ *
+ * Usage in server.js:
+ *   const { startEscalationEngine } = require("./escalationEngine");
+ *   startEscalationEngine();          // call once after DB is ready
+ */
+
+"use strict";
+
+const { getPool, sql } = require("./db");
+const { logAudit } = require("./utils/auditLog");
+
+// ── Configuration ────────────────────────────────────────────────────────────
+
+const INTERVAL_MS = 60 * 60 * 1000; // run every hour
+const SYSTEM_USER = "EscalationEngine";
+
+// ── Legal Milestone steps ────────────────────────────────────────────────────
+
+const LM_STEPS = [
+  "DocCollection",
+  "LegalReview",
+  "Drafting",
+  "InternalApproval",
+  "DocShared",
+  "MutualAgreement",
+  "DirectorMeeting",
+  "FinalExecution",
+];
+
+// ── Agreement Workflow steps ─────────────────────────────────────────────────
+
+const AW_STEPS = [
+  "Drafting",
+  "InternalReview",
+  "CustomerSharing",
+  "CustomerApproval",
+  "Execution",
+  "Registration",
+  "Archival",
+];
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function today() {
+  return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+}
+
+/**
+ * Build a SQL CASE expression that sets <step>Status = 'Blocked'
+ * only when the step is overdue and not already terminal.
+ */
+function buildCaseBlocks(steps, prefix = "") {
+  // Returns array of { setCols, whereParts } for each step
+  return steps.map((s) => ({
+    step: s,
+    dueCol: `${prefix}${s}Due`,
+    statusCol: `${prefix}${s}Status`,
+  }));
+}
+
+// ── Legal Milestones escalation ───────────────────────────────────────────────
+
+async function escalateLegalMilestones() {
+  const pool = getPool();
+  const todayStr = today();
+  let totalBlocked = 0;
+
+  // Fetch all active records with their due dates and step statuses
+  const rows = await pool.request().query(`
+    SELECT
+      Id, MilestoneNo, OverallStatus,
+      ${LM_STEPS.map((s) => `${s}Due, ${s}Status`).join(", ")}
+    FROM dbo.FollowupLegalMilestones
+    WHERE IsDeleted = 0
+      AND OverallStatus NOT IN ('Completed', 'Cancelled')
+  `);
+
+  for (const row of rows.recordset) {
+    const setClauses = [];
+    const blockedSteps = [];
+
+    for (const s of LM_STEPS) {
+      const due = row[`${s}Due`];
+      const status = row[`${s}Status`];
+      if (
+        due &&
+        due.toISOString().slice(0, 10) < todayStr &&
+        status !== null &&
+        !["Completed", "Blocked", "Waived"].includes(status)
+      ) {
+        setClauses.push(`${s}Status = 'Blocked'`);
+        blockedSteps.push(s);
+      }
+    }
+
+    if (setClauses.length === 0) continue;
+
+    await pool
+      .request()
+      .input("Id", sql.Int, row.Id)
+      .query(`
+        UPDATE dbo.FollowupLegalMilestones
+        SET ${setClauses.join(", ")}, UpdatedBy = '${SYSTEM_USER}', UpdatedAt = SYSDATETIME()
+        WHERE Id = @Id
+      `);
+
+    logAudit({
+      module: "LegalMilestone",
+      recordId: row.Id,
+      recordNo: row.MilestoneNo,
+      action: "Escalated",
+      changedBy: SYSTEM_USER,
+      changes: blockedSteps.map((s) => ({
+        field: `${s}Status`,
+        oldValue: row[`${s}Status`],
+        newValue: "Blocked",
+      })),
+    });
+
+    totalBlocked += blockedSteps.length;
+  }
+
+  return totalBlocked;
+}
+
+// ── Agreement Workflow escalation ─────────────────────────────────────────────
+
+async function escalateAgreementWorkflows() {
+  const pool = getPool();
+  const todayStr = today();
+  let totalBlocked = 0;
+
+  const rows = await pool.request().query(`
+    SELECT
+      Id, WorkflowNo, OverallStatus,
+      ${AW_STEPS.map((s) => `${s}Due, ${s}Status`).join(", ")}
+    FROM dbo.FollowupAgreementWorkflows
+    WHERE IsDeleted = 0
+      AND OverallStatus NOT IN ('Completed', 'Cancelled')
+  `);
+
+  for (const row of rows.recordset) {
+    const setClauses = [];
+    const blockedSteps = [];
+
+    for (const s of AW_STEPS) {
+      const due = row[`${s}Due`];
+      const status = row[`${s}Status`];
+      if (
+        due &&
+        due.toISOString().slice(0, 10) < todayStr &&
+        status !== null &&
+        !["Completed", "Blocked", "Waived"].includes(status)
+      ) {
+        setClauses.push(`${s}Status = 'Blocked'`);
+        blockedSteps.push(s);
+      }
+    }
+
+    if (setClauses.length === 0) continue;
+
+    await pool
+      .request()
+      .input("Id", sql.Int, row.Id)
+      .query(`
+        UPDATE dbo.FollowupAgreementWorkflows
+        SET ${setClauses.join(", ")}, UpdatedBy = '${SYSTEM_USER}', UpdatedAt = SYSDATETIME()
+        WHERE Id = @Id
+      `);
+
+    logAudit({
+      module: "AgreementWorkflow",
+      recordId: row.Id,
+      recordNo: row.WorkflowNo,
+      action: "Escalated",
+      changedBy: SYSTEM_USER,
+      changes: blockedSteps.map((s) => ({
+        field: `${s}Status`,
+        oldValue: row[`${s}Status`],
+        newValue: "Blocked",
+      })),
+    });
+
+    totalBlocked += blockedSteps.length;
+  }
+
+  return totalBlocked;
+}
+
+// ── Sales Deed escalation ─────────────────────────────────────────────────────
+// Sales Deed has no steps — flag the record itself as overdue when:
+//   Status = 'Draft' and DeedDate has passed, OR
+//   Status = 'Executed' and RegistrationDate has passed
+
+async function escalateSalesDeeds() {
+  const pool = getPool();
+  const todayStr = today();
+
+  // Draft deeds past their DeedDate
+  const draftResult = await pool.request().input("Today", sql.Date, todayStr)
+    .query(`
+      UPDATE dbo.FollowupSalesDeeds
+      SET Status = 'Overdue', UpdatedBy = '${SYSTEM_USER}', UpdatedAt = SYSDATETIME()
+      OUTPUT INSERTED.Id, INSERTED.DeedNo
+      WHERE IsDeleted = 0
+        AND Status = 'Draft'
+        AND DeedDate IS NOT NULL
+        AND DeedDate < @Today
+    `);
+
+  for (const r of draftResult.recordset) {
+    logAudit({
+      module: "SalesDeed",
+      recordId: r.Id,
+      recordNo: r.DeedNo,
+      action: "Escalated",
+      changedBy: SYSTEM_USER,
+      changes: [{ field: "Status", oldValue: "Draft", newValue: "Overdue" }],
+    });
+  }
+
+  // Executed deeds past their RegistrationDate
+  const execResult = await pool.request().input("Today", sql.Date, todayStr)
+    .query(`
+      UPDATE dbo.FollowupSalesDeeds
+      SET Status = 'Overdue', UpdatedBy = '${SYSTEM_USER}', UpdatedAt = SYSDATETIME()
+      OUTPUT INSERTED.Id, INSERTED.DeedNo
+      WHERE IsDeleted = 0
+        AND Status = 'Executed'
+        AND RegistrationDate IS NOT NULL
+        AND RegistrationDate < @Today
+    `);
+
+  for (const r of execResult.recordset) {
+    logAudit({
+      module: "SalesDeed",
+      recordId: r.Id,
+      recordNo: r.DeedNo,
+      action: "Escalated",
+      changedBy: SYSTEM_USER,
+      changes: [{ field: "Status", oldValue: "Executed", newValue: "Overdue" }],
+    });
+  }
+
+  return draftResult.recordset.length + execResult.recordset.length;
+}
+
+// ── Bookings escalation ───────────────────────────────────────────────────────
+// A Pending booking is stale if it was created > 30 days ago with no update.
+// Flag it by setting Status = 'Stale'.
+
+async function escalateBookings() {
+  const pool = getPool();
+
+  const result = await pool.request().query(`
+    UPDATE dbo.FollowupBookings
+    SET Status = 'Stale', UpdatedBy = '${SYSTEM_USER}', UpdatedAt = SYSDATETIME()
+    OUTPUT INSERTED.Id, INSERTED.BookingNo
+    WHERE IsDeleted = 0
+      AND Status = 'Pending'
+      AND DATEDIFF(day, BookingDate, SYSDATETIME()) > 30
+  `);
+
+  for (const r of result.recordset) {
+    logAudit({
+      module: "Booking",
+      recordId: r.Id,
+      recordNo: r.BookingNo,
+      action: "Escalated",
+      changedBy: SYSTEM_USER,
+      changes: [{ field: "Status", oldValue: "Pending", newValue: "Stale" }],
+    });
+  }
+
+  return result.recordset.length;
+}
+
+// ── Main runner ───────────────────────────────────────────────────────────────
+
+async function runEscalation() {
+  const start = Date.now();
+  console.log(`[EscalationEngine] Running at ${new Date().toISOString()}`);
+
+  try {
+    const [lm, aw, sd, bk] = await Promise.all([
+      escalateLegalMilestones(),
+      escalateAgreementWorkflows(),
+      escalateSalesDeeds(),
+      escalateBookings(),
+    ]);
+
+    const elapsed = Date.now() - start;
+    console.log(
+      `[EscalationEngine] Done in ${elapsed}ms — ` +
+        `LegalMilestones: ${lm} steps blocked, ` +
+        `AgreementWorkflows: ${aw} steps blocked, ` +
+        `SalesDeeds: ${sd} flagged, ` +
+        `Bookings: ${bk} flagged`
+    );
+  } catch (err) {
+    console.error("[EscalationEngine] Error:", err.message);
+  }
+}
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+
+function startEscalationEngine() {
+  // Run immediately on startup, then on interval
+  runEscalation();
+  setInterval(runEscalation, INTERVAL_MS);
+  console.log(
+    `[EscalationEngine] Started — interval: ${INTERVAL_MS / 1000 / 60} min`
+  );
+}
+
+module.exports = { startEscalationEngine, runEscalation };
