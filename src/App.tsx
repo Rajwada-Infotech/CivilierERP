@@ -296,6 +296,15 @@ const FinanceDemandsPage = lazy(() =>
     default: module.FinanceDemandsPage,
   })),
 );
+const AgreementWorkflowPage = lazy(
+  () => import("./pages/followup/AgreementWorkflow")
+);
+const DocumentVaultPage = lazy(
+  () => import("./pages/followup/DocumentVault")
+);
+const CommunicatorPage = lazy(
+  () => import("./pages/followup/Communicator")
+);
 const FollowupPaymentsPage = lazy(() =>
   import("./pages/followup/FinancePayments").then((module) => ({
     default: module.FinancePaymentsPage,
@@ -868,6 +877,30 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ProjectStatusReportPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/agreement/workflow"
+        element={
+          <ProtectedRoute>
+            <AgreementWorkflowPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/agreement/document-vault"
+        element={
+          <ProtectedRoute>
+            <DocumentVaultPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/agreement/communicator"
+        element={
+          <ProtectedRoute>
+            <CommunicatorPage />
           </ProtectedRoute>
         }
       />

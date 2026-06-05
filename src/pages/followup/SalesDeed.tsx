@@ -51,6 +51,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { SignaturePicker } from "@/components/SignaturePicker";
+import { AuditLogDrawer } from "@/components/AuditLogDrawer";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -444,6 +446,8 @@ export function SalesDeedPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  const [signatureId, setSignatureId] = useState<number | null>(null);
+  const [auditTarget, setAuditTarget] = useState<{ id: number; no: string } | null>(null);
 
   const { data: meta } = useQuery({
     queryKey: ["sales-deed-meta"],
@@ -542,6 +546,7 @@ export function SalesDeedPage() {
   function openCreate() {
     setEditId(null);
     setForm(EMPTY_FORM);
+    setSignatureId(null);
     setDialogOpen(true);
   }
 
@@ -569,6 +574,7 @@ export function SalesDeedPage() {
       Status: deed.Status,
       Notes: deed.Notes ?? "",
     });
+    setSignatureId((deed as any).SignatureId ?? null);
     setDialogOpen(true);
   }
 
@@ -594,6 +600,7 @@ export function SalesDeedPage() {
       WitnessNames: form.WitnessNames || null,
       Status: form.Status,
       Notes: form.Notes || null,
+      SignatureId: signatureId,
     };
   }
 
@@ -1238,6 +1245,15 @@ export function SalesDeedPage() {
                                   >
                                     <Pencil size={13} /> Edit
                                   </button>
+                                  <button
+                                    className="sd-menu-item"
+                                    onClick={() => {
+                                      setAuditTarget({ id: deed.Id, no: deed.DeedNo });
+                                      setOpenMenuId(null);
+                                    }}
+                                  >
+                                    <Clock size={13} /> History
+                                  </button>
                                   {canDeleteRecords && (
                                     <button
                                       className="sd-menu-item danger"
@@ -1593,6 +1609,15 @@ export function SalesDeedPage() {
                 rows={2}
               />
             </div>
+
+            {/* Signature stamp */}
+            <div className="space-y-2">
+              <Label>Signature Stamp (optional)</Label>
+              <SignaturePicker
+                value={signatureId}
+                onChange={setSignatureId}
+              />
+            </div>
           </div>
 
           <DialogFooter>
@@ -1643,6 +1668,14 @@ export function SalesDeedPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AuditLogDrawer
+        open={!!auditTarget}
+        onClose={() => setAuditTarget(null)}
+        module="SalesDeed"
+        recordId={auditTarget?.id ?? null}
+        recordNo={auditTarget?.no}
+      />
     </>
   );
 }
