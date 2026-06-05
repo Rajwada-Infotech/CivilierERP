@@ -2,6 +2,7 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
+const { logAudit } = require("../utils/auditLog");
 
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -515,6 +516,7 @@ router.post(
       }
 
       await transaction.commit();
+      logAudit({ module: "Booking", recordId: id, recordNo: bookingNo, action: "Created", changedBy: userName });
       res
         .status(201)
         .json({ Id: id, BookingNo: bookingNo, Status: payload.Status });
@@ -636,11 +638,10 @@ router.put(
         );
 
       await transaction.commit();
+      logAudit({ module: "Booking", recordId: id, recordNo: bookingNo, action: "Updated", notes: `Status: ${payload.Status}`, changedBy: userName });
       res.json({ success: true });
     } catch (err) {
-      try {
-        await transaction.rollback();
-      } catch {}
+      try { await transaction.rollback(); } catch {}
       console.error("followupBookings PUT error:", err);
       res.status(500).json({ error: "Failed to update booking" });
     }
@@ -667,6 +668,7 @@ router.delete(
           SET IsDeleted = 1, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
           WHERE Id = @Id AND IsDeleted = 0
         `);
+      logAudit({ module: "Booking", recordId: id, action: "Deleted", changedBy: userName });
       res.json({ success: true });
     } catch (err) {
       console.error("followupBookings DELETE error:", err);
@@ -676,7 +678,3 @@ router.delete(
 );
 
 module.exports = router;
-
-
-
-

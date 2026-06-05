@@ -9,6 +9,7 @@ const cors = require("cors");
 const compression = require("compression");
 
 const { connectDB, closeDB } = require("./db");
+const { startEscalationEngine } = require("./escalationEngine");
 const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
@@ -164,6 +165,11 @@ const ALL_ROUTES = [
   { path: "/api/widget-catalog", file: "./routes/widgetCatalogAdmin" },
   { path: "/api/page-definitions", file: "./routes/pageDefinitions" },
   { path: "/api/lookups", file: "./routes/lookups" },
+  { path: "/api/followup-agreement-workflow", file: "./routes/followupAgreementWorkflow" },
+  { path: "/api/followup-document-vault",     file: "./routes/followupDocumentVault" },
+  { path: "/api/followup-communicator", file: "./routes/followupCommunicator" },
+  { path: "/api/followup-audit-log", file: "./routes/followupAuditLog" },
+  { path: "/api/followup-escalation", file: "./routes/followupEscalation" },
 ];
 
 // ─── createApp ───────────────────────────────────────────────────────────────
@@ -374,6 +380,7 @@ async function startServer() {
     const server = httpServer.listen(PORT, () => {
       printBanner(PORT);
       logger.info(`[START] Server ready on port ${PORT}`);
+      startEscalationEngine();
     });
 
     setupGracefulShutdown(server, worker);
