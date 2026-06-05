@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -20,13 +20,11 @@ import {
   IndianRupee,
   Eye,
   Printer,
+  Search,
+  ChevronDown,
+  AlertCircle,
+  XCircle,
 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 
 import {
   getBanks,
@@ -116,8 +114,11 @@ const BANK_TYPES = [
   "Regional Rural",
 ];
 
-const inp =
-  "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
+// ─── Shared input class (ContractorMaster style) ─────────────────────────────
+const inputCls =
+  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
+const selectCls =
+  "w-full appearance-none pl-3 pr-9 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
 
 // ─── Bank Type Badges ───────────────────────────────────────────────────────
 const bankTypeBadge: Record<string, string> = {
@@ -228,15 +229,12 @@ function buildColumns(
         const active = Boolean(getValue());
         return (
           <span
-            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${
               active
-                ? "bg-green-500/10 border-green-500/20 text-green-600"
-                : "bg-red-500/10 border-red-500/20 text-red-600"
+                ? "bg-emerald-500/10 text-emerald-600"
+                : "bg-muted text-muted-foreground"
             }`}
           >
-            <span
-              className={`w-1.5 h-1.5 rounded-full mr-1.5 ${active ? "bg-green-500" : "bg-red-500"}`}
-            />
             {active ? "Active" : "Inactive"}
           </span>
         );
@@ -250,7 +248,7 @@ function buildColumns(
         const bank = row.original;
         const id = String(bank.BId);
         return (
-          <div className="flex items-center justify-end gap-1">
+          <div className="flex items-center justify-start gap-2 w-full min-w-[120px]">
             {deleteId === id ? (
               <>
                 <span className="text-[11px] text-muted-foreground mr-1">
@@ -258,44 +256,46 @@ function buildColumns(
                 </span>
                 <button
                   onClick={() => onDeleteConfirm(id)}
-                  className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+                  className="p-1 rounded text-destructive hover:bg-destructive/10"
                 >
-                  <Check size={13} />
+                  <Check size={12} />
                 </button>
                 <button
                   onClick={onDeleteCancel}
-                  className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
+                  className="p-1 rounded text-muted-foreground hover:bg-muted"
                 >
-                  <X size={13} />
+                  <X size={12} />
                 </button>
               </>
             ) : (
               <>
                 <button
                   onClick={() => onView(bank)}
-                  className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
+                  className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
                   title="View details"
                 >
-                  <Eye size={13} />
+                  <Eye size={15} />
                 </button>
                 <button
                   onClick={() => onPrint(bank)}
-                  className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
+                  className="p-1 rounded text-amber-500 hover:bg-amber-500/10 transition-colors"
                   title="Print"
                 >
-                  <Printer size={13} />
+                  <Printer size={15} />
                 </button>
                 <button
                   onClick={() => onEdit(bank)}
-                  className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors"
+                  className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
+                  title="Edit"
                 >
-                  <Edit2 size={13} />
+                  <Edit2 size={15} />
                 </button>
                 <button
                   onClick={() => onDeleteRequest(id)}
-                  className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+                  className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                  title="Delete"
                 >
-                  <Trash2 size={13} />
+                  <Trash2 size={15} />
                 </button>
               </>
             )}
@@ -338,13 +338,47 @@ const BankMaster: React.FC = () => {
   } = useForm<FormState>({
     resolver: zodResolver(bankFormSchema),
     defaultValues: EMPTY,
-    mode: "onChange", // Optional: real-time validation
+    mode: "onChange",
   });
 
   const form = watch();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [viewRow, setViewRow] = useState<BankRecord | null>(null);
+
+  // ─── Table filter / pagination state ─────────────────────────────────────
+  const [search, setSearch] = useState("");
+  const [filterBankType, setFilterBankType] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [page, setPage] = useState(1);
+  const limit = 10;
+
+
+  // ─── Filtered list ────────────────────────────────────────────────────────
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return dbBanks.filter((b) => {
+      const matchSearch =
+        !q ||
+        (b.BName ?? "").toLowerCase().includes(q) ||
+        (b.BBranch ?? "").toLowerCase().includes(q) ||
+        (b.BAccountNumber ?? "").toLowerCase().includes(q) ||
+        (b.BIfscCode ?? "").toLowerCase().includes(q) ||
+        (b.BCompanyName ?? "").toLowerCase().includes(q);
+      const matchType = !filterBankType || b.BBankType === filterBankType;
+      const matchStatus =
+        !filterStatus ||
+        (filterStatus === "active" ? b.BStatus : !b.BStatus);
+      return matchSearch && matchType && matchStatus;
+    });
+  }, [dbBanks, search, filterBankType, filterStatus]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, filterBankType, filterStatus]);
+
+  const totalPages = Math.max(Math.ceil(filtered.length / limit), 1);
+  const paginated = filtered.slice((page - 1) * limit, page * limit);
 
   const toPayload = (f: FormState) => ({
     BName: f.bankName.trim() || null,
@@ -369,7 +403,6 @@ const BankMaster: React.FC = () => {
         await addBank(toPayload(values));
         toast.success("Bank added successfully!");
       }
-
       await queryClient.invalidateQueries({ queryKey: ["bank-master"] });
       reset(EMPTY);
       setEditingId(null);
@@ -465,334 +498,491 @@ const BankMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Bank Master"]} />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Bank Master
-      </h1>
 
-      <div className="space-y-5">
-        {/* Form Section */}
-        <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
-            <div>
-              <h2 className="font-heading font-semibold text-foreground text-sm">
-                {editingId ? "Edit Bank" : "Add Bank"}
-              </h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                {editingId
-                  ? "Modify bank details below."
-                  : "Register a new bank account."}
-              </p>
-            </div>
-            {editingId && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-primary/10 text-primary border border-primary/20">
-                Editing
-              </span>
-            )}
+      <div className="relative space-y-8 mt-6">
+        {/* ── Page Header ── */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Bank Master
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Manage bank accounts with branch, IFSC and balance details
+            </p>
           </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs text-muted-foreground bg-muted/60 rounded-lg px-3 py-1.5">
+              {dbBanks.length} Banks
+            </span>
+          </div>
+        </div>
 
-          <form className="p-5" onSubmit={handleSubmit(handleSave)}>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Company Name */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Company Name
-                </label>
-                <div className="relative">
-                  <Building2
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                  />
-                  <select
-                    {...register("companyName")}
-                    className={`${inp} pl-8`}
-                  >
-                    <option value="">Select Company...</option>
-                    {companies.map((c) => (
-                      <option key={c.id} value={c.label}>
-                        {c.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Bank Name */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Bank Name <span className="text-destructive">*</span>
-                </label>
-                <div className="relative">
-                  <Landmark
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <input
-                    type="text"
-                    {...register("bankName")}
-                    placeholder="e.g. State Bank of India"
-                    className={`${inp} pl-8 ${errors.bankName ? "border-destructive" : ""}`}
-                  />
-                </div>
-                {errors.bankName && (
-                  <p className="text-[11px] text-destructive mt-1">
-                    {errors.bankName.message}
-                  </p>
-                )}
-              </div>
-
-              {/* Branch */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Branch Name
-                </label>
-                <input
-                  type="text"
-                  {...register("branch")}
-                  placeholder="e.g. Park Street Branch"
-                  className={inp}
-                />
-              </div>
-
-              {/* Account Number */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Account Number <span className="text-destructive">*</span>
-                </label>
-                <div className="relative">
-                  <Hash
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <input
-                    type="text"
-                    {...register("accountNo")}
-                    placeholder="Bank account number"
-                    className={`${inp} pl-8 font-mono tracking-widest ${errors.accountNo ? "border-destructive" : ""}`}
-                  />
-                </div>
-                {errors.accountNo && (
-                  <p className="text-[11px] text-destructive mt-1">
-                    {errors.accountNo.message}
-                  </p>
-                )}
-              </div>
-
-              {/* IFSC Code */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  IFSC Code <span className="text-destructive">*</span>
-                </label>
-                <div className="relative">
-                  <Hash
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <input
-                    type="text"
-                    {...register("ifsc")}
-                    value={form.ifsc}
-                    onChange={(e) =>
-                      setValue(
-                        "ifsc",
-                        e.target.value.toUpperCase().slice(0, 11),
-                        { shouldValidate: true },
-                      )
-                    }
-                    placeholder="e.g. SBIN0001234"
-                    maxLength={11}
-                    className={`${inp} pl-8 font-mono tracking-widest uppercase ${errors.ifsc ? "border-destructive" : ""}`}
-                  />
-                  {form.ifsc.length === 11 && IFSC_REGEX.test(form.ifsc) && (
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded">
-                      ✓
-                    </span>
-                  )}
-                </div>
-                {errors.ifsc && (
-                  <p className="text-[11px] text-destructive mt-1">
-                    {errors.ifsc.message}
-                  </p>
-                )}
-              </div>
-
-              {/* Account Type */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Account Type
-                </label>
-                <select {...register("accountType")} className={inp}>
-                  <option value="">Select Account Type...</option>
-                  {ACCOUNT_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Bank Type */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Bank Type
-                </label>
-                <select {...register("bankType")} className={inp}>
-                  <option value="">Select Bank Type...</option>
-                  {BANK_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Holder Name */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Account Holder Name
-                </label>
-                <div className="relative">
-                  <CreditCard
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <input
-                    type="text"
-                    {...register("holderName")}
-                    placeholder="Name on account"
-                    className={`${inp} pl-8`}
-                  />
-                </div>
-              </div>
-
-              {/* Opening Balance */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Opening Balance (₹)
-                </label>
-                <div className="relative">
-                  <IndianRupee
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    {...register("openingBalance")}
-                    placeholder="0.00"
-                    className={`${inp} pl-8 font-mono ${errors.openingBalance ? "border-destructive" : ""}`}
-                  />
-                </div>
-                {errors.openingBalance && (
-                  <p className="text-[11px] text-destructive mt-1">
-                    {errors.openingBalance.message}
-                  </p>
-                )}
-              </div>
-
-              {/* Address */}
-              <div className="sm:col-span-2">
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Bank Address
-                </label>
-                <div className="relative">
-                  <MapPin
-                    size={14}
-                    className="absolute left-3 top-3 text-muted-foreground"
-                  />
-                  <textarea
-                    rows={2}
-                    {...register("address")}
-                    placeholder="Branch address..."
-                    className={`${inp} pl-8 resize-none`}
-                  />
-                </div>
-              </div>
-
-              {/* Status */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Status
-                </label>
+        {/* ── Form Card ── */}
+        <div className="rounded-xl border border-border bg-card shadow-sm">
+          {/* Card Header */}
+          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
+            <div className="flex items-center gap-3">
+              {editingId && (
                 <button
                   type="button"
-                  onClick={() => setValue("status", !form.status)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    form.status ? "bg-primary" : "bg-muted border border-border"
-                  }`}
+                  onClick={handleReset}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  <span
-                    className={`inline-block h-4 w-4 rounded-full bg-primary-foreground transition-transform shadow-sm ${
-                      form.status ? "translate-x-6" : "translate-x-1"
-                    }`}
-                  />
+                  <RotateCcw size={15} />
+                  <span className="hidden sm:inline">Back</span>
                 </button>
-                <span className="ml-2 text-xs text-muted-foreground font-body">
-                  {form.status ? "Active" : "Inactive"}
-                </span>
-              </div>
+              )}
+              {editingId && <span className="text-border/60">|</span>}
+              <h2 className="text-base font-heading font-semibold text-foreground">
+                {editingId ? "Edit Bank" : "Add Bank"}
+              </h2>
             </div>
-
-            <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border">
-              <button
-                type="submit"
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
-              >
-                <Plus size={15} />
-                {editingId ? "Update" : "Save"}
-              </button>
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={handleReset}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
+                className="px-4 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
               >
-                <RotateCcw size={14} />
-                Reset
+                <RotateCcw size={13} />
+                {editingId ? "Cancel" : "Reset"}
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmit(handleSave)}
+                className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white flex items-center gap-2"
+              >
+                {editingId ? <Check size={14} /> : <Plus size={14} />}
+                {editingId ? "Update Bank" : "Save Bank"}
               </button>
             </div>
-          </form>
+          </div>
+
+          <div className="px-5 sm:px-6 py-6 space-y-7">
+            {/* ── Section: Basic Information ── */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+                  <Landmark size={12} className="text-primary" />
+                </div>
+                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                  Basic Information
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
+                {/* Company Name */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Company Name
+                  </label>
+                  <div className="relative">
+                    <Building2
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    <select
+                      {...register("companyName")}
+                      className={`${selectCls} pl-8`}
+                    >
+                      <option value="">Select Company...</option>
+                      {companies.map((c) => (
+                        <option key={c.id} value={c.label}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Bank Name */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    Bank Name <span className="text-destructive">*</span>
+                  </label>
+                  <div className="relative">
+                    <Landmark
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    <input
+                      type="text"
+                      {...register("bankName")}
+                      placeholder="e.g. State Bank of India"
+                      className={`${inputCls} pl-8 ${errors.bankName ? "border-red-400" : ""}`}
+                    />
+                  </div>
+                  {errors.bankName && (
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertCircle size={11} /> {errors.bankName.message}
+                    </p>
+                  )}
+                </div>
+
+                {/* Branch */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Branch Name
+                  </label>
+                  <input
+                    type="text"
+                    {...register("branch")}
+                    placeholder="e.g. Park Street Branch"
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* ── Section: Account Details ── */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+                  <CreditCard size={12} className="text-primary" />
+                </div>
+                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                  Account Details
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
+                {/* Account Number */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    Account Number <span className="text-destructive">*</span>
+                  </label>
+                  <div className="relative">
+                    <Hash
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    <input
+                      type="text"
+                      {...register("accountNo")}
+                      placeholder="Bank account number"
+                      className={`${inputCls} pl-8 font-mono tracking-widest ${errors.accountNo ? "border-red-400" : ""}`}
+                    />
+                  </div>
+                  {errors.accountNo && (
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertCircle size={11} /> {errors.accountNo.message}
+                    </p>
+                  )}
+                </div>
+
+                {/* IFSC Code */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    IFSC Code <span className="text-destructive">*</span>
+                  </label>
+                  <div className="relative">
+                    <Hash
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    <input
+                      type="text"
+                      {...register("ifsc")}
+                      value={form.ifsc}
+                      onChange={(e) =>
+                        setValue(
+                          "ifsc",
+                          e.target.value.toUpperCase().slice(0, 11),
+                          { shouldValidate: true },
+                        )
+                      }
+                      placeholder="e.g. SBIN0001234"
+                      maxLength={11}
+                      className={`${inputCls} pl-8 font-mono tracking-widest uppercase ${errors.ifsc ? "border-red-400" : ""}`}
+                    />
+                    {form.ifsc.length === 11 && IFSC_REGEX.test(form.ifsc) && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded">
+                        ✓
+                      </span>
+                    )}
+                  </div>
+                  {errors.ifsc && (
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertCircle size={11} /> {errors.ifsc.message}
+                    </p>
+                  )}
+                </div>
+
+                {/* Account Holder Name */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Account Holder Name
+                  </label>
+                  <div className="relative">
+                    <CreditCard
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    <input
+                      type="text"
+                      {...register("holderName")}
+                      placeholder="Name on account"
+                      className={`${inputCls} pl-8`}
+                    />
+                  </div>
+                </div>
+
+                {/* Account Type */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Account Type
+                  </label>
+                  <div className="relative">
+                    <select {...register("accountType")} className={selectCls}>
+                      <option value="">Select Account Type...</option>
+                      {ACCOUNT_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Bank Type */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Bank Type
+                  </label>
+                  <div className="relative">
+                    <select {...register("bankType")} className={selectCls}>
+                      <option value="">Select Bank Type...</option>
+                      {BANK_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Opening Balance */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Opening Balance (₹)
+                  </label>
+                  <div className="relative">
+                    <IndianRupee
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      {...register("openingBalance")}
+                      placeholder="0.00"
+                      className={`${inputCls} pl-8 font-mono ${errors.openingBalance ? "border-red-400" : ""}`}
+                    />
+                  </div>
+                  {errors.openingBalance && (
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertCircle size={11} /> {errors.openingBalance.message}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* ── Section: Address ── */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+                  <MapPin size={12} className="text-primary" />
+                </div>
+                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                  Address
+                </p>
+              </div>
+              <div className="relative">
+                <MapPin
+                  size={13}
+                  className="absolute left-3 top-3 text-muted-foreground pointer-events-none"
+                />
+                <textarea
+                  rows={2}
+                  {...register("address")}
+                  placeholder="Branch address..."
+                  className={`${inputCls} pl-8 resize-none`}
+                />
+              </div>
+            </div>
+
+            {/* ── Status Toggle ── */}
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setValue("status", !form.status)}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${
+                  form.status ? "bg-emerald-500" : "bg-muted-foreground/30"
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                    form.status ? "translate-x-4" : "translate-x-0.5"
+                  }`}
+                />
+              </button>
+              <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                Status —{" "}
+                <span
+                  className={
+                    form.status ? "text-emerald-600" : "text-foreground"
+                  }
+                >
+                  {form.status ? "Active" : "Inactive"}
+                </span>
+              </span>
+            </div>
+          </div>
         </div>
 
-        {/* Table Section */}
-        <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-border bg-card/60">
-            <h3 className="font-heading font-semibold text-foreground text-sm">
-              Bank Records
-            </h3>
+        {/* ── Table Section ── */}
+        <div>
+          {/* Toolbar */}
+          <div className="mb-3 flex items-center gap-3 flex-wrap">
+            <div className="relative">
+              <Search
+                size={13}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search name, account, IFSC…"
+                className="w-56 text-sm rounded-lg border border-border pl-9 pr-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+              />
+            </div>
+
+            <div className="relative">
+              <select
+                value={filterBankType}
+                onChange={(e) => setFilterBankType(e.target.value)}
+                className="appearance-none text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+              >
+                <option value="">All Types</option>
+                {BANK_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={12}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+            </div>
+
+            <div className="relative">
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="appearance-none text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+              >
+                <option value="">All Status</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+              <ChevronDown
+                size={12}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+            </div>
+
+            {(search || filterBankType || filterStatus) && (
+              <button
+                onClick={() => {
+                  setSearch("");
+                  setFilterBankType("");
+                  setFilterStatus("");
+                }}
+                className="text-xs font-heading text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors flex items-center gap-1.5"
+              >
+                <X size={11} /> Clear
+              </button>
+            )}
+
           </div>
-          <DataTable
-            data={dbBanks}
-            columns={columns}
-            loading={isLoading}
-            searchPlaceholder="Search banks..."
-            emptyMessage="No banks yet. Add one above."
-            exportConfig={{
-              title: "Bank Master",
-              filename: "bank-master",
-              columns: EXPORT_COLUMNS,
-            }}
-            rowClassName={(row) =>
-              editingId === String(row.original.BId)
-                ? "bg-primary/5 border-l-2 border-l-primary"
-                : ""
-            }
-          />
+
+          {/* Table */}
+          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden [&_th:last-child]:text-left [&_td:last-child]:text-left">
+            <DataTable
+              data={paginated}
+              columns={columns}
+              loading={isLoading}
+              searchPlaceholder="Search banks..."
+              emptyMessage="No banks yet. Add one above."
+              exportConfig={{
+                title: "Bank Master",
+                filename: "bank-master",
+                columns: EXPORT_COLUMNS,
+              }}
+              rowClassName={(row) =>
+                editingId === String(row.original.BId) ? "bg-primary/5" : ""
+              }
+            />
+          </div>
+          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
+            <span className="text-xs text-muted-foreground">
+              Page {page} of {totalPages}
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                disabled={page <= 1}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+                disabled={page >= totalPages}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* View Detail Modal */}
-      <Dialog
-        open={!!viewRow}
-        onOpenChange={(open) => !open && setViewRow(null)}
-      >
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="font-heading text-base">
-              Bank Details
-            </DialogTitle>
-          </DialogHeader>
-          {viewRow && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-1">
+      {/* ── View Detail Drawer ── */}
+      {viewRow && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div
+            className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+            onClick={() => setViewRow(null)}
+          />
+          <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Landmark size={15} className="text-primary" />
+                <h3 className="font-heading font-semibold text-sm text-foreground">
+                  Bank Details
+                </h3>
+              </div>
+              <button
+                onClick={() => setViewRow(null)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
+              >
+                <XCircle size={15} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
               {[
                 { label: "Company", value: viewRow.BCompanyName },
                 { label: "Bank Name", value: viewRow.BName },
@@ -812,42 +1002,55 @@ const BankMaster: React.FC = () => {
                   mono: true,
                 },
                 { label: "Address", value: viewRow.BAddress },
-                {
-                  label: "Status",
-                  value: viewRow.BStatus ? "Active" : "Inactive",
-                },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
-                  <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     {label}
                   </p>
                   <p
-                    className={`text-sm text-foreground break-words ${mono ? "font-mono" : "font-body"}`}
+                    className={`text-sm text-foreground ${mono ? "font-mono font-semibold text-primary" : ""}`}
                   >
                     {value || "—"}
                   </p>
                 </div>
               ))}
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Status
+                </p>
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${viewRow.BStatus ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+                >
+                  {viewRow.BStatus ? "Active" : "Inactive"}
+                </span>
+              </div>
             </div>
-          )}
-          <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
-            {viewRow && (
+            <div className="px-5 py-3 border-t border-border flex justify-end gap-2 bg-muted/20">
               <button
                 onClick={() => handlePrint(viewRow)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-all"
+                className="px-3 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
               >
                 <Printer size={13} /> Print
               </button>
-            )}
-            <button
-              onClick={() => setViewRow(null)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
-            >
-              Close
-            </button>
+              <button
+                onClick={() => setViewRow(null)}
+                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  handleEdit(viewRow);
+                  setViewRow(null);
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm flex items-center gap-1.5"
+              >
+                <Edit2 size={13} /> Edit Bank
+              </button>
+            </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
     </>
   );
 };

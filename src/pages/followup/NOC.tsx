@@ -1057,6 +1057,7 @@ export function NOCPage() {
                       "Unit",
                       "Dates",
                       "Approved By",
+                      "Bank / Loan",
                       "Status",
                       "",
                     ].map((h) => (
@@ -1114,6 +1115,7 @@ export function NOCPage() {
                       <th>Unit / Project</th>
                       <th>NOC Date</th>
                       <th>Approved By</th>
+                      <th>Bank / Loan</th>
                       <th>Status</th>
                       <th></th>
                     </tr>
@@ -1210,6 +1212,65 @@ export function NOCPage() {
                             )}
                           </td>
 
+                          {/* Bank / Loan */}
+                          <td>
+                            {noc.BankName ? (
+                              <div>
+                                <div
+                                  style={{
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                    color: "hsl(var(--foreground))",
+                                  }}
+                                >
+                                  {noc.BankName}
+                                </div>
+                                {noc.BankNOCStatus && (
+                                  <div
+                                    style={{
+                                      fontSize: 11,
+                                      color:
+                                        noc.BankNOCStatus === "Received"
+                                          ? "hsl(142 72% 38%)"
+                                          : noc.BankNOCStatus === "Applied"
+                                            ? "hsl(var(--primary))"
+                                            : "hsl(var(--muted-foreground))",
+                                    }}
+                                  >
+                                    NOC:{" "}
+                                    {noc.BankNOCStatus === "NotApplicable"
+                                      ? "N/A"
+                                      : noc.BankNOCStatus}
+                                  </div>
+                                )}
+                                {noc.LoanSanctionStatus && (
+                                  <div
+                                    style={{
+                                      fontSize: 11,
+                                      color:
+                                        noc.LoanSanctionStatus === "Sanctioned"
+                                          ? "hsl(142 72% 38%)"
+                                          : noc.LoanSanctionStatus ===
+                                              "Rejected"
+                                            ? "hsl(0 84% 50%)"
+                                            : "hsl(var(--muted-foreground))",
+                                    }}
+                                  >
+                                    Loan: {noc.LoanSanctionStatus}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div
+                                style={{
+                                  color: "hsl(var(--muted-foreground))",
+                                  fontSize: 13,
+                                }}
+                              >
+                                —
+                              </div>
+                            )}
+                          </td>
 
                           {/* Status */}
                           <td>
@@ -1488,6 +1549,131 @@ export function NOCPage() {
                 onChange={(e) => set("Reason", e.target.value)}
                 placeholder="Purpose of the NOC…"
               />
+            </div>
+
+            <div className="noc-form-section">Bank NOC / Loan Tracking</div>
+
+            {/* Bank Name + Loan Account */}
+            <div className="noc-form-grid">
+              <div className="space-y-2">
+                <Label>Bank Name</Label>
+                <Input
+                  value={form.BankName}
+                  onChange={(e) => set("BankName", e.target.value)}
+                  placeholder="e.g. HDFC Bank"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Loan Account No</Label>
+                <Input
+                  value={form.LoanAccountNo}
+                  onChange={(e) => set("LoanAccountNo", e.target.value)}
+                  placeholder="Loan account number…"
+                />
+              </div>
+            </div>
+
+            {/* Loan Amount + Sanction Status */}
+            <div className="noc-form-grid">
+              <div className="space-y-2">
+                <Label>Loan Amount (₹)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.LoanAmount}
+                  onChange={(e) => set("LoanAmount", e.target.value)}
+                  placeholder="0.00"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Loan Sanction Status</Label>
+                <select
+                  className="noc-status-select"
+                  value={form.LoanSanctionStatus}
+                  onChange={(e) => set("LoanSanctionStatus", e.target.value)}
+                >
+                  <option value="">— Not set —</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Sanctioned">Sanctioned</option>
+                  <option value="Rejected">Rejected</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Sanction Date + Disbursement Status */}
+            <div className="noc-form-grid">
+              <div className="space-y-2">
+                <Label>Sanction Date</Label>
+                <Input
+                  type="date"
+                  value={form.LoanSanctionDate}
+                  onChange={(e) => set("LoanSanctionDate", e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Disbursement Status</Label>
+                <select
+                  className="noc-status-select"
+                  value={form.LoanDisbursementStatus}
+                  onChange={(e) =>
+                    set("LoanDisbursementStatus", e.target.value)
+                  }
+                >
+                  <option value="">— Not set —</option>
+                  <option value="Pending">Pending</option>
+                  <option value="PartiallyDisbursed">
+                    Partially Disbursed
+                  </option>
+                  <option value="FullyDisbursed">Fully Disbursed</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Disbursement Date + Bank NOC Status */}
+            <div className="noc-form-grid">
+              <div className="space-y-2">
+                <Label>Disbursement Date</Label>
+                <Input
+                  type="date"
+                  value={form.LoanDisbursementDate}
+                  onChange={(e) => set("LoanDisbursementDate", e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Bank NOC Status</Label>
+                <select
+                  className="noc-status-select"
+                  value={form.BankNOCStatus}
+                  onChange={(e) => set("BankNOCStatus", e.target.value)}
+                >
+                  <option value="">— Not set —</option>
+                  <option value="NotApplicable">Not Applicable</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Applied">Applied</option>
+                  <option value="Received">Received</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Bank NOC Date + Notes */}
+            <div className="noc-form-grid">
+              <div className="space-y-2">
+                <Label>Bank NOC Date</Label>
+                <Input
+                  type="date"
+                  value={form.BankNOCDate}
+                  onChange={(e) => set("BankNOCDate", e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Bank NOC Notes</Label>
+                <Input
+                  value={form.BankNOCNotes}
+                  onChange={(e) => set("BankNOCNotes", e.target.value)}
+                  placeholder="Any remarks on bank NOC…"
+                />
+              </div>
             </div>
 
             {/* Notes */}

@@ -161,10 +161,12 @@ router.get(
     try {
       const pool = getPool();
       const result = await pool.request().query(`
-        SELECT id AS ProjectId, name AS ProjectName
-        FROM dbo.enterprise
-        WHERE business_type = 'P'
-        ORDER BY name
+        SELECT DISTINCT pm.id AS ProjectId, pm.name AS ProjectName
+        FROM dbo.BookingPaymentTerms bpt
+        JOIN dbo.FollowupBookings fb ON fb.Id = bpt.BookingID
+        JOIN dbo.enterprise pm       ON pm.id = fb.ProjectId
+        WHERE fb.IsDeleted = 0 AND fb.ProjectId IS NOT NULL
+        ORDER BY pm.name
       `);
       res.json(result.recordset);
     } catch (err) {

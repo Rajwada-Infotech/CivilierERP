@@ -76,6 +76,12 @@ const fields: FieldDef[] = [
       "West Bengal",
     ],
   },
+  {
+    name: "LHeadPaymentTerms",
+    label: "Payment Terms",
+    type: "select",
+    options: ["Advance", "15 Days", "30 Days", "45 Days", "60 Days"],
+  },
   { name: "LHeadAddress", label: "Address", type: "textarea", fullWidth: true },
   { name: "LHeadStatus", label: "Status", type: "toggle", defaultValue: true },
 ];
@@ -86,6 +92,7 @@ const columns: ColumnDef[] = [
   { key: "LHeadContactPerson", label: "Contact Person" },
   { key: "LHeadPhone", label: "Phone" },
   { key: "LGST", label: "GST No." },
+  { key: "LHeadPaymentTerms", label: "Payment Terms" },
   { key: "LHeadStatus", label: "Status" },
 ];
 
@@ -99,6 +106,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "PAN", accessor: "LHeadPan" },
   { header: "GST Type", accessor: "LGSTType" },
   { header: "GST State", accessor: "LGSTState" },
+  { header: "Payment Terms", accessor: "LHeadPaymentTerms" },
   { header: "Address", accessor: "LHeadAddress" },
   {
     header: "Status",
@@ -130,6 +138,7 @@ const CustomerMaster: React.FC = () => {
       LHeadPan: item.LHeadPan || "",
       LGSTType: item.LGSTType || "",
       LGSTState: item.LGSTState || "",
+      LHeadPaymentTerms: item.LHeadPaymentTerms || "",
       LHeadAddress: item.LHeadAddress || "",
       LHeadStatus: Boolean(item.LHeadStatus),
     }));
@@ -163,6 +172,7 @@ const CustomerMaster: React.FC = () => {
         LHeadPan: record.LHeadPan,
         LGSTType: record.LGSTType || null,
         LGSTState: record.LGSTState || null,
+        LHeadPaymentTerms: record.LHeadPaymentTerms,
         LHeadAddress: record.LHeadAddress,
         LHeadStatus: record.LHeadStatus,
         LBranchName: null,
@@ -223,6 +233,7 @@ const CustomerMaster: React.FC = () => {
             { key: "LHeadPan", label: "PAN Number", mono: true },
             { key: "LGSTType", label: "GST Type" },
             { key: "LGSTState", label: "GST State" },
+            { key: "LHeadPaymentTerms", label: "Payment Terms" },
             { key: "LHeadAddress", label: "Address" },
             { key: "LHeadStatus", label: "Status" },
           ],
@@ -244,6 +255,7 @@ const CustomerMaster: React.FC = () => {
               <tr><td>PAN Number</td><td>${row.LHeadPan || "—"}</td></tr>
               <tr><td>GST Type</td><td>${row.LGSTType || "—"}</td></tr>
               <tr><td>GST State</td><td>${row.LGSTState || "—"}</td></tr>
+              <tr><td>Payment Terms</td><td>${row.LHeadPaymentTerms || "—"}</td></tr>
               <tr><td>Address</td><td>${row.LHeadAddress || "—"}</td></tr>
               <tr><td>Status</td><td>${row.LHeadStatus ? "Active" : "Inactive"}</td></tr>
             </table>
