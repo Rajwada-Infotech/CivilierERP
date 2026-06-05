@@ -104,20 +104,4 @@ export const followupNavItems: NavItem[] = [
       { label: "GRN Reminders", path: "/followup/follow-ups/grn-reminders" },
     ],
   },
-
-  // ── 8. Setup ─────────────────────────────────────────────────────────────
-  {
-    label: "Setup",
-    icon: Settings2,
-    children: [
-      {
-        label: "Payment Plan Master",
-        path: "/followup/setup/payment-plan-master",
-      },
-      { label: "Unit Master", path: "/followup/setup/unit-master" },
-      { label: "Block Master", path: "/followup/setup/block-master" },
-      { label: "Customer Master", path: "/followup/setup/customer-master" },
-      { label: "Pending Tasks", path: "/followup/setup/pending-tasks" },
-    ],
-  },
 ];
