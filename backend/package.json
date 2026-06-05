@@ -15,6 +15,7 @@
   "license": "ISC",
   "dependencies": {
     "@tanstack/react-query": "^5.101.0",
+    "axios": "^1.17.0",
     "bcrypt": "^6.0.0",
     "compression": "^1.8.1",
     "cors": "^2.8.6",
@@ -29,6 +30,7 @@
     "lz-string": "^1.5.0",
     "mssql": "^12.2.1",
     "multer": "^2.1.1",
+    "nodemailer": "^8.0.10",
     "pino": "^10.3.1",
     "pino-http": "^10.4.0",
     "pino-pretty": "^13.1.3",

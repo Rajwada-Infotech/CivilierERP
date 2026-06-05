@@ -255,18 +255,25 @@ const FollowupAgreements = lazy(() =>
   })),
 );
 const ApplicantDetail = lazy(() => import("./pages/followup/ApplicantDetail"));
-const ApplicantTimeline = lazy(() => import("./pages/followup/ApplicantTimeline"));
+const ApplicantTimeline = lazy(
+  () => import("./pages/followup/ApplicantTimeline"),
+);
 const FollowupApplications = lazy(
   () => import("./pages/followup/Applications"),
 );
 const WelcomeCallsPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
+  import("./pages/followup/WelcomeCalls").then((module) => ({
     default: module.WelcomeCallsPage,
   })),
 );
 const NocPage = lazy(() =>
   import("./pages/followup/NOC").then((module) => ({
     default: module.NOCPage,
+  })),
+);
+const BankNOCPage = lazy(() =>
+  import("./pages/followup/BankNOC").then((module) => ({
+    default: module.BankNOCPage,
   })),
 );
 const SalesDeedPage = lazy(() =>
@@ -295,6 +302,15 @@ const FinanceDemandsPage = lazy(() =>
   import("./pages/followup/FinanceDemands").then((module) => ({
     default: module.FinanceDemandsPage,
   })),
+);
+const AgreementWorkflowPage = lazy(
+  () => import("./pages/followup/AgreementWorkflow")
+);
+const DocumentVaultPage = lazy(
+  () => import("./pages/followup/DocumentVault")
+);
+const CommunicatorPage = lazy(
+  () => import("./pages/followup/Communicator")
 );
 const FollowupPaymentsPage = lazy(() =>
   import("./pages/followup/FinancePayments").then((module) => ({
@@ -784,6 +800,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/followup/closure/bank-noc"
+        element={
+          <ProtectedRoute>
+            <BankNOCPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/followup/closure/sales-deed"
         element={
           <ProtectedRoute>
@@ -868,6 +892,30 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ProjectStatusReportPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/agreement/workflow"
+        element={
+          <ProtectedRoute>
+            <AgreementWorkflowPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/agreement/document-vault"
+        element={
+          <ProtectedRoute>
+            <DocumentVaultPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/agreement/communicator"
+        element={
+          <ProtectedRoute>
+            <CommunicatorPage />
           </ProtectedRoute>
         }
       />
