@@ -51,14 +51,17 @@ export async function fetchWithAuth(
 
   let response: Response;
 
+  // Do not force Content-Type when the body is FormData — the browser must set
+  // it automatically so it can include the correct multipart boundary string.
+  const isFormData = fetchOptions.body instanceof FormData;
+
   try {
     response = await fetch(apiUrl(url), {
       ...fetchOptions,
       headers: {
-        "Content-Type": "application/json",
+        ...(!isFormData ? { "Content-Type": "application/json" } : {}),
         ...(fetchOptions.headers || {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        // Forward the skip flag as a header so server middleware can honour it.
         ...(skipActivityLog ? { "X-Skip-Activity-Log": "1" } : {}),
       },
     });
