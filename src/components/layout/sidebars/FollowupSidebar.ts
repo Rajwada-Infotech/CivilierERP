@@ -29,7 +29,10 @@ export const followupNavItems: NavItem[] = [
   {
     label: "Agreement",
     icon: FileText,
-    children: [{ label: "Agreements", path: "/followup/agreement/agreements" }],
+    children: [
+      { label: "Agreements", path: "/followup/agreement/agreements" },
+      { label: "Legal Milestones", path: "/followup/legal/milestones" },
+    ],
   },
 
   // ── Track C: Finance / Payments ───────────────────────────────────────────
@@ -56,6 +59,8 @@ export const followupNavItems: NavItem[] = [
     children: [
       { label: "NOC", path: "/followup/closure/noc" },
       { label: "Sales Deed", path: "/followup/closure/sales-deed" },
+      { label: "Pre-Possession", path: "/followup/closure/pre-possession" },
+      { label: "Possession Notice", path: "/followup/closure/possession-notice" },
       { label: "Handover", path: "/followup/closure/handover" },
     ],
   },

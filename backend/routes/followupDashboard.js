@@ -31,8 +31,8 @@ router.get("/summary", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.FollowupAgreements    WHERE IsDeleted = 0 AND Status NOT IN ('Cancelled')) AS activeAgreements,
 
         -- NOC
-        (SELECT COUNT(*) FROM dbo.FollowupNoc           WHERE IsDeleted = 0 AND Status = 'Pending') AS pendingNOC,
-        (SELECT COUNT(*) FROM dbo.FollowupNoc           WHERE IsDeleted = 0 AND Status = 'Issued')  AS issuedNOC,
+        (SELECT COUNT(*) FROM dbo.FollowupNOCs           WHERE IsDeleted = 0 AND Status = 'Pending') AS pendingNOC,
+        (SELECT COUNT(*) FROM dbo.FollowupNOCs           WHERE IsDeleted = 0 AND Status = 'Issued')  AS issuedNOC,
 
         -- Sales Deed
         (SELECT COUNT(*) FROM dbo.FollowupSalesDeed     WHERE IsDeleted = 0 AND Status = 'Draft')      AS draftSalesDeed,
@@ -170,7 +170,7 @@ router.get("/pipeline", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.FollowupBookings      WHERE IsDeleted = 0) AS stage2_bookings,
         (SELECT COUNT(*) FROM dbo.FollowupWelcomeCalls  WHERE IsDeleted = 0 AND Status = 'Completed') AS stage3_welcome_calls,
         (SELECT COUNT(*) FROM dbo.FollowupAgreements    WHERE IsDeleted = 0 AND Status = 'Signed')    AS stage4_agreements,
-        (SELECT COUNT(*) FROM dbo.FollowupNoc           WHERE IsDeleted = 0 AND Status = 'Issued')    AS stage5_noc,
+        (SELECT COUNT(*) FROM dbo.FollowupNOCs           WHERE IsDeleted = 0 AND Status = 'Issued')    AS stage5_noc,
         (SELECT COUNT(*) FROM dbo.FollowupHandover      WHERE IsDeleted = 0 AND Status = 'Completed') AS stage6_handover
     `);
     res.json(result.recordset[0]);
