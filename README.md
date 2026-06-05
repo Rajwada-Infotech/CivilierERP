@@ -6,12 +6,14 @@
 [![Status](https://img.shields.io/badge/status-under%20active%20development-orange)](https://rajwadainfotech.com)
 [![License](https://img.shields.io/badge/license-proprietary-red)](#license)
 [![Stack](https://img.shields.io/badge/stack-React%20%2B%20Node.js%20%2B%20MSSQL-blue)](#tech-stack)
+[![Docs](https://img.shields.io/badge/docs-PDF%20Reference-informational)](https://github.com/Rajwada-Infotech/CivilierERP/blob/main/CivilierERP%20Documentation.pdf)
 
 ---
 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Documentation](#documentation)
 - [About Rajwada Infotech](#about-rajwada-infotech)
 - [Core Modules](#core-modules)
 - [Key Features](#key-features)
@@ -40,7 +42,32 @@
 The platform integrates all critical business functions — project management, procurement, inventory, finance, HR, and reporting — into a single secure and scalable system. It provides real-time visibility across multiple sites and projects, streamlines multi-level approval workflows, reduces manual effort, and enables better decision-making at every level of the organization.
 
 > **⚠️ Status: Under Active Development**
-> This project is a work-in-progress. Features and modules are being built iteratively. It is **not yet ready for production deployment**.
+> This project is a work-in-progress. Production deployment preparation lives in [DEPLOYMENT.md](DEPLOYMENT.md).
+
+---
+
+## Documentation
+
+The full developer documentation is available as a PDF reference covering all modules, APIs, database schema, infrastructure, and deployment procedures.
+
+📄 **[CivilierERP Developer Documentation (PDF)](https://github.com/Rajwada-Infotech/CivilierERP/blob/main/CivilierERP%20Documentation.pdf)**
+
+The documentation covers:
+
+| Section | Topics |
+|---|---|
+| Finance Module | Payments, Receipts, BRS, Trial Balance, Setup masters |
+| Material Module | Purchase Orders, GRN, Issues, Stock, Transfers |
+| Follow-Up Module | Applications, Bookings, Agreements, Closure, Construction Updates |
+| Engineering Module | BOQ, Work Orders, Work Done |
+| Ticket Module | Support lifecycle, real-time chat, escalation, SLA |
+| Admin Module | Authorization layers, RBAC, user management, rights |
+| Authentication | JWT flow, Redis blacklist, brute-force protection |
+| Redis Infrastructure | Caching, rate limiting, graceful degradation |
+| Deployment & Infrastructure | AWS, Docker, CI/CD, health endpoints |
+| Document Numbering | Three-tier format, atomic locking, lineage |
+| Approval Workflow Engine | Multi-level approvals, audit trail, guardEdit |
+| Reports & Widgets | Data export, dashboard widgets, access control |
 
 ---
 
@@ -100,7 +127,7 @@ Real-time operational dashboards, KPI tracking, custom report generation, and ex
 |---|---|
 | **Frontend** | React, TypeScript, Vite, Tailwind CSS, shadcn/ui |
 | **Backend** | Node.js, Express |
-| **Database** | PostgreSQL |
+| **Database** | Microsoft SQL Server |
 | **Caching** | Redis |
 | **Auth** | JWT (JSON Web Tokens) |
 | **State Management** | TanStack Query (React Query) |
@@ -159,9 +186,8 @@ CivilierERP/
 
 Ensure the following are installed on your system:
 
-- **Node.js** v18 or later
-- **Bun** (used for the backend) — [install here](https://bun.sh)
-- **PostgreSQL** v14 or later
+- **Node.js** v20 or later
+- **Microsoft SQL Server** 2019 or later, or AWS RDS for SQL Server
 - **Redis** v7 or later
 - **Docker & Docker Compose** *(optional, for containerized setup)*
 
@@ -186,7 +212,7 @@ npm install
 
 ```bash
 cd backend
-bun install
+npm install
 ```
 
 ---
@@ -222,7 +248,7 @@ cp backend/.env.example backend/.env
 
 Fill in your values based on your local environment. Refer to `backend/.env.example` for the full list of required keys. The file contains configuration for:
 
-- **Database** — PostgreSQL host, port, name, user, and password
+- **Database** — SQL Server host, port, name, user, password, and TLS settings
 - **Redis** — host and port for caching
 - **JWT** — secret key and token expiry
 - **App** — server port and Node environment
@@ -240,7 +266,7 @@ cd backend
 docker compose up --build
 ```
 
-This spins up the app, PostgreSQL, and Redis together.
+This runs the app stack with Redis. SQL Server should be provided separately, either locally or through RDS in production.
 
 #### Option B — Manual
 
@@ -248,7 +274,7 @@ This spins up the app, PostgreSQL, and Redis together.
 
 ```bash
 cd backend
-bun run index.js
+npm run dev
 ```
 
 **Run the frontend** (in a separate terminal from the project root):
@@ -263,7 +289,7 @@ The frontend will be available at `http://localhost:5173` and will proxy API cal
 
 ```bash
 cd backend
-node migrate.js
+npm run migrate
 ```
 
 Migrations are numbered and run in order. Always run migrations after pulling new changes that include files in `backend/migrations/`.
@@ -277,11 +303,11 @@ Browser (React + Vite)
         │
         │  HTTP / REST
         ▼
-Express API Server (Node.js / Bun)
+Express API Server (Node.js)
         │
    ┌────┴────┐
    │         │
-PostgreSQL  Redis
+SQL Server  Redis
 (primary   (caching &
  data)      sessions)
 ```
@@ -291,7 +317,7 @@ PostgreSQL  Redis
 1. Frontend makes authenticated requests with a JWT Bearer token in the `Authorization` header.
 2. `auth.js` middleware verifies the token on every protected route.
 3. `role.js` and `permissions.js` enforce role and page-level access before the route handler runs.
-4. Route handlers interact with PostgreSQL via parameterized queries.
+4. Route handlers interact with SQL Server via parameterized queries.
 5. Redis is used for caching frequently accessed data and for token blacklisting on logout.
 
 ---
@@ -313,6 +339,8 @@ Draft  ──► Pending  ──► Approved
 
 This separation ensures that approval authority is centralized and auditable.
 
+> For full details on the approval engine, workflow configuration, and the `guardEdit()` guard, see the [Developer Documentation](https://github.com/Rajwada-Infotech/CivilierERP/blob/main/CivilierERP%20Documentation.pdf).
+
 ---
 
 ## Role-Based Access Control
@@ -329,6 +357,8 @@ Access in CivilierERP is governed by roles assigned to each user. Each role has 
 | `engineering` | Project and engineering module access |
 
 Permissions are checked server-side on every request via middleware. Frontend sidebar navigation and UI elements are also conditionally rendered based on the authenticated user's role.
+
+> For the full authorization architecture — including the two-layer permission model (`allowRoles()` + `checkPermission()`), role aliases, and the `UserPageRightsJson` override system — see the [Developer Documentation](https://github.com/Rajwada-Infotech/CivilierERP/blob/main/CivilierERP%20Documentation.pdf).
 
 ---
 

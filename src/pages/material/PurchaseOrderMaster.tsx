@@ -165,6 +165,8 @@ interface POListItem {
   status: string;
   docNo: string;
   remarks: string;
+  poType: string;
+  sourceWODocNo: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -325,6 +327,7 @@ const PurchaseOrderMaster: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const limit = 10;
+  const [poTypeFilter, setPoTypeFilter] = useState<string>(""); // "" = All
 
   // ── Doc number state ──────────────────────────────────────────────────────
   const [poDocTypeId, setPoDocTypeId] = useState<number | null>(null);
@@ -405,8 +408,8 @@ const PurchaseOrderMaster: React.FC = () => {
 
   // ── Remote data ───────────────────────────────────────────────────────────
   const { data: dbData, isLoading } = useQuery({
-    queryKey: ["purchase-orders", page, limit],
-    queryFn: () => getPurchaseOrders({ page, limit }),
+    queryKey: ["purchase-orders", page, limit, poTypeFilter],
+    queryFn: () => getPurchaseOrders({ page, limit, poType: poTypeFilter || undefined }),
   });
 
   const { data: suppliersRaw = [] } = useQuery({
@@ -694,6 +697,8 @@ const PurchaseOrderMaster: React.FC = () => {
     status: item.Status ?? "Draft",
     docNo: item.DocNo ?? "",
     remarks: item.Remarks ?? "",
+    poType: item.POType ?? "Direct",
+    sourceWODocNo: item.SourceWODocNo ?? null,
   }));
 
   // ── Pre-populate form when arriving from Material Request ─────────────────
@@ -1076,8 +1081,11 @@ const PurchaseOrderMaster: React.FC = () => {
   useEffect(() => {
     if (!sourceWO || poDocTypeId) return; // already selected or not a WO-sourced form
     fetchDocTypes("WO_PO").then(async (docTypes) => {
-      // Lock to the doc type whose Prefix is exactly "WO_PO"
-      const woPo = docTypes.find((d) => d.Prefix === "WO_PO");
+      // Lock to the doc type whose Prefix is "WO-PO" (dash, as seeded in TypeOfDoc)
+      // Fall back to "WO_PO" (underscore) for legacy installs
+      const woPo =
+        docTypes.find((d) => d.Prefix === "WO-PO") ??
+        docTypes.find((d) => d.Prefix === "WO_PO");
       if (!woPo) return;
       const nextDocNo = await fetchNextDocNumber(
         woPo.TypeOfDocId,
@@ -1563,6 +1571,28 @@ const PurchaseOrderMaster: React.FC = () => {
           </button>
         </div>
 
+        {/* PO Type Filter Tabs */}
+        <div className="flex items-center gap-1 mb-3 bg-muted/30 rounded-xl p-1 w-fit">
+          {[
+            { value: "", label: "All POs" },
+            { value: "WO_PO", label: "WO-POs" },
+            { value: "Direct", label: "Direct" },
+            { value: "Normal", label: "From MR" },
+          ].map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => { setPoTypeFilter(tab.value); setPage(1); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                poTypeFilter === tab.value
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
         {/* Search */}
         <div className="relative mb-4">
           <Search
@@ -1639,8 +1669,20 @@ const PurchaseOrderMaster: React.FC = () => {
                       key={item._id}
                       className="hover:bg-muted/20 transition-colors group"
                     >
-                      <td className="px-4 py-3 font-mono text-xs font-semibold text-foreground">
-                        {item.poNumber || item.docNo || "—"}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-xs font-semibold text-foreground">
+                            {item.poNumber || item.docNo || "—"}
+                          </span>
+                          {item.poType === "WO_PO" && (
+                            <span
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
+                              title={item.sourceWODocNo ? `From Work Order: ${item.sourceWODocNo}` : "Auto-generated from Work Order"}
+                            >
+                              WO-PO
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">
                         {fmtDate(item.poDate)}

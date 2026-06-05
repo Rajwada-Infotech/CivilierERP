@@ -8,7 +8,9 @@ let loaded = false;
 
 function loadEnv() {
   if (!loaded) {
-    dotenv.config({ path: envPath });
+    if (process.env.NODE_ENV !== "production") {
+      dotenv.config({ path: envPath });
+    }
     loaded = true;
   }
 
@@ -16,7 +18,7 @@ function loadEnv() {
   if (missing.length > 0) {
     throw new Error(
       `Missing required environment variable(s): ${missing.join(", ")}. ` +
-        "Add them to backend/.env or provide them in the process environment.",
+        "Add them to backend/.env for local development or provide them in the process environment.",
     );
   }
 

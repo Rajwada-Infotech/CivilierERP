@@ -165,6 +165,9 @@ const EnterpriseMasterPage = lazy(
   () => import("./pages/admin/masters/EnterpriseMaster"),
 );
 const BOQ = lazy(() => import("./pages/engineering/BOQ"));
+const DailyProgressReport = lazy(
+  () => import("./pages/engineering/DailyProgressReport"),
+);
 
 // Admin Pages
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -289,13 +292,13 @@ const PossessionNoticePage = lazy(
   () => import("./pages/followup/PossessionNotice"),
 );
 const FinanceDemandsPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
+  import("./pages/followup/FinanceDemands").then((module) => ({
     default: module.FinanceDemandsPage,
   })),
 );
 const FollowupPaymentsPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
-    default: module.FollowupPaymentsPage,
+  import("./pages/followup/FinancePayments").then((module) => ({
+    default: module.FinancePaymentsPage,
   })),
 );
 const CustomerReportPage = lazy(() =>
@@ -357,15 +360,19 @@ function RequireRole({
 // ─── Admin Protected Route ────────────────────────────────────────────────────
 function ProtectedProviders({ children }: { children: React.ReactNode }) {
   return (
-    <RecordsProvider>
-      <TdsProvider>
-        <DebitNoteProvider>
-          <BillingTermsProvider>
-            <TaskProvider>{children}</TaskProvider>
-          </BillingTermsProvider>
-        </DebitNoteProvider>
-      </TdsProvider>
-    </RecordsProvider>
+    <FinYearProvider>
+      <HsnProvider>
+        <RecordsProvider>
+          <TdsProvider>
+            <DebitNoteProvider>
+              <BillingTermsProvider>
+                <TaskProvider>{children}</TaskProvider>
+              </BillingTermsProvider>
+            </DebitNoteProvider>
+          </TdsProvider>
+        </RecordsProvider>
+      </HsnProvider>
+    </FinYearProvider>
   );
 }
 
@@ -1147,6 +1154,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/engineering/dpr"
+        element={
+          <ProtectedRoute>
+            <DailyProgressReport />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/masters/card"
         element={
           <ProtectedRoute>
@@ -1615,11 +1630,7 @@ function App() {
             >
               <ModuleProvider>
                 <ThemeProvider>
-                  <FinYearProvider>
-                    <HsnProvider>
-                      <AppRoutes />
-                    </HsnProvider>
-                  </FinYearProvider>
+                  <AppRoutes />
                 </ThemeProvider>
               </ModuleProvider>
             </Router>

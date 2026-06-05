@@ -74,13 +74,19 @@ const BASE = "/api/material-requests";
 // ── API ────────────────────────────────────────────────────────────────────────
 
 export const getMaterialRequests = (
-  query: { page?: number; limit?: number; search?: string } = {},
+  query: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    status?: string;
+  } = {},
 ) => {
-  const { page = 1, limit = 10, search = "" } = query;
+  const { page = 1, limit = 10, search = "", status = "" } = query;
   const qs = new URLSearchParams({
     page: String(page),
     limit: String(limit),
     ...(search ? { search } : {}),
+    ...(status ? { status } : {}),
   });
   return fetchWithAuth(`${BASE}?${qs}`).then((r) =>
     handleResponse<MRListResponse>(r),

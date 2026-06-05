@@ -182,10 +182,16 @@ async function handleResponse<T = any>(res: Response): Promise<T> {
 // ── API Functions ─────────────────────────────────────────────────────────────
 
 export const getPurchaseOrders = (
-  query: { page?: number; limit?: number } = {},
+  query: { page?: number; limit?: number; poType?: string; fyId?: number } = {},
 ) => {
-  const { page = 1, limit = 10 } = query;
-  return fetchWithAuth(`/purchase-orders?page=${page}&limit=${limit}`)
+  const { page = 1, limit = 10, poType, fyId } = query;
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+  });
+  if (poType) params.set("poType", poType);
+  if (fyId) params.set("fyId", String(fyId));
+  return fetchWithAuth(`/purchase-orders?${params.toString()}`)
     .then((r) => handleResponse<POListResponse>(r))
     .then((r: any): POListResponse => {
       const data = Array.isArray(r.data) ? r.data : Array.isArray(r) ? r : null;
