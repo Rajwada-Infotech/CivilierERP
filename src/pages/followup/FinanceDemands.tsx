@@ -8,22 +8,18 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
-  IndianRupee,
   RefreshCw,
   Search,
   Send,
   Undo2,
   X,
-  FileText,
-  CalendarDays,
-  SlidersHorizontal,
+  Filter,
+  Inbox,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -123,30 +119,9 @@ function fmtMoney(v?: number | null) {
   return `₹ ${Number(v).toLocaleString("en-IN")}`;
 }
 
-const STATUS_CONFIG: Record<
-  DemandStatus,
-  {
-    label: string;
-    variant: "outline" | "secondary" | "default";
-    icon: React.ReactNode;
-  }
-> = {
-  Pending: {
-    label: "Pending",
-    variant: "outline",
-    icon: <Clock className="w-3 h-3" />,
-  },
-  Demanded: {
-    label: "Demanded",
-    variant: "secondary",
-    icon: <Send className="w-3 h-3" />,
-  },
-  Paid: {
-    label: "Paid",
-    variant: "default",
-    icon: <CheckCircle2 className="w-3 h-3" />,
-  },
-};
+function isOverdue(date: string | null, status: DemandStatus) {
+  return date && new Date(date) < new Date() && status !== "Paid";
+}
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
@@ -210,6 +185,84 @@ async function undoRaise(id: number) {
   return res.json();
 }
 
+// ─── Status pill ──────────────────────────────────────────────────────────────
+
+function StatusPill({ status }: { status: DemandStatus }) {
+  if (status === "Pending")
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800">
+        <Clock className="w-3 h-3" /> Pending
+      </span>
+    );
+  if (status === "Demanded")
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-800">
+        <Send className="w-3 h-3" /> Demanded
+      </span>
+    );
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800">
+      <CheckCircle2 className="w-3 h-3" /> Paid
+    </span>
+  );
+}
+
+// ─── Summary Card ─────────────────────────────────────────────────────────────
+
+interface SummaryCardProps {
+  label: string;
+  count: number | undefined;
+  amount: number | undefined;
+  icon: React.ReactNode;
+  active: boolean;
+  onClick: () => void;
+  styles: { ring: string; bar: string; num: string; bg: string };
+}
+
+function SummaryCard({
+  label,
+  count,
+  amount,
+  icon,
+  active,
+  onClick,
+  styles,
+}: SummaryCardProps) {
+  return (
+    <button
+      onClick={onClick}
+      className={`relative text-left w-full rounded-xl border bg-card p-5 transition-all duration-150 hover:shadow-md hover:-translate-y-0.5 focus:outline-none ${
+        active
+          ? `ring-2 ${styles.ring} shadow-md -translate-y-0.5`
+          : "border-border"
+      }`}
+    >
+      <div
+        className={`absolute top-0 left-0 h-0.5 w-full rounded-t-xl ${active ? styles.bar : "bg-transparent"}`}
+      />
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+            {label}
+          </p>
+          <p className={`text-3xl font-bold tabular-nums ${styles.num}`}>
+            {count ?? "—"}
+          </p>
+          <p className="text-sm text-muted-foreground mt-1 tabular-nums">
+            {fmtMoney(amount)}
+          </p>
+        </div>
+        <div className={`p-2 rounded-lg ${styles.bg}`}>{icon}</div>
+      </div>
+      {active && (
+        <span className="absolute top-3 right-3 text-[10px] font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+          FILTERED
+        </span>
+      )}
+    </button>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 50;
@@ -218,24 +271,18 @@ export function FinanceDemandsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  // Filters
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [projectId, setProjectId] = useState("");
   const [status, setStatus] = useState("");
 
-  // Raise demand dialog
   const [raiseRow, setRaiseRow] = useState<DemandRow | null>(null);
   const [raiseForm, setRaiseForm] = useState<RaiseForm>({
     dueDate: "",
     notes: "",
   });
-
-  // Undo dialog
   const [undoRow, setUndoRow] = useState<DemandRow | null>(null);
-
-  // ── Queries ──────────────────────────────────────────────────────────────
 
   const queryKey = ["followup-demands", page, search, projectId, status];
 
@@ -250,8 +297,6 @@ export function FinanceDemandsPage() {
     queryKey: ["followup-demand-projects"],
     queryFn: fetchProjects,
   });
-
-  // ── Mutations ────────────────────────────────────────────────────────────
 
   const raiseMutation = useMutation({
     mutationFn: ({
@@ -279,8 +324,6 @@ export function FinanceDemandsPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
-  // ── Derived ──────────────────────────────────────────────────────────────
-
   const rows = data?.data ?? [];
   const summary = data?.summary;
   const total = data?.pagination.total ?? 0;
@@ -301,129 +344,129 @@ export function FinanceDemandsPage() {
 
   const hasFilters = search || projectId || status;
 
-  // ── Render ───────────────────────────────────────────────────────────────
-
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <Breadcrumbs
-            items={[
-              { label: "Follow-Up", href: "/followup" },
-              { label: "Finance" },
-              { label: "Demands" },
-            ]}
+    <div className="min-h-screen bg-background">
+      <div className="max-w-[1400px] mx-auto px-6 py-6 space-y-5">
+        {/* ── Header ──────────────────────────────────────────────────────── */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <Breadcrumbs
+              items={[
+                { label: "Follow-Up", href: "/followup" },
+                { label: "Finance" },
+                { label: "Demands" },
+              ]}
+            />
+            <h1 className="text-2xl font-heading font-bold tracking-tight text-foreground mt-1">
+              Payment Demands
+            </h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Raise and track milestone payment demand letters for all bookings.
+            </p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate("/followup")}
+              className="gap-1.5"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" /> Dashboard
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              className="gap-1.5"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Refresh
+            </Button>
+          </div>
+        </div>
+
+        {/* ── Summary cards ────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <SummaryCard
+            label="Pending"
+            count={summary?.PendingCount}
+            amount={summary?.PendingAmount}
+            icon={
+              <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+            }
+            active={status === "Pending"}
+            onClick={() => {
+              setStatus(status === "Pending" ? "" : "Pending");
+              setPage(1);
+            }}
+            styles={{
+              ring: "ring-amber-400/60",
+              bar: "bg-amber-400",
+              num: "text-amber-600 dark:text-amber-400",
+              bg: "bg-amber-50 dark:bg-amber-950/30",
+            }}
           />
-          <h1 className="text-3xl font-heading font-bold text-foreground mt-1">
-            Payment Demands
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Raise and track milestone payment demand letters for all bookings.
-          </p>
+          <SummaryCard
+            label="Demanded"
+            count={summary?.DemandedCount}
+            amount={summary?.DemandedAmount}
+            icon={<Send className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
+            active={status === "Demanded"}
+            onClick={() => {
+              setStatus(status === "Demanded" ? "" : "Demanded");
+              setPage(1);
+            }}
+            styles={{
+              ring: "ring-primary/40",
+              bar: "bg-primary",
+              num: "text-primary",
+              bg: "bg-primary/10",
+            }}
+          />
+          <SummaryCard
+            label="Paid"
+            count={summary?.PaidCount}
+            amount={summary?.PaidAmount}
+            icon={
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+            }
+            active={status === "Paid"}
+            onClick={() => {
+              setStatus(status === "Paid" ? "" : "Paid");
+              setPage(1);
+            }}
+            styles={{
+              ring: "ring-emerald-400/60",
+              bar: "bg-emerald-500",
+              num: "text-emerald-600 dark:text-emerald-400",
+              bg: "bg-emerald-50 dark:bg-emerald-950/30",
+            }}
+          />
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={() => navigate("/followup")}
-            className="gap-2"
-          >
-            <ArrowLeft className="w-4 h-4" /> Dashboard
-          </Button>
-          <Button variant="outline" onClick={() => refetch()} className="gap-2">
-            <RefreshCw className="w-4 h-4" /> Refresh
-          </Button>
-        </div>
-      </div>
 
-      {/* Summary tiles */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card
-          className={`cursor-pointer transition-colors ${status === "Pending" ? "border-amber-500 bg-amber-50 dark:bg-amber-950/20" : ""}`}
-          onClick={() => {
-            setStatus(status === "Pending" ? "" : "Pending");
-            setPage(1);
-          }}
-        >
-          <CardContent className="pt-5 flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30">
-              <Clock className="w-5 h-5 text-amber-600" />
-            </div>
-            <div>
-              <div className="text-2xl font-bold">
-                {summary?.PendingCount ?? "—"}
-              </div>
-              <div className="text-sm text-muted-foreground">Pending</div>
-              <div className="text-xs font-medium text-amber-600">
-                {fmtMoney(summary?.PendingAmount)}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card
-          className={`cursor-pointer transition-colors ${status === "Demanded" ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20" : ""}`}
-          onClick={() => {
-            setStatus(status === "Demanded" ? "" : "Demanded");
-            setPage(1);
-          }}
-        >
-          <CardContent className="pt-5 flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30">
-              <Send className="w-5 h-5 text-blue-600" />
-            </div>
-            <div>
-              <div className="text-2xl font-bold">
-                {summary?.DemandedCount ?? "—"}
-              </div>
-              <div className="text-sm text-muted-foreground">Demanded</div>
-              <div className="text-xs font-medium text-blue-600">
-                {fmtMoney(summary?.DemandedAmount)}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card
-          className={`cursor-pointer transition-colors ${status === "Paid" ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20" : ""}`}
-          onClick={() => {
-            setStatus(status === "Paid" ? "" : "Paid");
-            setPage(1);
-          }}
-        >
-          <CardContent className="pt-5 flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-            </div>
-            <div>
-              <div className="text-2xl font-bold">
-                {summary?.PaidCount ?? "—"}
-              </div>
-              <div className="text-sm text-muted-foreground">Paid</div>
-              <div className="text-xs font-medium text-emerald-600">
-                {fmtMoney(summary?.PaidAmount)}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-4">
-          <div className="flex flex-wrap gap-3 items-end">
-            <div className="flex gap-2 flex-1 min-w-[200px]">
+        {/* ── Filters + Table ──────────────────────────────────────────────── */}
+        <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
+          {/* Filter bar */}
+          <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-border bg-muted/30">
+            <Filter className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input
                 placeholder="Search applicant, booking, milestone…"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && applySearch()}
-                className="flex-1"
+                className="pl-8 h-8 text-sm"
               />
-              <Button onClick={applySearch} variant="outline" size="icon">
-                <Search className="w-4 h-4" />
-              </Button>
             </div>
+            <Button
+              onClick={applySearch}
+              size="sm"
+              variant="outline"
+              className="h-8 px-3 text-sm"
+            >
+              Search
+            </Button>
+
             <Select
               value={projectId}
               onValueChange={(v) => {
@@ -431,7 +474,7 @@ export function FinanceDemandsPage() {
                 setPage(1);
               }}
             >
-              <SelectTrigger className="w-44">
+              <SelectTrigger className="h-8 w-40 text-sm">
                 <SelectValue placeholder="All Projects" />
               </SelectTrigger>
               <SelectContent>
@@ -443,6 +486,7 @@ export function FinanceDemandsPage() {
                 ))}
               </SelectContent>
             </Select>
+
             <Select
               value={status}
               onValueChange={(v) => {
@@ -450,7 +494,7 @@ export function FinanceDemandsPage() {
                 setPage(1);
               }}
             >
-              <SelectTrigger className="w-36">
+              <SelectTrigger className="h-8 w-32 text-sm">
                 <SelectValue placeholder="All Status" />
               </SelectTrigger>
               <SelectContent>
@@ -460,48 +504,58 @@ export function FinanceDemandsPage() {
                 <SelectItem value="Paid">Paid</SelectItem>
               </SelectContent>
             </Select>
+
             {hasFilters && (
               <Button
                 variant="ghost"
+                size="sm"
                 onClick={clearFilters}
-                className="gap-1 text-muted-foreground"
+                className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
               >
                 <X className="w-3 h-3" /> Clear
               </Button>
             )}
-          </div>
-        </CardContent>
-      </Card>
 
-      {/* Table */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base">
-              Milestones
-              {total > 0 && (
-                <span className="ml-2 text-sm font-normal text-muted-foreground">
-                  ({total.toLocaleString("en-IN")} total)
-                </span>
-              )}
-            </CardTitle>
+            <span className="ml-auto text-sm text-muted-foreground tabular-nums">
+              {total > 0 && `${total.toLocaleString("en-IN")} milestones`}
+            </span>
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
+
+          {/* Table */}
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Booking</TableHead>
-                  <TableHead>Applicant</TableHead>
-                  <TableHead>Project / Unit</TableHead>
-                  <TableHead>Milestone</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead>Due Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Demand No.</TableHead>
-                  <TableHead>Raised On</TableHead>
-                  <TableHead className="text-center">Actions</TableHead>
+                <TableRow className="bg-muted/40 hover:bg-muted/40">
+                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground pl-4">
+                    Booking
+                  </TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Applicant
+                  </TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Project / Unit
+                  </TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Milestone
+                  </TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground text-right">
+                    Amount
+                  </TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Due Date
+                  </TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Status
+                  </TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Demand No.
+                  </TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Raised On
+                  </TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground text-center pr-4">
+                    Action
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -509,9 +563,12 @@ export function FinanceDemandsPage() {
                   <TableRow>
                     <TableCell
                       colSpan={10}
-                      className="py-12 text-center text-muted-foreground"
+                      className="py-16 text-center text-muted-foreground text-sm"
                     >
-                      Loading…
+                      <div className="flex flex-col items-center gap-2">
+                        <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground/50" />
+                        Loading milestones…
+                      </div>
                     </TableCell>
                   </TableRow>
                 )}
@@ -519,159 +576,178 @@ export function FinanceDemandsPage() {
                   <TableRow>
                     <TableCell
                       colSpan={10}
-                      className="py-12 text-center text-destructive"
+                      className="py-16 text-center text-destructive text-sm"
                     >
-                      Failed to load demands.
+                      Failed to load demands. Try refreshing.
                     </TableCell>
                   </TableRow>
                 )}
                 {!isLoading && !isError && rows.length === 0 && (
                   <TableRow>
-                    <TableCell
-                      colSpan={10}
-                      className="py-12 text-center text-muted-foreground"
-                    >
-                      No milestones found.
+                    <TableCell colSpan={10} className="py-16 text-center">
+                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                        <Inbox className="w-8 h-8 text-muted-foreground/40" />
+                        <p className="text-sm">No milestones found</p>
+                      </div>
                     </TableCell>
                   </TableRow>
                 )}
                 {!isLoading &&
                   !isError &&
-                  rows.map((row) => {
-                    const cfg = STATUS_CONFIG[row.DemandStatus];
-                    return (
-                      <TableRow key={row.Id}>
-                        <TableCell className="font-mono text-sm font-medium">
+                  rows.map((row) => (
+                    <TableRow
+                      key={row.Id}
+                      className="border-b last:border-0 transition-colors"
+                    >
+                      <TableCell className="py-3 pl-4">
+                        <span className="font-mono text-xs font-semibold text-foreground tracking-wide">
                           {row.BookingNo}
-                        </TableCell>
-                        <TableCell>
-                          <div className="font-medium">{row.ApplicantName}</div>
-                          {row.PrimaryMobile && (
-                            <div className="text-xs text-muted-foreground">
-                              {row.PrimaryMobile}
-                            </div>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div>{row.ProjectName ?? "—"}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {row.UnitNo}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="font-medium">{row.TermName}</div>
-                          {row.DocRef && (
-                            <div className="text-xs text-muted-foreground font-mono">
-                              {row.DocRef}
-                            </div>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right font-medium tabular-nums">
+                        </span>
+                      </TableCell>
+                      <TableCell className="py-3">
+                        <p className="text-sm font-medium text-foreground leading-tight">
+                          {row.ApplicantName}
+                        </p>
+                        {row.PrimaryMobile && (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {row.PrimaryMobile}
+                          </p>
+                        )}
+                      </TableCell>
+                      <TableCell className="py-3">
+                        <p className="text-sm text-foreground">
+                          {row.ProjectName ?? "—"}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5 font-mono">
+                          {row.UnitNo}
+                        </p>
+                      </TableCell>
+                      <TableCell className="py-3">
+                        <p className="text-sm font-medium text-foreground">
+                          {row.TermName}
+                        </p>
+                        {row.DocRef && (
+                          <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                            {row.DocRef}
+                          </p>
+                        )}
+                      </TableCell>
+                      <TableCell className="py-3 text-right">
+                        <span className="text-sm font-semibold text-foreground tabular-nums">
                           {fmtMoney(row.ComputedAmount)}
-                        </TableCell>
-                        <TableCell>
-                          {row.DueDate ? (
-                            <span
-                              className={
-                                new Date(row.DueDate) < new Date() &&
-                                row.DemandStatus !== "Paid"
-                                  ? "text-destructive font-medium"
-                                  : ""
-                              }
-                            >
-                              {fmt(row.DueDate)}
-                            </span>
-                          ) : (
-                            "—"
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={cfg.variant} className="gap-1">
-                            {cfg.icon}
-                            {cfg.label}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {row.DemandNo ?? "—"}
-                        </TableCell>
-                        <TableCell>{fmt(row.DemandRaisedOn)}</TableCell>
-                        <TableCell className="text-center">
-                          <div className="flex justify-center gap-1">
-                            {row.DemandStatus === "Pending" && (
-                              <Button
-                                size="sm"
-                                className="gap-1 h-7 px-2 text-xs"
-                                onClick={() => {
-                                  setRaiseRow(row);
-                                  setRaiseForm({
-                                    dueDate: row.DueDate?.slice(0, 10) ?? "",
-                                    notes: "",
-                                  });
-                                }}
-                              >
-                                <Bell className="w-3 h-3" />
-                                Raise
-                              </Button>
-                            )}
-                            {row.DemandStatus === "Demanded" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="gap-1 h-7 px-2 text-xs"
-                                onClick={() => setUndoRow(row)}
-                              >
-                                <Undo2 className="w-3 h-3" />
-                                Undo
-                              </Button>
-                            )}
-                            {row.DemandStatus === "Paid" && (
-                              <span className="text-xs text-muted-foreground">
-                                {fmt(row.PaidOn)}
-                              </span>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
+                        </span>
+                      </TableCell>
+                      <TableCell className="py-3">
+                        {row.DueDate ? (
+                          <span
+                            className={`text-sm ${isOverdue(row.DueDate, row.DemandStatus) ? "text-destructive font-medium" : "text-foreground"}`}
+                          >
+                            {fmt(row.DueDate)}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="py-3">
+                        <StatusPill status={row.DemandStatus} />
+                      </TableCell>
+                      <TableCell className="py-3">
+                        {row.DemandNo ? (
+                          <span className="font-mono text-xs font-medium text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
+                            {row.DemandNo}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">
+                            —
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="py-3 text-sm text-muted-foreground">
+                        {fmt(row.DemandRaisedOn)}
+                      </TableCell>
+                      <TableCell className="py-3 text-center pr-4">
+                        {row.DemandStatus === "Pending" && (
+                          <Button
+                            size="sm"
+                            className="h-7 px-3 text-xs gap-1.5"
+                            onClick={() => {
+                              setRaiseRow(row);
+                              setRaiseForm({
+                                dueDate: row.DueDate?.slice(0, 10) ?? "",
+                                notes: "",
+                              });
+                            }}
+                          >
+                            <Bell className="w-3 h-3" /> Raise
+                          </Button>
+                        )}
+                        {row.DemandStatus === "Demanded" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-3 text-xs gap-1.5"
+                            onClick={() => setUndoRow(row)}
+                          >
+                            <Undo2 className="w-3 h-3" /> Undo
+                          </Button>
+                        )}
+                        {row.DemandStatus === "Paid" && (
+                          <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                            {fmt(row.PaidOn)}
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
               </TableBody>
             </Table>
           </div>
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between px-4 py-3 border-t">
+            <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-muted/20">
               <span className="text-sm text-muted-foreground">
-                Page {page} of {totalPages}
+                Page <span className="font-medium text-foreground">{page}</span>{" "}
+                of{" "}
+                <span className="font-medium text-foreground">
+                  {totalPages}
+                </span>
               </span>
-              <div className="flex gap-2">
+              <div className="flex gap-1">
                 <Button
                   variant="outline"
                   size="sm"
                   disabled={page <= 1}
                   onClick={() => setPage((p) => p - 1)}
+                  className="h-7 w-7 p-0"
                 >
-                  <ChevronLeft className="w-4 h-4" />
+                  <ChevronLeft className="w-3.5 h-3.5" />
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   disabled={page >= totalPages}
                   onClick={() => setPage((p) => p + 1)}
+                  className="h-7 w-7 p-0"
                 >
-                  <ChevronRight className="w-4 h-4" />
+                  <ChevronRight className="w-3.5 h-3.5" />
                 </Button>
               </div>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      {/* ── Raise Demand Dialog ─────────────────────────────────────────── */}
+      {/* ── Raise Demand Dialog ───────────────────────────────────────────── */}
       <Dialog open={!!raiseRow} onOpenChange={(o) => !o && setRaiseRow(null)}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Raise Demand</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-primary/10">
+                <Bell className="w-4 h-4 text-primary" />
+              </div>
+              Raise Demand
+            </DialogTitle>
             <DialogDescription>
               This will mark the milestone as <strong>Demanded</strong> and
               generate a demand number.
@@ -680,32 +756,36 @@ export function FinanceDemandsPage() {
 
           {raiseRow && (
             <div className="space-y-4">
-              {/* Summary */}
-              <div className="rounded-lg border bg-muted/40 p-3 space-y-1 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Booking</span>
-                  <span className="font-mono font-medium">
-                    {raiseRow.BookingNo}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Applicant</span>
-                  <span className="font-medium">{raiseRow.ApplicantName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Milestone</span>
-                  <span className="font-medium">{raiseRow.TermName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Amount</span>
-                  <span className="font-bold text-primary">
+              <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">
+                {[
+                  { label: "Booking", value: raiseRow.BookingNo, mono: true },
+                  { label: "Applicant", value: raiseRow.ApplicantName },
+                  { label: "Milestone", value: raiseRow.TermName },
+                ].map(({ label, value, mono }) => (
+                  <div
+                    key={label}
+                    className="flex justify-between items-center px-3 py-2"
+                  >
+                    <span className="text-xs text-muted-foreground">
+                      {label}
+                    </span>
+                    <span
+                      className={`text-sm font-medium text-foreground ${mono ? "font-mono" : ""}`}
+                    >
+                      {value}
+                    </span>
+                  </div>
+                ))}
+                <div className="flex justify-between items-center px-3 py-2">
+                  <span className="text-xs text-muted-foreground">Amount</span>
+                  <span className="text-sm font-bold text-primary">
                     {fmtMoney(raiseRow.ComputedAmount)}
                   </span>
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label>Due Date</Label>
+              <div className="space-y-1.5">
+                <Label className="text-sm">Due Date</Label>
                 <Input
                   type="date"
                   value={raiseForm.dueDate}
@@ -718,8 +798,13 @@ export function FinanceDemandsPage() {
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <Label>Notes (optional)</Label>
+              <div className="space-y-1.5">
+                <Label className="text-sm">
+                  Notes{" "}
+                  <span className="text-muted-foreground font-normal">
+                    (optional)
+                  </span>
+                </Label>
                 <Textarea
                   value={raiseForm.notes}
                   onChange={(e) =>
@@ -727,12 +812,13 @@ export function FinanceDemandsPage() {
                   }
                   placeholder="Any remarks for this demand…"
                   rows={3}
+                  className="resize-none text-sm"
                 />
               </div>
             </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setRaiseRow(null)}>
               Cancel
             </Button>
@@ -750,14 +836,14 @@ export function FinanceDemandsPage() {
               }}
               className="gap-2"
             >
-              <Send className="w-4 h-4" />
+              <Send className="w-3.5 h-3.5" />
               {raiseMutation.isPending ? "Raising…" : "Raise Demand"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ── Undo Confirm Dialog ─────────────────────────────────────────── */}
+      {/* ── Undo Confirm Dialog ───────────────────────────────────────────── */}
       <AlertDialog
         open={!!undoRow}
         onOpenChange={(o) => !o && setUndoRow(null)}
