@@ -407,207 +407,227 @@ const GeneralLedgerMaster: React.FC = () => {
     <>
       <Breadcrumbs items={["Masters", "General Ledger"]} />
 
-      {/* Page header */}
-      <div className="mb-6">
-        <h1 className="text-xl font-heading font-bold text-foreground">
-          General Ledger Master
-        </h1>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Define ledger accounts with a name, short code and account group
-        </p>
-      </div>
-
-      {/* Form Card */}
-      <div className="rounded-xl border border-border bg-card mb-6">
-        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-foreground">
-            {editingId ? "Edit Ledger Account" : "Add Ledger Account"}
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            {editingId
-              ? "Modify the selected ledger account"
-              : "Fill in the details to create a new record."}
-          </p>
+      <div className="relative space-y-8 mt-6">
+        {/* ── Page header ── */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              General Ledger Master
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Define ledger accounts with a name, short code and account group
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs text-muted-foreground bg-muted/60 rounded-lg px-3 py-1.5">
+              {totalRecords} Accounts
+            </span>
+          </div>
         </div>
 
-        <div className="p-5">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
-            {/* Account Name */}
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
-                Account Name <span className="text-red-500">*</span>
-              </label>
-              <input
-                value={form.LHeadName}
-                onChange={(e) => {
-                  setForm((p) => ({ ...p, LHeadName: e.target.value }));
-                  setErrors((p) => ({ ...p, LHeadName: false }));
-                }}
-                placeholder="e.g. Cash in Hand"
-                className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
-                  errors.LHeadName ? "border-red-400" : "border-border"
-                }`}
-              />
-              {errors.LHeadName && (
-                <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                  <AlertCircle size={11} /> Required
-                </p>
+        {/* ── Form Card ── */}
+        <div className="rounded-xl border border-border bg-card shadow-sm">
+          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
+            <div className="flex items-center gap-3">
+              {editingId && (
+                <button
+                  onClick={resetForm}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <RotateCcw size={15} />
+                  <span className="hidden sm:inline">Back</span>
+                </button>
               )}
+              {editingId && <span className="text-border/60">|</span>}
+              <h2 className="text-base font-heading font-semibold text-foreground">
+                {editingId ? "Edit Ledger Account" : "Add Ledger Account"}
+              </h2>
             </div>
-
-            {/* Short Code */}
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
-                Short Code
-              </label>
-              <div className="relative">
-                <Hash
-                  size={13}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                />
-                <input
-                  value={form.LHeadCode}
-                  onChange={(e) => {
-                    setForm((p) => ({
-                      ...p,
-                      LHeadCode: e.target.value.toUpperCase(),
-                    }));
-                    hasManuallyEditedCode.current = true;
-                  }}
-                  placeholder="e.g. CIH"
-                  maxLength={20}
-                  className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-                />
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                Auto-generated from account name (you can override manually)
-              </p>
-            </div>
-
-            {/* Account Group */}
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
-                Account Group
-              </label>
-              {groupsLoading ? (
-                <div className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-muted/40 text-muted-foreground">
-                  Loading…
-                </div>
-              ) : (
-                <div className="relative">
-                  <select
-                    value={form.LBelongsTo}
-                    onChange={(e) =>
-                      setForm((p) => ({ ...p, LBelongsTo: e.target.value }))
-                    }
-                    className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
-                  >
-                    <option value="">Select group…</option>
-                    {accountGroups.map((g) => (
-                      <option key={g._id} value={g._id}>
-                        {g.name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    size={13}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                  />
-                </div>
+            <div className="flex items-center gap-2">
+              {editingId && (
+                <button
+                  onClick={resetForm}
+                  className="px-5 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
               )}
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60 flex items-center gap-2"
+              >
+                {saving ? (
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : editingId ? (
+                  <Check size={14} />
+                ) : (
+                  <Plus size={14} />
+                )}
+                {saving ? "Saving…" : editingId ? "Update Account" : "Save Account"}
+              </button>
             </div>
           </div>
 
-          {/* Form Actions */}
-          <div className="flex items-center gap-3 mt-6 pt-5 border-t border-border">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="px-5 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity flex items-center gap-2"
-            >
-              {saving ? (
-                <>
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Saving…
-                </>
-              ) : editingId ? (
-                <>
-                  <Check size={14} /> Update Account
-                </>
-              ) : (
-                <>
-                  <Plus size={14} /> Save Account
-                </>
-              )}
-            </button>
+          <div className="px-5 sm:px-6 py-6 space-y-7">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+                  <BookOpen size={12} className="text-primary" />
+                </div>
+                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                  Account Details
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
+                {/* Account Name */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    Account Name <span className="text-destructive">*</span>
+                  </label>
+                  <input
+                    value={form.LHeadName}
+                    onChange={(e) => {
+                      setForm((p) => ({ ...p, LHeadName: e.target.value }));
+                      setErrors((p) => ({ ...p, LHeadName: false }));
+                    }}
+                    placeholder="e.g. Cash in Hand"
+                    className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
+                      errors.LHeadName ? "border-red-400" : "border-border"
+                    }`}
+                  />
+                  {errors.LHeadName && (
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertCircle size={11} /> Required
+                    </p>
+                  )}
+                </div>
 
-            {editingId && (
-              <button
-                onClick={resetForm}
-                className="px-5 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors flex items-center gap-2"
+                {/* Short Code */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Short Code
+                  </label>
+                  <div className="relative">
+                    <Hash
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    <input
+                      value={form.LHeadCode}
+                      onChange={(e) => {
+                        setForm((p) => ({
+                          ...p,
+                          LHeadCode: e.target.value.toUpperCase(),
+                        }));
+                        hasManuallyEditedCode.current = true;
+                      }}
+                      placeholder="e.g. CIH"
+                      maxLength={20}
+                      className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                    />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground/70">
+                    Auto-generated from account name (you can override manually)
+                  </p>
+                </div>
+
+                {/* Account Group */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Account Group
+                  </label>
+                  {groupsLoading ? (
+                    <div className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-muted/40 text-muted-foreground">
+                      Loading…
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <BookOpen
+                        size={13}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                      <select
+                        value={form.LBelongsTo}
+                        onChange={(e) =>
+                          setForm((p) => ({ ...p, LBelongsTo: e.target.value }))
+                        }
+                        className="w-full appearance-none pl-8 pr-9 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                      >
+                        <option value="">Select group…</option>
+                        {accountGroups.map((g) => (
+                          <option key={g._id} value={g._id}>
+                            {g.name}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        size={13}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Table Section ── */}
+        <div>
+          {/* Toolbar */}
+          <div className="mb-3 flex items-center gap-3 flex-wrap">
+            <div className="relative">
+              <Search
+                size={13}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search name or code…"
+                className="w-56 text-sm rounded-lg border border-border pl-9 pr-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+              />
+            </div>
+
+            <div className="relative">
+              <BookOpen
+                size={13}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <select
+                value={filterGroup}
+                onChange={(e) => setFilterGroup(e.target.value)}
+                className="appearance-none text-sm rounded-lg border border-border pl-8 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
               >
-                <RotateCcw size={13} /> Cancel
+                <option value="">All Groups</option>
+                {accountGroups.map((g) => (
+                  <option key={g._id} value={g._id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={12}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+            </div>
+
+            {(search || filterGroup) && (
+              <button
+                onClick={() => {
+                  setSearch("");
+                  setFilterGroup("");
+                }}
+                className="text-xs font-heading text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors flex items-center gap-1.5"
+              >
+                <X size={11} /> Clear
               </button>
             )}
           </div>
-        </div>
-      </div>
 
-      {/* Table Section */}
-      <div>
-        {/* Toolbar */}
-        <div className="mb-3 flex items-center gap-3 flex-wrap">
-          <div className="relative">
-            <Search
-              size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name or code…"
-              className="w-56 text-sm rounded-lg border border-border pl-9 pr-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-            />
-          </div>
-
-          <div className="relative">
-            <select
-              value={filterGroup}
-              onChange={(e) => setFilterGroup(e.target.value)}
-              className="text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
-            >
-              <option value="">All Groups</option>
-              {accountGroups.map((g) => (
-                <option key={g._id} value={g._id}>
-                  {g.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              size={12}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-            />
-          </div>
-
-          {(search || filterGroup) && (
-            <button
-              onClick={() => {
-                setSearch("");
-                setFilterGroup("");
-              }}
-              className="text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors flex items-center gap-1.5"
-            >
-              <X size={11} /> Clear
-            </button>
-          )}
-
-          <span className="ml-auto text-xs text-muted-foreground bg-muted/60 rounded-lg px-3 py-1.5">
-            {totalRecords} Accounts
-          </span>
-        </div>
-
-        {/* Table */}
-        <div className="rounded-xl border border-border overflow-hidden bg-card">
+          {/* Table */}
+          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
           <DataTable
             data={filtered}
             columns={columns}
@@ -625,29 +645,31 @@ const GeneralLedgerMaster: React.FC = () => {
               row.original.LHeadId === editingId ? "bg-primary/5" : ""
             }
           />
-        </div>
-        <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
-          <span className="text-muted-foreground">
-            Page {page} of {totalPages}
-          </span>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage((p) => Math.max(p - 1, 1))}
-              disabled={page <= 1}
-              className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-50"
-            >
-              Previous
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-              disabled={page >= totalPages}
-              className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-50"
-            >
-              Next
-            </button>
+          </div>
+          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
+            <span className="text-xs text-muted-foreground">
+              Page {page} of {totalPages}
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                disabled={page <= 1}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+                disabled={page >= totalPages}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
         <div className="fixed inset-0 z-50 flex justify-end">
@@ -710,13 +732,19 @@ const GeneralLedgerMaster: React.FC = () => {
                 </span>
               </div>
             </div>
-            <div className="px-5 py-3 border-t border-border">
+            <div className="px-5 py-3 border-t border-border flex justify-end gap-2 bg-muted/20">
+              <button
+                onClick={() => setViewRecord(null)}
+                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                Close
+              </button>
               <button
                 onClick={() => {
                   startEdit(viewRecord);
                   setViewRecord(null);
                 }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm flex items-center gap-1.5"
               >
                 <Pencil size={13} /> Edit Account
               </button>

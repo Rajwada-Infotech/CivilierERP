@@ -447,34 +447,83 @@ const AccountGroupMaster: React.FC = () => {
     <>
       <Breadcrumbs items={["Masters", "Account Group"]} />
 
-      <div className="mb-6">
-        <h1 className="text-xl font-heading font-bold text-foreground">
-          Account Group Master
-        </h1>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Organise accounts into parent groups and sub-groups
-        </p>
-      </div>
-
-      {/* ── Form card ── */}
-      <div className="rounded-xl border border-border bg-card mb-6">
-        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-foreground">
-            {editingId ? "Edit Group" : "Add Account Group"}
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            {editingId
-              ? "Modify the selected group"
-              : "Fill in the details to create a new group."}
-          </p>
+      <div className="relative space-y-8 mt-6">
+        {/* ── Page header ── */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Account Group Master
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Organise accounts into parent groups and sub-groups
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs text-muted-foreground bg-muted/60 rounded-lg px-3 py-1.5">
+              {rootCount} Parent · {subCount} Sub
+            </span>
+          </div>
         </div>
 
-        <div className="p-5">
-          <div className="grid grid-cols-2 gap-x-6 gap-y-5">
+        {/* ── Form card ── */}
+        <div className="rounded-xl border border-border bg-card shadow-sm">
+          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
+            <div className="flex items-center gap-3">
+              {editingId && (
+                <button
+                  onClick={resetForm}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <RotateCcw size={15} />
+                  <span className="hidden sm:inline">Back</span>
+                </button>
+              )}
+              {editingId && <span className="text-border/60">|</span>}
+              <h2 className="text-base font-heading font-semibold text-foreground">
+                {editingId ? "Edit Group" : "Add Account Group"}
+              </h2>
+            </div>
+            <div className="flex items-center gap-2">
+              {editingId && (
+                <button
+                  onClick={resetForm}
+                  className="px-5 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60 flex items-center gap-2"
+              >
+                {saving ? (
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : editingId ? (
+                  <Check size={14} />
+                ) : (
+                  <Plus size={14} />
+                )}
+                {saving ? "Saving…" : editingId ? "Update Group" : "Save Group"}
+              </button>
+            </div>
+          </div>
+
+          <div className="px-5 sm:px-6 py-6 space-y-7">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+                  <Layers size={12} className="text-primary" />
+                </div>
+                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                  Group Details
+                </p>
+              </div>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-5">
             {/* Group Name */}
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
-                GROUP NAME <span className="text-red-500">*</span>
+            <div className="space-y-1.5">
+              <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                Group Name <span className="text-destructive">*</span>
               </label>
               <input
                 value={form.name}
@@ -493,9 +542,9 @@ const AccountGroupMaster: React.FC = () => {
             </div>
 
             {/* Code */}
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
-                CODE <span className="text-red-500">*</span>
+            <div className="space-y-1.5">
+              <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                Code <span className="text-destructive">*</span>
               </label>
               <input
                 value={form.code}
@@ -517,27 +566,37 @@ const AccountGroupMaster: React.FC = () => {
             </div>
 
             {/* Parent Group — hierarchical dropdown */}
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
-                PARENT GROUP
+            <div className="space-y-1.5 col-span-2">
+              <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                Parent Group
               </label>
-              <select
-                value={form.parentId}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, parentId: e.target.value }))
-                }
-                className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-              >
-                <option value="">— Top-level group (no parent)</option>
-                {dropdownOptions.map(({ group, depth }) => (
-                  <option key={group._id} value={group._id}>
-                    {"\u00a0\u00a0\u00a0\u00a0".repeat(depth)}
-                    {depth > 0 ? "└ " : ""}
-                    {group.name}
-                    {group.code ? ` (${group.code})` : ""}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <FolderOpen
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+                <select
+                  value={form.parentId}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, parentId: e.target.value }))
+                  }
+                  className="w-full appearance-none pl-8 pr-9 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                >
+                  <option value="">— Top-level group (no parent)</option>
+                  {dropdownOptions.map(({ group, depth }) => (
+                    <option key={group._id} value={group._id}>
+                      {"\u00a0\u00a0\u00a0\u00a0".repeat(depth)}
+                      {depth > 0 ? "└ " : ""}
+                      {group.name}
+                      {group.code ? ` (${group.code})` : ""}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={14}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+              </div>
               <p className="text-[11px] text-muted-foreground mt-1">
                 {selectedParentPath ? (
                   <>
@@ -552,111 +611,67 @@ const AccountGroupMaster: React.FC = () => {
               </p>
             </div>
           </div>
+          </div>
+          </div>
+        </div>
 
-          {/* Actions */}
-          <div className="flex items-center gap-3 mt-6 pt-5 border-t border-border">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="px-5 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity flex items-center gap-2"
-            >
-              {saving ? (
-                <>
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Saving…
-                </>
-              ) : editingId ? (
-                <>
-                  <Check size={14} />
-                  Update Group
-                </>
-              ) : (
-                <>
-                  <Plus size={14} />
-                  Save Group
-                </>
-              )}
-            </button>
-            {editingId && (
-              <button
-                onClick={resetForm}
-                className="px-5 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors flex items-center gap-2"
-              >
-                <RotateCcw size={13} />
-                Cancel
-              </button>
+        {/* ── Table ── */}
+        <div>
+          <div className="mb-3 flex items-center gap-3">
+            <div className="relative flex-1 max-w-xs">
+              <Search
+                size={13}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search name or code…"
+                className="w-full text-sm rounded-lg border border-border pl-9 pr-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+              />
+            </div>
+            {!search && (
+              <div className="flex gap-2">
+                <button
+                  onClick={expandAll}
+                  className="text-xs font-heading text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
+                >
+                  Expand All
+                </button>
+                <button
+                  onClick={collapseAll}
+                  className="text-xs font-heading text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
+                >
+                  Collapse All
+                </button>
+              </div>
             )}
           </div>
-        </div>
-      </div>
 
-      {/* ── Table ── */}
-      <div>
-        <div className="mb-3 flex items-center gap-3">
-          <div className="relative flex-1 max-w-xs">
-            <Search
-              size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name or code…"
-              className="w-full text-sm rounded-lg border border-border pl-9 pr-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-            />
-          </div>
-          {!search && (
-            <div className="flex gap-2">
-              <button
-                onClick={expandAll}
-                className="text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
-              >
-                Expand All
-              </button>
-              <button
-                onClick={collapseAll}
-                className="text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
-              >
-                Collapse All
-              </button>
-            </div>
-          )}
-          <div className="ml-auto flex gap-2 text-xs text-muted-foreground">
-            <span className="bg-muted/60 rounded-lg px-3 py-1.5">
-              {rootCount} Parent Groups
-            </span>
-            <span className="bg-muted/60 rounded-lg px-3 py-1.5">
-              {subCount} Sub-Groups
-            </span>
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-border overflow-hidden bg-card">
+          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
           {isLoading ? (
-            <div className="p-10 text-center">
-              <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">Loading groups…</p>
+            <div className="text-center py-16 text-muted-foreground text-sm">
+              <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              Loading groups…
             </div>
           ) : error ? (
-            <div className="p-10 text-center">
-              <p className="text-red-500 text-sm">
-                Failed to load. Check backend connection.
-              </p>
+            <div className="text-center py-16 text-destructive text-sm">
+              Failed to load. Check backend connection.
             </div>
           ) : (
-            <table className="w-full text-left">
+            <table className="w-full text-left text-sm">
               <thead>
-                <tr className="border-b border-border bg-muted/40">
-                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wide py-3 px-4">
+                <tr className="bg-muted/30 border-b border-border">
+                  <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
                     Group Name
                   </th>
-                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wide py-3 px-4">
+                  <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
                     Code
                   </th>
-                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wide py-3 px-4">
+                  <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
                     Belongs To
                   </th>
-                  <th className="py-3 px-4 w-24" />
+                  <th className="px-4 py-3 w-24" />
                 </tr>
               </thead>
               <tbody>
@@ -759,17 +774,12 @@ const AccountGroupMaster: React.FC = () => {
                   )
                 ) : tree.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-12 text-center">
+                    <td colSpan={4} className="text-center py-14 text-muted-foreground text-sm">
                       <Layers
-                        size={28}
-                        className="text-muted-foreground/30 mx-auto mb-3"
+                        size={18}
+                        className="mx-auto mb-2 opacity-30"
                       />
-                      <p className="text-sm text-muted-foreground">
-                        No account groups yet.
-                      </p>
-                      <p className="text-xs text-muted-foreground/70 mt-1">
-                        Use the form above to create your first group.
-                      </p>
+                      No account groups yet. Use the form above to create your first group.
                     </td>
                   </tr>
                 ) : (
@@ -793,6 +803,7 @@ const AccountGroupMaster: React.FC = () => {
               </tbody>
             </table>
           )}
+          </div>
         </div>
       </div>
       {/* ── View Detail Drawer ── */}
@@ -919,13 +930,19 @@ const AccountGroupMaster: React.FC = () => {
                 );
               })()}
             </div>
-            <div className="px-5 py-3 border-t border-border">
+            <div className="px-5 py-3 border-t border-border flex justify-end gap-2 bg-muted/20">
+              <button
+                onClick={() => setViewRecord(null)}
+                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                Close
+              </button>
               <button
                 onClick={() => {
                   startEdit(viewRecord);
                   setViewRecord(null);
                 }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm flex items-center gap-1.5"
               >
                 <Pencil size={13} /> Edit Group
               </button>

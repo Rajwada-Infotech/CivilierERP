@@ -35,7 +35,17 @@ const LIST_COLUMNS = `
   fn.Status,
   fn.Notes,
   fn.CreatedBy,
-  fn.CreatedAt
+  fn.CreatedAt,
+  fn.BankName,
+  fn.LoanAccountNo,
+  fn.LoanSanctionStatus,
+  CONVERT(VARCHAR(10), fn.LoanSanctionDate, 23)     AS LoanSanctionDate,
+  fn.LoanDisbursementStatus,
+  CONVERT(VARCHAR(10), fn.LoanDisbursementDate, 23) AS LoanDisbursementDate,
+  fn.LoanAmount,
+  fn.BankNOCStatus,
+  CONVERT(VARCHAR(10), fn.BankNOCDate, 23)          AS BankNOCDate,
+  fn.BankNOCNotes
 `;
 
 const STATUS_OPTIONS = ["Pending", "Approved", "Issued", "Rejected"];
@@ -135,6 +145,20 @@ function getPayload(body) {
     Reason: normalizeText(body?.Reason),
     Status: status,
     Notes: normalizeText(body?.Notes),
+    // Bank NOC fields
+    BankName: normalizeText(body?.BankName),
+    LoanAccountNo: normalizeText(body?.LoanAccountNo),
+    LoanSanctionStatus: normalizeText(body?.LoanSanctionStatus) || null,
+    LoanSanctionDate: normalizeText(body?.LoanSanctionDate),
+    LoanDisbursementStatus: normalizeText(body?.LoanDisbursementStatus) || null,
+    LoanDisbursementDate: normalizeText(body?.LoanDisbursementDate),
+    LoanAmount: (() => {
+      const v = normalizeNumber(body?.LoanAmount);
+      return v === null || Number.isNaN(v) ? null : v;
+    })(),
+    BankNOCStatus: normalizeText(body?.BankNOCStatus) || null,
+    BankNOCDate: normalizeText(body?.BankNOCDate),
+    BankNOCNotes: normalizeText(body?.BankNOCNotes),
   };
 }
 
@@ -331,11 +355,9 @@ router.post("/", async (req, res) => {
       unitSelection &&
       Number(unitSelection.ApplicantId) !== Number(payload.ApplicantId)
     )
-      return res
-        .status(400)
-        .json({
-          error: "The selected unit does not belong to the selected applicant.",
-        });
+      return res.status(400).json({
+        error: "The selected unit does not belong to the selected applicant.",
+      });
 
     const transaction = new sql.Transaction(getPool());
     await transaction.begin();
@@ -353,12 +375,29 @@ router.post("/", async (req, res) => {
       .input("Reason", sql.NVarChar(500), payload.Reason)
       .input("Status", sql.NVarChar(30), payload.Status)
       .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
+      .input("BankName", sql.NVarChar(150), payload.BankName)
+      .input("LoanAccountNo", sql.NVarChar(60), payload.LoanAccountNo)
+      .input("LoanSanctionStatus", sql.NVarChar(30), payload.LoanSanctionStatus)
+      .input("LoanSanctionDate", sql.Date, payload.LoanSanctionDate)
+      .input(
+        "LoanDisbursementStatus",
+        sql.NVarChar(30),
+        payload.LoanDisbursementStatus,
+      )
+      .input("LoanDisbursementDate", sql.Date, payload.LoanDisbursementDate)
+      .input("LoanAmount", sql.Decimal(18, 2), payload.LoanAmount)
+      .input("BankNOCStatus", sql.NVarChar(30), payload.BankNOCStatus)
+      .input("BankNOCDate", sql.Date, payload.BankNOCDate)
+      .input("BankNOCNotes", sql.NVarChar(500), payload.BankNOCNotes)
       .input("CreatedBy", sql.NVarChar(100), userName).query(`
         INSERT INTO dbo.FollowupNOCs (
           NOCNo, ApplicantId, UnitSelectionId, AgreementId,
           ProjectId, CompanyId,
           NOCDate, ApprovalDate, IssuedDate,
           ApprovedBy, Reason, Status, Notes,
+          BankName, LoanAccountNo, LoanSanctionStatus, LoanSanctionDate,
+          LoanDisbursementStatus, LoanDisbursementDate, LoanAmount,
+          BankNOCStatus, BankNOCDate, BankNOCNotes,
           CreatedBy, CreatedAt
         )
         OUTPUT INSERTED.Id
@@ -367,6 +406,9 @@ router.post("/", async (req, res) => {
           @ProjectId, @CompanyId,
           @NOCDate, @ApprovalDate, @IssuedDate,
           @ApprovedBy, @Reason, @Status, @Notes,
+          @BankName, @LoanAccountNo, @LoanSanctionStatus, @LoanSanctionDate,
+          @LoanDisbursementStatus, @LoanDisbursementDate, @LoanAmount,
+          @BankNOCStatus, @BankNOCDate, @BankNOCNotes,
           @CreatedBy, SYSDATETIME()
         )
       `);
@@ -414,11 +456,9 @@ router.put("/:id", async (req, res) => {
       unitSelection &&
       Number(unitSelection.ApplicantId) !== Number(payload.ApplicantId)
     )
-      return res
-        .status(400)
-        .json({
-          error: "The selected unit does not belong to the selected applicant.",
-        });
+      return res.status(400).json({
+        error: "The selected unit does not belong to the selected applicant.",
+      });
 
     const existing = await getPool()
       .request()
@@ -445,22 +485,46 @@ router.put("/:id", async (req, res) => {
       .input("Reason", sql.NVarChar(500), payload.Reason)
       .input("Status", sql.NVarChar(30), payload.Status)
       .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
+      .input("BankName", sql.NVarChar(150), payload.BankName)
+      .input("LoanAccountNo", sql.NVarChar(60), payload.LoanAccountNo)
+      .input("LoanSanctionStatus", sql.NVarChar(30), payload.LoanSanctionStatus)
+      .input("LoanSanctionDate", sql.Date, payload.LoanSanctionDate)
+      .input(
+        "LoanDisbursementStatus",
+        sql.NVarChar(30),
+        payload.LoanDisbursementStatus,
+      )
+      .input("LoanDisbursementDate", sql.Date, payload.LoanDisbursementDate)
+      .input("LoanAmount", sql.Decimal(18, 2), payload.LoanAmount)
+      .input("BankNOCStatus", sql.NVarChar(30), payload.BankNOCStatus)
+      .input("BankNOCDate", sql.Date, payload.BankNOCDate)
+      .input("BankNOCNotes", sql.NVarChar(500), payload.BankNOCNotes)
       .input("UpdatedBy", sql.NVarChar(100), userName).query(`
         UPDATE dbo.FollowupNOCs SET
-          ApplicantId     = @ApplicantId,
-          UnitSelectionId = @UnitSelectionId,
-          AgreementId     = @AgreementId,
-          ProjectId       = @ProjectId,
-          CompanyId       = @CompanyId,
-          NOCDate         = @NOCDate,
-          ApprovalDate    = @ApprovalDate,
-          IssuedDate      = @IssuedDate,
-          ApprovedBy      = @ApprovedBy,
-          Reason          = @Reason,
-          Status          = @Status,
-          Notes           = @Notes,
-          UpdatedBy       = @UpdatedBy,
-          UpdatedAt       = SYSDATETIME()
+          ApplicantId            = @ApplicantId,
+          UnitSelectionId        = @UnitSelectionId,
+          AgreementId            = @AgreementId,
+          ProjectId              = @ProjectId,
+          CompanyId              = @CompanyId,
+          NOCDate                = @NOCDate,
+          ApprovalDate           = @ApprovalDate,
+          IssuedDate             = @IssuedDate,
+          ApprovedBy             = @ApprovedBy,
+          Reason                 = @Reason,
+          Status                 = @Status,
+          Notes                  = @Notes,
+          BankName               = @BankName,
+          LoanAccountNo          = @LoanAccountNo,
+          LoanSanctionStatus     = @LoanSanctionStatus,
+          LoanSanctionDate       = @LoanSanctionDate,
+          LoanDisbursementStatus = @LoanDisbursementStatus,
+          LoanDisbursementDate   = @LoanDisbursementDate,
+          LoanAmount             = @LoanAmount,
+          BankNOCStatus          = @BankNOCStatus,
+          BankNOCDate            = @BankNOCDate,
+          BankNOCNotes           = @BankNOCNotes,
+          UpdatedBy              = @UpdatedBy,
+          UpdatedAt              = SYSDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
       `);
 
@@ -496,7 +560,3 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-

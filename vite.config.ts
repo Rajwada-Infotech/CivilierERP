@@ -1,5 +1,5 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react-swc";
+import react from "@vitejs/plugin-react";
 import path from "path";
 
 // Suppress ECONNREFUSED noise when backend is not running
@@ -40,9 +40,7 @@ export default defineConfig(({ mode }) => ({
     },
   },
   plugins: [
-    react({
-      disableOxcRecommendation: true, // Suppresses Vite 8 recommendation warning
-    }),
+    react(),
   ],
   build: {
     rollupOptions: {
