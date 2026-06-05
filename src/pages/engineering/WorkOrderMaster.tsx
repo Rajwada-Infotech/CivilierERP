@@ -3144,6 +3144,7 @@ const WorkOrderEditPanel: React.FC<{
         header: {
           BoqID: form.boqId ? parseInt(form.boqId) : null,
           CompanyId: parseInt(form.companyId),
+          ProjectId: parseInt(form.projectId),
           DocumentDate: form.docDate,
           ContractorId: parseInt(form.contractorId),
           SupplierId: form.supplierId ? parseInt(form.supplierId) : undefined,
@@ -3481,7 +3482,10 @@ const WorkOrderEditPanel: React.FC<{
                   </span>
                 </FieldLabel>
                 <div className="relative">
-                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={14} />
+                  <Calendar
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    size={14}
+                  />
                   <input
                     type="date"
                     value={form.docDate}
@@ -4170,6 +4174,7 @@ const WorkOrderMaster: React.FC = () => {
         header: {
           BoqID: form.boqId ? parseInt(form.boqId) : null,
           CompanyId: parseInt(form.companyId),
+          ProjectId: parseInt(form.projectId),
           DocumentDate: form.docDate,
           ContractorId: parseInt(form.contractorId),
           SupplierId: form.supplierId ? parseInt(form.supplierId) : undefined,
@@ -4275,57 +4280,760 @@ const WorkOrderMaster: React.FC = () => {
 
       {/* Page header */}
       <div className="relative space-y-8 mt-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-            <span className="p-1.5 rounded-lg bg-violet-500/10 inline-flex shrink-0">
-              <ClipboardList size={18} className="text-violet-500" />
-            </span>
-            Work Order
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5 hidden sm:block">
-            Create and manage work orders with activity-based cost breakdown
-          </p>
-        </div>
-
-        {/* Tab switcher + action buttons */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Tab toggle */}
-          <div className="flex items-center rounded-lg border border-border bg-muted/30 p-0.5">
-            <button
-              onClick={() => setViewMode("create")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                viewMode === "create"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <PenSquare size={13} />
-              <span className="hidden sm:inline">Create</span>
-            </button>
-            <button
-              onClick={() => setViewMode("list")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                viewMode === "list" ||
-                viewMode === "detail" ||
-                viewMode === "edit"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <List size={13} />
-              <span className="hidden sm:inline">View All</span>
-            </button>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-violet-500/10 inline-flex shrink-0">
+                <ClipboardList size={18} className="text-violet-500" />
+              </span>
+              Work Order
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5 hidden sm:block">
+              Create and manage work orders with activity-based cost breakdown
+            </p>
           </div>
 
-          {viewMode === "create" && (
-            <>
+          {/* Tab switcher + action buttons */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Tab toggle */}
+            <div className="flex items-center rounded-lg border border-border bg-muted/30 p-0.5">
+              <button
+                onClick={() => setViewMode("create")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                  viewMode === "create"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <PenSquare size={13} />
+                <span className="hidden sm:inline">Create</span>
+              </button>
+              <button
+                onClick={() => setViewMode("list")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                  viewMode === "list" ||
+                  viewMode === "detail" ||
+                  viewMode === "edit"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <List size={13} />
+                <span className="hidden sm:inline">View All</span>
+              </button>
+            </div>
+
+            {viewMode === "create" && (
+              <>
+                <button
+                  onClick={() => void resetAll()}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
+                >
+                  <RotateCcw size={13} />
+                  <span className="hidden sm:inline">Reset</span>
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || loadingDropdowns}
+                  className="gradient-accent flex items-center gap-1.5 font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-60 transition-opacity"
+                >
+                  {saving ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Saving…</span>
+                    </>
+                  ) : saved ? (
+                    <>
+                      <Check size={14} />
+                      <span>Saved!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save size={14} />
+                      <span className="hidden sm:inline">Save Work Order</span>
+                      <span className="sm:hidden">Save</span>
+                    </>
+                  )}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── VIEW ALL ── */}
+        {viewMode === "list" && (
+          <WorkOrdersList
+            onViewDetail={(id) => {
+              setSelectedOrderId(id);
+              setViewMode("detail");
+            }}
+          />
+        )}
+
+        {/* ── DETAIL VIEW ── */}
+        {viewMode === "detail" && selectedOrderId !== null && (
+          <WorkOrderDetailPanel
+            workOrderId={selectedOrderId}
+            onBack={() => setViewMode("list")}
+            onDelete={() => setViewMode("list")}
+            onEdit={(id) => {
+              setSelectedOrderId(id);
+              setViewMode("edit");
+            }}
+          />
+        )}
+
+        {/* ── EDIT VIEW ── */}
+        {viewMode === "edit" && selectedOrderId !== null && (
+          <WorkOrderEditPanel
+            workOrderId={selectedOrderId}
+            onBack={() => {
+              setViewMode("detail");
+            }}
+            onSaved={(id) => {
+              setSelectedOrderId(id);
+              setViewMode("detail");
+            }}
+          />
+        )}
+
+        {/* ── CREATE FORM ── */}
+        {viewMode === "create" && (
+          <>
+            {dropdownError && (
+              <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 px-4 py-3">
+                <AlertCircle
+                  size={15}
+                  className="text-amber-500 shrink-0 mt-0.5"
+                />
+                <p className="text-sm text-amber-700 dark:text-amber-400">
+                  {dropdownError}
+                </p>
+              </div>
+            )}
+
+            {savedId && (
+              <div className="mb-5 rounded-xl border border-border bg-card px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-medium text-muted-foreground">
+                    Approval Status:
+                  </span>
+                  <StatusBadge status={savedStatus} />
+                </div>
+                <ApprovalActions
+                  status={savedStatus}
+                  recordId={savedId}
+                  endpoint="/api/work-orders"
+                  onSuccess={async () => {
+                    try {
+                      const res = await fetchWithAuth(
+                        `/api/work-orders/${savedId}`,
+                      );
+                      if (res.ok) {
+                        const data = await res.json();
+                        setSavedStatus(
+                          data.Status || data.status || savedStatus,
+                        );
+                      }
+                    } catch {
+                      /* ignore */
+                    }
+                  }}
+                />
+              </div>
+            )}
+
+            {/* ── Unified Work Order Header Card ── */}
+            <div className="rounded-2xl border border-border bg-card mb-5 shadow-sm">
+              {/* Card Header */}
+              <div className="px-5 py-4 border-b border-border bg-muted/20 flex items-center justify-between rounded-t-2xl">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                    <FileText size={15} className="text-primary" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold text-foreground tracking-tight">
+                      Work Order Details
+                    </h2>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Configuration, parties &amp; document info
+                    </p>
+                  </div>
+                </div>
+                {form.docNumber && (
+                  <span className="font-mono text-xs font-bold text-primary bg-primary/10 border border-primary/20 px-2.5 py-1 rounded-lg shrink-0">
+                    {form.docNumber}
+                  </span>
+                )}
+              </div>
+
+              <div className="divide-y divide-border/60">
+                {/* ── Section 1: Project Configuration ── */}
+                <div className="px-5 py-4">
+                  <div className="flex items-center gap-2 mb-3.5">
+                    <div className="w-1 h-4 rounded-full bg-primary/60 shrink-0" />
+                    <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                      Project Configuration
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* BOQ Link */}
+                    <div>
+                      <FieldLabel>
+                        <span className="flex items-center gap-1.5">
+                          <FileText size={11} />
+                          Linked BOQ
+                        </span>
+                        <span className="invisible text-red-500 ml-0.5">*</span>
+                      </FieldLabel>
+                      <select
+                        value={form.boqId}
+                        onChange={async (e) => {
+                          const boqId = e.target.value;
+                          const boq = approvedBoqs.find(
+                            (b) => String(b.id) === boqId,
+                          );
+                          setForm((prev) => ({
+                            ...prev,
+                            boqId,
+                            companyId: boq?.CompanyId
+                              ? String(boq.CompanyId)
+                              : prev.companyId,
+                            projectId: boq?.ProjectId
+                              ? String(boq.ProjectId)
+                              : prev.projectId,
+                          }));
+                          if (boqId) {
+                            try {
+                              const acts = await fetchWithAuth(
+                                `/api/engineering/boq-activities/${boqId}`,
+                              ).then((r) => r.json());
+                              if (Array.isArray(acts) && acts.length > 0) {
+                                const inherited: ActivityGroup[] = acts.map(
+                                  (a: any) => ({
+                                    id: uid(),
+                                    groupId: null,
+                                    name: a.ActivityName || "",
+                                    expanded: true,
+                                    activities: [
+                                      {
+                                        id: uid(),
+                                        activityId: a.ActivityId
+                                          ? parseInt(a.ActivityId)
+                                          : null,
+                                        name: a.ActivityName || "",
+                                        uomId: a.UomId ?? null,
+                                        unit: a.UomName || "",
+                                        ratePerUnit: parseFloat(a.Rate || 0),
+                                        area: parseFloat(a.Quantity || 0),
+                                        materials: [],
+                                        hsnCode: "",
+                                        hsnGstRate: parseFloat(a.TaxPct || 0),
+                                        hsnGstType: "cgst_sgst" as const,
+                                      },
+                                    ],
+                                  }),
+                                );
+                                setGroups(inherited);
+                              }
+                            } catch {
+                              /* non-fatal */
+                            }
+                          }
+                        }}
+                        className={selectCls}
+                      >
+                        <option value="">— None —</option>
+                        {approvedBoqs.map((b) => (
+                          <option key={b.id} value={String(b.id)}>
+                            {b.name}
+                          </option>
+                        ))}
+                      </select>
+                      {form.boqId && (
+                        <p className="text-[10px] text-primary/70 mt-1 flex items-center gap-1">
+                          <Check size={9} />
+                          Company &amp; Project auto-filled from BOQ
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Company */}
+                    <div>
+                      <FieldLabel required>
+                        <span className="flex items-center gap-1.5">
+                          <Building2 size={11} />
+                          Company Name
+                        </span>
+                      </FieldLabel>
+                      {renderSelect(
+                        "companyId",
+                        form.companyId,
+                        (v) => setField("companyId", v),
+                        companies,
+                        "Select company",
+                        errors.companyId ?? false,
+                      )}
+                      {errors.companyId && (
+                        <p className="text-xs text-red-500 mt-1">Required</p>
+                      )}
+                    </div>
+
+                    {/* Project */}
+                    <div>
+                      <FieldLabel required>
+                        <span className="flex items-center gap-1.5">
+                          <Layers size={11} />
+                          Project Name
+                        </span>
+                      </FieldLabel>
+                      {renderSelect(
+                        "projectId",
+                        form.projectId,
+                        (v) => setField("projectId", v),
+                        projects,
+                        "Select project",
+                        errors.projectId ?? false,
+                      )}
+                      {errors.projectId && (
+                        <p className="text-xs text-red-500 mt-1">Required</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Section 2: Document Configuration ── */}
+                <div className="px-5 py-4">
+                  <div className="flex items-center gap-2 mb-3.5">
+                    <div className="w-1 h-4 rounded-full bg-indigo-400/70 shrink-0" />
+                    <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                      Document Configuration
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Financial Year */}
+                    <div>
+                      <FieldLabel>
+                        <span className="flex items-center gap-1.5">
+                          <Calendar size={11} />
+                          Financial Year
+                        </span>
+                      </FieldLabel>
+                      {loadingDropdowns ? (
+                        <SelectSkeleton />
+                      ) : (
+                        <select
+                          value={selectedFinYear ?? ""}
+                          onChange={(e) => {
+                            const nextFinYear = e.target.value || undefined;
+                            setSelectedFinYear(nextFinYear);
+                            if (woDocTypeId)
+                              void refreshWoDocNumber(woDocTypeId, nextFinYear);
+                          }}
+                          className={selectCls}
+                        >
+                          <option value="">Select financial year…</option>
+                          {finYearOptions.map((fy) => (
+                            <option key={fy.id} value={fy.year}>
+                              {fy.year}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+
+                    {/* Document Type */}
+                    <div>
+                      <FieldLabel>
+                        <span className="flex items-center gap-1.5">
+                          <Hash size={11} />
+                          Document Type
+                        </span>
+                      </FieldLabel>
+                      <DocNumberPreview
+                        module="WO"
+                        finYear={selectedFinYear || undefined}
+                        selectedDocTypeId={woDocTypeId}
+                        preview={woDocNo}
+                        refreshTrigger={docRefreshTrigger}
+                        onSelect={applyWoDocNumber}
+                        readOnly={viewMode !== "create"}
+                      />
+                    </div>
+
+                    {/* Document Number */}
+                    <div>
+                      <FieldLabel>
+                        <span className="flex items-center gap-1.5">
+                          <Hash size={11} />
+                          Document Number
+                        </span>
+                      </FieldLabel>
+                      <input
+                        value={form.docNumber}
+                        onChange={(e) => {
+                          const nextValue = e.target.value.toUpperCase();
+                          setForm((prev) => ({
+                            ...prev,
+                            docNumber: nextValue,
+                          }));
+                          setWoDocNo(nextValue);
+                        }}
+                        className={`${inputCls} font-mono`}
+                        placeholder="Auto-generated…"
+                      />
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Auto-filled, still editable
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Section 3: Parties & Amount ── */}
+                <div className="px-5 py-4">
+                  <div className="flex items-center gap-2 mb-3.5">
+                    <div className="w-1 h-4 rounded-full bg-emerald-400/70 shrink-0" />
+                    <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                      Parties &amp; Amount
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* Document Date */}
+                    <div>
+                      <FieldLabel required>
+                        <span className="flex items-center gap-1.5">
+                          <Calendar size={11} />
+                          Document Date
+                        </span>
+                      </FieldLabel>
+                      <div className="relative">
+                        <Calendar
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                          size={14}
+                        />
+                        <input
+                          type="date"
+                          value={form.docDate}
+                          onChange={(e) => setField("docDate", e.target.value)}
+                          className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.docDate ? "border-red-400" : "border-border"}`}
+                        />
+                      </div>
+                      {errors.docDate && (
+                        <p className="text-xs text-red-500 mt-1">Required</p>
+                      )}
+                    </div>
+                    {/* Contractor */}
+                    <div>
+                      <FieldLabel required>
+                        <span className="flex items-center gap-1.5">
+                          <User size={11} />
+                          Contractor
+                        </span>
+                      </FieldLabel>
+                      {renderSelect(
+                        "contractorId",
+                        form.contractorId,
+                        (v) => setField("contractorId", v),
+                        contractors,
+                        "Select contractor",
+                        errors.contractorId ?? false,
+                      )}
+                      {errors.contractorId && (
+                        <p className="text-xs text-red-500 mt-1">Required</p>
+                      )}
+                    </div>
+
+                    {/* Supplier */}
+                    <div>
+                      <FieldLabel>
+                        <span className="flex items-center gap-1.5">
+                          <User size={11} />
+                          Supplier
+                        </span>
+                        <span className="invisible text-red-500 ml-0.5">*</span>
+                      </FieldLabel>
+                      {renderSelect(
+                        "supplierId",
+                        form.supplierId,
+                        (v) => setField("supplierId", v),
+                        suppliers,
+                        "Select supplier",
+                        false,
+                      )}
+                    </div>
+
+                    {/* Total Amount */}
+                    <div>
+                      <FieldLabel>
+                        <span className="flex items-center gap-1.5">
+                          <IndianRupee size={11} />
+                          Total Amount
+                        </span>
+                        <span className="invisible text-red-500 ml-0.5">*</span>
+                      </FieldLabel>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">
+                          ₹
+                        </span>
+                        <input
+                          readOnly
+                          value={grandTotal > 0 ? grandTotal.toFixed(2) : ""}
+                          placeholder="Calculated from activities"
+                          className={`${inputCls} pl-7 bg-muted/40 text-foreground font-mono font-semibold cursor-not-allowed`}
+                        />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+                        <Calculator size={9} />
+                        Auto-calculated from activities
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Section 4: Remarks & T&C ── */}
+                <div className="px-5 py-4">
+                  <div className="flex items-center gap-2 mb-3.5">
+                    <div className="w-1 h-4 rounded-full bg-amber-400/70 shrink-0" />
+                    <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                      Notes &amp; Terms
+                    </span>
+                  </div>
+
+                  {/* Remarks */}
+                  <div className="mb-4">
+                    <FieldLabel>Remarks</FieldLabel>
+                    <input
+                      value={form.remarks}
+                      onChange={(e) => setField("remarks", e.target.value)}
+                      placeholder="Any additional remarks…"
+                      className={inputCls}
+                    />
+                  </div>
+
+                  {/* Terms & Conditions */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <FieldLabel>Terms &amp; Conditions</FieldLabel>
+                      {/* T&C Picker from TCMaster */}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setTcDropdownOpen((o) => !o)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition mb-2"
+                        >
+                          <Plus size={13} />
+                          Add T&amp;C
+                        </button>
+                        {tcDropdownOpen && (
+                          <>
+                            <div
+                              className="fixed inset-0 z-[99]"
+                              onClick={() => setTcDropdownOpen(false)}
+                            />
+                            <div className="absolute right-0 top-full mt-1 z-[100] w-80 rounded-xl border border-border bg-card shadow-xl overflow-hidden">
+                              <div className="px-3 py-2 border-b border-border">
+                                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                                  Select Terms &amp; Conditions
+                                </p>
+                              </div>
+                              <div className="max-h-56 overflow-y-auto divide-y divide-border">
+                                {tcRecords.length === 0 ? (
+                                  <p className="px-4 py-6 text-xs text-center text-muted-foreground">
+                                    No T&amp;C records found
+                                  </p>
+                                ) : (
+                                  tcRecords.map((tc) => {
+                                    const isSelected = selectedTCs.some(
+                                      (s) => s.id === tc.id,
+                                    );
+                                    return (
+                                      <button
+                                        key={tc.id}
+                                        type="button"
+                                        onClick={() =>
+                                          setSelectedTCs((prev) =>
+                                            isSelected
+                                              ? prev.filter(
+                                                  (s) => s.id !== tc.id,
+                                                )
+                                              : [...prev, tc],
+                                          )
+                                        }
+                                        className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSelected ? "bg-primary/5" : ""}`}
+                                      >
+                                        <span
+                                          className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? "bg-primary border-primary" : "border-border"}`}
+                                        >
+                                          {isSelected && (
+                                            <Check
+                                              size={10}
+                                              className="text-primary-foreground"
+                                            />
+                                          )}
+                                        </span>
+                                        <span className="flex-1 min-w-0">
+                                          <span className="block text-sm font-medium text-foreground truncate">
+                                            {tc.name}
+                                          </span>
+                                          <span className="block text-[11px] text-muted-foreground truncate mt-0.5">
+                                            {tc.terms}
+                                          </span>
+                                        </span>
+                                      </button>
+                                    );
+                                  })
+                                )}
+                              </div>
+                              <div className="px-3 py-2 border-t border-border">
+                                <button
+                                  type="button"
+                                  onClick={() => setTcDropdownOpen(false)}
+                                  className="w-full text-xs text-center text-muted-foreground hover:text-foreground transition py-1"
+                                >
+                                  Done
+                                </button>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    {/* Selected T&C list */}
+                    {selectedTCs.length > 0 ? (
+                      <div className="space-y-2">
+                        {selectedTCs.map((tc, idx) => (
+                          <div
+                            key={tc.id}
+                            className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3"
+                          >
+                            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center mt-0.5">
+                              {idx + 1}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-foreground">
+                                {tc.name}
+                              </p>
+                              <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap">
+                                {tc.terms}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedTCs((prev) =>
+                                  prev.filter((s) => s.id !== tc.id),
+                                )
+                              }
+                              className="flex-shrink-0 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-muted-foreground hover:text-red-500 transition"
+                            >
+                              <X size={13} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">
+                        No terms selected. Click &quot;Add T&amp;C&quot; to pick
+                        from master.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Activity Details */}
+            <div className="rounded-xl border border-border bg-card mb-5">
+              <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Calculator size={15} className="text-primary shrink-0" />
+                  <h2 className="text-sm font-semibold text-foreground">
+                    Activity Details
+                  </h2>
+                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full hidden sm:block">
+                    {groups.length}g ·{" "}
+                    {groups.reduce((s, g) => s + g.activities.length, 0)}a
+                  </span>
+                </div>
+                <button
+                  onClick={addGroup}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors shrink-0"
+                >
+                  <FolderPlus size={13} />
+                  <span className="hidden sm:inline">Add Group</span>
+                  <span className="sm:hidden">Group</span>
+                </button>
+              </div>
+              <div className="p-3 space-y-3">
+                {groups.map((group, idx) => (
+                  <ActivityGroupCard
+                    key={group.id}
+                    group={group}
+                    index={idx}
+                    onUpdate={(updated) => updateGroup(idx, updated)}
+                    onDelete={() => deleteGroup(idx)}
+                    canDelete={groups.length > 1}
+                    activityGroupOptions={activityGroupOptions}
+                    activityOptions={activityOptions}
+                    uomOptions={uomOptions}
+                    itemOptions={itemOptions}
+                    suppliers={suppliers}
+                    loadingDropdowns={loadingDropdowns}
+                    loadingItems={loadingItems}
+                    hsnRecords={hsnRecords}
+                  />
+                ))}
+              </div>
+              <div className="border-t border-border bg-muted/10">
+                <div className="grid grid-cols-1 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border/50">
+                  <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      <Package size={11} className="text-amber-500" />
+                      Materials
+                    </span>
+                    <span className="text-base font-bold text-amber-600 dark:text-amber-400">
+                      {fmt(grandMaterialsTotal)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      <Hammer size={11} className="text-blue-500" />
+                      Labour
+                    </span>
+                    <span className="text-base font-bold text-blue-600 dark:text-blue-400">
+                      {fmt(grandLabourTotal)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      <Receipt size={11} className="text-violet-500" />
+                      HSN GST
+                    </span>
+                    <span className="text-base font-bold text-violet-600 dark:text-violet-400">
+                      {fmt(grandHsnGst)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3 bg-muted/20">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      <Receipt size={11} className="text-primary" />
+                      Grand Total (incl. GST)
+                    </span>
+                    <span className="text-xl font-bold text-foreground">
+                      {fmt(grandTotal)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom bar */}
+            <div className="flex items-center justify-end gap-3 pb-8">
               <button
                 onClick={() => void resetAll()}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
               >
                 <RotateCcw size={13} />
-                <span className="hidden sm:inline">Reset</span>
+                Reset
               </button>
               <button
                 onClick={handleSave}
@@ -4334,717 +5042,24 @@ const WorkOrderMaster: React.FC = () => {
               >
                 {saving ? (
                   <>
-                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Saving…</span>
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Saving…
                   </>
                 ) : saved ? (
                   <>
                     <Check size={14} />
-                    <span>Saved!</span>
+                    Saved!
                   </>
                 ) : (
                   <>
                     <Save size={14} />
-                    <span className="hidden sm:inline">Save Work Order</span>
-                    <span className="sm:hidden">Save</span>
+                    Save Work Order
                   </>
                 )}
               </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* ── VIEW ALL ── */}
-      {viewMode === "list" && (
-        <WorkOrdersList
-          onViewDetail={(id) => {
-            setSelectedOrderId(id);
-            setViewMode("detail");
-          }}
-        />
-      )}
-
-      {/* ── DETAIL VIEW ── */}
-      {viewMode === "detail" && selectedOrderId !== null && (
-        <WorkOrderDetailPanel
-          workOrderId={selectedOrderId}
-          onBack={() => setViewMode("list")}
-          onDelete={() => setViewMode("list")}
-          onEdit={(id) => {
-            setSelectedOrderId(id);
-            setViewMode("edit");
-          }}
-        />
-      )}
-
-      {/* ── EDIT VIEW ── */}
-      {viewMode === "edit" && selectedOrderId !== null && (
-        <WorkOrderEditPanel
-          workOrderId={selectedOrderId}
-          onBack={() => {
-            setViewMode("detail");
-          }}
-          onSaved={(id) => {
-            setSelectedOrderId(id);
-            setViewMode("detail");
-          }}
-        />
-      )}
-
-      {/* ── CREATE FORM ── */}
-      {viewMode === "create" && (
-        <>
-          {dropdownError && (
-            <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 px-4 py-3">
-              <AlertCircle
-                size={15}
-                className="text-amber-500 shrink-0 mt-0.5"
-              />
-              <p className="text-sm text-amber-700 dark:text-amber-400">
-                {dropdownError}
-              </p>
             </div>
-          )}
-
-          {savedId && (
-            <div className="mb-5 rounded-xl border border-border bg-card px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-medium text-muted-foreground">
-                  Approval Status:
-                </span>
-                <StatusBadge status={savedStatus} />
-              </div>
-              <ApprovalActions
-                status={savedStatus}
-                recordId={savedId}
-                endpoint="/api/work-orders"
-                onSuccess={async () => {
-                  try {
-                    const res = await fetchWithAuth(
-                      `/api/work-orders/${savedId}`,
-                    );
-                    if (res.ok) {
-                      const data = await res.json();
-                      setSavedStatus(data.Status || data.status || savedStatus);
-                    }
-                  } catch {
-                    /* ignore */
-                  }
-                }}
-              />
-            </div>
-          )}
-
-          {/* ── Unified Work Order Header Card ── */}
-          <div className="rounded-2xl border border-border bg-card mb-5 shadow-sm">
-            {/* Card Header */}
-            <div className="px-5 py-4 border-b border-border bg-muted/20 flex items-center justify-between rounded-t-2xl">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                  <FileText size={15} className="text-primary" />
-                </div>
-                <div>
-                  <h2 className="text-sm font-bold text-foreground tracking-tight">
-                    Work Order Details
-                  </h2>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    Configuration, parties &amp; document info
-                  </p>
-                </div>
-              </div>
-              {form.docNumber && (
-                <span className="font-mono text-xs font-bold text-primary bg-primary/10 border border-primary/20 px-2.5 py-1 rounded-lg shrink-0">
-                  {form.docNumber}
-                </span>
-              )}
-            </div>
-
-            <div className="divide-y divide-border/60">
-              {/* ── Section 1: Project Configuration ── */}
-              <div className="px-5 py-4">
-                <div className="flex items-center gap-2 mb-3.5">
-                  <div className="w-1 h-4 rounded-full bg-primary/60 shrink-0" />
-                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-                    Project Configuration
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* BOQ Link */}
-                  <div>
-                    <FieldLabel>
-                      <span className="flex items-center gap-1.5">
-                        <FileText size={11} />
-                        Linked BOQ
-                      </span>
-                      <span className="invisible text-red-500 ml-0.5">*</span>
-                    </FieldLabel>
-                    <select
-                      value={form.boqId}
-                      onChange={async (e) => {
-                        const boqId = e.target.value;
-                        const boq = approvedBoqs.find(
-                          (b) => String(b.id) === boqId,
-                        );
-                        setForm((prev) => ({
-                          ...prev,
-                          boqId,
-                          companyId: boq?.CompanyId
-                            ? String(boq.CompanyId)
-                            : prev.companyId,
-                          projectId: boq?.ProjectId
-                            ? String(boq.ProjectId)
-                            : prev.projectId,
-                        }));
-                        if (boqId) {
-                          try {
-                            const acts = await fetchWithAuth(
-                              `/api/engineering/boq-activities/${boqId}`,
-                            ).then((r) => r.json());
-                            if (Array.isArray(acts) && acts.length > 0) {
-                              const inherited: ActivityGroup[] = acts.map(
-                                (a: any) => ({
-                                  id: uid(),
-                                  groupId: null,
-                                  name: a.ActivityName || "",
-                                  expanded: true,
-                                  activities: [
-                                    {
-                                      id: uid(),
-                                      activityId: a.ActivityId
-                                        ? parseInt(a.ActivityId)
-                                        : null,
-                                      name: a.ActivityName || "",
-                                      uomId: a.UomId ?? null,
-                                      unit: a.UomName || "",
-                                      ratePerUnit: parseFloat(a.Rate || 0),
-                                      area: parseFloat(a.Quantity || 0),
-                                      materials: [],
-                                      hsnCode: "",
-                                      hsnGstRate: parseFloat(a.TaxPct || 0),
-                                      hsnGstType: "cgst_sgst" as const,
-                                    },
-                                  ],
-                                }),
-                              );
-                              setGroups(inherited);
-                            }
-                          } catch {
-                            /* non-fatal */
-                          }
-                        }
-                      }}
-                      className={selectCls}
-                    >
-                      <option value="">— None —</option>
-                      {approvedBoqs.map((b) => (
-                        <option key={b.id} value={String(b.id)}>
-                          {b.name}
-                        </option>
-                      ))}
-                    </select>
-                    {form.boqId && (
-                      <p className="text-[10px] text-primary/70 mt-1 flex items-center gap-1">
-                        <Check size={9} />
-                        Company &amp; Project auto-filled from BOQ
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Company */}
-                  <div>
-                    <FieldLabel required>
-                      <span className="flex items-center gap-1.5">
-                        <Building2 size={11} />
-                        Company Name
-                      </span>
-                    </FieldLabel>
-                    {renderSelect(
-                      "companyId",
-                      form.companyId,
-                      (v) => setField("companyId", v),
-                      companies,
-                      "Select company",
-                      errors.companyId ?? false,
-                    )}
-                    {errors.companyId && (
-                      <p className="text-xs text-red-500 mt-1">Required</p>
-                    )}
-                  </div>
-
-                  {/* Project */}
-                  <div>
-                    <FieldLabel required>
-                      <span className="flex items-center gap-1.5">
-                        <Layers size={11} />
-                        Project Name
-                      </span>
-                    </FieldLabel>
-                    {renderSelect(
-                      "projectId",
-                      form.projectId,
-                      (v) => setField("projectId", v),
-                      projects,
-                      "Select project",
-                      errors.projectId ?? false,
-                    )}
-                    {errors.projectId && (
-                      <p className="text-xs text-red-500 mt-1">Required</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* ── Section 2: Document Configuration ── */}
-              <div className="px-5 py-4">
-                <div className="flex items-center gap-2 mb-3.5">
-                  <div className="w-1 h-4 rounded-full bg-indigo-400/70 shrink-0" />
-                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-                    Document Configuration
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Financial Year */}
-                  <div>
-                    <FieldLabel>
-                      <span className="flex items-center gap-1.5">
-                        <Calendar size={11} />
-                        Financial Year
-                      </span>
-                    </FieldLabel>
-                    {loadingDropdowns ? (
-                      <SelectSkeleton />
-                    ) : (
-                      <select
-                        value={selectedFinYear ?? ""}
-                        onChange={(e) => {
-                          const nextFinYear = e.target.value || undefined;
-                          setSelectedFinYear(nextFinYear);
-                          if (woDocTypeId)
-                            void refreshWoDocNumber(woDocTypeId, nextFinYear);
-                        }}
-                        className={selectCls}
-                      >
-                        <option value="">Select financial year…</option>
-                        {finYearOptions.map((fy) => (
-                          <option key={fy.id} value={fy.year}>
-                            {fy.year}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-
-                  {/* Document Type */}
-                  <div>
-                    <FieldLabel>
-                      <span className="flex items-center gap-1.5">
-                        <Hash size={11} />
-                        Document Type
-                      </span>
-                    </FieldLabel>
-                    <DocNumberPreview
-                      module="WO"
-                      finYear={selectedFinYear || undefined}
-                      selectedDocTypeId={woDocTypeId}
-                      preview={woDocNo}
-                      refreshTrigger={docRefreshTrigger}
-                      onSelect={applyWoDocNumber}
-                      readOnly={viewMode !== "create"}
-                    />
-                  </div>
-
-                  {/* Document Number */}
-                  <div>
-                    <FieldLabel>
-                      <span className="flex items-center gap-1.5">
-                        <Hash size={11} />
-                        Document Number
-                      </span>
-                    </FieldLabel>
-                    <input
-                      value={form.docNumber}
-                      onChange={(e) => {
-                        const nextValue = e.target.value.toUpperCase();
-                        setForm((prev) => ({ ...prev, docNumber: nextValue }));
-                        setWoDocNo(nextValue);
-                      }}
-                      className={`${inputCls} font-mono`}
-                      placeholder="Auto-generated…"
-                    />
-                    <p className="text-[10px] text-muted-foreground mt-1">
-                      Auto-filled, still editable
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* ── Section 3: Parties & Amount ── */}
-              <div className="px-5 py-4">
-                <div className="flex items-center gap-2 mb-3.5">
-                  <div className="w-1 h-4 rounded-full bg-emerald-400/70 shrink-0" />
-                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-                    Parties &amp; Amount
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {/* Document Date */}
-                  <div>
-                    <FieldLabel required>
-                      <span className="flex items-center gap-1.5">
-                        <Calendar size={11} />
-                        Document Date
-                      </span>
-                    </FieldLabel>
-                    <div className="relative">
-                      <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={14} />
-                      <input
-                        type="date"
-                        value={form.docDate}
-                        onChange={(e) => setField("docDate", e.target.value)}
-                        className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.docDate ? "border-red-400" : "border-border"}`}
-                      />
-                    </div>
-                    {errors.docDate && (
-                      <p className="text-xs text-red-500 mt-1">Required</p>
-                    )}
-                  </div>
-                  {/* Contractor */}
-                  <div>
-                    <FieldLabel required>
-                      <span className="flex items-center gap-1.5">
-                        <User size={11} />
-                        Contractor
-                      </span>
-                    </FieldLabel>
-                    {renderSelect(
-                      "contractorId",
-                      form.contractorId,
-                      (v) => setField("contractorId", v),
-                      contractors,
-                      "Select contractor",
-                      errors.contractorId ?? false,
-                    )}
-                    {errors.contractorId && (
-                      <p className="text-xs text-red-500 mt-1">Required</p>
-                    )}
-                  </div>
-
-                  {/* Supplier */}
-                  <div>
-                    <FieldLabel>
-                      <span className="flex items-center gap-1.5">
-                        <User size={11} />
-                        Supplier
-                      </span>
-                      <span className="invisible text-red-500 ml-0.5">*</span>
-                    </FieldLabel>
-                    {renderSelect(
-                      "supplierId",
-                      form.supplierId,
-                      (v) => setField("supplierId", v),
-                      suppliers,
-                      "Select supplier",
-                      false,
-                    )}
-                  </div>
-
-                  {/* Total Amount */}
-                  <div>
-                    <FieldLabel>
-                      <span className="flex items-center gap-1.5">
-                        <IndianRupee size={11} />
-                        Total Amount
-                      </span>
-                      <span className="invisible text-red-500 ml-0.5">*</span>
-                    </FieldLabel>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">
-                        ₹
-                      </span>
-                      <input
-                        readOnly
-                        value={grandTotal > 0 ? grandTotal.toFixed(2) : ""}
-                        placeholder="Calculated from activities"
-                        className={`${inputCls} pl-7 bg-muted/40 text-foreground font-mono font-semibold cursor-not-allowed`}
-                      />
-                    </div>
-                    <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
-                      <Calculator size={9} />
-                      Auto-calculated from activities
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* ── Section 4: Remarks & T&C ── */}
-              <div className="px-5 py-4">
-                <div className="flex items-center gap-2 mb-3.5">
-                  <div className="w-1 h-4 rounded-full bg-amber-400/70 shrink-0" />
-                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-                    Notes &amp; Terms
-                  </span>
-                </div>
-
-                {/* Remarks */}
-                <div className="mb-4">
-                  <FieldLabel>Remarks</FieldLabel>
-                  <input
-                    value={form.remarks}
-                    onChange={(e) => setField("remarks", e.target.value)}
-                    placeholder="Any additional remarks…"
-                    className={inputCls}
-                  />
-                </div>
-
-                {/* Terms & Conditions */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <FieldLabel>Terms &amp; Conditions</FieldLabel>
-                    {/* T&C Picker from TCMaster */}
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setTcDropdownOpen((o) => !o)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition mb-2"
-                      >
-                        <Plus size={13} />
-                        Add T&amp;C
-                      </button>
-                      {tcDropdownOpen && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-[99]"
-                            onClick={() => setTcDropdownOpen(false)}
-                          />
-                          <div className="absolute right-0 top-full mt-1 z-[100] w-80 rounded-xl border border-border bg-card shadow-xl overflow-hidden">
-                            <div className="px-3 py-2 border-b border-border">
-                              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                                Select Terms &amp; Conditions
-                              </p>
-                            </div>
-                            <div className="max-h-56 overflow-y-auto divide-y divide-border">
-                              {tcRecords.length === 0 ? (
-                                <p className="px-4 py-6 text-xs text-center text-muted-foreground">
-                                  No T&amp;C records found
-                                </p>
-                              ) : (
-                                tcRecords.map((tc) => {
-                                  const isSelected = selectedTCs.some(
-                                    (s) => s.id === tc.id,
-                                  );
-                                  return (
-                                    <button
-                                      key={tc.id}
-                                      type="button"
-                                      onClick={() =>
-                                        setSelectedTCs((prev) =>
-                                          isSelected
-                                            ? prev.filter((s) => s.id !== tc.id)
-                                            : [...prev, tc],
-                                        )
-                                      }
-                                      className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSelected ? "bg-primary/5" : ""}`}
-                                    >
-                                      <span
-                                        className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? "bg-primary border-primary" : "border-border"}`}
-                                      >
-                                        {isSelected && (
-                                          <Check
-                                            size={10}
-                                            className="text-primary-foreground"
-                                          />
-                                        )}
-                                      </span>
-                                      <span className="flex-1 min-w-0">
-                                        <span className="block text-sm font-medium text-foreground truncate">
-                                          {tc.name}
-                                        </span>
-                                        <span className="block text-[11px] text-muted-foreground truncate mt-0.5">
-                                          {tc.terms}
-                                        </span>
-                                      </span>
-                                    </button>
-                                  );
-                                })
-                              )}
-                            </div>
-                            <div className="px-3 py-2 border-t border-border">
-                              <button
-                                type="button"
-                                onClick={() => setTcDropdownOpen(false)}
-                                className="w-full text-xs text-center text-muted-foreground hover:text-foreground transition py-1"
-                              >
-                                Done
-                              </button>
-                            </div>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  {/* Selected T&C list */}
-                  {selectedTCs.length > 0 ? (
-                    <div className="space-y-2">
-                      {selectedTCs.map((tc, idx) => (
-                        <div
-                          key={tc.id}
-                          className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3"
-                        >
-                          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center mt-0.5">
-                            {idx + 1}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-foreground">
-                              {tc.name}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap">
-                              {tc.terms}
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setSelectedTCs((prev) =>
-                                prev.filter((s) => s.id !== tc.id),
-                              )
-                            }
-                            className="flex-shrink-0 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-muted-foreground hover:text-red-500 transition"
-                          >
-                            <X size={13} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground italic">
-                      No terms selected. Click &quot;Add T&amp;C&quot; to pick
-                      from master.
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Activity Details */}
-          <div className="rounded-xl border border-border bg-card mb-5">
-            <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <Calculator size={15} className="text-primary shrink-0" />
-                <h2 className="text-sm font-semibold text-foreground">
-                  Activity Details
-                </h2>
-                <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full hidden sm:block">
-                  {groups.length}g ·{" "}
-                  {groups.reduce((s, g) => s + g.activities.length, 0)}a
-                </span>
-              </div>
-              <button
-                onClick={addGroup}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors shrink-0"
-              >
-                <FolderPlus size={13} />
-                <span className="hidden sm:inline">Add Group</span>
-                <span className="sm:hidden">Group</span>
-              </button>
-            </div>
-            <div className="p-3 space-y-3">
-              {groups.map((group, idx) => (
-                <ActivityGroupCard
-                  key={group.id}
-                  group={group}
-                  index={idx}
-                  onUpdate={(updated) => updateGroup(idx, updated)}
-                  onDelete={() => deleteGroup(idx)}
-                  canDelete={groups.length > 1}
-                  activityGroupOptions={activityGroupOptions}
-                  activityOptions={activityOptions}
-                  uomOptions={uomOptions}
-                  itemOptions={itemOptions}
-                  suppliers={suppliers}
-                  loadingDropdowns={loadingDropdowns}
-                  loadingItems={loadingItems}
-                  hsnRecords={hsnRecords}
-                />
-              ))}
-            </div>
-            <div className="border-t border-border bg-muted/10">
-              <div className="grid grid-cols-1 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border/50">
-                <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
-                  <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    <Package size={11} className="text-amber-500" />
-                    Materials
-                  </span>
-                  <span className="text-base font-bold text-amber-600 dark:text-amber-400">
-                    {fmt(grandMaterialsTotal)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
-                  <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    <Hammer size={11} className="text-blue-500" />
-                    Labour
-                  </span>
-                  <span className="text-base font-bold text-blue-600 dark:text-blue-400">
-                    {fmt(grandLabourTotal)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
-                  <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    <Receipt size={11} className="text-violet-500" />
-                    HSN GST
-                  </span>
-                  <span className="text-base font-bold text-violet-600 dark:text-violet-400">
-                    {fmt(grandHsnGst)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3 bg-muted/20">
-                  <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    <Receipt size={11} className="text-primary" />
-                    Grand Total (incl. GST)
-                  </span>
-                  <span className="text-xl font-bold text-foreground">
-                    {fmt(grandTotal)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Bottom bar */}
-          <div className="flex items-center justify-end gap-3 pb-8">
-            <button
-              onClick={() => void resetAll()}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
-            >
-              <RotateCcw size={13} />
-              Reset
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving || loadingDropdowns}
-              className="gradient-accent flex items-center gap-1.5 font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-60 transition-opacity"
-            >
-              {saving ? (
-                <>
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Saving…
-                </>
-              ) : saved ? (
-                <>
-                  <Check size={14} />
-                  Saved!
-                </>
-              ) : (
-                <>
-                  <Save size={14} />
-                  Save Work Order
-                </>
-              )}
-            </button>
-          </div>
-        </>
-      )}
+          </>
+        )}
       </div>
     </>
   );

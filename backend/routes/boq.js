@@ -377,6 +377,14 @@ router.post("/", async (req, res) => {
     await transaction.commit();
     await bumpCacheVersion("boq");
 
+    // Auto-submit: move Draft → Pending so it appears in approval inbox
+    try {
+      await transition("boq", newId, "Pending", req.user?.email, req.user?.role);
+      await bumpCacheVersion("boq");
+    } catch (e) {
+      console.warn("[BOQ auto-submit]", e.message);
+    }
+
     res.status(201).json({
       message: "BOQ created successfully",
       BoqID: newId,
@@ -453,6 +461,21 @@ router.put("/:id", async (req, res) => {
 
     await transaction.commit();
     await bumpCacheVersion("boq");
+
+    // Re-submit to Pending if record was reverted to Draft (e.g. after edit)
+    try {
+      const currentStatus = await (async () => {
+        const pool = getPool();
+        const r = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.BOQ WHERE BoqID = @id");
+        return r.recordset[0]?.Status;
+      })();
+      if (currentStatus === "Draft" || currentStatus === "Rejected") {
+        await transition("boq", id, "Pending", req.user?.email, req.user?.role);
+        await bumpCacheVersion("boq");
+      }
+    } catch (e) {
+      console.warn("[BOQ auto-submit on update]", e.message);
+    }
 
     res.json({ message: "BOQ updated successfully" });
   } catch (err) {

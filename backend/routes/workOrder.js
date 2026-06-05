@@ -194,7 +194,7 @@ router.get("/meta/items", async (req, res) => {
         CAST(i.M_Id AS NVARCHAR(36)) AS id,
         i.M_Name                     AS name,
         i.M_HSN                      AS hsnCode,
-        ${hasUOM ? "u.Id AS uomId, u.UOMName AS uomName," : "NULL AS uomId, NULL AS uomName,"} // lgtm[js/sql-injection]
+        ${hasUOM ? "u.Id AS uomId, u.UOMName AS uomName," : "NULL AS uomId, NULL AS uomName,"}
         ISNULL(
           CASE
             WHEN ISNULL(h.HIGST, 0) > 0 THEN h.HIGST
@@ -207,7 +207,7 @@ router.get("/meta/items", async (req, res) => {
         ) AS gstRate
       FROM dbo.Item_Master_Group i
       LEFT JOIN dbo.HSN h       ON h.HCode    = i.M_HSN  AND h.HStatus = 1
-      ${hasUOM ? "LEFT JOIN dbo.UOMMaster u ON u.UOMCode = i.M_UOM" : ""} // lgtm[js/sql-injection]
+      ${hasUOM ? "LEFT JOIN dbo.UOMMaster u ON u.UOMCode = i.M_UOM" : ""}
       WHERE (i.Parent_Id IS NOT NULL OR i.M_IdentityCode = 1)
       ORDER BY i.M_Name
     `);
@@ -302,9 +302,7 @@ router.get(
       const id = requireValidId(req, res);
       if (!id) return;
       const pool = getPool();
-      const headerResult = await pool
-        .request()
-        .input("Id", sql.Int, id).query(`
+      const headerResult = await pool.request().input("Id", sql.Int, id).query(`
         SELECT h.*, ec.name AS CompanyName, ep.name AS ProjectName, ahm.LHeadName AS ContractorName, ams.LHeadName AS SupplierName
         FROM dbo.WorkOrderHeader h
         LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
@@ -536,8 +534,7 @@ router.delete("/:id", async (req, res) => {
     const id = requireValidId(req, res);
     if (!id) return;
     const pool = getPool();
-    await pool.request().input("WorkOrderHeaderId", sql.Int, id)
-      .query(`
+    await pool.request().input("WorkOrderHeaderId", sql.Int, id).query(`
       DELETE m FROM dbo.WorkOrderActivityMaterials m
       INNER JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
       WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
@@ -570,9 +567,8 @@ router.get("/:id/activities", async (req, res) => {
     const id = requireValidId(req, res);
     if (!id) return;
     const pool = getPool();
-    const result = await pool
-      .request()
-      .input("WorkOrderHeaderId", sql.Int, id).query(`
+    const result = await pool.request().input("WorkOrderHeaderId", sql.Int, id)
+      .query(`
         SELECT
           a.Id, a.WorkOrderHeaderId, a.ActivityGroupId, a.ActivityId,
           a.UOMId, a.Rate, a.Area, a.LabourAmount, a.MaterialAmount,
@@ -620,8 +616,8 @@ router.post("/:id/activities", async (req, res) => {
     Remarks,
   } = req.body;
   try {
-      const pool = getPool();
-      const headerRow = await pool
+    const pool = getPool();
+    const headerRow = await pool
       .request()
       .input("HeaderId", sql.Int, id)
       .query(
@@ -1136,7 +1132,7 @@ router.post("/:id/save-full", async (req, res) => {
           .query(`
           DELETE FROM dbo.WorkOrderActivityMaterials
           WHERE WorkOrderActivityId = @WorkOrderActivityId
-          AND Id NOT IN (${safeMaterialIds.join(",")}) // lgtm[js/sql-injection] — safeIntList() ensures only positive integers
+          AND Id NOT IN (${safeMaterialIds.join(",")})
         `);
       } else {
         await pool
@@ -1155,12 +1151,12 @@ router.post("/:id/save-full", async (req, res) => {
         DELETE m FROM dbo.WorkOrderActivityMaterials m
         INNER JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
         WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
-        AND a.Id NOT IN (${safeActivityIds.join(",")}) // lgtm[js/sql-injection] — safeIntList() ensures only positive integers
+        AND a.Id NOT IN (${safeActivityIds.join(",")})
       `);
       await pool.request().input("WorkOrderHeaderId", sql.Int, headerId).query(`
         DELETE FROM dbo.WorkOrderActivities
         WHERE WorkOrderHeaderId = @WorkOrderHeaderId
-        AND Id NOT IN (${safeActivityIds.join(",")}) // lgtm[js/sql-injection] — safeIntList() ensures only positive integers
+        AND Id NOT IN (${safeActivityIds.join(",")})
       `);
     } else {
       await pool.request().input("WorkOrderHeaderId", sql.Int, headerId).query(`
@@ -1177,9 +1173,200 @@ router.post("/:id/save-full", async (req, res) => {
     }
 
     await bumpCacheVersion("work-orders");
+
+    // Auto-submit: move Draft → Pending so it appears in approval inbox
+    try {
+      await transition("work-orders", headerId, "Pending", req.user?.email, req.user?.role);
+      await bumpCacheVersion("work-orders");
+    } catch (e) {
+      console.warn("[WO auto-submit]", e.message);
+    }
+
+    // ── Auto-create WO-POs from material items ────────────────────────────────
+    // After every save-full we regenerate WO-POs for this work order:
+    //   1. Delete any draft WO-POs previously auto-generated from this WO
+    //   2. Re-read all materials (with item name, UOM, supplier, GST rate)
+    //   3. Group by SupplierIdPerLine → one PO per supplier (null = no supplier)
+    //   4. For each group: compute subtotal + GST → insert PurchaseOrder
+    // Non-fatal: WO-PO failure logs but does not roll back the save.
+    const createdWOPOs = [];
+    try {
+      const userEmail = req.user?.name || req.user?.email || "system";
+      const { finYear } = req.body;
+
+      // Resolve WO-PO doc type id — accept both 'WO-PO' (canonical) and 'WO_PO' (legacy)
+      const dtRow = await pool.request().query(`
+        SELECT TOP 1 TypeOfDocId FROM dbo.TypeOfDoc
+        WHERE Prefix IN ('WO-PO', 'WO_PO') AND IsActive = 1
+        ORDER BY TypeOfDocId
+      `);
+      const woPODocTypeId = dtRow.recordset[0]?.TypeOfDocId || null;
+
+      // Re-read WO header for company/project/docno
+      const hdrRow = await pool.request().input("Id", sql.Int, headerId).query(`
+        SELECT Id, DocumentNumber, DocNo, CompanyId, ProjectId
+        FROM dbo.WorkOrderHeader WHERE Id = @Id
+      `);
+      const hdr = hdrRow.recordset[0];
+
+      // Delete previously auto-generated draft WO-POs for this WO
+      await pool.request().input("SourceWOId", sql.Int, headerId).query(`
+        DELETE FROM dbo.PurchaseOrderItems
+        WHERE PurchaseOrderID IN (
+          SELECT PurchaseOrderID FROM dbo.PurchaseOrders
+          WHERE SourceWOId = @SourceWOId AND POType = 'WO_PO' AND Status = 'Draft'
+        )
+      `);
+      await pool.request().input("SourceWOId", sql.Int, headerId).query(`
+        DELETE FROM dbo.PurchaseOrders
+        WHERE SourceWOId = @SourceWOId AND POType = 'WO_PO' AND Status = 'Draft'
+      `);
+
+      // Load all material lines for this WO
+      const matsResult = await pool
+        .request()
+        .input("HeaderId", sql.Int, headerId).query(`
+          SELECT
+            m.ItemId,
+            img.M_Name    AS ItemName,
+            img.M_HSN     AS HsnCode,
+            m.UOMId,
+            uom.UOMName,
+            m.Quantity,
+            m.Rate,
+            ISNULL(m.GSTRate, 0) AS GSTRate,
+            m.SupplierIdPerLine,
+            sup.LHeadName AS SupplierName
+          FROM dbo.WorkOrderActivityMaterials m
+          INNER JOIN dbo.WorkOrderActivities   a   ON a.Id      = m.WorkOrderActivityId
+          LEFT  JOIN dbo.Item_Master_Group     img ON img.M_Id  = m.ItemId
+          LEFT  JOIN dbo.UOMMaster             uom ON uom.Id    = m.UOMId
+          LEFT  JOIN dbo.AccountHeadMaster     sup ON sup.LHeadId = m.SupplierIdPerLine
+          WHERE a.WorkOrderHeaderId = @HeaderId
+            AND m.ItemId IS NOT NULL
+        `);
+
+      if (matsResult.recordset.length > 0 && woPODocTypeId) {
+        // Group by supplier
+        const bySupplier = {};
+        for (const m of matsResult.recordset) {
+          const key =
+            m.SupplierIdPerLine != null
+              ? String(m.SupplierIdPerLine)
+              : "__none__";
+          if (!bySupplier[key])
+            bySupplier[key] = {
+              supplierId: m.SupplierIdPerLine,
+              supplierName: m.SupplierName,
+              lines: [],
+            };
+          bySupplier[key].lines.push(m);
+        }
+
+        for (const group of Object.values(bySupplier)) {
+          const poItemsArr = group.lines.map((m) => {
+            const qty = parseFloat(m.Quantity) || 0;
+            const rate = parseFloat(m.Rate) || 0;
+            const gstRate = parseFloat(m.GSTRate) || 0;
+            const lineAmt = qty * rate;
+            const gstAmt = parseFloat(((lineAmt * gstRate) / 100).toFixed(2));
+            return {
+              itemId: m.ItemId ? String(m.ItemId) : null,
+              itemDescription: m.ItemName || "",
+              hsnCode: m.HsnCode || null,
+              quantity: qty,
+              unit: m.UOMName || "",
+              rate: rate,
+              amount: lineAmt,
+              tax: gstRate,
+              gstAmount: gstAmt,
+              totalWithGst: parseFloat((lineAmt + gstAmt).toFixed(2)),
+            };
+          });
+
+          const subtotal = poItemsArr.reduce((s, i) => s + i.amount, 0);
+          const totalGst = poItemsArr.reduce((s, i) => s + i.gstAmount, 0);
+          const totalAmount = parseFloat((subtotal + totalGst).toFixed(2));
+
+          // Pick representative GST rate for header columns (most common rate)
+          const gstRateFreq = {};
+          for (const i of poItemsArr)
+            gstRateFreq[i.tax] = (gstRateFreq[i.tax] || 0) + 1;
+          const headerGstRate = parseFloat(
+            Object.entries(gstRateFreq).sort((a, b) => b[1] - a[1])[0]?.[0] ||
+              "0",
+          );
+
+          const docNo = await lockNextDocNumber(pool, sql, {
+            docTypeId: woPODocTypeId,
+            finYear: finYear || null,
+            tableName: "PurchaseOrders",
+            issuedBy: userEmail,
+          });
+
+          const insertResult = await pool
+            .request()
+            .input("PONo", sql.NVarChar(100), docNo)
+            .input("PODate", sql.Date, new Date())
+            .input("SupplierID", sql.Int, group.supplierId || null)
+            .input("CompanyId", sql.Int, hdr?.CompanyId || null)
+            .input("ProjectId", sql.Int, hdr?.ProjectId || null)
+            .input("Subtotal", sql.Decimal(18, 2), subtotal)
+            .input("TotalAmount", sql.Decimal(18, 2), totalAmount)
+            .input("GstRate", sql.Decimal(5, 2), headerGstRate)
+            .input("Status", sql.NVarChar(50), "Draft")
+            .input("DocTypeId", sql.Int, woPODocTypeId)
+            .input("DocNo", sql.NVarChar(100), docNo)
+            .input("SourceWOId", sql.Int, headerId)
+            .input(
+              "SourceWODocNo",
+              sql.NVarChar(100),
+              hdr?.DocNo || hdr?.DocumentNumber || null,
+            )
+            .input("POItems", sql.NVarChar(sql.MAX), JSON.stringify(poItemsArr))
+            .input("CreatedBy", sql.NVarChar(100), userEmail)
+            .input("CreatedAt", sql.DateTime2, new Date()).query(`
+              INSERT INTO dbo.PurchaseOrders
+                (PurchaseOrderNo, PODate, SupplierID, CompanyId, ProjectId,
+                 SubtotalAmount, TotalAmount, GstRate, Status, DocTypeId, DocNo,
+                 SourceWOId, SourceWODocNo, POItems, POType,
+                 CreatedBy, CreatedAt)
+              OUTPUT INSERTED.PurchaseOrderID
+              VALUES
+                (@PONo, @PODate, @SupplierID, @CompanyId, @ProjectId,
+                 @Subtotal, @TotalAmount, @GstRate, @Status, @DocTypeId, @DocNo,
+                 @SourceWOId, @SourceWODocNo, @POItems, 'WO_PO',
+                 @CreatedBy, @CreatedAt)
+            `);
+
+          const newPOId = insertResult.recordset[0].PurchaseOrderID;
+          await backPatchRecordId(pool, sql, docNo, "PurchaseOrders", newPOId);
+          createdWOPOs.push({
+            PurchaseOrderID: newPOId,
+            PurchaseOrderNo: docNo,
+            SupplierName: group.supplierName || null,
+            subtotal,
+            totalGst: parseFloat(totalGst.toFixed(2)),
+            totalAmount,
+            lineCount: poItemsArr.length,
+          });
+        }
+
+      }
+      // Always bump purchase-orders cache — deletion of old draft WO-POs also
+      // changes what users see in the PO list, even when no new POs are created.
+      await bumpCacheVersion("purchase-orders");
+    } catch (woPoErr) {
+      // Non-fatal — WO save succeeded; log and surface in response
+      console.error("[POST /:id/save-full WO-PO auto-create]", woPoErr.message);
+      // Still try to bump cache so stale WO-PO deletions become visible
+      try { await bumpCacheVersion("purchase-orders"); } catch (_) {}
+    }
+
     res.json({
       message: "Work order saved successfully",
       activityCount: safeActivityIds.length,
+      woPOs: createdWOPOs,
     });
   } catch (err) {
     console.error("[POST /:id/save-full]", err.message);
@@ -1507,6 +1694,3 @@ router.post("/:id/confirm", async (req, res) => {
 });
 
 module.exports = router;
-
-
-

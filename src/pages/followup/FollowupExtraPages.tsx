@@ -764,30 +764,6 @@ export function ConstructionUpdatesPage() {
   );
 }
 
-export function FinanceDemandsPage() {
-  return (
-    <ScopedLogPage
-      title="Finance Demands"
-      description="Track payment demand letters and demand follow-ups."
-      moduleName="finance_demands"
-      defaultType="payment"
-      helpText="Use payment entries to record installment demand progress."
-    />
-  );
-}
-
-export function FollowupPaymentsPage() {
-  return (
-    <ScopedLogPage
-      title="Follow-up Payments"
-      description="Track payment confirmations and outstanding follow-up activity."
-      moduleName="followup_payments"
-      defaultType="payment"
-      helpText="Store payment confirmations directly against the follow-up module."
-    />
-  );
-}
-
 export function CustomerReportPage() {
   return (
     <ReportPage

@@ -4,11 +4,12 @@ npm-debug.log
 .gitignore
 README.md
 .env
+.env.*
+!.env.example
 .nyc_output
 coverage
 *.log
 dist
-.nyc_output
-.nyc_output
 migrations
-worker.js  # Run separately if needed
+worker.js
+tmp
