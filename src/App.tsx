@@ -255,7 +255,9 @@ const FollowupAgreements = lazy(() =>
   })),
 );
 const ApplicantDetail = lazy(() => import("./pages/followup/ApplicantDetail"));
-const ApplicantTimeline = lazy(() => import("./pages/followup/ApplicantTimeline"));
+const ApplicantTimeline = lazy(
+  () => import("./pages/followup/ApplicantTimeline"),
+);
 const FollowupApplications = lazy(
   () => import("./pages/followup/Applications"),
 );
@@ -267,6 +269,11 @@ const WelcomeCallsPage = lazy(() =>
 const NocPage = lazy(() =>
   import("./pages/followup/NOC").then((module) => ({
     default: module.NOCPage,
+  })),
+);
+const BankNOCPage = lazy(() =>
+  import("./pages/followup/BankNOC").then((module) => ({
+    default: module.BankNOCPage,
   })),
 );
 const SalesDeedPage = lazy(() =>
@@ -780,6 +787,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <NocPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/closure/bank-noc"
+        element={
+          <ProtectedRoute>
+            <BankNOCPage />
           </ProtectedRoute>
         }
       />

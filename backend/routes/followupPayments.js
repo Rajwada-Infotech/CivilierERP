@@ -161,12 +161,10 @@ router.get(
     try {
       const pool = getPool();
       const result = await pool.request().query(`
-        SELECT DISTINCT pm.id AS ProjectId, pm.name AS ProjectName
-        FROM dbo.BookingPaymentTerms bpt
-        JOIN dbo.FollowupBookings fb ON fb.Id = bpt.BookingID
-        JOIN dbo.enterprise pm       ON pm.id = fb.ProjectId
-        WHERE fb.IsDeleted = 0 AND fb.ProjectId IS NOT NULL
-        ORDER BY pm.name
+        SELECT id AS ProjectId, name AS ProjectName
+        FROM dbo.enterprise
+        WHERE business_type = 'P'
+        ORDER BY name
       `);
       res.json(result.recordset);
     } catch (err) {
@@ -225,11 +223,9 @@ router.post(
       if (!paymentDate)
         return res.status(400).json({ error: "Payment date is required" });
       if (!VALID_MODES.includes(paymentMode))
-        return res
-          .status(400)
-          .json({
-            error: `Payment mode must be one of: ${VALID_MODES.join(", ")}`,
-          });
+        return res.status(400).json({
+          error: `Payment mode must be one of: ${VALID_MODES.join(", ")}`,
+        });
 
       // Load the milestone
       const termResult = await pool.request().input("Id", sql.Int, termId)
@@ -244,11 +240,9 @@ router.post(
       const term = termResult.recordset[0];
       if (!term) return res.status(404).json({ error: "Milestone not found" });
       if (term.DemandStatus === "Pending")
-        return res
-          .status(400)
-          .json({
-            error: "Demand has not been raised yet — raise demand first",
-          });
+        return res.status(400).json({
+          error: "Demand has not been raised yet — raise demand first",
+        });
       if (term.DemandStatus === "Paid")
         return res
           .status(400)
