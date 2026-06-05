@@ -26,6 +26,7 @@ import {
   HardHat,
   CalendarCheck,
   PhoneCall,
+  Scale,
 } from "lucide-react";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -309,6 +310,163 @@ function logIcon(type: string) {
   }
 }
 
+// ── Legal Pending Panel ────────────────────────────────────────────────────────
+
+function LegalPendingPanel({ items }: { items: any[] }) {
+  const navigate = useNavigate();
+  return (
+    <div className="rounded-xl border border-border bg-card">
+      <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Scale className="w-4 h-4 text-indigo-500" />
+          <h3 className="text-sm font-semibold">Legal Pending</h3>
+        </div>
+        <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+          {items.length}
+        </span>
+      </div>
+      <div className="divide-y divide-border">
+        {items.slice(0, 8).map((item) => (
+          <div
+            key={item.Id}
+            className="px-5 py-3 flex items-center justify-between hover:bg-muted/30 cursor-pointer transition-colors"
+            onClick={() => navigate("/followup/legal/milestones")}
+          >
+            <div>
+              <p className="text-sm font-medium text-foreground">{item.ApplicantName}</p>
+              <p className="text-xs text-muted-foreground">
+                Step {item.CurrentStep}/8 · {item.MilestoneNo}
+              </p>
+            </div>
+            <div className="text-right">
+              {item.CurrentStepDue ? (
+                <p
+                  className={`text-xs font-medium ${
+                    new Date(item.CurrentStepDue) < new Date()
+                      ? "text-red-500"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  {new Date(item.CurrentStepDue) < new Date()
+                    ? "Overdue"
+                    : `Due ${item.CurrentStepDue}`}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">No due date</p>
+              )}
+            </div>
+          </div>
+        ))}
+        {items.length === 0 && (
+          <div className="px-5 py-8 text-center text-sm text-muted-foreground">
+            No pending legal milestones
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Milestone Tracker Panel ────────────────────────────────────────────────────
+
+function MilestoneTrackerPanel({ stats }: { stats: any }) {
+  const total = stats?.Total || 0;
+  const completed = stats?.Completed || 0;
+  const inProgress = stats?.InProgress || 0;
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <BarChart3 className="w-4 h-4 text-violet-500" />
+        <h3 className="text-sm font-semibold">Milestone Tracker</h3>
+      </div>
+      <div className="flex items-end gap-3 mb-3">
+        <span className="text-3xl font-bold font-heading">{pct}%</span>
+        <span className="text-sm text-muted-foreground mb-1">completion rate</span>
+      </div>
+      <div className="w-full bg-muted rounded-full h-2 mb-4">
+        <div
+          className="h-2 rounded-full bg-emerald-500 transition-all"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          { label: "Total", value: total, color: "text-foreground" },
+          { label: "Completed", value: completed, color: "text-emerald-600" },
+          { label: "In Progress", value: inProgress, color: "text-blue-600" },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="text-center">
+            <p className={`text-lg font-bold ${color}`}>{value}</p>
+            <p className="text-[10px] text-muted-foreground">{label}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Possession Pipeline Panel ──────────────────────────────────────────────────
+
+function PossessionPipelinePanel({ items }: { items: any[] }) {
+  const navigate = useNavigate();
+  return (
+    <div className="rounded-xl border border-border bg-card">
+      <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Home className="w-4 h-4 text-emerald-500" />
+          <h3 className="text-sm font-semibold">Possession Pipeline</h3>
+        </div>
+        <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+          {items.length}
+        </span>
+      </div>
+      <div className="divide-y divide-border">
+        {items.slice(0, 8).map((item) => (
+          <div
+            key={item.Id}
+            className="px-5 py-3 flex items-center justify-between hover:bg-muted/30 cursor-pointer"
+            onClick={() => navigate("/followup/closure/possession-notice")}
+          >
+            <div>
+              <p className="text-sm font-medium">{item.ApplicantName}</p>
+              <p className="text-xs text-muted-foreground">
+                {item.UnitNo || "—"} · {item.NoticeType}
+              </p>
+            </div>
+            <div className="text-right">
+              <p
+                className={`text-xs font-semibold ${
+                  item.DaysRemaining < 0
+                    ? "text-red-500"
+                    : item.DaysRemaining <= 7
+                      ? "text-amber-500"
+                      : "text-emerald-600"
+                }`}
+              >
+                {item.DaysRemaining < 0
+                  ? `${Math.abs(item.DaysRemaining)}d overdue`
+                  : item.DaysRemaining === 0
+                    ? "Today"
+                    : `${item.DaysRemaining}d remaining`}
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                {item.ScheduledPossDate}
+              </p>
+            </div>
+          </div>
+        ))}
+        {items.length === 0 && (
+          <div className="px-5 py-8 text-center text-sm text-muted-foreground">
+            No active possession notices
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 export default function FollowupDashboard() {
@@ -407,6 +565,13 @@ export default function FollowupDashboard() {
   } = useQuery({
     queryKey: ["followup-dashboard-log"],
     queryFn: () => fetchWithAuth("/api/followup-log").then((r) => r.json()),
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const { data: dashboardSummary } = useQuery({
+    queryKey: ["followup-dashboard-summary"],
+    queryFn: () =>
+      fetchWithAuth("/api/followup-dashboard/summary").then((r) => r.json()),
     staleTime: 2 * 60 * 1000,
   });
 
@@ -725,6 +890,13 @@ export default function FollowupDashboard() {
               onClick={() => navigate("/followup/construction/updates")}
             />
           </div>
+        </div>
+
+        {/* ── New panels row: Milestone Tracker + Legal Pending + Possession Pipeline ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <MilestoneTrackerPanel stats={dashboardSummary?.milestoneTracker} />
+          <LegalPendingPanel items={dashboardSummary?.legalPending ?? []} />
+          <PossessionPipelinePanel items={dashboardSummary?.possessionPipeline ?? []} />
         </div>
 
         {/* ── Pipeline Funnel + Status Breakdowns ── */}

@@ -21,7 +21,6 @@ import {
   X,
   MessageCircle,
   CalendarDays,
-  Filter,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -264,7 +263,7 @@ function TicketRow({
   const isLong = (ticket.issue_details?.length ?? 0) > 100;
 
   return (
-    <div className="group rounded-xl border border-border bg-card hover:border-border/60 hover:shadow-sm transition-all overflow-hidden">
+    <div className="group rounded-xl border border-border bg-card hover:border-primary/30 hover:shadow-md hover:bg-card/80 transition-all overflow-hidden">
       <div className="flex items-stretch">
         {/* Priority bar */}
         <div className={cn("w-1 shrink-0", bar)} />
@@ -346,7 +345,7 @@ function TicketRow({
               </div>
               <button
                 onClick={() => onResolve(ticket)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-600 hover:bg-emerald-500/10 border border-emerald-400/20 transition-colors opacity-0 group-hover:opacity-100"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-600 hover:bg-emerald-500/10 border border-emerald-400/20 transition-colors"
               >
                 <CheckCircle2 size={11} />
                 Resolve
@@ -500,30 +499,34 @@ export default function TicketResolution() {
     <>
       <Breadcrumbs items={["Admin", "Support Tickets", "Resolution"]} />
 
-      <div className="max-w-4xl mx-auto pb-12 space-y-6">
+      <div className="max-w-3xl mx-auto pt-6 pb-10 space-y-5">
         {/* ── Page header ── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-bold text-foreground">
-              Ticket Resolution
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {allTickets.length} unresolved ticket
-              {allTickets.length !== 1 ? "s" : ""} awaiting admin approval
-              {urgentCount > 0 && (
-                <span className="text-red-500 ml-1.5 font-medium">
-                  · {urgentCount} urgent
-                </span>
-              )}
-            </p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div>
+              <h1 className="text-xl font-heading font-bold text-foreground">
+                Ticket Resolution
+              </h1>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {allTickets.length} unresolved ticket
+                {allTickets.length !== 1 ? "s" : ""} awaiting admin approval
+                {urgentCount > 0 && (
+                  <span className="text-red-500 ml-1.5 font-medium">
+                    · {urgentCount} urgent
+                  </span>
+                )}
+              </p>
+            </div>
           </div>
-          <button
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50"
-          >
-            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+            </button>
+          </div>
         </div>
 
         {/* ── Stat pills ── */}
@@ -568,7 +571,7 @@ export default function TicketResolution() {
         )}
 
         {/* ── Filters ── */}
-        <div className="rounded-xl border border-border bg-card px-4 py-3 space-y-3">
+        <div className="space-y-2">
           {/* Search */}
           <div className="relative">
             <Search
@@ -579,7 +582,7 @@ export default function TicketResolution() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search by subject, customer, or issue…"
-              className="w-full pl-8 pr-8 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+              className="w-full pl-8 pr-8 py-2 rounded-xl border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
             />
             {search && (
               <button
@@ -594,9 +597,8 @@ export default function TicketResolution() {
           {/* Filter chips */}
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-1.5">
-              <Filter size={11} className="text-muted-foreground" />
               <span className="text-[11px] text-muted-foreground font-medium">
-                Status
+                Status:
               </span>
               {(["All", "Pending", "InProgress"] as const).map((s) => (
                 <button
@@ -614,11 +616,9 @@ export default function TicketResolution() {
               ))}
             </div>
 
-            <div className="w-px h-4 bg-border" />
-
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-muted-foreground font-medium">
-                Priority
+                Priority:
               </span>
               {(["All", ...PRIORITIES] as const).map((p) => (
                 <button
