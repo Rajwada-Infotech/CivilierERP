@@ -610,4 +610,152 @@ router.delete(
   },
 );
 
+// ── GET /:id/timeline — full applicant journey ────────────────────────────────
+router.get(
+  "/:id/timeline",
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
+  async (req, res) => {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid applicant id" });
+
+    try {
+      const pool = getPool();
+
+      const [
+        applicantRes,
+        unitSelectionsRes,
+        bookingsRes,
+        welcomeCallsRes,
+        agreementsRes,
+        nocsRes,
+        salesDeedsRes,
+        handoversRes,
+        logsRes,
+      ] = await Promise.all([
+        // Applicant detail
+        pool.request().input("Id", sql.Int, id).query(`
+          SELECT TOP 1 ${LIST_COLUMNS}
+          FROM dbo.FollowupApplications fa
+          LEFT JOIN dbo.enterprise pm ON pm.id = fa.ProjectId
+          LEFT JOIN dbo.users      u  ON u.id  = fa.AssignedTo
+          LEFT JOIN dbo.UnitMaster um ON um.Id = fa.UnitId
+          LEFT JOIN dbo.BlockMaster bm ON bm.Id = um.BlockId
+          WHERE fa.Id = @Id AND fa.IsDeleted = 0
+        `),
+
+        // Unit Selections
+        pool.request().input("ApplicantId", sql.Int, id).query(`
+          SELECT
+            fus.Id, fus.SelectionNo, fus.UnitNo, fus.BlockName, fus.FloorName,
+            fus.UnitType, fus.AreaSqFt, fus.RatePerSqFt, fus.TotalValue, fus.Status,
+            CONVERT(VARCHAR(10), fus.CreatedAt, 23) AS CreatedDate
+          FROM dbo.FollowupUnitSelections fus
+          WHERE fus.ApplicantId = @ApplicantId AND fus.IsDeleted = 0
+          ORDER BY fus.CreatedAt
+        `),
+
+        // Bookings
+        pool.request().input("ApplicantId", sql.Int, id).query(`
+          SELECT
+            fb.Id, fb.BookingNo, fb.UnitNo, fb.BlockName, fb.TotalValue,
+            fb.BookingAmount, fb.Status, fb.PaymentMode,
+            CONVERT(VARCHAR(10), fb.BookingDate, 23) AS BookingDate,
+            ep.name AS ProjectName
+          FROM dbo.FollowupBookings fb
+          LEFT JOIN dbo.enterprise ep ON ep.id = fb.ProjectId AND ep.business_type = 'P'
+          WHERE fb.ApplicantId = @ApplicantId AND fb.IsDeleted = 0
+          ORDER BY fb.BookingDate
+        `),
+
+        // Welcome Calls
+        pool.request().input("ApplicantId", sql.Int, id).query(`
+          SELECT
+            wc.Id, wc.CallNo, wc.BookingId, fb.BookingNo,
+            CONVERT(VARCHAR(10), wc.CallDate, 23) AS CallDate,
+            wc.Outcome, wc.BankSelected, wc.LoanRequired,
+            wc.ExpectedLoanAmount, wc.Status, wc.Notes
+          FROM dbo.FollowupWelcomeCalls wc
+          LEFT JOIN dbo.FollowupBookings fb ON fb.Id = wc.BookingId
+          WHERE wc.ApplicantId = @ApplicantId AND wc.IsDeleted = 0
+          ORDER BY wc.CallDate
+        `),
+
+        // Agreements
+        pool.request().input("ApplicantId", sql.Int, id).query(`
+          SELECT
+            fa.Id, fa.AgreementNo, fa.AgreementType, fa.Status, fa.TotalValue,
+            CONVERT(VARCHAR(10), fa.AgreementDate, 23) AS AgreementDate
+          FROM dbo.FollowupAgreements fa
+          WHERE fa.ApplicantId = @ApplicantId AND fa.IsDeleted = 0
+          ORDER BY fa.AgreementDate
+        `),
+
+        // NOCs
+        pool.request().input("ApplicantId", sql.Int, id).query(`
+          SELECT
+            fn.Id, fn.NocNo, fn.BankName, fn.NocType, fn.Status,
+            CONVERT(VARCHAR(10), fn.IssueDate,  23) AS IssueDate,
+            CONVERT(VARCHAR(10), fn.ExpiryDate, 23) AS ExpiryDate
+          FROM dbo.FollowupNoc fn
+          WHERE fn.ApplicantId = @ApplicantId AND fn.IsDeleted = 0
+          ORDER BY fn.IssueDate
+        `),
+
+        // Sales Deeds
+        pool.request().input("ApplicantId", sql.Int, id).query(`
+          SELECT
+            fsd.Id, fsd.DeedNo, fsd.Status, fsd.StampDuty, fsd.RegistrationFee,
+            CONVERT(VARCHAR(10), fsd.ExecutionDate,    23) AS ExecutionDate,
+            CONVERT(VARCHAR(10), fsd.RegistrationDate, 23) AS RegistrationDate
+          FROM dbo.FollowupSalesDeed fsd
+          WHERE fsd.ApplicantId = @ApplicantId AND fsd.IsDeleted = 0
+          ORDER BY fsd.ExecutionDate
+        `),
+
+        // Handovers
+        pool.request().input("ApplicantId", sql.Int, id).query(`
+          SELECT
+            fho.Id, fho.HandoverNo, fho.Status, fho.UnitCondition,
+            CONVERT(VARCHAR(10), fho.HandoverDate,       23) AS HandoverDate,
+            CONVERT(VARCHAR(10), fho.ActualHandoverDate, 23) AS ActualHandoverDate,
+            fho.ElectricMeterHandedOver, fho.WaterConnectionHandedOver,
+            fho.ParkingAllotted, fho.WelcomeKitGiven
+          FROM dbo.FollowupHandover fho
+          WHERE fho.ApplicantId = @ApplicantId AND fho.IsDeleted = 0
+          ORDER BY fho.HandoverDate
+        `),
+
+        // Audit Logs
+        pool.request().input("ApplicantId", sql.Int, id).query(`
+          SELECT TOP 50
+            fl.Id, fl.LogType, fl.Module, fl.Notes, fl.Amount, fl.CreatedBy,
+            CONVERT(VARCHAR(10), fl.LogDate, 23) AS LogDate
+          FROM dbo.FollowupLog fl
+          WHERE fl.RefId = @ApplicantId AND fl.IsDeleted = 0
+          ORDER BY fl.CreatedAt DESC
+        `),
+      ]);
+
+      if (!applicantRes.recordset.length) {
+        return res.status(404).json({ error: "Applicant not found" });
+      }
+
+      res.json({
+        applicant:      applicantRes.recordset[0],
+        unitSelections: unitSelectionsRes.recordset,
+        bookings:       bookingsRes.recordset,
+        welcomeCalls:   welcomeCallsRes.recordset,
+        agreements:     agreementsRes.recordset,
+        nocs:           nocsRes.recordset,
+        salesDeeds:     salesDeedsRes.recordset,
+        handovers:      handoversRes.recordset,
+        logs:           logsRes.recordset,
+      });
+    } catch (err) {
+      console.error("followupApplicants TIMELINE error:", err);
+      res.status(500).json({ error: "Failed to load applicant timeline" });
+    }
+  },
+);
+
 module.exports = router;

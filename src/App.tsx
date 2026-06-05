@@ -165,6 +165,9 @@ const EnterpriseMasterPage = lazy(
   () => import("./pages/admin/masters/EnterpriseMaster"),
 );
 const BOQ = lazy(() => import("./pages/engineering/BOQ"));
+const DailyProgressReport = lazy(
+  () => import("./pages/engineering/DailyProgressReport"),
+);
 
 // Admin Pages
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -252,6 +255,7 @@ const FollowupAgreements = lazy(() =>
   })),
 );
 const ApplicantDetail = lazy(() => import("./pages/followup/ApplicantDetail"));
+const ApplicantTimeline = lazy(() => import("./pages/followup/ApplicantTimeline"));
 const FollowupApplications = lazy(
   () => import("./pages/followup/Applications"),
 );
@@ -278,14 +282,23 @@ const HandoverPage = lazy(() =>
 const ConstructionUpdatesPage = lazy(
   () => import("./pages/followup/ConstructionUpdates"),
 );
+const LegalMilestonesPage = lazy(
+  () => import("./pages/followup/LegalMilestones"),
+);
+const PrePossessionPage = lazy(
+  () => import("./pages/followup/PrePossessionClearance"),
+);
+const PossessionNoticePage = lazy(
+  () => import("./pages/followup/PossessionNotice"),
+);
 const FinanceDemandsPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
+  import("./pages/followup/FinanceDemands").then((module) => ({
     default: module.FinanceDemandsPage,
   })),
 );
 const FollowupPaymentsPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
-    default: module.FollowupPaymentsPage,
+  import("./pages/followup/FinancePayments").then((module) => ({
+    default: module.FinancePaymentsPage,
   })),
 );
 const CustomerReportPage = lazy(() =>
@@ -718,7 +731,7 @@ function AppRoutes() {
         path="/applicant-timeline/:id"
         element={
           <ProtectedRoute>
-            <ApplicantDetail />
+            <ApplicantTimeline />
           </ProtectedRoute>
         }
       />
@@ -783,6 +796,30 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <HandoverPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/legal/milestones"
+        element={
+          <ProtectedRoute>
+            <LegalMilestonesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/closure/pre-possession"
+        element={
+          <ProtectedRoute>
+            <PrePossessionPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/closure/possession-notice"
+        element={
+          <ProtectedRoute>
+            <PossessionNoticePage />
           </ProtectedRoute>
         }
       />
@@ -1113,6 +1150,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <BOQ />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/engineering/dpr"
+        element={
+          <ProtectedRoute>
+            <DailyProgressReport />
           </ProtectedRoute>
         }
       />
