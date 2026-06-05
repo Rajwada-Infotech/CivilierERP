@@ -256,7 +256,7 @@ router.post("/", async (req, res) => {
           .input("Status",         sql.NVarChar(30), "Pending")
           .input("CreatedBy",      sql.NVarChar(100),userName)
           .query(`
-            INSERT INTO dbo.FollowupNoc (
+            INSERT INTO dbo.FollowupNOCs (
               ApplicantId, UnitSelectionId, AgreementId, ProjectId, CompanyId,
               Reason, Status, CreatedBy, CreatedAt
             )
@@ -272,7 +272,7 @@ router.post("/", async (req, res) => {
           await pool.request()
             .input("Id",    sql.Int,          nocId)
             .input("NOCNo", sql.NVarChar(50), nocNo)
-            .query(`UPDATE dbo.FollowupNoc SET NocNo = @NOCNo WHERE Id = @Id`);
+            .query(`UPDATE dbo.FollowupNOCs SET NOCNo = @NOCNo WHERE Id = @Id`);
           autoDraftNocNo = nocNo;
         }
       } catch (nocErr) {

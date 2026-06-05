@@ -1800,7 +1800,26 @@ export default function BookingsPage() {
         const j = await res.json();
         throw new Error(j.error || "Create failed");
       }
+      const created = await res.json();
       toast.success("Booking created");
+
+      // Auto-create a Welcome Call record linked to this booking
+      try {
+        await fetchWithAuth("/api/followup-welcome-calls", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            BookingId: created.id ?? created.Id,
+            ApplicantId: payload.ApplicantId,
+            CallDate: new Date().toISOString().slice(0, 10),
+            Status: "Scheduled",
+            Notes: `Auto-created on booking ${created.bookingNo ?? ""}`.trim(),
+          }),
+        });
+        toast.info("Welcome Call scheduled — go to Sales → Welcome Calls to log the outcome.");
+      } catch {
+        // Non-fatal: booking was already created successfully
+      }
     }
     await queryClient.invalidateQueries({ queryKey: ["followup-bookings"] });
     setShowForm(false);
