@@ -198,6 +198,12 @@ const materialSetupItems = [
 
 const followupSetupItems = [
   {
+    icon: ClipboardList,
+    label: "Payment Plan",
+    path: "/followup/setup/payment-plan-master",
+    color: "text-emerald-500",
+  },
+  {
     icon: Layers,
     label: "Block",
     path: "/followup/setup/block-master",
