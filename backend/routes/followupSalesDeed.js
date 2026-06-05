@@ -2,6 +2,7 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
+const { logAudit } = require("../utils/auditLog");
 
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -421,6 +422,7 @@ router.post("/", async (req, res) => {
       );
 
     await transaction.commit();
+    logAudit({ module: "SalesDeed", recordId: id, recordNo: deedNo, action: "Created", changedBy: userName });
     res.status(201).json({ Id: id, DeedNo: deedNo, Status: payload.Status });
   } catch (err) {
     console.error("followupSalesDeed POST error:", err);
@@ -523,6 +525,7 @@ router.put("/:id", async (req, res) => {
         WHERE Id = @Id AND IsDeleted = 0
       `);
 
+    logAudit({ module: "SalesDeed", recordId: id, recordNo: `DEED${String(id).padStart(6, "0")}`, action: "Updated", fieldName: "Status", newValue: payload.Status, changedBy: userName });
     res.json({ success: true });
   } catch (err) {
     console.error("followupSalesDeed PUT error:", err);
@@ -547,6 +550,7 @@ router.delete("/:id", async (req, res) => {
         SET IsDeleted = 1, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
       `);
+    logAudit({ module: "SalesDeed", recordId: id, recordNo: `DEED${String(id).padStart(6, "0")}`, action: "Deleted", changedBy: userName });
     res.json({ success: true });
   } catch (err) {
     console.error("followupSalesDeed DELETE error:", err);
@@ -555,7 +559,3 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-

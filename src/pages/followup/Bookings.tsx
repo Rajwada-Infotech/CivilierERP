@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { AuditLogDrawer } from "@/components/AuditLogDrawer";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { toast } from "sonner";
@@ -1676,6 +1677,7 @@ export default function BookingsPage() {
   const [page, setPage] = useState(1);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
+  const [auditTarget, setAuditTarget] = useState<{ id: number; no: string } | null>(null);
 
   const statusOptions = useLookup("BOOKING_STATUS", ["Confirmed", "Pending", "Cancelled"]);
   const paymentModes = useLookup("PAYMENT_MODE", ["Cheque", "NEFT", "RTGS", "DD", "Cash", "Online"]);
@@ -1820,6 +1822,23 @@ export default function BookingsPage() {
       } catch {
         // Non-fatal: booking was already created successfully
       }
+
+      // Auto-send welcome Email / SMS / WhatsApp
+      import("../../api/followupCommunicatorApi").then(({ followupCommunicatorApi }) => {
+        followupCommunicatorApi.trigger({
+          triggerType:   "booking",
+          applicantId:   payload.ApplicantId,
+          bookingId:     created.id ?? created.Id,
+          applicantName: created.ApplicantName ?? "",
+          email:         created.Email         ?? undefined,
+          phone:         created.PrimaryMobile ?? created.Phone ?? undefined,
+          projectName:   created.ProjectName   ?? undefined,
+          unitNo:        created.UnitNo        ?? payload.UnitNo,
+          bookingDate:   payload.BookingDate,
+        }).catch(() => {
+          // Communication failure is non-blocking
+        });
+      }).catch(() => {});
     }
     await queryClient.invalidateQueries({ queryKey: ["followup-bookings"] });
     setShowForm(false);
@@ -2237,10 +2256,19 @@ export default function BookingsPage() {
                             <StatusBadge status={b.Status} />
                           </td>
                           <td className="px-3 py-3.5 w-8">
-                            <ChevronRight
+                            <div className="flex items-center gap-1">
+                              <button
+                                title="History"
+                                onClick={(e) => { e.stopPropagation(); setAuditTarget({ id: b.Id, no: b.BookingNo ?? `#${b.Id}` }); }}
+                                className="p-1 rounded-lg text-muted-foreground/40 hover:text-primary hover:bg-primary/8 transition-colors"
+                              >
+                                <Clock size={13} />
+                              </button>
+                              <ChevronRight
                               size={14}
                               className={`text-muted-foreground/30 transition-all group-hover:text-primary group-hover:translate-x-0.5 ${isSelected ? "text-primary" : ""}`}
                             />
+                            </div>
                           </td>
                         </tr>
                       );
@@ -2368,6 +2396,15 @@ export default function BookingsPage() {
           onEdit={() => openEdit(selectedBooking)}
         />
       )}
+
+      {/* Audit log drawer */}
+      <AuditLogDrawer
+        open={!!auditTarget}
+        onClose={() => setAuditTarget(null)}
+        module="Booking"
+        recordId={auditTarget?.id ?? null}
+        recordNo={auditTarget?.no}
+      />
     </>
   );
 }

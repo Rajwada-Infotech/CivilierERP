@@ -2,6 +2,7 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
+const { logAudit } = require("../utils/auditLog");
 
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -245,6 +246,7 @@ router.post("/", async (req, res) => {
       .query(`UPDATE dbo.FollowupLegalMilestones SET MilestoneNo = @MilestoneNo WHERE Id = @Id`);
 
     await transaction.commit();
+    logAudit({ module: "LegalMilestone", recordId: id, recordNo: milestoneNo, action: "Created", changedBy: userName });
     res.status(201).json({ Id: id, MilestoneNo: milestoneNo });
   } catch (err) {
     console.error("legalMilestones POST error:", err);
@@ -299,6 +301,7 @@ router.patch("/:id/step", async (req, res) => {
       .input("UpdatedBy", sql.NVarChar(100),     userName)
       .query(query);
 
+    logAudit({ module: "LegalMilestone", recordId: id, action: "StepUpdated", stepName: stepField, newValue: status, changedBy: userName });
     res.json({ success: true });
   } catch (err) {
     console.error("legalMilestones PATCH step error:", err);
@@ -335,6 +338,7 @@ router.put("/:id", async (req, res) => {
             UpdatedAt     = SYSDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
       `);
+    logAudit({ module: "LegalMilestone", recordId: id, action: "Updated", fieldName: "OverallStatus", newValue: overallStatus, changedBy: userName });
     res.json({ success: true });
   } catch (err) {
     console.error("legalMilestones PUT error:", err);
@@ -359,6 +363,7 @@ router.delete("/:id", async (req, res) => {
         SET IsDeleted = 1, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
       `);
+    logAudit({ module: "LegalMilestone", recordId: id, action: "Deleted", changedBy: userName });
     res.json({ success: true });
   } catch (err) {
     console.error("legalMilestones DELETE error:", err);
