@@ -262,7 +262,7 @@ const FollowupApplications = lazy(
   () => import("./pages/followup/Applications"),
 );
 const WelcomeCallsPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
+  import("./pages/followup/WelcomeCalls").then((module) => ({
     default: module.WelcomeCallsPage,
   })),
 );
