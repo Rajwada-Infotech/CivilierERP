@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -75,6 +75,7 @@ import {
   Receipt,
   ChevronDown,
   CalendarDays,
+  FilePenLine,
 } from "lucide-react";
 
 // ─── PO Chain Status Hook ─────────────────────────────────────────────────────
@@ -308,6 +309,7 @@ type ViewMode = "list" | "create" | "edit" | "view";
 const PurchaseOrderMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const location = useLocation();
+  const navigate = useNavigate();
   const { finYears } = useFinYear();
 
   // ── MR prefill (when navigated from Material Request "Create PO") ─────────
@@ -409,7 +411,8 @@ const PurchaseOrderMaster: React.FC = () => {
   // ── Remote data ───────────────────────────────────────────────────────────
   const { data: dbData, isLoading } = useQuery({
     queryKey: ["purchase-orders", page, limit, poTypeFilter],
-    queryFn: () => getPurchaseOrders({ page, limit, poType: poTypeFilter || undefined }),
+    queryFn: () =>
+      getPurchaseOrders({ page, limit, poType: poTypeFilter || undefined }),
   });
 
   const { data: suppliersRaw = [] } = useQuery({
@@ -1541,6 +1544,22 @@ const PurchaseOrderMaster: React.FC = () => {
     setViewMode("view");
   };
 
+  const goToAmend = (item: POListItem) => {
+    navigate("/material/amendment-menu", {
+      state: {
+        prefill: {
+          tab: "PO",
+          docId: item._id,
+          docNo: item.poNumber || item.docNo,
+          supplierName: item.supplierName,
+          projectName: item.projectName,
+          companyName: item.companyName,
+          totalAmount: item.totalAmount,
+        },
+      },
+    });
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER: LIST VIEW
   // ─────────────────────────────────────────────────────────────────────────
@@ -1581,7 +1600,10 @@ const PurchaseOrderMaster: React.FC = () => {
           ].map((tab) => (
             <button
               key={tab.value}
-              onClick={() => { setPoTypeFilter(tab.value); setPage(1); }}
+              onClick={() => {
+                setPoTypeFilter(tab.value);
+                setPage(1);
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
                 poTypeFilter === tab.value
                   ? "bg-card text-foreground shadow-sm"
@@ -1677,7 +1699,11 @@ const PurchaseOrderMaster: React.FC = () => {
                           {item.poType === "WO_PO" && (
                             <span
                               className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
-                              title={item.sourceWODocNo ? `From Work Order: ${item.sourceWODocNo}` : "Auto-generated from Work Order"}
+                              title={
+                                item.sourceWODocNo
+                                  ? `From Work Order: ${item.sourceWODocNo}`
+                                  : "Auto-generated from Work Order"
+                              }
                             >
                               WO-PO
                             </span>
@@ -1719,13 +1745,6 @@ const PurchaseOrderMaster: React.FC = () => {
                             title="View"
                           >
                             <Eye size={14} />
-                          </button>
-                          <button
-                            onClick={() => goToEdit(item)}
-                            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition"
-                            title="Edit"
-                          >
-                            <PenSquare size={14} />
                           </button>
                           <button
                             onClick={() => handleDelete(item._id)}
@@ -2056,11 +2075,14 @@ const PurchaseOrderMaster: React.FC = () => {
               Print
             </button>
             <button
-              onClick={() => setViewMode("edit")}
+              onClick={() => {
+                const item = listData.find((r) => r._id === editingId);
+                if (item) goToAmend(item);
+              }}
               className="gradient-accent inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold transition shadow-sm"
             >
-              <PenSquare size={14} />
-              Edit
+              <FilePenLine size={14} />
+              Amend
             </button>
           </div>
         )}

@@ -330,9 +330,12 @@ function StockDetailsTable({ godownId }: { godownId: number }) {
                       {row.ItemGroupName || "—"}
                     </td>
                     <td className="px-4 py-2.5">
-                      {row.UOMCode ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-600 border border-blue-400/20">
-                          {row.UOMCode}
+                      {row.UOMSymbol || row.UOMName ? (
+                        <span
+                          title={row.UOMName ?? undefined}
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-600 border border-blue-400/20"
+                        >
+                          {row.UOMSymbol || row.UOMName}
                         </span>
                       ) : (
                         <span className="text-muted-foreground">—</span>

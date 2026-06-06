@@ -10,11 +10,11 @@ export interface BillingTermRow {
 }
 
 export interface BillingTermPayload {
-  Name: unknown;
-  Description: unknown;
+  Name: string;
+  Description: string;
   CalculationType: string;
   DeductionType: string | null;
-  IsActive: unknown;
+  IsActive: boolean;
 }
 
 export const getBillingTerms = async (): Promise<BillingTermRow[]> => {

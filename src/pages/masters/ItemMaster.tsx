@@ -335,7 +335,11 @@ const ItemMaster: React.FC = () => {
       const res = await fetchWithAuth("/api/account-head/options?type=S");
       if (!res.ok) return [];
       const data = await res.json();
-      return Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
+      return Array.isArray(data)
+        ? data
+        : Array.isArray(data?.data)
+          ? data.data
+          : [];
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -548,9 +552,19 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "uomCode",
       header: "UOM",
-      cell: ({ row }) => (
-        <span className="font-mono text-sm">{row.original.uomCode || "-"}</span>
-      ),
+      cell: ({ row }) => {
+        const uomRaw = Array.isArray(dbUoms)
+          ? (dbUoms as any[]).find(
+              (u: any) => u.UOMCode === row.original.uomCode,
+            )
+          : null;
+        const uomLabel = uomRaw
+          ? uomRaw.Symbol
+            ? `${uomRaw.UOMName} (${uomRaw.Symbol})`
+            : uomRaw.UOMName
+          : row.original.uomCode;
+        return <span className="text-sm">{uomLabel || "-"}</span>;
+      },
     },
     {
       accessorKey: "defaultSupplierId",

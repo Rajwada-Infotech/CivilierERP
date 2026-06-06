@@ -30,8 +30,8 @@ router.post("/", async (req, res) => {
       .input("CalculationType", sql.NVarChar(20), CalculationType || null)
       .input("DeductionType", sql.NVarChar(20), DeductionType || null)
       .input("IsActive", sql.Bit, IsActive ? 1 : 0)
-      .input("CreatedBy", sql.Int, req.user?.id || 1)
-      .input("CreatedAt", sql.DateTime2, new Date()).query(`
+      .input("CreatedBy", sql.Int, req.user?.userId || null)
+      .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
         INSERT INTO dbo.Billing_Terms_Master
           (Name, Description, CalculationType, DeductionType, IsActive, CreatedBy, CreatedAt)
         VALUES
@@ -57,8 +57,8 @@ router.put("/:id", async (req, res) => {
       .input("CalculationType", sql.NVarChar(20), CalculationType || null)
       .input("DeductionType", sql.NVarChar(20), DeductionType || null)
       .input("IsActive", sql.Bit, IsActive ? 1 : 0)
-      .input("UpdatedBy", sql.Int, req.user?.id || 1)
-      .input("UpdatedAt", sql.DateTime2, new Date()).query(`
+      .input("UpdatedBy", sql.Int, req.user?.userId || null)
+      .input("UpdatedAt", sql.DateTime2(3), new Date()).query(`
         UPDATE dbo.Billing_Terms_Master
         SET
           Name = @Name,
@@ -94,7 +94,3 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-

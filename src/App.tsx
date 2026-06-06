@@ -255,7 +255,9 @@ const FollowupAgreements = lazy(() =>
   })),
 );
 const ApplicantDetail = lazy(() => import("./pages/followup/ApplicantDetail"));
-const ApplicantTimeline = lazy(() => import("./pages/followup/ApplicantTimeline"));
+const ApplicantTimeline = lazy(
+  () => import("./pages/followup/ApplicantTimeline"),
+);
 const FollowupApplications = lazy(
   () => import("./pages/followup/Applications"),
 );
@@ -267,6 +269,11 @@ const WelcomeCallsPage = lazy(() =>
 const NocPage = lazy(() =>
   import("./pages/followup/NOC").then((module) => ({
     default: module.NOCPage,
+  })),
+);
+const BankNOCPage = lazy(() =>
+  import("./pages/followup/BankNOC").then((module) => ({
+    default: module.BankNOCPage,
   })),
 );
 const SalesDeedPage = lazy(() =>
@@ -297,14 +304,10 @@ const FinanceDemandsPage = lazy(() =>
   })),
 );
 const AgreementWorkflowPage = lazy(
-  () => import("./pages/followup/AgreementWorkflow")
+  () => import("./pages/followup/AgreementWorkflow"),
 );
-const DocumentVaultPage = lazy(
-  () => import("./pages/followup/DocumentVault")
-);
-const CommunicatorPage = lazy(
-  () => import("./pages/followup/Communicator")
-);
+const DocumentVaultPage = lazy(() => import("./pages/followup/DocumentVault"));
+const CommunicatorPage = lazy(() => import("./pages/followup/Communicator"));
 const FollowupPaymentsPage = lazy(() =>
   import("./pages/followup/FinancePayments").then((module) => ({
     default: module.FinancePaymentsPage,
@@ -340,6 +343,9 @@ const EngineeringDashboard = lazy(
   () => import("./pages/engineering/EngineeringDashboard"),
 );
 const WorkDone = lazy(() => import("./pages/engineering/WorkDone"));
+const EngineeringAmendmentMenu = lazy(
+  () => import("./pages/engineering/EngineeringAmendmentMenu"),
+);
 
 // ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -793,6 +799,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/followup/closure/bank-noc"
+        element={
+          <ProtectedRoute>
+            <BankNOCPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/followup/closure/sales-deed"
         element={
           <ProtectedRoute>
@@ -1191,6 +1205,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <DailyProgressReport />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/engineering/amendment-menu"
+        element={
+          <ProtectedRoute>
+            <EngineeringAmendmentMenu />
           </ProtectedRoute>
         }
       />

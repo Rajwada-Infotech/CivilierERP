@@ -137,10 +137,22 @@ const ALL_ROUTES = [
   },
   { path: "/api/followup-demands", file: "./routes/followupDemands" },
   { path: "/api/followup-payments", file: "./routes/followupPayments" },
-  { path: "/api/followup-welcome-calls", file: "./routes/followupWelcomeCalls" },
-  { path: "/api/followup-legal-milestones", file: "./routes/followupLegalMilestones" },
-  { path: "/api/followup-pre-possession", file: "./routes/followupPrePossession" },
-  { path: "/api/followup-possession-notices", file: "./routes/followupPossessionNotice" },
+  {
+    path: "/api/followup-welcome-calls",
+    file: "./routes/followupWelcomeCalls",
+  },
+  {
+    path: "/api/followup-legal-milestones",
+    file: "./routes/followupLegalMilestones",
+  },
+  {
+    path: "/api/followup-pre-possession",
+    file: "./routes/followupPrePossession",
+  },
+  {
+    path: "/api/followup-possession-notice",
+    file: "./routes/followupPossessionNotice",
+  },
   { path: "/api/followup-dashboard", file: "./routes/followupDashboard" },
   { path: "/api/company-master", file: "./routes/companyMaster" },
   { path: "/api/project-master", file: "./routes/projectMaster" },
@@ -165,8 +177,14 @@ const ALL_ROUTES = [
   { path: "/api/widget-catalog", file: "./routes/widgetCatalogAdmin" },
   { path: "/api/page-definitions", file: "./routes/pageDefinitions" },
   { path: "/api/lookups", file: "./routes/lookups" },
-  { path: "/api/followup-agreement-workflow", file: "./routes/followupAgreementWorkflow" },
-  { path: "/api/followup-document-vault",     file: "./routes/followupDocumentVault" },
+  {
+    path: "/api/followup-agreement-workflow",
+    file: "./routes/followupagreementworkflow",
+  },
+  {
+    path: "/api/followup-document-vault",
+    file: "./routes/followupDocumentVault",
+  },
   { path: "/api/followup-communicator", file: "./routes/followupCommunicator" },
   { path: "/api/followup-audit-log", file: "./routes/followupAuditLog" },
   { path: "/api/followup-escalation", file: "./routes/followupEscalation" },

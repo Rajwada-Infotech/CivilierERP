@@ -1,16 +1,16 @@
 const express = require("express");
-const path    = require("path");
-const fs      = require("fs");
-const multer  = require("multer");
+const path = require("path");
+const fs = require("fs");
+const multer = require("multer");
 const { getPool, sql } = require("../db");
-const authMiddleware   = require("../middleware/auth");
+const authMiddleware = require("../middleware/auth");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false }));
 
-const PERMISSION_MODULE    = "Followup";
+const PERMISSION_MODULE = "Followup";
 const PERMISSION_SUBMODULE = "DocumentVault";
 
 // ── Upload dir ────────────────────────────────────────────────────────────────
@@ -20,7 +20,7 @@ if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
   filename: (_req, file, cb) => {
-    const ts   = Date.now();
+    const ts = Date.now();
     const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
     cb(null, `${ts}_${safe}`);
   },
@@ -32,7 +32,9 @@ const upload = multer({
   fileFilter: (_req, file, cb) => {
     const ALLOWED = [
       "application/pdf",
-      "image/jpeg", "image/png", "image/webp",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
       "application/msword",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "application/vnd.ms-excel",
@@ -50,7 +52,10 @@ router.use(checkPermissionForMethod(PERMISSION_MODULE, PERMISSION_SUBMODULE));
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function requireUserName(req, res) {
   const u = req.user?.name || req.user?.email || null;
-  if (!u) { res.status(401).json({ error: "Unauthorized" }); return null; }
+  if (!u) {
+    res.status(401).json({ error: "Unauthorized" });
+    return null;
+  }
   return u;
 }
 function parseId(v) {
@@ -85,11 +90,10 @@ router.get("/meta/options", async (req, res) => {
         SELECT
           fa.Id,
           fa.ApplicantNo,
-          ISNULL(ahm.DisplayName, ahm.LHeadName) AS ApplicantName
+          fa.ApplicantName
         FROM dbo.FollowupApplications fa
-        LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.Id = fa.ApplicantId
         WHERE fa.IsDeleted = 0
-        ORDER BY ApplicantName
+        ORDER BY fa.ApplicantName
       `),
     ]);
     res.json({
@@ -105,19 +109,26 @@ router.get("/meta/options", async (req, res) => {
 // ── GET / — list docs, optionally filtered by applicant ───────────────────────
 router.get("/", async (req, res) => {
   try {
-    const page       = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const pageSize   = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 20));
-    const offset     = (page - 1) * pageSize;
-    const search     = typeof req.query.search === "string" ? req.query.search.trim() : "";
-    const category   = typeof req.query.category === "string" ? req.query.category.trim() : "";
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(
+      100,
+      Math.max(1, parseInt(req.query.pageSize, 10) || 20),
+    );
+    const offset = (page - 1) * pageSize;
+    const search =
+      typeof req.query.search === "string" ? req.query.search.trim() : "";
+    const category =
+      typeof req.query.category === "string" ? req.query.category.trim() : "";
     const applicantId = parseId(req.query.applicantId);
 
-    const pool    = getPool();
+    const pool = getPool();
     const request = pool.request();
     const filters = ["d.IsDeleted = 0"];
 
     if (search) {
-      filters.push(`(d.DocName LIKE @search OR d.DocNo LIKE @search OR ISNULL(ahm.DisplayName, ahm.LHeadName) LIKE @search)`);
+      filters.push(
+        `(d.DocName LIKE @search OR d.DocNo LIKE @search OR fa.ApplicantName LIKE @search)`,
+      );
       request.input("search", sql.NVarChar(255), `%${search}%`);
     }
     if (category) {
@@ -134,13 +145,13 @@ router.get("/", async (req, res) => {
     const dataResult = await request.query(`
       SELECT
         d.Id, d.DocNo, d.ApplicantId,
-        ISNULL(ahm.DisplayName, ahm.LHeadName) AS ApplicantName,
-        ahm.LHeadCode AS ApplicantCode,
+        fa.ApplicantName,
+        fa.ApplicantNo AS ApplicantCode,
         d.Category, d.DocName, d.FileName, d.FilePath,
         d.FileSize, d.MimeType, d.Notes, d.Tags,
         d.CreatedBy, d.CreatedAt, d.UpdatedBy, d.UpdatedAt
       FROM dbo.FollowupDocumentVault d
-      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.Id = d.ApplicantId
+      LEFT JOIN dbo.FollowupApplications fa ON fa.Id = d.ApplicantId
       WHERE ${where}
       ORDER BY d.CreatedAt DESC, d.Id DESC
       OFFSET ${offset} ROWS FETCH NEXT ${pageSize} ROWS ONLY
@@ -149,14 +160,19 @@ router.get("/", async (req, res) => {
     const countResult = await pool.request().query(`
       SELECT COUNT(*) AS total
       FROM dbo.FollowupDocumentVault d
-      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.Id = d.ApplicantId
+      LEFT JOIN dbo.FollowupApplications fa ON fa.Id = d.ApplicantId
       WHERE ${where}
     `);
 
     const total = countResult.recordset[0].total;
     res.json({
       data: dataResult.recordset,
-      pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages: Math.ceil(total / pageSize),
+      },
     });
   } catch (err) {
     console.error("DocumentVault GET error:", err.message);
@@ -172,28 +188,35 @@ router.post("/upload", upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
   const { ApplicantId, Category, DocName, Notes, Tags } = req.body || {};
-  if (!ApplicantId) return res.status(400).json({ error: "ApplicantId is required" });
+  if (!ApplicantId)
+    return res.status(400).json({ error: "ApplicantId is required" });
 
   try {
     const pool = getPool();
 
     // Generate DocNo
-    const cntRes = await pool.request().query(`SELECT COUNT(*) AS cnt FROM dbo.FollowupDocumentVault`);
-    const docNo  = `DV${String(cntRes.recordset[0].cnt + 1).padStart(6, "0")}`;
+    const cntRes = await pool
+      .request()
+      .query(`SELECT COUNT(*) AS cnt FROM dbo.FollowupDocumentVault`);
+    const docNo = `DV${String(cntRes.recordset[0].cnt + 1).padStart(6, "0")}`;
 
-    const result = await pool.request()
-      .input("DocNo",       sql.NVarChar(50),       docNo)
-      .input("ApplicantId", sql.Int,                parseInt(ApplicantId, 10))
-      .input("Category",    sql.NVarChar(100),       normalizeText(Category) || "Other")
-      .input("DocName",     sql.NVarChar(255),       normalizeText(DocName) || req.file.originalname)
-      .input("FileName",    sql.NVarChar(255),       req.file.filename)
-      .input("FilePath",    sql.NVarChar(500),       req.file.path)
-      .input("FileSize",    sql.BigInt,              req.file.size)
-      .input("MimeType",    sql.NVarChar(100),       req.file.mimetype)
-      .input("Notes",       sql.NVarChar(sql.MAX),   normalizeText(Notes))
-      .input("Tags",        sql.NVarChar(500),       normalizeText(Tags))
-      .input("CreatedBy",   sql.NVarChar(100),       userName)
-      .query(`
+    const result = await pool
+      .request()
+      .input("DocNo", sql.NVarChar(50), docNo)
+      .input("ApplicantId", sql.Int, parseInt(ApplicantId, 10))
+      .input("Category", sql.NVarChar(100), normalizeText(Category) || "Other")
+      .input(
+        "DocName",
+        sql.NVarChar(255),
+        normalizeText(DocName) || req.file.originalname,
+      )
+      .input("FileName", sql.NVarChar(255), req.file.filename)
+      .input("FilePath", sql.NVarChar(500), req.file.path)
+      .input("FileSize", sql.BigInt, req.file.size)
+      .input("MimeType", sql.NVarChar(100), req.file.mimetype)
+      .input("Notes", sql.NVarChar(sql.MAX), normalizeText(Notes))
+      .input("Tags", sql.NVarChar(500), normalizeText(Tags))
+      .input("CreatedBy", sql.NVarChar(100), userName).query(`
         INSERT INTO dbo.FollowupDocumentVault
           (DocNo, ApplicantId, Category, DocName, FileName, FilePath,
            FileSize, MimeType, Notes, Tags, CreatedBy)
@@ -218,14 +241,19 @@ router.get("/file/:id", async (req, res) => {
   if (!id) return res.status(400).json({ error: "Invalid id" });
 
   try {
-    const result = await getPool().request()
+    const result = await getPool()
+      .request()
       .input("Id", sql.Int, id)
-      .query(`SELECT FileName, FilePath, MimeType, DocName FROM dbo.FollowupDocumentVault WHERE Id = @Id AND IsDeleted = 0`);
+      .query(
+        `SELECT FileName, FilePath, MimeType, DocName FROM dbo.FollowupDocumentVault WHERE Id = @Id AND IsDeleted = 0`,
+      );
 
-    if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
+    if (!result.recordset.length)
+      return res.status(404).json({ error: "Not found" });
 
     const doc = result.recordset[0];
-    if (!fs.existsSync(doc.FilePath)) return res.status(404).json({ error: "File not found on disk" });
+    if (!fs.existsSync(doc.FilePath))
+      return res.status(404).json({ error: "File not found on disk" });
 
     res.setHeader("Content-Type", doc.MimeType);
     res.setHeader("Content-Disposition", `inline; filename="${doc.FileName}"`);
@@ -247,14 +275,14 @@ router.put("/:id", async (req, res) => {
   const { Category, DocName, Notes, Tags } = req.body || {};
 
   try {
-    const result = await getPool().request()
-      .input("Id",        sql.Int,              id)
-      .input("Category",  sql.NVarChar(100),    normalizeText(Category))
-      .input("DocName",   sql.NVarChar(255),    normalizeText(DocName))
-      .input("Notes",     sql.NVarChar(sql.MAX),normalizeText(Notes))
-      .input("Tags",      sql.NVarChar(500),    normalizeText(Tags))
-      .input("UpdatedBy", sql.NVarChar(100),    userName)
-      .query(`
+    const result = await getPool()
+      .request()
+      .input("Id", sql.Int, id)
+      .input("Category", sql.NVarChar(100), normalizeText(Category))
+      .input("DocName", sql.NVarChar(255), normalizeText(DocName))
+      .input("Notes", sql.NVarChar(sql.MAX), normalizeText(Notes))
+      .input("Tags", sql.NVarChar(500), normalizeText(Tags))
+      .input("UpdatedBy", sql.NVarChar(100), userName).query(`
         UPDATE dbo.FollowupDocumentVault SET
           Category  = ISNULL(@Category,  Category),
           DocName   = ISNULL(@DocName,   DocName),
@@ -265,7 +293,8 @@ router.put("/:id", async (req, res) => {
         WHERE Id = @Id AND IsDeleted = 0
       `);
 
-    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Not found" });
+    if (!result.rowsAffected[0])
+      return res.status(404).json({ error: "Not found" });
     res.json({ success: true });
   } catch (err) {
     console.error("DocumentVault PUT error:", err.message);
@@ -285,22 +314,27 @@ router.delete("/:id", async (req, res) => {
     const pool = getPool();
 
     // Fetch path before soft-delete for cleanup
-    const fileRes = await pool.request()
+    const fileRes = await pool
+      .request()
       .input("Id", sql.Int, id)
-      .query(`SELECT FilePath FROM dbo.FollowupDocumentVault WHERE Id = @Id AND IsDeleted = 0`);
+      .query(
+        `SELECT FilePath FROM dbo.FollowupDocumentVault WHERE Id = @Id AND IsDeleted = 0`,
+      );
 
-    if (!fileRes.recordset.length) return res.status(404).json({ error: "Not found" });
+    if (!fileRes.recordset.length)
+      return res.status(404).json({ error: "Not found" });
 
-    const result = await pool.request()
-      .input("Id",        sql.Int,          id)
-      .input("UpdatedBy", sql.NVarChar(100), userName)
-      .query(`
+    const result = await pool
+      .request()
+      .input("Id", sql.Int, id)
+      .input("UpdatedBy", sql.NVarChar(100), userName).query(`
         UPDATE dbo.FollowupDocumentVault
         SET IsDeleted = 1, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
       `);
 
-    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Not found" });
+    if (!result.rowsAffected[0])
+      return res.status(404).json({ error: "Not found" });
 
     // Best-effort physical cleanup
     const filePath = fileRes.recordset[0].FilePath;

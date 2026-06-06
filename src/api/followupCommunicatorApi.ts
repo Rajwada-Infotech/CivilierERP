@@ -1,5 +1,5 @@
 // src/api/followupCommunicatorApi.ts
-import axios from "axios";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE = "/api/followup-communicator";
 
@@ -58,15 +58,33 @@ export interface LogsResponse {
 
 export const followupCommunicatorApi = {
   /** Ad-hoc send from UI */
-  send: async (payload: SendPayload): Promise<{ success: boolean; message: string }> => {
-    const res = await axios.post(`${BASE}/send`, payload);
-    return res.data;
+  send: async (
+    payload: SendPayload,
+  ): Promise<{ success: boolean; message: string }> => {
+    const res = await fetchWithAuth(`${BASE}/send`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error((err as { error?: string }).error || "Send failed");
+    }
+    return res.json();
   },
 
   /** System trigger — sends welcome messages across all configured channels */
-  trigger: async (payload: TriggerPayload): Promise<{ success: boolean; results: TriggerResult[] }> => {
-    const res = await axios.post(`${BASE}/trigger`, payload);
-    return res.data;
+  trigger: async (
+    payload: TriggerPayload,
+  ): Promise<{ success: boolean; results: TriggerResult[] }> => {
+    const res = await fetchWithAuth(`${BASE}/trigger`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error((err as { error?: string }).error || "Trigger failed");
+    }
+    return res.json();
   },
 
   /** Fetch sent log */
@@ -78,13 +96,20 @@ export const followupCommunicatorApi = {
     page?: number;
     limit?: number;
   }): Promise<LogsResponse> => {
-    const res = await axios.get(`${BASE}/logs`, { params });
-    return res.data;
+    const qs = new URLSearchParams(
+      Object.entries(params)
+        .filter(([, v]) => v !== undefined && v !== "")
+        .map(([k, v]) => [k, String(v)]),
+    ).toString();
+    const res = await fetchWithAuth(`${BASE}/logs${qs ? "?" + qs : ""}`);
+    if (!res.ok) throw new Error("Failed to fetch communicator logs");
+    return res.json();
   },
 
   /** Single log entry */
   getLog: async (id: number): Promise<CommunicatorLog> => {
-    const res = await axios.get(`${BASE}/logs/${id}`);
-    return res.data;
+    const res = await fetchWithAuth(`${BASE}/logs/${id}`);
+    if (!res.ok) throw new Error("Failed to fetch log entry");
+    return res.json();
   },
 };

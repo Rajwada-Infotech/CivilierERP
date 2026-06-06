@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useFinYear } from "@/contexts/FinYearContext";
@@ -1295,6 +1296,7 @@ const ALL_STATUSES = ["All", ...BOOKING_STATUSES] as const;
 const PAGE_SIZE = 20;
 
 export default function MaterialExpenseBooking() {
+  const navigate = useNavigate();
   const { finYears } = useFinYear();
   const activeFinYears = finYears
     .filter((fy) => fy.status === "Active")
@@ -1941,6 +1943,22 @@ export default function MaterialExpenseBooking() {
     _mastersCache.grn = null;
     fetchMasters();
     setView("form");
+  };
+
+  const openAmend = (rec: ExpenseRecord) => {
+    navigate("/material/amendment-menu", {
+      state: {
+        prefill: {
+          tab: "EB",
+          docId: rec.id ?? "",
+          docNo: rec.bookingReference ?? "",
+          supplierName: rec.supplier ?? "",
+          projectName: rec.projectName ?? "",
+          companyName: rec.companyName ?? "",
+          totalAmount: rec.netAmount ?? rec.basicAmount ?? 0,
+        },
+      },
+    });
   };
 
   const requestDelete = async (id: string) => {
@@ -3253,7 +3271,7 @@ export default function MaterialExpenseBooking() {
                           : `booking-card-${index}`
                       }
                       rec={rec}
-                      onEdit={() => openEdit(rec)}
+                      onEdit={() => openAmend(rec)}
                       onPreview={() => setPreviewRecord(rec)}
                       onDelete={() => requestDelete(rec.id)}
                       onApprovalSuccess={fetchRecords}
@@ -3410,14 +3428,6 @@ export default function MaterialExpenseBooking() {
                                       title="Preview"
                                     >
                                       <Eye size={12} />
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-7 w-7 p-0"
-                                      onClick={() => openEdit(rec)}
-                                    >
-                                      <Edit size={12} />
                                     </Button>
                                     <Button
                                       variant="destructive"
@@ -3646,7 +3656,7 @@ export default function MaterialExpenseBooking() {
       <ExpenseBookingPreviewModal
         previewRecord={previewRecord}
         onClose={() => setPreviewRecord(null)}
-        onEdit={(record) => openEdit(record)}
+        onEdit={(record) => openAmend(record)}
       />
 
       {/* Remaining GRN Items — auto-created silently on save */}

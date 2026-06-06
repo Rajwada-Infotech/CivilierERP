@@ -11,6 +11,14 @@ const express = require("express");
 const router = express.Router();
 const nodemailer = require("nodemailer");
 const axios = require("axios");
+const authMiddleware = require("../middleware/auth");
+const { checkPermissionForMethod } = require("../middleware/routePermission");
+
+const PERMISSION_MODULE = "Followup";
+const PERMISSION_SUBMODULE = "Communicator";
+
+router.use(authMiddleware);
+router.use(checkPermissionForMethod(PERMISSION_MODULE, PERMISSION_SUBMODULE));
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -21,7 +29,7 @@ async function getConfig(pool, channel) {
     .query(
       `SELECT TOP 1 ConfigJson, IsActive
        FROM dbo.CommunicatorConfig
-       WHERE Channel = @Channel`
+       WHERE Channel = @Channel`,
     );
   if (!result.recordset.length) return null;
   const row = result.recordset[0];
@@ -33,25 +41,38 @@ async function getConfig(pool, channel) {
   }
 }
 
-async function logMessage(pool, { applicantId, bookingId, channel, recipient, subject, body, status, errorMessage, sentBy }) {
+async function logMessage(
+  pool,
+  {
+    applicantId,
+    bookingId,
+    channel,
+    recipient,
+    subject,
+    body,
+    status,
+    errorMessage,
+    sentBy,
+  },
+) {
   await pool
     .request()
-    .input("ApplicantId",  applicantId  ?? null)
-    .input("BookingId",    bookingId    ?? null)
-    .input("Channel",      channel)
-    .input("Recipient",    recipient)
-    .input("Subject",      subject      ?? null)
-    .input("Body",         body)
-    .input("Status",       status)
+    .input("ApplicantId", applicantId ?? null)
+    .input("BookingId", bookingId ?? null)
+    .input("Channel", channel)
+    .input("Recipient", recipient)
+    .input("Subject", subject ?? null)
+    .input("Body", body)
+    .input("Status", status)
     .input("ErrorMessage", errorMessage ?? null)
-    .input("SentBy",       sentBy       ?? "System")
+    .input("SentBy", sentBy ?? "System")
     .query(
       `INSERT INTO dbo.FollowupCommunicatorLog
          (ApplicantId, BookingId, Channel, Recipient, Subject, Body,
           Status, ErrorMessage, SentBy, SentAt)
        VALUES
          (@ApplicantId, @BookingId, @Channel, @Recipient, @Subject, @Body,
-          @Status, @ErrorMessage, @SentBy, GETDATE())`
+          @Status, @ErrorMessage, @SentBy, GETDATE())`,
     );
 }
 
@@ -59,8 +80,8 @@ async function logMessage(pool, { applicantId, bookingId, channel, recipient, su
 
 async function sendEmail(config, { to, subject, body }) {
   const transporter = nodemailer.createTransport({
-    host:   config.host,
-    port:   config.port   ?? 587,
+    host: config.host,
+    port: config.port ?? 587,
     secure: config.secure ?? false,
     auth: {
       user: config.user,
@@ -68,10 +89,10 @@ async function sendEmail(config, { to, subject, body }) {
     },
   });
   await transporter.sendMail({
-    from:    config.from ?? config.user,
+    from: config.from ?? config.user,
     to,
     subject,
-    html:    body,
+    html: body,
   });
 }
 
@@ -84,10 +105,10 @@ async function sendSms(config, { to, body }) {
     await axios.get(config.apiUrl, {
       params: {
         authorization: config.apiKey,
-        sender_id:     config.senderId,
-        message:       body,
-        numbers:       to,
-        route:         config.route ?? "v3",
+        sender_id: config.senderId,
+        message: body,
+        numbers: to,
+        route: config.route ?? "v3",
       },
     });
   } else {
@@ -95,16 +116,16 @@ async function sendSms(config, { to, body }) {
       config.apiUrl,
       {
         sender_id: config.senderId,
-        message:   body,
-        numbers:   to,
-        route:     config.route ?? "v3",
+        message: body,
+        numbers: to,
+        route: config.route ?? "v3",
       },
       {
         headers: {
           authorization: config.apiKey,
           "Content-Type": "application/json",
         },
-      }
+      },
     );
   }
 }
@@ -113,12 +134,15 @@ async function sendWhatsApp(config, { to, body }) {
   // Supports generic WhatsApp Business API (WATI, AiSensy, etc.)
   // Config keys: apiUrl, apiKey, senderNumber
   // Normalise number — strip spaces, ensure +91 prefix for Indian numbers
-  const normalised = to.replace(/\s+/g, "").replace(/^0/, "+91").replace(/^91/, "+91");
+  const normalised = to
+    .replace(/\s+/g, "")
+    .replace(/^0/, "+91")
+    .replace(/^91/, "+91");
 
   await axios.post(
     config.apiUrl,
     {
-      phone:   normalised,
+      phone: normalised,
       message: body,
     },
     {
@@ -126,13 +150,16 @@ async function sendWhatsApp(config, { to, body }) {
         Authorization: `Bearer ${config.apiKey}`,
         "Content-Type": "application/json",
       },
-    }
+    },
   );
 }
 
 // ─── core dispatch ────────────────────────────────────────────────────────────
 
-async function dispatch(pool, { channel, recipient, subject, body, applicantId, bookingId, sentBy }) {
+async function dispatch(
+  pool,
+  { channel, recipient, subject, body, applicantId, bookingId, sentBy },
+) {
   const cfg = await getConfig(pool, `${channel}-api`);
   if (!cfg) {
     throw new Error(`Channel '${channel}' is not configured or inactive`);
@@ -149,16 +176,33 @@ async function dispatch(pool, { channel, recipient, subject, body, applicantId, 
   }
 
   await logMessage(pool, {
-    applicantId, bookingId, channel, recipient,
-    subject, body, status: "Sent", sentBy,
+    applicantId,
+    bookingId,
+    channel,
+    recipient,
+    subject,
+    body,
+    status: "Sent",
+    sentBy,
   });
 }
 
 // ─── welcome message templates ────────────────────────────────────────────────
 
-function buildWelcomeTemplates({ applicantName, projectName, unitNo, bookingDate, contactName, contactPhone }) {
+function buildWelcomeTemplates({
+  applicantName,
+  projectName,
+  unitNo,
+  bookingDate,
+  contactName,
+  contactPhone,
+}) {
   const date = bookingDate
-    ? new Date(bookingDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    ? new Date(bookingDate).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
     : "—";
 
   const emailBody = `
@@ -175,11 +219,9 @@ function buildWelcomeTemplates({ applicantName, projectName, unitNo, bookingDate
       <p>Warm regards,<br/><strong>${projectName ?? "The Team"}</strong></p>
     </div>`;
 
-  const smsBody =
-    `Dear ${applicantName}, your booking for Unit ${unitNo ?? "—"} in ${projectName ?? "our project"} is confirmed on ${date}. Our team will contact you shortly. Welcome aboard!`;
+  const smsBody = `Dear ${applicantName}, your booking for Unit ${unitNo ?? "—"} in ${projectName ?? "our project"} is confirmed on ${date}. Our team will contact you shortly. Welcome aboard!`;
 
-  const waBody =
-    `Hello *${applicantName}* 👋\n\nYour booking for *Unit ${unitNo ?? "—"}* in *${projectName ?? "our project"}* has been confirmed on *${date}*.\n\nYour relationship manager *${contactName ?? "our team"}* ${contactPhone ? `(${contactPhone})` : ""} will get in touch with you soon.\n\nWelcome aboard! 🏠`;
+  const waBody = `Hello *${applicantName}* 👋\n\nYour booking for *Unit ${unitNo ?? "—"}* in *${projectName ?? "our project"}* has been confirmed on *${date}*.\n\nYour relationship manager *${contactName ?? "our team"}* ${contactPhone ? `(${contactPhone})` : ""} will get in touch with you soon.\n\nWelcome aboard! 🏠`;
 
   return { emailBody, smsBody, waBody };
 }
@@ -190,16 +232,23 @@ function buildWelcomeTemplates({ applicantName, projectName, unitNo, bookingDate
 // Body: { channel, recipient, subject?, body, applicantId?, bookingId? }
 router.post("/send", async (req, res) => {
   const pool = req.app.locals.db;
-  const { channel, recipient, subject, body, applicantId, bookingId } = req.body;
+  const { channel, recipient, subject, body, applicantId, bookingId } =
+    req.body;
 
   if (!channel || !recipient || !body) {
-    return res.status(400).json({ error: "channel, recipient, and body are required" });
+    return res
+      .status(400)
+      .json({ error: "channel, recipient, and body are required" });
   }
 
   try {
     await dispatch(pool, {
-      channel, recipient, subject, body,
-      applicantId, bookingId,
+      channel,
+      recipient,
+      subject,
+      body,
+      applicantId,
+      bookingId,
       sentBy: req.body.sentBy ?? "User",
     });
     res.json({ success: true, message: `${channel} sent successfully` });
@@ -207,8 +256,13 @@ router.post("/send", async (req, res) => {
     // Log failure
     try {
       await logMessage(pool, {
-        applicantId, bookingId, channel, recipient,
-        subject, body, status: "Failed",
+        applicantId,
+        bookingId,
+        channel,
+        recipient,
+        subject,
+        body,
+        status: "Failed",
         errorMessage: err.message,
         sentBy: req.body.sentBy ?? "User",
       });
@@ -226,19 +280,32 @@ router.post("/send", async (req, res) => {
 router.post("/trigger", async (req, res) => {
   const pool = req.app.locals.db;
   const {
-    triggerType, applicantId, bookingId,
-    applicantName, email, phone,
-    projectName, unitNo, bookingDate,
-    contactName, contactPhone,
+    triggerType,
+    applicantId,
+    bookingId,
+    applicantName,
+    email,
+    phone,
+    projectName,
+    unitNo,
+    bookingDate,
+    contactName,
+    contactPhone,
   } = req.body;
 
   if (!triggerType || !applicantId) {
-    return res.status(400).json({ error: "triggerType and applicantId are required" });
+    return res
+      .status(400)
+      .json({ error: "triggerType and applicantId are required" });
   }
 
   const { emailBody, smsBody, waBody } = buildWelcomeTemplates({
     applicantName: applicantName ?? "Customer",
-    projectName, unitNo, bookingDate, contactName, contactPhone,
+    projectName,
+    unitNo,
+    bookingDate,
+    contactName,
+    contactPhone,
   });
 
   const results = [];
@@ -251,16 +318,23 @@ router.post("/trigger", async (req, res) => {
         recipient: email,
         subject: `Welcome to ${projectName ?? "our project"} — Booking Confirmed`,
         body: emailBody,
-        applicantId, bookingId,
+        applicantId,
+        bookingId,
         sentBy: "System",
       });
       results.push({ channel: "email", status: "sent" });
     } catch (err) {
       try {
         await logMessage(pool, {
-          applicantId, bookingId, channel: "email", recipient: email,
-          subject: `Welcome — Booking Confirmed`, body: emailBody,
-          status: "Failed", errorMessage: err.message, sentBy: "System",
+          applicantId,
+          bookingId,
+          channel: "email",
+          recipient: email,
+          subject: `Welcome — Booking Confirmed`,
+          body: emailBody,
+          status: "Failed",
+          errorMessage: err.message,
+          sentBy: "System",
         });
       } catch (_) {}
       results.push({ channel: "email", status: "failed", error: err.message });
@@ -274,15 +348,22 @@ router.post("/trigger", async (req, res) => {
         channel: "sms",
         recipient: phone,
         body: smsBody,
-        applicantId, bookingId,
+        applicantId,
+        bookingId,
         sentBy: "System",
       });
       results.push({ channel: "sms", status: "sent" });
     } catch (err) {
       try {
         await logMessage(pool, {
-          applicantId, bookingId, channel: "sms", recipient: phone,
-          body: smsBody, status: "Failed", errorMessage: err.message, sentBy: "System",
+          applicantId,
+          bookingId,
+          channel: "sms",
+          recipient: phone,
+          body: smsBody,
+          status: "Failed",
+          errorMessage: err.message,
+          sentBy: "System",
         });
       } catch (_) {}
       results.push({ channel: "sms", status: "failed", error: err.message });
@@ -296,18 +377,29 @@ router.post("/trigger", async (req, res) => {
         channel: "whatsapp",
         recipient: phone,
         body: waBody,
-        applicantId, bookingId,
+        applicantId,
+        bookingId,
         sentBy: "System",
       });
       results.push({ channel: "whatsapp", status: "sent" });
     } catch (err) {
       try {
         await logMessage(pool, {
-          applicantId, bookingId, channel: "whatsapp", recipient: phone,
-          body: waBody, status: "Failed", errorMessage: err.message, sentBy: "System",
+          applicantId,
+          bookingId,
+          channel: "whatsapp",
+          recipient: phone,
+          body: waBody,
+          status: "Failed",
+          errorMessage: err.message,
+          sentBy: "System",
         });
       } catch (_) {}
-      results.push({ channel: "whatsapp", status: "failed", error: err.message });
+      results.push({
+        channel: "whatsapp",
+        status: "failed",
+        error: err.message,
+      });
     }
   }
 
@@ -317,18 +409,37 @@ router.post("/trigger", async (req, res) => {
 // GET /api/followup-communicator/logs?applicantId=&bookingId=&channel=&status=&page=&limit=
 router.get("/logs", async (req, res) => {
   const pool = req.app.locals.db;
-  const { applicantId, bookingId, channel, status, page = 1, limit = 50 } = req.query;
+  const {
+    applicantId,
+    bookingId,
+    channel,
+    status,
+    page = 1,
+    limit = 50,
+  } = req.query;
   const offset = (parseInt(page) - 1) * parseInt(limit);
 
   let where = "WHERE 1=1";
   const req2 = pool.request();
 
-  if (applicantId) { where += " AND ApplicantId = @ApplicantId"; req2.input("ApplicantId", applicantId); }
-  if (bookingId)   { where += " AND BookingId = @BookingId";     req2.input("BookingId",   bookingId); }
-  if (channel)     { where += " AND Channel = @Channel";         req2.input("Channel",     channel); }
-  if (status)      { where += " AND Status = @Status";           req2.input("Status",      status); }
+  if (applicantId) {
+    where += " AND ApplicantId = @ApplicantId";
+    req2.input("ApplicantId", applicantId);
+  }
+  if (bookingId) {
+    where += " AND BookingId = @BookingId";
+    req2.input("BookingId", bookingId);
+  }
+  if (channel) {
+    where += " AND Channel = @Channel";
+    req2.input("Channel", channel);
+  }
+  if (status) {
+    where += " AND Status = @Status";
+    req2.input("Status", status);
+  }
 
-  req2.input("Limit",  parseInt(limit));
+  req2.input("Limit", parseInt(limit));
   req2.input("Offset", offset);
 
   try {
@@ -338,17 +449,24 @@ router.get("/logs", async (req, res) => {
        FROM dbo.FollowupCommunicatorLog
        ${where}
        ORDER BY SentAt DESC
-       OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY`
+       OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY`,
     );
 
-    const countResult = await pool
-      .request()
-      .query(`SELECT COUNT(*) AS Total FROM dbo.FollowupCommunicatorLog ${where.replace(/@\w+/g, (m) => {
-        // re-bind not needed for count — just run separate simple count
-        return m;
-      })}`);
+    const countResult = await pool.request().query(
+      `SELECT COUNT(*) AS Total FROM dbo.FollowupCommunicatorLog ${where.replace(
+        /@\w+/g,
+        (m) => {
+          // re-bind not needed for count — just run separate simple count
+          return m;
+        },
+      )}`,
+    );
     // Simple approach: just return the rows and let the frontend paginate
-    res.json({ data: result.recordset, page: parseInt(page), limit: parseInt(limit) });
+    res.json({
+      data: result.recordset,
+      page: parseInt(page),
+      limit: parseInt(limit),
+    });
   } catch (err) {
     console.error("[followupCommunicator] logs error:", err.message);
     res.status(500).json({ error: err.message });
@@ -363,7 +481,8 @@ router.get("/logs/:id", async (req, res) => {
       .request()
       .input("Id", req.params.id)
       .query(`SELECT * FROM dbo.FollowupCommunicatorLog WHERE Id = @Id`);
-    if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
+    if (!result.recordset.length)
+      return res.status(404).json({ error: "Not found" });
     res.json(result.recordset[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
