@@ -93,7 +93,7 @@ async function sendEmail(config, { to, subject, body }) {
     from: config.from ?? config.user,
     to,
     subject,
-    html: sanitizeHtml(body),//(/<script[\s\S]*?<\/script>/gi,'').replace(/on\w+\s*=/gi,''),
+    html: sanitizeHtml(body),
   });
 }
 
