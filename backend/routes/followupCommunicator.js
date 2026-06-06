@@ -17,7 +17,7 @@ const { checkPermissionForMethod } = require("../middleware/routePermission");
 const PERMISSION_MODULE = "Followup";
 const PERMISSION_SUBMODULE = "Communicator";
 
-router.use(authMiddleware);
+const rateLimit=require('express-rate-limit');router.use(rateLimit({windowMs:15*60*1000,max:50,validate:false}));router.use(authMiddleware);
 router.use(checkPermissionForMethod(PERMISSION_MODULE, PERMISSION_SUBMODULE));
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
