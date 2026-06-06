@@ -9,7 +9,7 @@ let loaded = false;
 function loadEnv() {
   if (!loaded) {
     if (process.env.NODE_ENV !== "production") {
-      dotenv.config({ path: envPath });
+      dotenv.config({ path: envPath, override: true });
     }
     loaded = true;
   }

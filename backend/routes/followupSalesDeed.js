@@ -46,7 +46,7 @@ const LIST_COLUMNS = `
   fsd.CreatedAt
 `;
 
-const STATUS_OPTIONS = ["Draft", "Executed", "Registered", "Cancelled"];
+const STATUS_OPTIONS = ["Draft", "Executed", "Registered", "Overdue", "Cancelled"];
 
 router.use(authMiddleware);
 router.use(checkPermissionForMethod("Followup", "SalesDeed"));
