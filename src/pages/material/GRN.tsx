@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -51,7 +52,7 @@ import type {
 // Extend the base type with GST fields sourced from PurchaseOrderItems.TaxPct
 // (which itself comes from ItemMaster / HSN master at PO creation time).
 type GRNItemLine = GRNItemLineBase & {
-  gstPct: number;    // GST % from PO line (TaxPct) ← HSN master
+  gstPct: number; // GST % from PO line (TaxPct) ← HSN master
   gstAmount: number; // base (rate × qty) × gstPct / 100
 };
 
@@ -211,8 +212,8 @@ const createEmptyItem = (): GRNItemLine => ({
   rate: 0,
   quantity: 0,
   totalAmount: 0,
-  gstPct: 0,      // GST % sourced from PurchaseOrderItems.TaxPct (HSN master)
-  gstAmount: 0,   // computed: totalAmount × gstPct / 100
+  gstPct: 0, // GST % sourced from PurchaseOrderItems.TaxPct (HSN master)
+  gstAmount: 0, // computed: totalAmount × gstPct / 100
 });
 
 const parseJsonArray = <T,>(val: unknown): T[] => {
@@ -415,6 +416,7 @@ let onEdit: (grn: any) => void;
 let onView: (grn: any) => void;
 let deleteMutation: { mutate: (id: string) => void };
 let handleDeleteGrn: (id: string) => void;
+let goToGRNAmend: (grn: any) => void;
 
 // ─── List Columns ─────────────────────────────────────────────────────────────
 const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
@@ -533,13 +535,6 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
             <Eye size={15} />
           </button>
           <button
-            onClick={() => onEdit(grn)}
-            className="text-primary hover:bg-primary/10 p-2 rounded-lg transition-colors"
-            title="Edit"
-          >
-            <Edit3 size={15} />
-          </button>
-          <button
             onClick={() => handleDeleteGrn(String(grn.GRNID))}
             className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
             title="Delete"
@@ -635,6 +630,7 @@ function InfoPill({
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function GRN() {
   queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { finYears } = useFinYear();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingGrn, setViewingGrn] = useState<any | null>(null);
@@ -1080,6 +1076,23 @@ export default function GRN() {
     setEditingId(String(fullGrn.GRNID));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  const goToGRNAmendLocal = (grn: any) => {
+    navigate("/material/amendment-menu", {
+      state: {
+        prefill: {
+          tab: "GRN",
+          docId: String(grn.GRNID),
+          docNo: grn.GRNNo,
+          supplierName: grn.SupplierName,
+          projectName: grn.ProjectName ?? "",
+          companyName: grn.CompanyName ?? "",
+          totalAmount: grn.TotalAmount ?? 0,
+        },
+      },
+    });
+  };
+  goToGRNAmend = goToGRNAmendLocal;
 
   const resetForm = () => {
     setFormData(buildEmptyForm());

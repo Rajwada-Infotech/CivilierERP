@@ -304,14 +304,10 @@ const FinanceDemandsPage = lazy(() =>
   })),
 );
 const AgreementWorkflowPage = lazy(
-  () => import("./pages/followup/AgreementWorkflow")
+  () => import("./pages/followup/AgreementWorkflow"),
 );
-const DocumentVaultPage = lazy(
-  () => import("./pages/followup/DocumentVault")
-);
-const CommunicatorPage = lazy(
-  () => import("./pages/followup/Communicator")
-);
+const DocumentVaultPage = lazy(() => import("./pages/followup/DocumentVault"));
+const CommunicatorPage = lazy(() => import("./pages/followup/Communicator"));
 const FollowupPaymentsPage = lazy(() =>
   import("./pages/followup/FinancePayments").then((module) => ({
     default: module.FinancePaymentsPage,
@@ -347,6 +343,9 @@ const EngineeringDashboard = lazy(
   () => import("./pages/engineering/EngineeringDashboard"),
 );
 const WorkDone = lazy(() => import("./pages/engineering/WorkDone"));
+const EngineeringAmendmentMenu = lazy(
+  () => import("./pages/engineering/EngineeringAmendmentMenu"),
+);
 
 // ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -1206,6 +1205,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <DailyProgressReport />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/engineering/amendment-menu"
+        element={
+          <ProtectedRoute>
+            <EngineeringAmendmentMenu />
           </ProtectedRoute>
         }
       />

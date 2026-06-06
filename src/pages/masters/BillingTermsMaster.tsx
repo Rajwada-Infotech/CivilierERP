@@ -28,6 +28,7 @@ import {
 const mapRow = (
   row: BillingTermRow,
 ): BillingTerm & Record<string, unknown> => ({
+  id: String(row.BillingTermID),
   _id: String(row.BillingTermID),
   // Context-shape fields
   name: row.Name ?? "",
@@ -109,6 +110,7 @@ const BillingTermsMaster: React.FC = () => {
       label: "Calculation Type",
       type: "select",
       required: true,
+      defaultValue: "Before GST",
       options: ["Before GST", "After GST"],
     },
     {
@@ -140,7 +142,7 @@ const BillingTermsMaster: React.FC = () => {
   ];
 
   const columnRenderers = {
-    IsActive: (value: unknown) => (
+    status: (value: unknown) => (
       <span
         className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
           value
@@ -162,25 +164,29 @@ const BillingTermsMaster: React.FC = () => {
     try {
       if (event.action === "add") {
         const record = event.record as Record<string, unknown>;
-        const calcType = String(record.CalculationType ?? "");
+        const calcType = String(record.CalculationType ?? "Before GST");
         await addBillingTerm({
-          Name: record.Name,
-          Description: record.Description,
+          Name: String(record.Name ?? ""),
+          Description: String(record.Description ?? ""),
           CalculationType: calcType,
           DeductionType: String(record.DeductionType ?? "Addition"),
-          IsActive: record.IsActive,
+          IsActive:
+            record.IsActive !== undefined ? Boolean(record.IsActive) : true,
         });
         toast.success("Billing term added!");
         await refetch();
       } else if (event.action === "update") {
         const record = event.record as Record<string, unknown>;
-        const calcType = String(record["CalculationType"] ?? "");
+        const calcType = String(record["CalculationType"] ?? "Before GST");
         await updateBillingTerm(Number(event.id), {
           Name: String(record["Name"] ?? ""),
           Description: String(record["Description"] ?? ""),
           CalculationType: calcType,
           DeductionType: String(record["DeductionType"] ?? "Addition"),
-          IsActive: Boolean(record["IsActive"]),
+          IsActive:
+            record["IsActive"] !== undefined
+              ? Boolean(record["IsActive"])
+              : true,
         });
         toast.success("Billing term updated!");
         await refetch();

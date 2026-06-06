@@ -1,4 +1,4 @@
-import { useRef, useState, useMemo, useCallback } from "react";
+import { useRef, useState, useMemo, useCallback, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Upload,
@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -42,7 +43,6 @@ import {
   uploadDocument,
   updateDocument,
   deleteDocument,
-  getDocumentFileUrl,
 } from "@/api/documentVaultApi";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -74,7 +74,12 @@ interface MetaOptions {
 
 interface ListResponse {
   data: VaultDocument[];
-  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
 }
 
 interface UploadForm {
@@ -116,7 +121,9 @@ function fmtBytes(bytes: number): string {
 function fmtDate(str: string) {
   if (!str) return "";
   return new Date(str).toLocaleDateString("en-IN", {
-    day: "2-digit", month: "short", year: "numeric",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
   });
 }
 
@@ -134,22 +141,25 @@ function mimeIcon(mime: string | null) {
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
-  "Identity Proof":     "bg-blue-500/10 text-blue-600 border-blue-300/40",
-  "Address Proof":      "bg-violet-500/10 text-violet-600 border-violet-300/40",
-  "Income Proof":       "bg-emerald-500/10 text-emerald-600 border-emerald-300/40",
-  "Property Document":  "bg-amber-500/10 text-amber-600 border-amber-300/40",
-  "Agreement":          "bg-cyan-500/10 text-cyan-600 border-cyan-300/40",
-  "NOC":                "bg-rose-500/10 text-rose-600 border-rose-300/40",
-  "Bank Document":      "bg-teal-500/10 text-teal-600 border-teal-300/40",
-  "Legal Document":     "bg-orange-500/10 text-orange-600 border-orange-300/40",
-  "Possession Document":"bg-fuchsia-500/10 text-fuchsia-600 border-fuchsia-300/40",
-  "Other":              "bg-slate-500/10 text-slate-600 border-slate-300/40",
+  "Identity Proof": "bg-blue-500/10 text-blue-600 border-blue-300/40",
+  "Address Proof": "bg-violet-500/10 text-violet-600 border-violet-300/40",
+  "Income Proof": "bg-emerald-500/10 text-emerald-600 border-emerald-300/40",
+  "Property Document": "bg-amber-500/10 text-amber-600 border-amber-300/40",
+  Agreement: "bg-cyan-500/10 text-cyan-600 border-cyan-300/40",
+  NOC: "bg-rose-500/10 text-rose-600 border-rose-300/40",
+  "Bank Document": "bg-teal-500/10 text-teal-600 border-teal-300/40",
+  "Legal Document": "bg-orange-500/10 text-orange-600 border-orange-300/40",
+  "Possession Document":
+    "bg-fuchsia-500/10 text-fuchsia-600 border-fuchsia-300/40",
+  Other: "bg-slate-500/10 text-slate-600 border-slate-300/40",
 };
 
 function catBadge(cat: string) {
   const cls = CATEGORY_COLORS[cat] ?? CATEGORY_COLORS["Other"];
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${cls}`}>
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${cls}`}
+    >
       {cat}
     </span>
   );
@@ -161,34 +171,57 @@ export default function DocumentVaultPage() {
   const qc = useQueryClient();
 
   // ── Filters ──────────────────────────────────────────────────────────────
-  const [search,      setSearch]      = useState("");
-  const [filterCat,   setFilterCat]   = useState("");
-  const [filterApp,   setFilterApp]   = useState("");
-  const [page,        setPage]        = useState(1);
+  const [search, setSearch] = useState("");
+  const [filterCat, setFilterCat] = useState("");
+  const [filterApp, setFilterApp] = useState("");
+  const [page, setPage] = useState(1);
 
   // ── Dialog states ─────────────────────────────────────────────────────────
-  const [uploadOpen,  setUploadOpen]  = useState(false);
-  const [editTarget,  setEditTarget]  = useState<VaultDocument | null>(null);
-  const [deleteTarget,setDeleteTarget]= useState<VaultDocument | null>(null);
-  const [previewDoc,  setPreviewDoc]  = useState<VaultDocument | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<VaultDocument | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<VaultDocument | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<VaultDocument | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  // Fetch preview file as blob (auth-protected endpoint can't use bare <img src>)
+  useEffect(() => {
+    if (!previewDoc) {
+      setBlobUrl(null);
+      return;
+    }
+    let objectUrl: string | null = null;
+    fetchWithAuth(`/api/followup-document-vault/file/${previewDoc.Id}`)
+      .then((r) => r.blob())
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      })
+      .catch(() => setBlobUrl(null));
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [previewDoc]);
 
   // ── Upload form ───────────────────────────────────────────────────────────
-  const [form,        setForm]        = useState<UploadForm>(EMPTY_UPLOAD);
-  const [dragOver,    setDragOver]    = useState(false);
-  const [appSearch,   setAppSearch]   = useState("");
-  const [appOpen,     setAppOpen]     = useState(false);
+  const [form, setForm] = useState<UploadForm>(EMPTY_UPLOAD);
+  const [dragOver, setDragOver] = useState(false);
+  const [appSearch, setAppSearch] = useState("");
+  const [appOpen, setAppOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Edit form ─────────────────────────────────────────────────────────────
-  const [editForm,    setEditForm]    = useState<EditForm>({
-    Category: "", DocName: "", Notes: "", Tags: "",
+  const [editForm, setEditForm] = useState<EditForm>({
+    Category: "",
+    DocName: "",
+    Notes: "",
+    Tags: "",
   });
 
   function set<K extends keyof UploadForm>(k: K, v: UploadForm[K]) {
-    setForm(f => ({ ...f, [k]: v }));
+    setForm((f) => ({ ...f, [k]: v }));
   }
   function setE<K extends keyof EditForm>(k: K, v: EditForm[K]) {
-    setEditForm(f => ({ ...f, [k]: v }));
+    setEditForm((f) => ({ ...f, [k]: v }));
   }
 
   // ── Queries ───────────────────────────────────────────────────────────────
@@ -200,20 +233,24 @@ export default function DocumentVaultPage() {
 
   const queryParams = useMemo(() => {
     const p: Record<string, string> = { page: String(page), pageSize: "20" };
-    if (search)    p.search     = search;
-    if (filterCat) p.category   = filterCat;
+    if (search) p.search = search;
+    if (filterCat) p.category = filterCat;
     if (filterApp) p.applicantId = filterApp;
     return p;
   }, [search, filterCat, filterApp, page]);
 
-  const { data: listData, isFetching, refetch } = useQuery<ListResponse>({
+  const {
+    data: listData,
+    isFetching,
+    refetch,
+  } = useQuery<ListResponse>({
     queryKey: ["dv-list", queryParams],
     queryFn: () => fetchDocuments(queryParams),
     placeholderData: (prev) => prev,
   });
 
-  const docs        = listData?.data        ?? [];
-  const pagination  = listData?.pagination;
+  const docs = listData?.data ?? [];
+  const pagination = listData?.pagination;
 
   // ── Mutations ─────────────────────────────────────────────────────────────
   const uploadMut = useMutation({
@@ -228,8 +265,13 @@ export default function DocumentVaultPage() {
   });
 
   const editMut = useMutation({
-    mutationFn: ({ id, payload }: { id: number; payload: Record<string, unknown> }) =>
-      updateDocument(id, payload),
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: number;
+      payload: Record<string, unknown>;
+    }) => updateDocument(id, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dv-list"] });
       toast.success("Document updated");
@@ -249,31 +291,38 @@ export default function DocumentVaultPage() {
   });
 
   // ── Handlers ──────────────────────────────────────────────────────────────
-  const handleFileSelect = useCallback((files: FileList | null) => {
-    if (!files?.length) return;
-    const f = files[0];
-    set("file", f);
-    if (!form.DocName) set("DocName", f.name.replace(/\.[^/.]+$/, ""));
-  }, [form.DocName]);
+  const handleFileSelect = useCallback(
+    (files: FileList | null) => {
+      if (!files?.length) return;
+      const f = files[0];
+      set("file", f);
+      if (!form.DocName) set("DocName", f.name.replace(/\.[^/.]+$/, ""));
+    },
+    [form.DocName],
+  );
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    handleFileSelect(e.dataTransfer.files);
-  }, [handleFileSelect]);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOver(false);
+      handleFileSelect(e.dataTransfer.files);
+    },
+    [handleFileSelect],
+  );
 
   function handleUploadSubmit() {
-    if (!form.file)        return toast.error("Please select a file");
+    if (!form.file) return toast.error("Please select a file");
     if (!form.ApplicantId) return toast.error("Please select an applicant");
-    if (!form.DocName.trim()) return toast.error("Please enter a document name");
+    if (!form.DocName.trim())
+      return toast.error("Please enter a document name");
 
     const fd = new FormData();
-    fd.append("file",         form.file);
-    fd.append("ApplicantId",  form.ApplicantId);
-    fd.append("Category",     form.Category);
-    fd.append("DocName",      form.DocName.trim());
-    fd.append("Notes",        form.Notes.trim());
-    fd.append("Tags",         form.Tags.trim());
+    fd.append("file", form.file);
+    fd.append("ApplicantId", form.ApplicantId);
+    fd.append("Category", form.Category);
+    fd.append("DocName", form.DocName.trim());
+    fd.append("Notes", form.Notes.trim());
+    fd.append("Tags", form.Tags.trim());
     uploadMut.mutate(fd);
   }
 
@@ -281,9 +330,9 @@ export default function DocumentVaultPage() {
     setEditTarget(doc);
     setEditForm({
       Category: doc.Category,
-      DocName:  doc.DocName,
-      Notes:    doc.Notes ?? "",
-      Tags:     doc.Tags  ?? "",
+      DocName: doc.DocName,
+      Notes: doc.Notes ?? "",
+      Tags: doc.Tags ?? "",
     });
   }
 
@@ -293,9 +342,9 @@ export default function DocumentVaultPage() {
       id: editTarget.Id,
       payload: {
         Category: editForm.Category,
-        DocName:  editForm.DocName,
-        Notes:    editForm.Notes,
-        Tags:     editForm.Tags,
+        DocName: editForm.DocName,
+        Notes: editForm.Notes,
+        Tags: editForm.Tags,
       },
     });
   }
@@ -305,9 +354,13 @@ export default function DocumentVaultPage() {
     if (!meta?.applicants) return [];
     if (!appSearch.trim()) return meta.applicants.slice(0, 50);
     const q = appSearch.toLowerCase();
-    return meta.applicants.filter(
-      a => a.ApplicantName.toLowerCase().includes(q) || a.ApplicantNo.toLowerCase().includes(q)
-    ).slice(0, 50);
+    return meta.applicants
+      .filter(
+        (a) =>
+          a.ApplicantName.toLowerCase().includes(q) ||
+          a.ApplicantNo.toLowerCase().includes(q),
+      )
+      .slice(0, 50);
   }, [meta?.applicants, appSearch]);
 
   // ─── Render ───────────────────────────────────────────────────────────────
@@ -384,19 +437,26 @@ export default function DocumentVaultPage() {
       <div className="dv-page">
         {/* Header */}
         <div className="dv-header">
-          <Breadcrumbs items={[
-            { label: "Followup", href: "/followup" },
-            { label: "Document Vault" },
-          ]} />
+          <Breadcrumbs
+            items={[
+              { label: "Followup", href: "/followup" },
+              { label: "Document Vault" },
+            ]}
+          />
           <div className="flex items-center justify-between mt-2 mb-3">
             <div>
-              <h1 className="text-xl font-semibold tracking-tight">Document Vault</h1>
+              <h1 className="text-xl font-semibold tracking-tight">
+                Document Vault
+              </h1>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Centralized document storage per applicant
               </p>
             </div>
             <Button
-              onClick={() => { setForm(EMPTY_UPLOAD); setUploadOpen(true); }}
+              onClick={() => {
+                setForm(EMPTY_UPLOAD);
+                setUploadOpen(true);
+              }}
               className="gradient-accent gap-1.5 font-semibold text-white text-sm px-4 py-2 h-auto"
             >
               <Upload className="w-4 h-4" /> Upload Document
@@ -412,7 +472,10 @@ export default function DocumentVaultPage() {
               className="dv-search"
               placeholder="Search documents…"
               value={search}
-              onChange={e => { setSearch(e.target.value); setPage(1); }}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
             />
             {search && (
               <button
@@ -427,30 +490,44 @@ export default function DocumentVaultPage() {
           <select
             className="dv-select"
             value={filterCat}
-            onChange={e => { setFilterCat(e.target.value); setPage(1); }}
+            onChange={(e) => {
+              setFilterCat(e.target.value);
+              setPage(1);
+            }}
           >
             <option value="">All Categories</option>
-            {(meta?.categories ?? []).map(c => (
-              <option key={c} value={c}>{c}</option>
+            {(meta?.categories ?? []).map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
             ))}
           </select>
 
           <select
             className="dv-select"
             value={filterApp}
-            onChange={e => { setFilterApp(e.target.value); setPage(1); }}
+            onChange={(e) => {
+              setFilterApp(e.target.value);
+              setPage(1);
+            }}
             style={{ maxWidth: 200 }}
           >
             <option value="">All Applicants</option>
-            {(meta?.applicants ?? []).map(a => (
-              <option key={a.Id} value={a.Id}>{a.ApplicantName}</option>
+            {(meta?.applicants ?? []).map((a) => (
+              <option key={a.Id} value={a.Id}>
+                {a.ApplicantName}
+              </option>
             ))}
           </select>
 
           {(filterCat || filterApp) && (
             <button
               className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
-              onClick={() => { setFilterCat(""); setFilterApp(""); setPage(1); }}
+              onClick={() => {
+                setFilterCat("");
+                setFilterApp("");
+                setPage(1);
+              }}
             >
               <X style={{ width: 12, height: 12 }} /> Clear
             </button>
@@ -458,13 +535,18 @@ export default function DocumentVaultPage() {
 
           <div className="dv-toolbar-right">
             <span className="text-xs text-muted-foreground">
-              {pagination ? `${pagination.total} doc${pagination.total !== 1 ? "s" : ""}` : ""}
+              {pagination
+                ? `${pagination.total} doc${pagination.total !== 1 ? "s" : ""}`
+                : ""}
             </span>
             <button
               onClick={() => refetch()}
               className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground transition-colors"
             >
-              <RefreshCw style={{ width: 14, height: 14 }} className={isFetching ? "animate-spin" : ""} />
+              <RefreshCw
+                style={{ width: 14, height: 14 }}
+                className={isFetching ? "animate-spin" : ""}
+              />
             </button>
           </div>
         </div>
@@ -475,11 +557,16 @@ export default function DocumentVaultPage() {
             <div className="dv-empty">
               <FolderOpen className="w-12 h-12 opacity-20" />
               <p className="font-medium">No documents found</p>
-              <p className="text-sm">Upload the first document to get started.</p>
+              <p className="text-sm">
+                Upload the first document to get started.
+              </p>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => { setForm(EMPTY_UPLOAD); setUploadOpen(true); }}
+                onClick={() => {
+                  setForm(EMPTY_UPLOAD);
+                  setUploadOpen(true);
+                }}
               >
                 <Plus className="w-4 h-4 mr-1" /> Upload Document
               </Button>
@@ -498,31 +585,45 @@ export default function DocumentVaultPage() {
                 </tr>
               </thead>
               <tbody>
-                {docs.map(doc => (
+                {docs.map((doc) => (
                   <tr key={doc.Id}>
                     <td>
                       <div className="dv-file-row">
                         {mimeIcon(doc.MimeType)}
                         <div>
-                          <div className="dv-doc-name" title={doc.DocName}>{doc.DocName}</div>
+                          <div className="dv-doc-name" title={doc.DocName}>
+                            {doc.DocName}
+                          </div>
                           <div className="dv-doc-no">{doc.DocNo}</div>
                         </div>
                       </div>
                     </td>
                     <td>
-                      <div className="font-medium text-[.8125rem]">{doc.ApplicantName}</div>
-                      <div className="text-[.7rem] text-muted-foreground">{doc.ApplicantCode}</div>
+                      <div className="font-medium text-[.8125rem]">
+                        {doc.ApplicantName}
+                      </div>
+                      <div className="text-[.7rem] text-muted-foreground">
+                        {doc.ApplicantCode}
+                      </div>
                     </td>
                     <td>{catBadge(doc.Category)}</td>
-                    <td className="text-muted-foreground">{fmtBytes(doc.FileSize)}</td>
+                    <td className="text-muted-foreground">
+                      {fmtBytes(doc.FileSize)}
+                    </td>
                     <td>
                       {doc.Tags ? (
                         <div className="dv-tags">
-                          {doc.Tags.split(",").filter(Boolean).map(t => (
-                            <span key={t} className="dv-tag">{t.trim()}</span>
-                          ))}
+                          {doc.Tags.split(",")
+                            .filter(Boolean)
+                            .map((t) => (
+                              <span key={t} className="dv-tag">
+                                {t.trim()}
+                              </span>
+                            ))}
                         </div>
-                      ) : <span className="text-muted-foreground text-xs">—</span>}
+                      ) : (
+                        <span className="text-muted-foreground text-xs">—</span>
+                      )}
                     </td>
                     <td className="text-muted-foreground text-xs">
                       <div>{fmtDate(doc.CreatedAt)}</div>
@@ -537,15 +638,29 @@ export default function DocumentVaultPage() {
                         >
                           <Eye style={{ width: 15, height: 15 }} />
                         </button>
-                        <a
-                          href={getDocumentFileUrl(doc.Id)}
-                          download={doc.FileName}
+                        <button
                           className="dv-action-btn"
                           title="Download"
-                          onClick={e => e.stopPropagation()}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            try {
+                              const res = await fetchWithAuth(
+                                `/api/followup-document-vault/file/${doc.Id}`,
+                              );
+                              const blob = await res.blob();
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement("a");
+                              a.href = url;
+                              a.download = doc.FileName;
+                              a.click();
+                              setTimeout(() => URL.revokeObjectURL(url), 5000);
+                            } catch {
+                              /* handled */
+                            }
+                          }}
                         >
                           <Download style={{ width: 15, height: 15 }} />
-                        </a>
+                        </button>
                         <button
                           className="dv-action-btn"
                           title="Edit metadata"
@@ -574,38 +689,59 @@ export default function DocumentVaultPage() {
         {pagination && pagination.totalPages > 1 && (
           <div className="dv-pagination">
             <span>
-              Page {pagination.page} of {pagination.totalPages} · {pagination.total} documents
+              Page {pagination.page} of {pagination.totalPages} ·{" "}
+              {pagination.total} documents
             </span>
             <div className="flex gap-1">
               <Button
-                variant="outline" size="sm"
+                variant="outline"
+                size="sm"
                 disabled={pagination.page <= 1}
-                onClick={() => setPage(p => p - 1)}
-              >Previous</Button>
+                onClick={() => setPage((p) => p - 1)}
+              >
+                Previous
+              </Button>
               <Button
-                variant="outline" size="sm"
+                variant="outline"
+                size="sm"
                 disabled={pagination.page >= pagination.totalPages}
-                onClick={() => setPage(p => p + 1)}
-              >Next</Button>
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next
+              </Button>
             </div>
           </div>
         )}
       </div>
 
       {/* ── Upload Dialog ───────────────────────────────────────────────── */}
-      <Dialog open={uploadOpen} onOpenChange={v => { if (!v) { setUploadOpen(false); setForm(EMPTY_UPLOAD); }}}>
+      <Dialog
+        open={uploadOpen}
+        onOpenChange={(v) => {
+          if (!v) {
+            setUploadOpen(false);
+            setForm(EMPTY_UPLOAD);
+          }
+        }}
+      >
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Upload className="w-4 h-4" /> Upload Document
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Upload a document and associate it with an applicant.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-1">
             {/* Drop zone */}
             <div
               className={`dv-drop-zone${dragOver ? " over" : ""}${form.file ? " has-file" : ""}`}
-              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
               onDragLeave={() => setDragOver(false)}
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
@@ -615,18 +751,23 @@ export default function DocumentVaultPage() {
                 type="file"
                 className="hidden"
                 accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,.txt"
-                onChange={e => handleFileSelect(e.target.files)}
+                onChange={(e) => handleFileSelect(e.target.files)}
               />
               {form.file ? (
                 <div className="dv-file-info">
                   {mimeIcon(form.file.type)}
                   <div>
                     <div className="font-medium text-sm">{form.file.name}</div>
-                    <div className="text-xs text-muted-foreground">{fmtBytes(form.file.size)}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {fmtBytes(form.file.size)}
+                    </div>
                   </div>
                   <button
                     className="ml-2 text-muted-foreground hover:text-destructive"
-                    onClick={e => { e.stopPropagation(); set("file", null); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      set("file", null);
+                    }}
                   >
                     <X style={{ width: 14, height: 14 }} />
                   </button>
@@ -635,7 +776,9 @@ export default function DocumentVaultPage() {
                 <>
                   <Upload className="w-8 h-8 text-muted-foreground opacity-40" />
                   <div>
-                    <div className="font-medium text-sm">Drop file here or click to browse</div>
+                    <div className="font-medium text-sm">
+                      Drop file here or click to browse
+                    </div>
                     <div className="text-xs text-muted-foreground mt-0.5">
                       PDF, Images, Word, Excel · Max 25 MB
                     </div>
@@ -646,59 +789,81 @@ export default function DocumentVaultPage() {
 
             {/* Applicant picker */}
             <div className="space-y-2">
-              <Label>Applicant <span className="text-destructive">*</span></Label>
+              <Label>
+                Applicant <span className="text-destructive">*</span>
+              </Label>
               <div className="dv-app-picker">
                 <button
                   type="button"
                   className="dv-app-btn"
-                  onClick={() => setAppOpen(v => !v)}
+                  onClick={() => setAppOpen((v) => !v)}
                 >
-                  <span className={form.ApplicantName ? "" : "text-muted-foreground"}>
+                  <span
+                    className={
+                      form.ApplicantName ? "" : "text-muted-foreground"
+                    }
+                  >
                     {form.ApplicantName || "Select applicant…"}
                   </span>
                   <div className="flex items-center gap-1">
                     {form.ApplicantId && (
                       <span
                         className="text-muted-foreground hover:text-foreground"
-                        onClick={e => { e.stopPropagation(); set("ApplicantId", ""); set("ApplicantName", ""); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          set("ApplicantId", "");
+                          set("ApplicantName", "");
+                        }}
                       >
                         <X style={{ width: 12, height: 12 }} />
                       </span>
                     )}
-                    <ChevronDown style={{ width: 14, height: 14 }} className="text-muted-foreground" />
+                    <ChevronDown
+                      style={{ width: 14, height: 14 }}
+                      className="text-muted-foreground"
+                    />
                   </div>
                 </button>
 
                 {appOpen && (
                   <div className="dv-app-dropdown">
                     <div className="dv-app-search-wrap">
-                      <Search style={{ width: 13, height: 13 }} className="text-muted-foreground" />
+                      <Search
+                        style={{ width: 13, height: 13 }}
+                        className="text-muted-foreground"
+                      />
                       <input
                         className="dv-app-search"
                         placeholder="Search applicant…"
                         value={appSearch}
-                        onChange={e => setAppSearch(e.target.value)}
+                        onChange={(e) => setAppSearch(e.target.value)}
                         autoFocus
                       />
                     </div>
                     <div className="dv-app-list">
                       {filteredApplicants.length === 0 ? (
                         <div className="dv-app-empty">No applicants found</div>
-                      ) : filteredApplicants.map(a => (
-                        <button
-                          key={a.Id}
-                          type="button"
-                          className={`dv-app-item${String(a.Id) === form.ApplicantId ? " selected" : ""}`}
-                          onClick={() => {
-                            set("ApplicantId", String(a.Id));
-                            set("ApplicantName", a.ApplicantName);
-                            setAppOpen(false);
-                          }}
-                        >
-                          <span className="dv-app-item-name">{a.ApplicantName}</span>
-                          <span className="dv-app-item-no">{a.ApplicantNo}</span>
-                        </button>
-                      ))}
+                      ) : (
+                        filteredApplicants.map((a) => (
+                          <button
+                            key={a.Id}
+                            type="button"
+                            className={`dv-app-item${String(a.Id) === form.ApplicantId ? " selected" : ""}`}
+                            onClick={() => {
+                              set("ApplicantId", String(a.Id));
+                              set("ApplicantName", a.ApplicantName);
+                              setAppOpen(false);
+                            }}
+                          >
+                            <span className="dv-app-item-name">
+                              {a.ApplicantName}
+                            </span>
+                            <span className="dv-app-item-no">
+                              {a.ApplicantNo}
+                            </span>
+                          </button>
+                        ))
+                      )}
                     </div>
                   </div>
                 )}
@@ -711,19 +876,23 @@ export default function DocumentVaultPage() {
                 <Label>Category</Label>
                 <select
                   value={form.Category}
-                  onChange={e => set("Category", e.target.value)}
+                  onChange={(e) => set("Category", e.target.value)}
                   className="w-full h-10 px-3 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
                 >
-                  {(meta?.categories ?? ["Other"]).map(c => (
-                    <option key={c} value={c}>{c}</option>
+                  {(meta?.categories ?? ["Other"]).map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
                   ))}
                 </select>
               </div>
               <div className="space-y-2">
-                <Label>Document Name <span className="text-destructive">*</span></Label>
+                <Label>
+                  Document Name <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   value={form.DocName}
-                  onChange={e => set("DocName", e.target.value)}
+                  onChange={(e) => set("DocName", e.target.value)}
                   placeholder="e.g. Aadhaar Card"
                   className="rounded-[9px]"
                 />
@@ -734,11 +903,13 @@ export default function DocumentVaultPage() {
             <div className="space-y-2">
               <Label className="flex items-center gap-1.5">
                 <Tag size={12} /> Tags
-                <span className="text-xs font-normal text-muted-foreground">(comma-separated)</span>
+                <span className="text-xs font-normal text-muted-foreground">
+                  (comma-separated)
+                </span>
               </Label>
               <Input
                 value={form.Tags}
-                onChange={e => set("Tags", e.target.value)}
+                onChange={(e) => set("Tags", e.target.value)}
                 placeholder="e.g. kyc, original, verified"
                 className="rounded-[9px]"
               />
@@ -749,7 +920,7 @@ export default function DocumentVaultPage() {
               <Label>Notes</Label>
               <Textarea
                 value={form.Notes}
-                onChange={e => set("Notes", e.target.value)}
+                onChange={(e) => set("Notes", e.target.value)}
                 placeholder="Any additional remarks…"
                 rows={2}
                 className="rounded-[9px] resize-none"
@@ -758,16 +929,29 @@ export default function DocumentVaultPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setUploadOpen(false)} className="rounded-[9px]">
+            <Button
+              variant="outline"
+              onClick={() => setUploadOpen(false)}
+              className="rounded-[9px]"
+            >
               Cancel
             </Button>
             <Button
-              disabled={!form.file || !form.ApplicantId || !form.DocName.trim() || uploadMut.isPending}
+              disabled={
+                !form.file ||
+                !form.ApplicantId ||
+                !form.DocName.trim() ||
+                uploadMut.isPending
+              }
               onClick={handleUploadSubmit}
               className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
-              {uploadMut.isPending ? "Uploading…" : (
-                <><Upload className="w-4 h-4" /> Upload</>
+              {uploadMut.isPending ? (
+                "Uploading…"
+              ) : (
+                <>
+                  <Upload className="w-4 h-4" /> Upload
+                </>
               )}
             </Button>
           </DialogFooter>
@@ -775,10 +959,18 @@ export default function DocumentVaultPage() {
       </Dialog>
 
       {/* ── Edit Metadata Dialog ─────────────────────────────────────────── */}
-      <Dialog open={!!editTarget} onOpenChange={v => { if (!v) setEditTarget(null); }}>
+      <Dialog
+        open={!!editTarget}
+        onOpenChange={(v) => {
+          if (!v) setEditTarget(null);
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Edit Document</DialogTitle>
+            <DialogDescription className="sr-only">
+              Update the metadata for this document.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-1">
@@ -786,11 +978,13 @@ export default function DocumentVaultPage() {
               <Label>Category</Label>
               <select
                 value={editForm.Category}
-                onChange={e => setE("Category", e.target.value)}
+                onChange={(e) => setE("Category", e.target.value)}
                 className="w-full h-10 px-3 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
               >
-                {(meta?.categories ?? ["Other"]).map(c => (
-                  <option key={c} value={c}>{c}</option>
+                {(meta?.categories ?? ["Other"]).map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
                 ))}
               </select>
             </div>
@@ -798,7 +992,7 @@ export default function DocumentVaultPage() {
               <Label>Document Name</Label>
               <Input
                 value={editForm.DocName}
-                onChange={e => setE("DocName", e.target.value)}
+                onChange={(e) => setE("DocName", e.target.value)}
                 className="rounded-[9px]"
               />
             </div>
@@ -808,7 +1002,7 @@ export default function DocumentVaultPage() {
               </Label>
               <Input
                 value={editForm.Tags}
-                onChange={e => setE("Tags", e.target.value)}
+                onChange={(e) => setE("Tags", e.target.value)}
                 placeholder="comma-separated tags"
                 className="rounded-[9px]"
               />
@@ -817,7 +1011,7 @@ export default function DocumentVaultPage() {
               <Label>Notes</Label>
               <Textarea
                 value={editForm.Notes}
-                onChange={e => setE("Notes", e.target.value)}
+                onChange={(e) => setE("Notes", e.target.value)}
                 rows={2}
                 className="rounded-[9px] resize-none"
               />
@@ -825,7 +1019,11 @@ export default function DocumentVaultPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditTarget(null)} className="rounded-[9px]">
+            <Button
+              variant="outline"
+              onClick={() => setEditTarget(null)}
+              className="rounded-[9px]"
+            >
               Cancel
             </Button>
             <Button
@@ -833,23 +1031,43 @@ export default function DocumentVaultPage() {
               onClick={handleEditSubmit}
               className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
-              {editMut.isPending ? "Saving…" : <><CheckCircle2 className="w-4 h-4" /> Save</>}
+              {editMut.isPending ? (
+                "Saving…"
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" /> Save
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* ── Delete Confirm Dialog ────────────────────────────────────────── */}
-      <Dialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null); }}>
+      <Dialog
+        open={!!deleteTarget}
+        onOpenChange={(v) => {
+          if (!v) setDeleteTarget(null);
+        }}
+      >
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Delete Document?</DialogTitle>
+            <DialogDescription className="sr-only">
+              Confirm permanent deletion of this document.
+            </DialogDescription>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            This will permanently delete <strong>{deleteTarget?.DocName}</strong> ({deleteTarget?.DocNo}) and remove the file from storage. This cannot be undone.
+            This will permanently delete{" "}
+            <strong>{deleteTarget?.DocName}</strong> ({deleteTarget?.DocNo}) and
+            remove the file from storage. This cannot be undone.
           </p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)} className="rounded-[9px]">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              className="rounded-[9px]"
+            >
               Cancel
             </Button>
             <Button
@@ -865,7 +1083,12 @@ export default function DocumentVaultPage() {
       </Dialog>
 
       {/* ── Preview Dialog ───────────────────────────────────────────────── */}
-      <Dialog open={!!previewDoc} onOpenChange={v => { if (!v) setPreviewDoc(null); }}>
+      <Dialog
+        open={!!previewDoc}
+        onOpenChange={(v) => {
+          if (!v) setPreviewDoc(null);
+        }}
+      >
         <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -875,36 +1098,66 @@ export default function DocumentVaultPage() {
                 {previewDoc?.DocNo}
               </span>
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Preview and download the selected document.
+            </DialogDescription>
           </DialogHeader>
 
           {previewDoc && (
             <div className="space-y-3">
               {/* Render inline if PDF or image, else show download prompt */}
               {previewDoc.MimeType?.startsWith("image/") ? (
-                <img
-                  src={getDocumentFileUrl(previewDoc.Id)}
-                  alt={previewDoc.DocName}
-                  className="max-h-[60vh] w-full object-contain rounded-lg border border-border"
-                />
+                blobUrl ? (
+                  <img
+                    src={blobUrl}
+                    alt={previewDoc.DocName}
+                    className="max-h-[60vh] w-full object-contain rounded-lg border border-border"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">
+                    Loading preview…
+                  </div>
+                )
               ) : previewDoc.MimeType === "application/pdf" ? (
-                <iframe
-                  src={getDocumentFileUrl(previewDoc.Id)}
-                  className="dv-preview-frame"
-                  title={previewDoc.DocName}
-                />
+                blobUrl ? (
+                  <iframe
+                    src={blobUrl}
+                    className="dv-preview-frame"
+                    title={previewDoc.DocName}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">
+                    Loading preview…
+                  </div>
+                )
               ) : (
                 <div className="flex flex-col items-center justify-center gap-3 p-8 rounded-lg border border-border bg-muted/40">
                   {mimeIcon(previewDoc.MimeType)}
                   <p className="text-sm text-muted-foreground">
                     Preview not available for this file type.
                   </p>
-                  <a
-                    href={getDocumentFileUrl(previewDoc.Id)}
-                    download={previewDoc.FileName}
+                  <button
                     className="text-sm underline text-primary"
+                    onClick={async () => {
+                      if (!previewDoc) return;
+                      try {
+                        const res = await fetchWithAuth(
+                          `/api/followup-document-vault/file/${previewDoc.Id}`,
+                        );
+                        const blob = await res.blob();
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = previewDoc.FileName;
+                        a.click();
+                        setTimeout(() => URL.revokeObjectURL(url), 5000);
+                      } catch {
+                        /* handled */
+                      }
+                    }}
                   >
                     Download to view
-                  </a>
+                  </button>
                 </div>
               )}
 
@@ -917,23 +1170,44 @@ export default function DocumentVaultPage() {
               </div>
 
               {previewDoc.Notes && (
-                <p className="text-xs text-muted-foreground italic">{previewDoc.Notes}</p>
+                <p className="text-xs text-muted-foreground italic">
+                  {previewDoc.Notes}
+                </p>
               )}
             </div>
           )}
 
           <DialogFooter>
             {previewDoc && (
-              <a
-                href={getDocumentFileUrl(previewDoc.Id)}
-                download={previewDoc.FileName}
+              <Button
+                variant="outline"
+                className="rounded-[9px] gap-1.5"
+                onClick={async () => {
+                  if (!previewDoc) return;
+                  try {
+                    const res = await fetchWithAuth(
+                      `/api/followup-document-vault/file/${previewDoc.Id}`,
+                    );
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = previewDoc.FileName;
+                    a.click();
+                    setTimeout(() => URL.revokeObjectURL(url), 5000);
+                  } catch {
+                    /* toast handled by fetchWithAuth */
+                  }
+                }}
               >
-                <Button variant="outline" className="rounded-[9px] gap-1.5">
-                  <Download className="w-4 h-4" /> Download
-                </Button>
-              </a>
+                <Download className="w-4 h-4" /> Download
+              </Button>
             )}
-            <Button variant="outline" onClick={() => setPreviewDoc(null)} className="rounded-[9px]">
+            <Button
+              variant="outline"
+              onClick={() => setPreviewDoc(null)}
+              className="rounded-[9px]"
+            >
               Close
             </Button>
           </DialogFooter>

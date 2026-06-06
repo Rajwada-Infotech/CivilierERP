@@ -6,6 +6,9 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 
+// Bust cache on restart so UOM join fixes take effect immediately
+bumpCacheVersion("inventory-master").catch(() => {});
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 async function hasColumn(pool, tableName, columnName) {
   const result = await pool
@@ -90,11 +93,11 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
         "uom.Id AS UOMID, uom.UOMName AS UOMName, uom.UOMCode AS UOMCode, uom.Symbol AS UOMSymbol";
       uomGroupBy = ", uom.Id, uom.UOMName, uom.UOMCode, uom.Symbol";
     } else if (hasUomCol) {
-      uomJoinClause = `LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = (
+      uomJoinClause = `LEFT JOIN dbo.UOMMaster uom ON uom.Id = TRY_CAST((
         SELECT TOP 1 sl2.UOM FROM dbo.StockLedger sl2
         WHERE CONVERT(NVARCHAR(50), sl2.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
         ORDER BY sl2.StockID DESC
-      )`;
+      ) AS INT)`;
       uomSelect =
         "uom.Id AS UOMID, uom.UOMName AS UOMName, uom.UOMCode AS UOMCode, uom.Symbol AS UOMSymbol";
       uomGroupBy = ", uom.Id, uom.UOMName, uom.UOMCode, uom.Symbol";
@@ -227,7 +230,3 @@ router.post("/cache-bust", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
