@@ -11,6 +11,7 @@ const express = require("express");
 const router = express.Router();
 const nodemailer = require("nodemailer");
 const axios = require("axios");
+const sanitizeHtml = require("sanitize-html");
 const authMiddleware = require("../middleware/auth");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
