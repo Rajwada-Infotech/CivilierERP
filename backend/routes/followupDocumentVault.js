@@ -257,7 +257,7 @@ router.get("/file/:id", async (req, res) => {
 
     res.setHeader("Content-Type", doc.MimeType);
     res.setHeader("Content-Disposition", `inline; filename="${doc.FileName}"`);
-    fs.createReadStream(doc.FilePath).pipe(res);
+    const resolvedPath=require('path').resolve(doc.FilePath);const resolvedUploadDir=require('path').resolve(require('path').join(__dirname,'../uploads/vault'));if(!resolvedPath.startsWith(resolvedUploadDir))return res.status(403).json({error:'Access denied'});const safeFileName=require('path').basename(doc.FileName).replace(/[^\w.\-]/g,'_');fs.createReadStream(resolvedPath).pipe(res);
   } catch (err) {
     console.error("DocumentVault file GET error:", err.message);
     res.status(500).json({ error: "Failed to serve file" });
