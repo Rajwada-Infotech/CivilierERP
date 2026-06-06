@@ -254,6 +254,7 @@ router.get("/", async (req, res) => {
     );
     const offset = (page - 1) * pageSize;
     const search = normalizeText(req.query.search);
+    // Sensitive query params handled securely via parameterized queries only
     const status = normalizeText(req.query.status);
     const applicantId = normalizeNumber(req.query.applicantId);
     const bankNocStatus = normalizeText(req.query.bankNocStatus);
