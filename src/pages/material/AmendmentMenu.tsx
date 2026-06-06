@@ -1,10 +1,13 @@
-import React from "react";
-import { useState, useCallback, useMemo } from "react";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import React, { useState, useMemo, useCallback } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -12,153 +15,113 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  FilePenLine,
+  ShoppingCart,
+  Package,
+  Receipt,
   Search,
-  FileEdit,
   Eye,
-  Save,
-  X,
-  AlertTriangle,
-  Clock,
-  User,
+  Send,
+  ShieldCheck,
+  XCircle,
+  Trash2,
+  Loader2,
   ArrowLeftRight,
+  FileSearch,
+  User,
+  RefreshCw,
+  Pencil,
+  History,
   ChevronDown,
   ChevronUp,
-  Loader2,
-  RefreshCw,
-  FileText,
-  Package,
-  ShoppingCart,
-  Briefcase,
-  Receipt,
 } from "lucide-react";
+import {
+  Amendment,
+  AmendmentPayload,
+  createAmendment,
+  deleteAmendment,
+  getAmendments,
+  rejectAmendment,
+  approveAmendment,
+  submitAmendment,
+  updateAmendment,
+} from "@/api/amendmentsApi";
+import { getPurchaseOrders } from "@/api/purchaseOrdersApi";
+import { getGRNs } from "@/api/grnApi";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type DocType = "GRN" | "PO" | "WO" | "EB";
+type DocTab = "PO" | "GRN" | "EB";
 
-interface AuditEntry {
-  field: string;
-  oldValue: string;
-  newValue: string;
-  changedBy: string;
-  changedAt: string;
-  reason: string;
+interface PrefillState {
+  tab?: DocTab;
+  docId?: string | number;
+  docNo?: string;
+  supplierName?: string;
+  projectName?: string;
+  companyName?: string;
+  totalAmount?: number;
 }
 
-interface AmendedField {
-  field: string;
-  label: string;
-  oldValue: string | number;
-  newValue: string | number;
+interface FormState {
+  RefDocType: string;
+  RefDocId: string;
+  RefDocNo: string;
+  ProjectName: string;
+  CompanyName: string;
+  Description: string;
+  Reason: string;
+  AmendmentDate: string;
+  OriginalValue: string;
+  RevisedValue: string;
 }
 
-// ─── Config ───────────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-const DOC_TYPE_CONFIG: Record<
-  DocType,
-  {
-    label: string;
-    icon: React.ElementType;
-    api: string;
-    idField: string;
-    refField: string;
-    color: string;
-    searchPlaceholder: string;
-  }
-> = {
-  GRN: {
-    label: "Goods Receipt Note",
-    icon: Package,
-    api: "/api/grns",
-    idField: "GRNID",
-    refField: "GRNNo",
-    color: "text-emerald-500",
-    searchPlaceholder: "Search by GRN No, supplier...",
-  },
-  PO: {
-    label: "Purchase Order",
-    icon: ShoppingCart,
-    api: "/api/purchase-orders",
-    idField: "PurchaseOrderID",
-    refField: "PurchaseOrderNo",
-    color: "text-blue-500",
-    searchPlaceholder: "Search by PO No, supplier...",
-  },
-  WO: {
-    label: "Work Order",
-    icon: Briefcase,
-    api: "/api/work-orders",
-    idField: "Id",
-    refField: "DocumentNumber",
-    color: "text-amber-500",
-    searchPlaceholder: "Search by WO No, contractor...",
-  },
-  EB: {
-    label: "Expense Booking",
-    icon: Receipt,
-    api: "/api/expense-booking",
-    idField: "Eid",
-    refField: "EDocNo",
-    color: "text-purple-500",
-    searchPlaceholder: "Search by voucher no, supplier...",
-  },
-};
-
-const EDITABLE_FIELDS: Record<
-  DocType,
-  {
-    key: string;
-    label: string;
-    type: "text" | "number" | "date";
-    locked?: boolean;
-  }[]
-> = {
-  GRN: [
-    { key: "GRNNo", label: "GRN Number", type: "text", locked: true },
-    { key: "GRNDate", label: "GRN Date", type: "date" },
-    { key: "Status", label: "Status", type: "text" },
-    { key: "Remarks", label: "Remarks", type: "text" },
-    { key: "SupplierName", label: "Supplier", type: "text", locked: true },
-  ],
-  PO: [
-    { key: "PurchaseOrderNo", label: "PO Number", type: "text", locked: true },
-    { key: "PODate", label: "PO Date", type: "date" },
-    { key: "ExpectedDeliveryDate", label: "Expected Delivery", type: "date" },
-    { key: "ItemDescription", label: "Item Description", type: "text" },
-    { key: "Quantity", label: "Quantity", type: "number" },
-    { key: "Rate", label: "Rate", type: "number" },
-    { key: "TotalAmount", label: "Total Amount", type: "number", locked: true },
-    { key: "PaymentTerms", label: "Payment Terms", type: "text" },
-    { key: "Status", label: "Status", type: "text" },
-    { key: "Remarks", label: "Remarks", type: "text" },
-  ],
-  WO: [
-    { key: "DocumentNumber", label: "WO Number", type: "text", locked: true },
-    { key: "DocumentDate", label: "WO Date", type: "date" },
-    { key: "TotalAmount", label: "Total Amount", type: "number", locked: true },
-    { key: "Status", label: "Status", type: "text" },
-    { key: "ContractorName", label: "Contractor", type: "text", locked: true },
-  ],
-  EB: [
-    { key: "EDocNo", label: "Voucher No", type: "text", locked: true },
-    { key: "EDocDate", label: "Booking Date", type: "date" },
-    { key: "EReminder", label: "Due Date", type: "date" },
-    { key: "EProjectName", label: "Supplier / Vendor", type: "text" },
-    { key: "EDocumentType", label: "Material Category", type: "text" },
-    { key: "EAmount", label: "Basic Amount", type: "number" },
-    { key: "ECgstRate", label: "CGST %", type: "number" },
-    { key: "ESgstRate", label: "SGST %", type: "number" },
-    { key: "ENetAmount", label: "Net Amount", type: "number", locked: true },
-    { key: "EStatus", label: "Status", type: "text" },
-    { key: "ERemarks", label: "Remarks", type: "text" },
-  ],
+const EMPTY_FORM: FormState = {
+  RefDocType: "",
+  RefDocId: "",
+  RefDocNo: "",
+  ProjectName: "",
+  CompanyName: "",
+  Description: "",
+  Reason: "",
+  AmendmentDate: "",
+  OriginalValue: "",
+  RevisedValue: "",
 };
 
 const AMENDMENT_REASONS = [
   "Data Entry Error",
-  "Vendor/Supplier Correction",
+  "Vendor / Supplier Correction",
   "Quantity Revision",
   "Rate Revision",
   "Date Correction",
@@ -169,797 +132,1505 @@ const AMENDMENT_REASONS = [
   "Other",
 ];
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+const DOC_TYPE_MAP: Record<DocTab, string> = {
+  PO: "PurchaseOrder",
+  GRN: "GRN",
+  EB: "ExpenseBooking",
+};
 
-function fmt(val: unknown): string {
-  if (val === null || val === undefined || val === "") return "—";
-  if (typeof val === "string" && val.length > 10 && val.includes("T")) {
-    try {
-      return val.slice(0, 10);
-    } catch {
-      /* fall */
-    }
+const APPROVER_ROLES = ["admin", "director", "manager"];
+
+const STATUS_STYLES: Record<string, string> = {
+  Draft:
+    "border-slate-300 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+  Pending:
+    "border-amber-300 bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+  Approved:
+    "border-emerald-300 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+  Rejected:
+    "border-rose-300 bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
+};
+
+const TAB_CONFIG: {
+  id: DocTab;
+  label: string;
+  icon: React.ElementType;
+  color: string;
+  docType: string;
+}[] = [
+  {
+    id: "PO",
+    label: "Purchase Orders",
+    icon: ShoppingCart,
+    color: "text-blue-500",
+    docType: "PurchaseOrder",
+  },
+  {
+    id: "GRN",
+    label: "GRN",
+    icon: Package,
+    color: "text-emerald-500",
+    docType: "GRN",
+  },
+  {
+    id: "EB",
+    label: "Expense Bookings",
+    icon: Receipt,
+    color: "text-purple-500",
+    docType: "ExpenseBooking",
+  },
+];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function getCurrentRole(): string | null {
+  try {
+    const raw = localStorage.getItem("user");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return typeof parsed?.role === "string" ? parsed.role.toLowerCase() : null;
+  } catch {
+    return null;
   }
-  return String(val);
 }
 
-function getSearchableText(
-  row: Record<string, unknown>,
-  docType: DocType,
-): string {
-  const cfg = DOC_TYPE_CONFIG[docType];
-  return [
-    row[cfg.refField],
-    row.SupplierName,
-    row.LHeadName,
-    row.ContractorName,
-    row.EProjectName,
-    row.ItemDescription,
-    row.DocumentNumber,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+function formatMoney(val: number | null | undefined) {
+  if (val == null || Number.isNaN(Number(val))) return "—";
+  return `₹${Number(val).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
+function formatDate(val: string | null | undefined) {
+  if (!val) return "—";
+  const d = new Date(val);
+  return Number.isNaN(d.getTime()) ? val : d.toLocaleDateString("en-IN");
+}
 
-export default function Amendments() {
-  const [docType, setDocType] = useState<DocType>("GRN");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [records, setRecords] = useState<Record<string, unknown>[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [selectedRecord, setSelectedRecord] = useState<Record<
-    string,
-    unknown
-  > | null>(null);
-  const [editMode, setEditMode] = useState(false);
-  const [editedValues, setEditedValues] = useState<
-    Record<string, string | number>
-  >({});
-  const [amendReason, setAmendReason] = useState("");
-  const [amendReasonOther, setAmendReasonOther] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [auditLog, setAuditLog] = useState<AuditEntry[]>([]);
-  const [showAudit, setShowAudit] = useState(false);
-  const [amendedFields, setAmendedFields] = useState<AmendedField[]>([]);
-  const [showComparison, setShowComparison] = useState(false);
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
 
-  const cfg = DOC_TYPE_CONFIG[docType];
-  const fields = EDITABLE_FIELDS[docType];
+function toPayload(form: FormState): AmendmentPayload {
+  return {
+    RefDocType: form.RefDocType || undefined,
+    RefDocId: form.RefDocId ? Number(form.RefDocId) : undefined,
+    RefDocNo: form.RefDocNo.trim() || undefined,
+    ProjectName: form.ProjectName.trim() || undefined,
+    CompanyName: form.CompanyName.trim() || undefined,
+    Description: form.Description.trim() || undefined,
+    Reason: form.Reason.trim() || undefined,
+    AmendmentDate: form.AmendmentDate || undefined,
+    OriginalValue: form.OriginalValue ? Number(form.OriginalValue) : undefined,
+    RevisedValue: form.RevisedValue ? Number(form.RevisedValue) : undefined,
+  };
+}
 
-  const fetchRecords = useCallback(async () => {
-    setLoading(true);
-    setSelectedRecord(null);
-    setEditMode(false);
-    setAmendedFields([]);
-    setShowComparison(false);
-    try {
-      const res = await fetchWithAuth(`${cfg.api}?limit=200`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const arr: Record<string, unknown>[] = Array.isArray(json)
-        ? json
-        : Array.isArray((json as { data?: unknown }).data)
-          ? (json as { data: Record<string, unknown>[] }).data
-          : Array.isArray((json as { recordset?: unknown }).recordset)
-            ? (json as { recordset: Record<string, unknown>[] }).recordset
-            : [];
-      setRecords(arr);
-    } catch (err: unknown) {
-      toast.error(
-        "Failed to fetch: " +
-          (err instanceof Error ? err.message : String(err)),
-      );
-      setRecords([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [cfg.api]);
+function toFormState(a: Amendment): FormState {
+  return {
+    RefDocType: a.RefDocType ?? "",
+    RefDocId: a.RefDocId != null ? String(a.RefDocId) : "",
+    RefDocNo: a.RefDocNo ?? "",
+    ProjectName: a.ProjectName ?? "",
+    CompanyName: a.CompanyName ?? "",
+    Description: a.Description ?? "",
+    Reason: a.Reason ?? "",
+    AmendmentDate: a.AmendmentDate ?? "",
+    OriginalValue: a.OriginalValue != null ? String(a.OriginalValue) : "",
+    RevisedValue: a.RevisedValue != null ? String(a.RevisedValue) : "",
+  };
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function StatusBadge({ status }: { status: string }) {
+  return (
+    <Badge
+      variant="secondary"
+      className={STATUS_STYLES[status] ?? STATUS_STYLES.Draft}
+    >
+      {status}
+    </Badge>
+  );
+}
+
+// ─── Stats Card ───────────────────────────────────────────────────────────────
+
+function StatsRow({
+  poCount,
+  grnCount,
+  ebCount,
+  amendmentCount,
+}: {
+  poCount: number;
+  grnCount: number;
+  ebCount: number;
+  amendmentCount: number;
+}) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+      {[
+        {
+          label: "Purchase Orders",
+          value: poCount,
+          icon: ShoppingCart,
+          cls: "text-blue-500",
+        },
+        {
+          label: "GRNs",
+          value: grnCount,
+          icon: Package,
+          cls: "text-emerald-500",
+        },
+        {
+          label: "Expense Bookings",
+          value: ebCount,
+          icon: Receipt,
+          cls: "text-purple-500",
+        },
+        {
+          label: "Amendments Raised",
+          value: amendmentCount,
+          icon: FilePenLine,
+          cls: "text-primary",
+        },
+      ].map(({ label, value, icon: Icon, cls }) => (
+        <div
+          key={label}
+          className="rounded-xl border border-border bg-card px-4 py-3 flex items-center gap-3 shadow-sm"
+        >
+          <div className={`shrink-0 ${cls}`}>
+            <Icon size={18} />
+          </div>
+          <div>
+            <div className="text-xl font-bold text-foreground">{value}</div>
+            <div className="text-[11px] text-muted-foreground">{label}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Amendment Form Dialog ────────────────────────────────────────────────────
+
+interface AmendFormDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  editing: Amendment | null;
+  initialForm: FormState;
+  onSave: (payload: AmendmentPayload) => void;
+  isSaving: boolean;
+}
+
+function AmendFormDialog({
+  open,
+  onOpenChange,
+  editing,
+  initialForm,
+  onSave,
+  isSaving,
+}: AmendFormDialogProps) {
+  const [form, setForm] = useState<FormState>(initialForm);
 
   React.useEffect(() => {
-    fetchRecords();
-  }, [fetchRecords]);
+    setForm(initialForm);
+  }, [initialForm, open]);
 
-  const filteredRecords = useMemo(() => {
-    if (!searchQuery.trim()) return records;
-    const q = searchQuery.toLowerCase();
-    return records.filter((r) => getSearchableText(r, docType).includes(q));
-  }, [records, searchQuery, docType]);
+  const set = (field: keyof FormState, value: string) =>
+    setForm((f) => ({ ...f, [field]: value }));
 
-  const selectRecord = (rec: Record<string, unknown>) => {
-    setSelectedRecord(rec);
-    setEditMode(false);
-    setEditedValues({});
-    setAmendReason("");
-    setAmendReasonOther("");
-    setAmendedFields([]);
-    setShowComparison(false);
-    const key = `amendment_audit_${docType}_${rec[cfg.idField]}`;
-    try {
-      const stored = localStorage.getItem(key);
-      setAuditLog(stored ? (JSON.parse(stored) as AuditEntry[]) : []);
-    } catch {
-      setAuditLog([]);
-    }
-  };
+  const diff = useMemo(() => {
+    const o = Number(form.OriginalValue);
+    const r = Number(form.RevisedValue);
+    if (!form.OriginalValue.trim() || !form.RevisedValue.trim()) return null;
+    if (Number.isNaN(o) || Number.isNaN(r)) return null;
+    return r - o;
+  }, [form.OriginalValue, form.RevisedValue]);
 
-  const enterEdit = () => {
-    if (!selectedRecord) return;
-    const initial: Record<string, string | number> = {};
-    fields.forEach((f) => {
-      if (!f.locked) {
-        const val = selectedRecord[f.key];
-        initial[f.key] =
-          typeof val === "number" ? val : fmt(val) === "—" ? "" : fmt(val);
-      }
-    });
-    setEditedValues(initial);
-    setEditMode(true);
-    setShowComparison(false);
-    setShowAudit(false);
-  };
-
-  const cancelEdit = () => {
-    setEditMode(false);
-    setEditedValues({});
-    setAmendReason("");
-    setAmendReasonOther("");
-    setAmendedFields([]);
-  };
-
-  const computeDiff = (): AmendedField[] => {
-    if (!selectedRecord) return [];
-    return fields
-      .filter((f) => !f.locked && editedValues[f.key] !== undefined)
-      .filter((f) => {
-        const orig =
-          fmt(selectedRecord[f.key]) === "—" ? "" : fmt(selectedRecord[f.key]);
-        return orig !== String(editedValues[f.key] ?? "");
-      })
-      .map((f) => ({
-        field: f.key,
-        label: f.label,
-        oldValue: fmt(selectedRecord[f.key]),
-        newValue: String(editedValues[f.key] ?? ""),
-      }));
-  };
-
-  const previewChanges = () => {
-    const diff = computeDiff();
-    if (diff.length === 0) {
-      toast.info("No changes detected.");
+  const handleSave = () => {
+    if (!form.ProjectName.trim()) {
+      toast.error("Project name is required");
       return;
     }
-    setAmendedFields(diff);
-    setShowComparison(true);
+    if (!form.Description.trim()) {
+      toast.error("Description of change is required");
+      return;
+    }
+    if (!form.Reason.trim()) {
+      toast.error("Amendment reason is required");
+      return;
+    }
+    onSave(toPayload(form));
   };
 
-  const saveAmendment = async () => {
-    if (!selectedRecord) return;
-    const reason = amendReason === "Other" ? amendReasonOther : amendReason;
-    if (!reason.trim()) {
-      toast.error("Amendment reason is required.");
-      return;
-    }
-    const diff = computeDiff();
-    if (diff.length === 0) {
-      toast.info("No changes to save.");
-      return;
-    }
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!isSaving) onOpenChange(o);
+      }}
+    >
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FilePenLine size={18} className="text-primary" />
+            {editing ? "Edit Amendment" : "New Amendment"}
+          </DialogTitle>
+          <DialogDescription>
+            Capture the proposed value change and business reason for this
+            amendment.
+          </DialogDescription>
+        </DialogHeader>
 
-    const payload: Record<string, unknown> = { ...selectedRecord };
-    fields.forEach((f) => {
-      if (!f.locked && editedValues[f.key] !== undefined) {
-        payload[f.key] =
-          f.type === "number"
-            ? parseFloat(String(editedValues[f.key])) || 0
-            : editedValues[f.key];
-      }
-    });
-
-    setSaving(true);
-    try {
-      const id = selectedRecord[cfg.idField];
-      const res = await fetchWithAuth(`${cfg.api}/${String(id)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const errBody = (await res.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        throw new Error(errBody.error ?? `HTTP ${res.status}`);
-      }
-
-      const now = new Date().toISOString();
-      const storedUser = (() => {
-        try {
-          return (
-            (
-              JSON.parse(localStorage.getItem("user") ?? "{}") as {
-                name?: string;
+        <div className="grid gap-4 py-2 md:grid-cols-2">
+          {/* Doc Type — read-only when pre-filled */}
+          <div className="space-y-1.5">
+            <Label>Document Type</Label>
+            <Input
+              value={
+                form.RefDocType === "PurchaseOrder"
+                  ? "Purchase Order"
+                  : form.RefDocType === "GRN"
+                    ? "GRN"
+                    : form.RefDocType === "ExpenseBooking"
+                      ? "Expense Booking"
+                      : form.RefDocType || "—"
               }
-            ).name ?? "Unknown"
-          );
-        } catch {
-          return "Unknown";
-        }
-      })();
-      const newEntries: AuditEntry[] = diff.map((d) => ({
-        field: d.label,
-        oldValue: String(d.oldValue),
-        newValue: String(d.newValue),
-        changedBy: storedUser,
-        changedAt: now,
-        reason,
-      }));
+              readOnly
+              className="bg-muted/40 cursor-default"
+            />
+          </div>
 
-      const key = `amendment_audit_${docType}_${String(id)}`;
-      const existing = (() => {
-        try {
-          return JSON.parse(localStorage.getItem(key) ?? "[]") as AuditEntry[];
-        } catch {
-          return [] as AuditEntry[];
-        }
-      })();
-      const merged = [...existing, ...newEntries];
-      localStorage.setItem(key, JSON.stringify(merged));
-      setAuditLog(merged);
+          {/* Doc No — read-only when pre-filled */}
+          <div className="space-y-1.5">
+            <Label>Document No.</Label>
+            <Input
+              value={form.RefDocNo}
+              readOnly
+              className="bg-muted/40 cursor-default font-mono"
+            />
+          </div>
 
-      const updatedRec = { ...selectedRecord, ...payload };
-      setSelectedRecord(updatedRec);
-      setRecords((prev) =>
-        prev.map((r) => (r[cfg.idField] === id ? updatedRec : r)),
-      );
-      setAmendedFields(diff);
-      setShowComparison(true);
-      setEditMode(false);
-      setEditedValues({});
-      setAmendReason("");
-      setAmendReasonOther("");
-      toast.success(`Amendment saved — ${diff.length} field(s) updated.`);
-    } catch (err: unknown) {
-      toast.error(
-        "Save failed: " + (err instanceof Error ? err.message : String(err)),
-      );
-    } finally {
-      setSaving(false);
+          {/* Date */}
+          <div className="space-y-1.5">
+            <Label>Amendment Date</Label>
+            <Input
+              type="date"
+              value={form.AmendmentDate}
+              onChange={(e) => set("AmendmentDate", e.target.value)}
+            />
+          </div>
+
+          {/* Project */}
+          <div className="space-y-1.5">
+            <Label>
+              Project Name <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              value={form.ProjectName}
+              onChange={(e) => set("ProjectName", e.target.value)}
+              placeholder="Project name"
+            />
+          </div>
+
+          {/* Company */}
+          <div className="space-y-1.5">
+            <Label>Company / Vendor</Label>
+            <Input
+              value={form.CompanyName}
+              onChange={(e) => set("CompanyName", e.target.value)}
+              placeholder="Company or vendor"
+            />
+          </div>
+
+          {/* Original Value */}
+          <div className="space-y-1.5">
+            <Label>Original Value (₹)</Label>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.OriginalValue}
+              onChange={(e) => set("OriginalValue", e.target.value)}
+              placeholder="0.00"
+            />
+          </div>
+
+          {/* Revised Value */}
+          <div className="space-y-1.5">
+            <Label>Revised Value (₹)</Label>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.RevisedValue}
+              onChange={(e) => set("RevisedValue", e.target.value)}
+              placeholder="0.00"
+            />
+          </div>
+
+          {/* Diff preview */}
+          {diff !== null && (
+            <div className="md:col-span-2 rounded-lg border bg-muted/40 px-4 py-3 text-sm flex items-center gap-2">
+              <ArrowLeftRight
+                size={14}
+                className="text-muted-foreground shrink-0"
+              />
+              <span className="text-muted-foreground">Value difference: </span>
+              <span
+                className={`font-semibold ${diff >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400"}`}
+              >
+                {diff >= 0 ? "+" : ""}
+                {formatMoney(diff)}
+              </span>
+            </div>
+          )}
+
+          {/* Description */}
+          <div className="space-y-1.5 md:col-span-2">
+            <Label>
+              Description of Change <span className="text-destructive">*</span>
+            </Label>
+            <Textarea
+              rows={3}
+              value={form.Description}
+              onChange={(e) => set("Description", e.target.value)}
+              placeholder="What specifically changed — item quantities, rates, delivery date, etc."
+            />
+          </div>
+
+          {/* Reason */}
+          <div className="space-y-1.5 md:col-span-2">
+            <Label>
+              Business Reason <span className="text-destructive">*</span>
+            </Label>
+            <Select
+              value={form.Reason || "__empty"}
+              onValueChange={(v) => set("Reason", v === "__empty" ? "" : v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select reason for amendment" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__empty">Select reason...</SelectItem>
+                {AMENDMENT_REASONS.map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {r}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            disabled={isSaving}
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={isSaving}>
+            {isSaving ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving…
+              </>
+            ) : editing ? (
+              "Save Changes"
+            ) : (
+              "Create Amendment"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Amendment Detail Dialog ──────────────────────────────────────────────────
+
+function AmendmentDetailDialog({
+  amendment,
+  onClose,
+}: {
+  amendment: Amendment | null;
+  onClose: () => void;
+}) {
+  if (!amendment) return null;
+  return (
+    <Dialog
+      open={!!amendment}
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+    >
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FilePenLine size={16} className="text-primary" />
+            {amendment.AmendmentNo}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={amendment.Status} />
+            {amendment.RefDocNo && (
+              <span className="text-sm font-mono text-muted-foreground">
+                → {amendment.RefDocNo}
+              </span>
+            )}
+          </div>
+
+          {(amendment.OriginalValue != null ||
+            amendment.RevisedValue != null) && (
+            <div className="rounded-xl border border-border bg-muted/20 p-4 grid grid-cols-3 gap-4 text-center">
+              <div>
+                <div className="text-[11px] text-muted-foreground uppercase tracking-wide mb-1">
+                  Original
+                </div>
+                <div className="text-base font-bold text-foreground">
+                  {formatMoney(amendment.OriginalValue)}
+                </div>
+              </div>
+              <div className="flex items-center justify-center">
+                <ArrowLeftRight size={16} className="text-muted-foreground" />
+              </div>
+              <div>
+                <div className="text-[11px] text-muted-foreground uppercase tracking-wide mb-1">
+                  Revised
+                </div>
+                <div className="text-base font-bold text-foreground">
+                  {formatMoney(amendment.RevisedValue)}
+                </div>
+              </div>
+            </div>
+          )}
+          {amendment.ValueDifference != null && (
+            <div
+              className={`text-center text-sm font-semibold ${amendment.ValueDifference >= 0 ? "text-emerald-600" : "text-rose-600"}`}
+            >
+              Net change: {amendment.ValueDifference >= 0 ? "+" : ""}
+              {formatMoney(amendment.ValueDifference)}
+            </div>
+          )}
+
+          {[
+            { label: "Project", value: amendment.ProjectName },
+            { label: "Company / Vendor", value: amendment.CompanyName },
+            {
+              label: "Amendment Date",
+              value: formatDate(amendment.AmendmentDate),
+            },
+            { label: "Description", value: amendment.Description },
+            { label: "Reason", value: amendment.Reason },
+          ].map(({ label, value }) =>
+            value ? (
+              <div key={label} className="space-y-1">
+                <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                  {label}
+                </div>
+                <div className="text-sm text-foreground bg-muted/20 rounded-lg px-3 py-2 border border-border whitespace-pre-line">
+                  {value}
+                </div>
+              </div>
+            ) : null,
+          )}
+
+          {(amendment.ApprovedBy || amendment.RejectedBy) && (
+            <div className="rounded-xl border border-border p-3 space-y-2">
+              <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                Approval Trail
+              </div>
+              {amendment.ApprovedBy && (
+                <div className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-400">
+                  <CheckCircle2 size={13} />
+                  <span>
+                    Approved by <strong>{amendment.ApprovedBy}</strong> on{" "}
+                    {formatDate(amendment.ApprovedAt)}
+                  </span>
+                </div>
+              )}
+              {amendment.RejectedBy && (
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-xs text-rose-700 dark:text-rose-400">
+                    <XCircle size={13} />
+                    <span>
+                      Rejected by <strong>{amendment.RejectedBy}</strong> on{" "}
+                      {formatDate(amendment.RejectedAt)}
+                    </span>
+                  </div>
+                  {amendment.RejectionNote && (
+                    <div className="text-xs text-muted-foreground pl-5">
+                      Note: {amendment.RejectionNote}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="rounded-xl border border-border p-3 space-y-1">
+            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+              Audit
+            </div>
+            <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <User size={11} /> Created by{" "}
+              <strong className="text-foreground">
+                {amendment.CreatedBy ?? "—"}
+              </strong>{" "}
+              · {formatDate(amendment.CreatedAt)}
+            </div>
+            {amendment.UpdatedBy && (
+              <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <RefreshCw size={11} /> Updated by{" "}
+                <strong className="text-foreground">
+                  {amendment.UpdatedBy}
+                </strong>{" "}
+                · {formatDate(amendment.UpdatedAt)}
+              </div>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Amendments History Panel (inline expand per doc row) ─────────────────────
+
+function AmendmentsHistoryPanel({
+  docType,
+  docNo,
+  docId,
+  canApprove,
+  onEdit,
+  queryClient,
+}: {
+  docType: string;
+  docNo: string;
+  docId: number | string;
+  canApprove: boolean;
+  onEdit: (a: Amendment) => void;
+  queryClient: ReturnType<typeof useQueryClient>;
+}) {
+  const [viewingAmendment, setViewingAmendment] = useState<Amendment | null>(
+    null,
+  );
+  const [rejectTarget, setRejectTarget] = useState<Amendment | null>(null);
+  const [rejectNote, setRejectNote] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Amendment | null>(null);
+
+  const query = useQuery({
+    queryKey: ["amendments-doc", docType, docNo],
+    queryFn: () =>
+      getAmendments({ refDocType: docType, search: docNo, pageSize: 50 }),
+  });
+
+  const rows = query.data?.data ?? [];
+
+  const invalidate = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: ["amendments"] }),
+    [queryClient],
+  );
+
+  const submitMutation = useMutation({
+    mutationFn: submitAmendment,
+    onSuccess: () => {
+      toast.success("Submitted for approval");
+      invalidate();
+      query.refetch();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: approveAmendment,
+    onSuccess: () => {
+      toast.success("Amendment approved");
+      invalidate();
+      query.refetch();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: ({ id, note }: { id: number; note: string }) =>
+      rejectAmendment(id, note),
+    onSuccess: () => {
+      toast.success("Amendment rejected");
+      setRejectTarget(null);
+      setRejectNote("");
+      invalidate();
+      query.refetch();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteAmendment,
+    onSuccess: () => {
+      toast.success("Amendment deleted");
+      setDeleteTarget(null);
+      invalidate();
+      query.refetch();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (query.isLoading) {
+    return (
+      <div className="flex items-center gap-2 py-3 px-4 text-muted-foreground text-xs">
+        <Loader2 size={13} className="animate-spin" />
+        Loading amendments…
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-muted/20 border-t border-border">
+      {rows.length === 0 ? (
+        <div className="py-3 px-6 text-xs text-muted-foreground italic">
+          No amendments yet for this document.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border/60 bg-muted/30">
+                <th className="text-left px-4 py-2 font-semibold text-muted-foreground">
+                  Amendment No.
+                </th>
+                <th className="text-left px-4 py-2 font-semibold text-muted-foreground">
+                  Reason
+                </th>
+                <th className="text-left px-4 py-2 font-semibold text-muted-foreground">
+                  Value Change
+                </th>
+                <th className="text-left px-4 py-2 font-semibold text-muted-foreground">
+                  Date
+                </th>
+                <th className="text-left px-4 py-2 font-semibold text-muted-foreground">
+                  Status
+                </th>
+                <th className="text-right px-4 py-2 font-semibold text-muted-foreground">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((a) => (
+                <tr
+                  key={a.Id}
+                  className="border-b border-border/40 hover:bg-muted/20 transition-colors"
+                >
+                  <td className="px-4 py-2">
+                    <button
+                      type="button"
+                      onClick={() => setViewingAmendment(a)}
+                      className="font-semibold text-primary hover:underline font-mono"
+                    >
+                      {a.AmendmentNo}
+                    </button>
+                  </td>
+                  <td className="px-4 py-2 text-muted-foreground max-w-[160px] truncate">
+                    {a.Reason ?? "—"}
+                  </td>
+                  <td className="px-4 py-2">
+                    {a.OriginalValue != null || a.RevisedValue != null ? (
+                      <div className="flex items-center gap-1">
+                        <span className="text-muted-foreground">
+                          {formatMoney(a.OriginalValue)}
+                        </span>
+                        <ArrowLeftRight
+                          size={10}
+                          className="text-muted-foreground"
+                        />
+                        <span className="font-medium">
+                          {formatMoney(a.RevisedValue)}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-muted-foreground">
+                    {formatDate(a.AmendmentDate)}
+                  </td>
+                  <td className="px-4 py-2">
+                    <StatusBadge status={a.Status} />
+                  </td>
+                  <td className="px-4 py-2">
+                    <div className="flex justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setViewingAmendment(a)}
+                        className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition"
+                        title="View"
+                      >
+                        <Eye size={13} />
+                      </button>
+                      {a.Status === "Draft" && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => onEdit(a)}
+                            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition"
+                            title="Edit"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => submitMutation.mutate(a.Id)}
+                            disabled={submitMutation.isPending}
+                            className="p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-950/30 text-blue-600 transition"
+                            title="Submit for approval"
+                          >
+                            <Send size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTarget(a)}
+                            className="p-1 rounded hover:bg-rose-50 dark:hover:bg-rose-950/30 text-rose-500 transition"
+                            title="Delete"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </>
+                      )}
+                      {a.Status === "Pending" && canApprove && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => approveMutation.mutate(a.Id)}
+                            disabled={approveMutation.isPending}
+                            className="p-1 rounded hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-emerald-600 transition"
+                            title="Approve"
+                          >
+                            <ShieldCheck size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRejectTarget(a);
+                              setRejectNote("");
+                            }}
+                            className="p-1 rounded hover:bg-rose-50 dark:hover:bg-rose-950/30 text-rose-500 transition"
+                            title="Reject"
+                          >
+                            <XCircle size={13} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Detail / reject / delete dialogs reused inside the panel */}
+      <AmendmentDetailDialog
+        amendment={viewingAmendment}
+        onClose={() => setViewingAmendment(null)}
+      />
+
+      <Dialog
+        open={!!rejectTarget}
+        onOpenChange={(o) => {
+          if (!rejectMutation.isPending && !o) {
+            setRejectTarget(null);
+            setRejectNote("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reject Amendment</DialogTitle>
+            <DialogDescription>
+              Provide a reason before rejecting this amendment.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>
+              Rejection Note <span className="text-destructive">*</span>
+            </Label>
+            <Textarea
+              rows={3}
+              value={rejectNote}
+              onChange={(e) => setRejectNote(e.target.value)}
+              placeholder="Reason for rejection (required)"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={rejectMutation.isPending}
+              onClick={() => {
+                setRejectTarget(null);
+                setRejectNote("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={
+                !rejectNote.trim() || rejectMutation.isPending || !rejectTarget
+              }
+              onClick={() => {
+                if (rejectTarget)
+                  rejectMutation.mutate({
+                    id: rejectTarget.Id,
+                    note: rejectNote.trim(),
+                  });
+              }}
+            >
+              {rejectMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Rejecting…
+                </>
+              ) : (
+                "Confirm Reject"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => {
+          if (!o) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Amendment?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will soft-delete <strong>{deleteTarget?.AmendmentNo}</strong>
+              . Only Draft amendments can be deleted. This action cannot be
+              undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteMutation.isPending || !deleteTarget}
+              onClick={(e) => {
+                e.preventDefault();
+                if (deleteTarget) deleteMutation.mutate(deleteTarget.Id);
+              }}
+            >
+              {deleteMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// ─── Document Table (PO / GRN / EB) ──────────────────────────────────────────
+
+interface DocRow {
+  id: number | string;
+  docNo: string;
+  date: string;
+  party: string;
+  project: string;
+  company: string;
+  amount: number | null;
+  status: string;
+}
+
+function normalisePoRows(data: any[]): DocRow[] {
+  return data.map((r) => ({
+    id: r.PurchaseOrderID ?? r.Id,
+    docNo: r.DocNo ?? r.PurchaseOrderNo ?? "—",
+    date: r.PODate ?? r.CreatedAt ?? "",
+    party: r.SupplierName ?? "—",
+    project: r.ProjectName ?? "—",
+    company: r.CompanyName ?? "—",
+    amount: r.TotalAmount ?? null,
+    status: r.Status ?? "—",
+  }));
+}
+
+function normaliseGrnRows(data: any[]): DocRow[] {
+  return data.map((r) => ({
+    id: r.GRNId ?? r.Id,
+    docNo: r.DocNo ?? r.GRNNo ?? "—",
+    date: r.GRNDate ?? r.CreatedAt ?? "",
+    party: r.SupplierName ?? "—",
+    project: r.ProjectName ?? "—",
+    company: r.CompanyName ?? "—",
+    amount: r.TotalAmount ?? null,
+    status: r.Status ?? "—",
+  }));
+}
+
+function normaliseEbRows(data: any[]): DocRow[] {
+  return data.map((r) => ({
+    id: r.Eid ?? r.id,
+    docNo: r.EDocNo ?? `Draft #${r.Eid}`,
+    date: r.EDocDate ?? r.ECreatedAt ?? "",
+    party: r.ESupplierName ?? r.EName ?? "—",
+    project: r.EProjectDisplayName ?? r.EProjectName ?? "—",
+    company: r.ECompanyName ?? "—",
+    amount: r.ENetAmount ?? r.EAmount ?? null,
+    status: r.EStatus ?? "—",
+  }));
+}
+
+function DocTable({
+  tab,
+  search,
+  page,
+  onPageChange,
+  onAmend,
+  queryClient,
+  canApprove,
+}: {
+  tab: DocTab;
+  search: string;
+  page: number;
+  onPageChange: (p: number) => void;
+  onAmend: (row: DocRow) => void;
+  queryClient: ReturnType<typeof useQueryClient>;
+  canApprove: boolean;
+}) {
+  const [expandedId, setExpandedId] = useState<string | number | null>(null);
+
+  const docType = DOC_TYPE_MAP[tab];
+  const PAGE_SIZE = 15;
+
+  const poQuery = useQuery({
+    queryKey: ["amend-po-list", page, search],
+    queryFn: () => getPurchaseOrders({ page, limit: PAGE_SIZE }),
+    enabled: tab === "PO",
+  });
+
+  const grnQuery = useQuery({
+    queryKey: ["amend-grn-list", page, search],
+    queryFn: () => getGRNs({ page, limit: PAGE_SIZE }),
+    enabled: tab === "GRN",
+  });
+
+  const ebQuery = useQuery({
+    queryKey: ["amend-eb-list", page],
+    queryFn: () =>
+      fetchWithAuth(
+        `/api/expense-booking?page=${page}&limit=${PAGE_SIZE}`,
+      ).then((r) => r.json()),
+    enabled: tab === "EB",
+  });
+
+  const isLoading =
+    (tab === "PO" && poQuery.isLoading) ||
+    (tab === "GRN" && grnQuery.isLoading) ||
+    (tab === "EB" && ebQuery.isLoading);
+
+  const isError =
+    (tab === "PO" && poQuery.isError) ||
+    (tab === "GRN" && grnQuery.isError) ||
+    (tab === "EB" && ebQuery.isError);
+
+  const rawRows: DocRow[] = useMemo(() => {
+    if (tab === "PO") {
+      const data = poQuery.data?.data ?? [];
+      return normalisePoRows(data);
     }
+    if (tab === "GRN") {
+      const data = grnQuery.data?.data ?? [];
+      return normaliseGrnRows(data);
+    }
+    if (tab === "EB") {
+      const data = Array.isArray(ebQuery.data?.data)
+        ? ebQuery.data.data
+        : Array.isArray(ebQuery.data)
+          ? ebQuery.data
+          : [];
+      return normaliseEbRows(data);
+    }
+    return [];
+  }, [tab, poQuery.data, grnQuery.data, ebQuery.data]);
+
+  // Client-side search filter
+  const rows = useMemo(() => {
+    if (!search.trim()) return rawRows;
+    const s = search.trim().toLowerCase();
+    return rawRows.filter(
+      (r) =>
+        r.docNo.toLowerCase().includes(s) ||
+        r.party.toLowerCase().includes(s) ||
+        r.project.toLowerCase().includes(s),
+    );
+  }, [rawRows, search]);
+
+  const totalPages =
+    tab === "PO"
+      ? ((poQuery.data as any)?.totalPages ?? 1)
+      : tab === "GRN"
+        ? ((grnQuery.data as any)?.totalPages ?? 1)
+        : ((ebQuery.data as any)?.totalPages ?? 1);
+
+  const toggleExpand = (id: string | number) => {
+    setExpandedId((prev) => (prev === id ? null : id));
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-muted/30">
+            <TableHead className="w-8" />
+            <TableHead>Doc No.</TableHead>
+            <TableHead>Party / Vendor</TableHead>
+            <TableHead>Project</TableHead>
+            <TableHead>Amount</TableHead>
+            <TableHead>Date</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {isLoading ? (
+            <TableRow>
+              <TableCell colSpan={8} className="h-32 text-center">
+                <div className="inline-flex items-center gap-2 text-muted-foreground text-sm">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading documents…
+                </div>
+              </TableCell>
+            </TableRow>
+          ) : isError ? (
+            <TableRow>
+              <TableCell
+                colSpan={8}
+                className="h-32 text-center text-destructive text-sm"
+              >
+                Failed to load. Try refreshing.
+              </TableCell>
+            </TableRow>
+          ) : rows.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={8} className="h-32 text-center">
+                <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                  <Search size={28} className="opacity-30" />
+                  <span className="text-sm">No documents found.</span>
+                </div>
+              </TableCell>
+            </TableRow>
+          ) : (
+            rows.map((row) => (
+              <React.Fragment key={row.id}>
+                <TableRow className="hover:bg-muted/20">
+                  {/* Expand toggle */}
+                  <TableCell className="w-8 pl-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleExpand(row.id)}
+                      className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition"
+                      title={
+                        expandedId === row.id
+                          ? "Hide amendments"
+                          : "View amendments"
+                      }
+                    >
+                      {expandedId === row.id ? (
+                        <ChevronUp size={14} />
+                      ) : (
+                        <ChevronDown size={14} />
+                      )}
+                    </button>
+                  </TableCell>
+                  <TableCell>
+                    <span className="font-semibold font-mono text-sm text-foreground">
+                      {row.docNo}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <div className="text-sm font-medium">{row.party}</div>
+                    {row.company && row.company !== "—" && (
+                      <div className="text-xs text-muted-foreground">
+                        {row.company}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-sm">{row.project}</TableCell>
+                  <TableCell className="text-sm font-medium">
+                    {formatMoney(row.amount)}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {formatDate(row.date)}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] font-medium"
+                    >
+                      {row.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs gap-1.5"
+                        onClick={() => toggleExpand(row.id)}
+                      >
+                        <History size={12} />
+                        {expandedId === row.id ? "Hide" : "History"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="h-7 text-xs gap-1.5"
+                        onClick={() => onAmend(row)}
+                      >
+                        <FilePenLine size={12} />
+                        Amend
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+
+                {/* Inline expanded amendments panel */}
+                {expandedId === row.id && (
+                  <TableRow>
+                    <TableCell colSpan={8} className="p-0">
+                      <AmendmentsHistoryPanel
+                        docType={docType}
+                        docNo={row.docNo}
+                        docId={row.id}
+                        canApprove={canApprove}
+                        onEdit={(a) => {
+                          /* bubble up handled by parent via state */
+                        }}
+                        queryClient={queryClient}
+                      />
+                    </TableCell>
+                  </TableRow>
+                )}
+              </React.Fragment>
+            ))
+          )}
+        </TableBody>
+      </Table>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-border bg-muted/10 text-xs text-muted-foreground">
+          <span>
+            Page {page} of {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => onPageChange(Math.max(1, page - 1))}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+export default function AmendmentMenu() {
+  const queryClient = useQueryClient();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const canApprove = APPROVER_ROLES.includes(getCurrentRole() ?? "");
+
+  const prefill =
+    (location.state as { prefill?: PrefillState } | null)?.prefill ?? null;
+
+  const [activeTab, setActiveTab] = useState<DocTab>(() => {
+    if (prefill?.tab && ["PO", "GRN", "EB"].includes(prefill.tab))
+      return prefill.tab;
+    return "PO";
+  });
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+
+  // Form state
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Amendment | null>(null);
+  const [initialForm, setInitialForm] = useState<FormState>(EMPTY_FORM);
+
+  // Auto-open amend form when navigated from PO/GRN/EB page with prefill state
+  React.useEffect(() => {
+    if (!prefill) return;
+    const docTypeMap: Record<string, string> = {
+      PO: "PurchaseOrder",
+      GRN: "GRN",
+      EB: "ExpenseBooking",
+    };
+    const form: FormState = {
+      ...EMPTY_FORM,
+      RefDocType: docTypeMap[prefill.tab ?? ""] ?? "",
+      RefDocId: String(prefill.docId ?? ""),
+      RefDocNo: prefill.docNo ?? "",
+      ProjectName: prefill.projectName ?? "",
+      CompanyName: prefill.supplierName ?? prefill.companyName ?? "",
+      OriginalValue:
+        prefill.totalAmount != null ? String(prefill.totalAmount) : "",
+      AmendmentDate: today(),
+    };
+    setInitialForm(form);
+    setEditing(null);
+    setFormOpen(true);
+    // Clear state so revisiting the page doesn't re-open the form
+    navigate(location.pathname, { replace: true, state: {} });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Stats — document counts from list endpoints + total amendments raised
+  const poStatsQuery = useQuery({
+    queryKey: ["amend-po-list", 1, ""],
+    queryFn: () => getPurchaseOrders({ page: 1, limit: 1 }),
+  });
+  const grnStatsQuery = useQuery({
+    queryKey: ["amend-grn-list", 1, ""],
+    queryFn: () => getGRNs({ page: 1, limit: 1 }),
+  });
+  const ebStatsQuery = useQuery({
+    queryKey: ["amend-eb-list", 1],
+    queryFn: () =>
+      fetchWithAuth("/api/expense-booking?page=1&limit=1").then((r) =>
+        r.json(),
+      ),
+  });
+  const amendTotalQuery = useQuery({
+    queryKey: ["amendments-count", "total"],
+    queryFn: () => getAmendments({ page: 1, pageSize: 1 }),
+  });
+
+  const stats = useMemo(
+    () => ({
+      poCount: (poStatsQuery.data as any)?.total ?? 0,
+      grnCount: (grnStatsQuery.data as any)?.total ?? 0,
+      ebCount: (ebStatsQuery.data as any)?.total ?? 0,
+      amendmentCount: amendTotalQuery.data?.pagination?.total ?? 0,
+    }),
+    [
+      poStatsQuery.data,
+      grnStatsQuery.data,
+      ebStatsQuery.data,
+      amendTotalQuery.data,
+    ],
+  );
+
+  const invalidate = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["amendments"] });
+    queryClient.invalidateQueries({ queryKey: ["amendments-count"] });
+    queryClient.invalidateQueries({ queryKey: ["amend-po-list"] });
+    queryClient.invalidateQueries({ queryKey: ["amend-grn-list"] });
+    queryClient.invalidateQueries({ queryKey: ["amend-eb-list"] });
+  }, [queryClient]);
+
+  const createMutation = useMutation({
+    mutationFn: createAmendment,
+    onSuccess: () => {
+      toast.success("Amendment created");
+      setFormOpen(false);
+      setEditing(null);
+      setInitialForm(EMPTY_FORM);
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: number; payload: AmendmentPayload }) =>
+      updateAmendment(id, payload),
+    onSuccess: () => {
+      toast.success("Amendment updated");
+      setFormOpen(false);
+      setEditing(null);
+      setInitialForm(EMPTY_FORM);
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const isSaving = createMutation.isPending || updateMutation.isPending;
+
+  const openAmendFromDoc = (row: DocRow) => {
+    // Open create form pre-filled from the document row
+    const docTypeStr = DOC_TYPE_MAP[activeTab];
+    const form: FormState = {
+      ...EMPTY_FORM,
+      RefDocType: docTypeStr,
+      RefDocId: String(row.id),
+      RefDocNo: row.docNo,
+      ProjectName: row.project !== "—" ? row.project : "",
+      CompanyName:
+        row.party !== "—" ? row.party : row.company !== "—" ? row.company : "",
+      OriginalValue: row.amount != null ? String(row.amount) : "",
+      AmendmentDate: today(),
+    };
+    setEditing(null);
+    setInitialForm(form);
+    setFormOpen(true);
+  };
+
+  const openEdit = (a: Amendment) => {
+    setEditing(a);
+    setInitialForm(toFormState(a));
+    setFormOpen(true);
+  };
+
+  const handleSave = (payload: AmendmentPayload) => {
+    if (editing) {
+      updateMutation.mutate({ id: editing.Id, payload });
+    } else {
+      createMutation.mutate(payload);
+    }
+  };
+
+  const switchTab = (tab: DocTab) => {
+    setActiveTab(tab);
+    setPage(1);
+    setSearch("");
   };
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Material", "Amendments"]} />
-      <div className="p-6 space-y-5">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-              <FileEdit size={20} className="text-primary" />
-              Amendments
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Centralized amendment workflow for GRN, PO, WO &amp; Expense Booking
-              — with full audit trail.
-            </p>
-          </div>
-        </div>
+      <Breadcrumbs items={["Material", "Amendment"]} />
 
-        {/* Doc Type Tabs */}
-        <div className="flex flex-wrap gap-2">
-          {(Object.keys(DOC_TYPE_CONFIG) as DocType[]).map((dt) => {
-            const c = DOC_TYPE_CONFIG[dt];
-            const Icon = c.icon;
-            const active = docType === dt;
-            return (
-              <button
-                key={dt}
-                type="button"
-                onClick={() => {
-                  setDocType(dt);
-                  setSelectedRecord(null);
-                  setEditMode(false);
-                  setSearchQuery("");
-                  setAmendedFields([]);
-                  setShowComparison(false);
-                  setShowAudit(false);
-                }}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-                  active
-                    ? "gradient-accent text-white shadow-md ring-2 ring-white/20"
-                    : "border border-border text-muted-foreground hover:bg-muted bg-card"
-                }`}
-              >
-                <Icon size={14} />
-                {c.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-          {/* Left: Search + List */}
-          <div className="lg:col-span-2 space-y-3">
-            <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
-              <div className="px-4 py-3 border-b border-border">
-                <div className="flex items-center gap-2">
-                  <Search
-                    size={14}
-                    className="text-muted-foreground shrink-0"
-                  />
-                  <Input
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder={cfg.searchPlaceholder}
-                    className="h-8 text-xs border-0 shadow-none focus-visible:ring-0 p-0 bg-transparent"
-                  />
-                  <button
-                    type="button"
-                    onClick={fetchRecords}
-                    className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                    title="Refresh"
-                  >
-                    <RefreshCw size={13} />
-                  </button>
-                </div>
-              </div>
-              <div>
-                {loading && (
-                  <div className="flex items-center justify-center gap-2 py-10 text-muted-foreground text-sm">
-                    <Loader2 size={14} className="animate-spin" />
-                    Loading…
-                  </div>
-                )}
-                {!loading && filteredRecords.length === 0 && (
-                  <div className="py-10 text-center text-muted-foreground text-sm">
-                    No records found.
-                  </div>
-                )}
-                <div className="max-h-[520px] overflow-y-auto divide-y divide-border">
-                  {filteredRecords.map((rec, i) => {
-                    const id = rec[cfg.idField];
-                    const ref = fmt(rec[cfg.refField]);
-                    const isSelected =
-                      selectedRecord && selectedRecord[cfg.idField] === id;
-                    const supplierName = fmt(
-                      rec.SupplierName ??
-                        rec.LHeadName ??
-                        rec.ContractorName ??
-                        rec.EProjectName ??
-                        null,
-                    );
-                    const status = fmt(rec.Status ?? rec.EStatus ?? null);
-                    const hasAudit = (() => {
-                      try {
-                        const k = `amendment_audit_${docType}_${String(id)}`;
-                        const s = localStorage.getItem(k);
-                        return s
-                          ? (JSON.parse(s) as unknown[]).length > 0
-                          : false;
-                      } catch {
-                        return false;
-                      }
-                    })();
-                    return (
-                      <button
-                        key={String(id ?? i)}
-                        type="button"
-                        onClick={() => selectRecord(rec)}
-                        className={`w-full text-left px-4 py-3 transition-colors ${
-                          isSelected
-                            ? "bg-primary/8 border-l-2 border-l-primary"
-                            : "hover:bg-muted/40 border-l-2 border-l-transparent"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span
-                            className={`font-mono text-xs font-semibold ${cfg.color}`}
-                          >
-                            {ref || `#${String(id)}`}
-                          </span>
-                          <div className="flex items-center gap-1.5">
-                            {hasAudit && (
-                              <span
-                                title="Has amendment history"
-                                className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"
-                              />
-                            )}
-                            {status !== "—" && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
-                                {status}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        {supplierName !== "—" && (
-                          <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                            {supplierName}
-                          </p>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-                {!loading && (
-                  <div className="px-4 py-2 border-t border-border bg-muted/20">
-                    <span className="text-[11px] text-muted-foreground">
-                      {filteredRecords.length} of {records.length} records
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Detail / Edit */}
-          <div className="lg:col-span-3 space-y-4">
-            {!selectedRecord ? (
-              <div className="rounded-xl border border-dashed border-border bg-card">
-                <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
-                  <FileText size={36} className="text-muted-foreground/30" />
-                  <p className="text-sm text-muted-foreground max-w-xs">
-                    Select a {cfg.label} from the list to view its details and
-                    submit amendments.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <>
-                {/* Record card */}
-                <div className="rounded-xl border border-primary/20 bg-card shadow-sm overflow-hidden">
-                  <div className="pb-3 px-4 sm:px-5 pt-4 border-b border-border">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span
-                            className={`font-mono text-sm font-bold ${cfg.color}`}
-                          >
-                            {fmt(selectedRecord[cfg.refField])}
-                          </span>
-                          <Badge variant="outline" className="text-[10px]">
-                            {cfg.label}
-                          </Badge>
-                          {(selectedRecord.Status ?? selectedRecord.EStatus) !=
-                            null && (
-                            <Badge variant="secondary" className="text-[10px]">
-                              {fmt(
-                                selectedRecord.Status ?? selectedRecord.EStatus,
-                              )}
-                            </Badge>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                          ID: {fmt(selectedRecord[cfg.idField])}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {!editMode ? (
-                          <>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 text-xs gap-1.5"
-                              onClick={() => {
-                                setShowAudit((p) => !p);
-                                setShowComparison(false);
-                              }}
-                            >
-                              <Clock size={12} />
-                              History
-                              {auditLog.length > 0 && (
-                                <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 text-[10px] font-semibold">
-                                  {auditLog.length}
-                                </span>
-                              )}
-                            </Button>
-                            <Button
-                              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-                              onClick={enterEdit}
-                            >
-                              <FileEdit size={12} />
-                              Amend
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 text-xs gap-1.5"
-                              onClick={previewChanges}
-                            >
-                              <Eye size={12} />
-                              Preview
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={cancelEdit}
-                            >
-                              <X size={12} />
-                            </Button>
-                            <Button
-                              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-                              onClick={saveAmendment}
-                              disabled={saving}
-                            >
-                              {saving ? (
-                                <Loader2 size={12} className="animate-spin" />
-                              ) : (
-                                <Save size={12} />
-                              )}
-                              Save
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    {editMode && (
-                      <div className="mt-2 flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
-                        <AlertTriangle size={12} className="shrink-0" />
-                        <span>
-                          You are in amendment mode. Changes require a reason
-                          and will be logged to the audit trail.
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="pt-4 px-4 sm:px-5 pb-4 space-y-4">
-                    {/* Fields grid */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {fields.map((f) => {
-                        const origVal = fmt(selectedRecord[f.key]);
-                        const isEditable = editMode && !f.locked;
-                        const currentEdit = String(
-                          editedValues[f.key] ??
-                            (origVal === "—" ? "" : origVal),
-                        );
-                        const hasChange =
-                          isEditable &&
-                          currentEdit !== (origVal === "—" ? "" : origVal);
-
-                        return (
-                          <div key={f.key} className="space-y-1">
-                            <label className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
-                              {f.label}
-                              {f.locked && editMode && (
-                                <span className="text-[10px] px-1 py-0.5 rounded bg-muted border border-border text-muted-foreground/70">
-                                  locked
-                                </span>
-                              )}
-                            </label>
-                            {isEditable ? (
-                              <div className="relative">
-                                <input
-                                  type={
-                                    f.type === "date"
-                                      ? "date"
-                                      : f.type === "number"
-                                        ? "number"
-                                        : "text"
-                                  }
-                                  value={currentEdit}
-                                  onChange={(e) =>
-                                    setEditedValues((prev) => ({
-                                      ...prev,
-                                      [f.key]:
-                                        f.type === "number"
-                                          ? parseFloat(e.target.value) || 0
-                                          : e.target.value,
-                                    }))
-                                  }
-                                  className={`w-full px-3 py-1.5 rounded-lg text-sm border bg-background focus:outline-none focus:ring-2 focus:ring-primary transition-all ${
-                                    hasChange
-                                      ? "border-amber-400 bg-amber-50 dark:bg-amber-950/20 text-foreground"
-                                      : "border-border text-foreground"
-                                  }`}
-                                />
-                                {hasChange && (
-                                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-                                    ✎
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <div
-                                className={`px-3 py-1.5 rounded-lg text-sm border border-border ${
-                                  f.locked && editMode
-                                    ? "bg-muted/50 text-muted-foreground"
-                                    : "bg-muted/20 text-foreground"
-                                }`}
-                              >
-                                {origVal}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Reason section */}
-                    {editMode && (
-                      <div className="pt-3 border-t border-border space-y-3">
-                        <label className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                          <AlertTriangle size={12} className="text-amber-500" />
-                          Amendment Reason{" "}
-                          <span className="text-destructive">*</span>
-                        </label>
-                        <Select
-                          value={amendReason}
-                          onValueChange={setAmendReason}
-                        >
-                          <SelectTrigger className="h-9 text-sm">
-                            <SelectValue placeholder="Select reason for amendment..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {AMENDMENT_REASONS.map((r) => (
-                              <SelectItem key={r} value={r}>
-                                {r}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {amendReason === "Other" && (
-                          <textarea
-                            value={amendReasonOther}
-                            onChange={(e) =>
-                              setAmendReasonOther(e.target.value)
-                            }
-                            placeholder="Describe the reason for this amendment..."
-                            rows={2}
-                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                          />
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Side-by-side comparison */}
-                {showComparison && amendedFields.length > 0 && (
-                  <div className="rounded-xl border border-amber-400/40 bg-card shadow-sm overflow-hidden">
-                    <div className="pb-0 px-4 sm:px-5 pt-4">
-                      <button
-                        type="button"
-                        className="flex items-center justify-between w-full py-3"
-                        onClick={() => setShowComparison((p) => !p)}
-                      >
-                        <div className="flex items-center gap-2">
-                          <ArrowLeftRight
-                            size={14}
-                            className="text-amber-500"
-                          />
-                          <h3 className="text-sm font-heading">
-                            Change Summary —{" "}
-                            <span className="text-amber-600 dark:text-amber-400">
-                              {amendedFields.length} field
-                              {amendedFields.length !== 1 ? "s" : ""} amended
-                            </span>
-                          </h3>
-                        </div>
-                        {showComparison ? (
-                          <ChevronUp size={14} />
-                        ) : (
-                          <ChevronDown size={14} />
-                        )}
-                      </button>
-                    </div>
-                    <div className="px-4 sm:px-5 pb-4">
-                      <div className="rounded-xl overflow-hidden border border-border">
-                        <div className="grid grid-cols-3 bg-muted/60 px-4 py-2">
-                          <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                            Field
-                          </span>
-                          <span className="text-[11px] font-semibold text-red-500 uppercase tracking-wide">
-                            Original
-                          </span>
-                          <span className="text-[11px] font-semibold text-emerald-500 uppercase tracking-wide">
-                            Amended
-                          </span>
-                        </div>
-                        {amendedFields.map((af, idx) => (
-                          <div
-                            key={af.field}
-                            className={`grid grid-cols-3 px-4 py-2.5 gap-2 items-center ${
-                              idx % 2 === 0 ? "bg-background" : "bg-muted/20"
-                            }`}
-                          >
-                            <span className="text-xs font-medium text-foreground">
-                              {af.label}
-                            </span>
-                            <span className="text-xs text-red-500 line-through font-mono break-all">
-                              {af.oldValue || "—"}
-                            </span>
-                            <span className="text-xs text-emerald-600 dark:text-emerald-400 font-mono font-semibold break-all">
-                              {af.newValue}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Audit trail */}
-                {showAudit && (
-                  <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-                    <div className="pb-0 px-4 sm:px-5 pt-4">
-                      <button
-                        type="button"
-                        className="flex items-center justify-between w-full py-3"
-                        onClick={() => setShowAudit((p) => !p)}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Clock size={14} className="text-primary" />
-                          <h3 className="text-sm font-heading">
-                            Amendment History
-                          </h3>
-                        </div>
-                        {showAudit ? (
-                          <ChevronUp size={14} />
-                        ) : (
-                          <ChevronDown size={14} />
-                        )}
-                      </button>
-                    </div>
-                    <div className="px-4 sm:px-5 pb-4">
-                      {auditLog.length === 0 ? (
-                        <p className="text-sm text-muted-foreground text-center py-6">
-                          No amendment history for this record.
-                        </p>
-                      ) : (
-                        <div className="space-y-3">
-                          {[...auditLog].reverse().map((entry, i) => (
-                            <div
-                              key={i}
-                              className="rounded-xl border border-border p-3 space-y-2 bg-muted/10"
-                            >
-                              <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                  <User size={11} className="shrink-0" />
-                                  <span className="font-medium text-foreground">
-                                    {entry.changedBy}
-                                  </span>
-                                  <span>·</span>
-                                  <Clock size={11} className="shrink-0" />
-                                  <span>
-                                    {new Date(entry.changedAt).toLocaleString(
-                                      "en-IN",
-                                    )}
-                                  </span>
-                                </div>
-                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 shrink-0">
-                                  {entry.reason}
-                                </span>
-                              </div>
-                              <div className="grid grid-cols-3 gap-2 text-xs">
-                                <span className="text-muted-foreground font-medium">
-                                  {entry.field}
-                                </span>
-                                <span className="text-red-500 line-through font-mono break-all">
-                                  {entry.oldValue || "—"}
-                                </span>
-                                <span className="text-emerald-600 dark:text-emerald-400 font-mono font-semibold break-all">
-                                  {entry.newValue}
-                                </span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="flex items-center gap-2.5 text-xl font-heading font-bold text-foreground">
+            <FilePenLine size={20} className="text-primary" />
+            Amendment Centre
+          </h1>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Select a Purchase Order, GRN, or Expense Booking to raise or review
+            amendments — full audit trail.
+          </p>
         </div>
       </div>
+
+      {/* ── Stats ───────────────────────────────────────────────────────────── */}
+      <StatsRow
+        poCount={stats.poCount}
+        grnCount={stats.grnCount}
+        ebCount={stats.ebCount}
+        amendmentCount={stats.amendmentCount}
+      />
+
+      {/* ── Tab bar ─────────────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        {TAB_CONFIG.map(({ id, label, icon: Icon, color }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => switchTab(id)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all border ${
+              activeTab === id
+                ? "gradient-accent text-white shadow-sm border-transparent"
+                : "border-border bg-card text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            <Icon
+              size={14}
+              className={activeTab === id ? "text-white" : color}
+            />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Filters bar ─────────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row gap-3 mb-4">
+        <div className="relative flex-1 max-w-sm">
+          <FileSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input
+            className="pl-9"
+            placeholder="Search doc no, party, project…"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            queryClient.invalidateQueries({
+              queryKey: ["amend-po-list"],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["amend-grn-list"],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["amend-eb-list"],
+            });
+          }}
+          className="shrink-0"
+        >
+          <RefreshCw size={13} className="mr-1.5" />
+          Refresh
+        </Button>
+      </div>
+
+      {/* ── Document Table ───────────────────────────────────────────────────── */}
+      <DocTable
+        tab={activeTab}
+        search={search}
+        page={page}
+        onPageChange={setPage}
+        onAmend={openAmendFromDoc}
+        queryClient={queryClient}
+        canApprove={canApprove}
+      />
+
+      {/* ── Amendment Form Dialog ────────────────────────────────────────────── */}
+      <AmendFormDialog
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        editing={editing}
+        initialForm={initialForm}
+        onSave={handleSave}
+        isSaving={isSaving}
+      />
     </>
   );
 }

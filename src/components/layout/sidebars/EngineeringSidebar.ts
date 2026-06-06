@@ -1,4 +1,4 @@
-import { BarChart3, Receipt, ClipboardList } from "lucide-react";
+import { BarChart3, Receipt, ClipboardList, FilePenLine } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const engineeringNavItems: NavItem[] = [
@@ -16,5 +16,10 @@ export const engineeringNavItems: NavItem[] = [
     label: "DPR",
     icon: ClipboardList,
     path: "/engineering/dpr",
+  },
+  {
+    label: "Amendment",
+    icon: FilePenLine,
+    path: "/engineering/amendment-menu",
   },
 ];
