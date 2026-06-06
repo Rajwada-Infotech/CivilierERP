@@ -10,8 +10,14 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const PERMISSION_MODULE = "Followup";
 const PERMISSION_SUBMODULE = "WelcomeCalls";
 
-const OUTCOME_OPTIONS = ["connected", "no_answer", "callback", "voicemail", "completed"];
-const STATUS_OPTIONS  = ["Scheduled", "Completed", "Cancelled"];
+const OUTCOME_OPTIONS = [
+  "connected",
+  "no_answer",
+  "callback",
+  "voicemail",
+  "completed",
+];
+const STATUS_OPTIONS = ["Scheduled", "Completed", "Cancelled"];
 
 const LIST_COLUMNS = `
   wc.Id,
@@ -45,7 +51,10 @@ router.use(checkPermissionForMethod(PERMISSION_MODULE, PERMISSION_SUBMODULE));
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function requireUserName(req, res) {
   const userName = req.user?.name || req.user?.email || null;
-  if (!userName) { res.status(401).json({ error: "Unauthorized" }); return null; }
+  if (!userName) {
+    res.status(401).json({ error: "Unauthorized" });
+    return null;
+  }
   return userName;
 }
 
@@ -85,12 +94,12 @@ router.get("/meta/options", async (req, res) => {
                ISNULL(ahm.DisplayName, ahm.LHeadName) AS ApplicantName
         FROM   dbo.FollowupBookings fb
         LEFT JOIN dbo.AccountHeadMaster ahm
-               ON ahm.Id = fb.ApplicantId
+               ON ahm.LHeadId = fb.ApplicantId
         WHERE  fb.IsDeleted = 0
         ORDER  BY fb.BookingNo
       `),
       pool.request().query(`
-        SELECT id AS Id, name AS Name FROM dbo.users WHERE IsActive = 1 ORDER BY name
+        SELECT id AS Id, name AS Name FROM dbo.users WHERE ISNULL(discontinue, 0) = 0 ORDER BY name
       `),
     ]);
 
@@ -109,14 +118,19 @@ router.get("/meta/options", async (req, res) => {
 // ── GET / — list with pagination & filters ────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
-    const page     = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 20));
-    const offset   = (page - 1) * pageSize;
-    const search   = typeof req.query.search === "string" ? req.query.search.trim() : "";
-    const status   = typeof req.query.status === "string" ? req.query.status.trim() : "";
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(
+      100,
+      Math.max(1, parseInt(req.query.pageSize, 10) || 20),
+    );
+    const offset = (page - 1) * pageSize;
+    const search =
+      typeof req.query.search === "string" ? req.query.search.trim() : "";
+    const status =
+      typeof req.query.status === "string" ? req.query.status.trim() : "";
     const bookingId = parseId(req.query.bookingId);
 
-    const pool    = getPool();
+    const pool = getPool();
     const request = pool.request();
     const filters = ["wc.IsDeleted = 0"];
 
@@ -144,7 +158,7 @@ router.get("/", async (req, res) => {
       SELECT ${LIST_COLUMNS}
       FROM   dbo.FollowupWelcomeCalls wc
       LEFT JOIN dbo.FollowupBookings  fb  ON fb.Id   = wc.BookingId
-      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.Id  = wc.ApplicantId
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId  = wc.ApplicantId
       LEFT JOIN dbo.users             u   ON u.id    = wc.AssignedTo
       WHERE  ${where}
       ORDER  BY wc.CreatedAt DESC, wc.Id DESC
@@ -154,14 +168,19 @@ router.get("/", async (req, res) => {
     const countResult = await pool.request().query(`
       SELECT COUNT(*) AS total
       FROM   dbo.FollowupWelcomeCalls wc
-      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.Id = wc.ApplicantId
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = wc.ApplicantId
       WHERE  ${where}
     `);
 
     const total = countResult.recordset[0].total;
     res.json({
       data: dataResult.recordset,
-      pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages: Math.ceil(total / pageSize),
+      },
     });
   } catch (err) {
     console.error("WelcomeCalls GET error:", err.message);
@@ -175,18 +194,17 @@ router.get("/:id", async (req, res) => {
   if (!id) return res.status(400).json({ error: "Invalid id" });
 
   try {
-    const result = await getPool().request()
-      .input("Id", sql.Int, id)
-      .query(`
+    const result = await getPool().request().input("Id", sql.Int, id).query(`
         SELECT ${LIST_COLUMNS}
         FROM   dbo.FollowupWelcomeCalls wc
         LEFT JOIN dbo.FollowupBookings  fb  ON fb.Id  = wc.BookingId
-        LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.Id = wc.ApplicantId
+        LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = wc.ApplicantId
         LEFT JOIN dbo.users             u   ON u.id   = wc.AssignedTo
         WHERE  wc.Id = @Id AND wc.IsDeleted = 0
       `);
 
-    if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
+    if (!result.recordset.length)
+      return res.status(404).json({ error: "Not found" });
     res.json(result.recordset[0]);
   } catch (err) {
     console.error("WelcomeCalls GET/:id error:", err.message);
@@ -200,36 +218,55 @@ router.post("/", async (req, res) => {
   if (!userName) return;
 
   const {
-    BookingId, ApplicantId, CallDate, CallTime, Duration,
-    Outcome, BankSelected, LoanRequired, ExpectedLoanAmount,
-    PreferredBanker, AssignedTo, Notes, Status,
+    BookingId,
+    ApplicantId,
+    CallDate,
+    CallTime,
+    Duration,
+    Outcome,
+    BankSelected,
+    LoanRequired,
+    ExpectedLoanAmount,
+    PreferredBanker,
+    AssignedTo,
+    Notes,
+    Status,
   } = req.body || {};
 
-  if (!ApplicantId) return res.status(400).json({ error: "ApplicantId is required" });
+  if (!ApplicantId)
+    return res.status(400).json({ error: "ApplicantId is required" });
 
   let autoDraftNocNo = null;
 
   try {
-    const pool   = getPool();
+    const pool = getPool();
     const callNo = await generateCallNo(pool);
 
-    const result = await pool.request()
-      .input("CallNo",             sql.NVarChar(50),   callNo)
-      .input("BookingId",          sql.Int,             normalizeNumber(BookingId))
-      .input("ApplicantId",        sql.Int,             normalizeNumber(ApplicantId))
-      .input("CallDate",           sql.Date,            CallDate ? new Date(CallDate) : new Date())
-      .input("CallTime",           sql.NVarChar(10),   normalizeText(CallTime))
-      .input("Duration",           sql.NVarChar(20),   normalizeText(Duration))
-      .input("Outcome",            sql.NVarChar(50),   normalizeText(Outcome))
-      .input("BankSelected",       sql.NVarChar(200),  normalizeText(BankSelected))
-      .input("LoanRequired",       sql.Bit,             LoanRequired ? 1 : 0)
-      .input("ExpectedLoanAmount", sql.Decimal(18, 2), normalizeNumber(ExpectedLoanAmount))
-      .input("PreferredBanker",    sql.NVarChar(200),  normalizeText(PreferredBanker))
-      .input("AssignedTo",         sql.Int,             normalizeNumber(AssignedTo))
-      .input("Notes",              sql.NVarChar(sql.MAX), normalizeText(Notes))
-      .input("Status",             sql.NVarChar(50),   normalizeText(Status) || "Scheduled")
-      .input("CreatedBy",          sql.NVarChar(100),  userName)
-      .query(`
+    const result = await pool
+      .request()
+      .input("CallNo", sql.NVarChar(50), callNo)
+      .input("BookingId", sql.Int, normalizeNumber(BookingId))
+      .input("ApplicantId", sql.Int, normalizeNumber(ApplicantId))
+      .input("CallDate", sql.Date, CallDate ? new Date(CallDate) : new Date())
+      .input("CallTime", sql.NVarChar(10), normalizeText(CallTime))
+      .input("Duration", sql.NVarChar(20), normalizeText(Duration))
+      .input("Outcome", sql.NVarChar(50), normalizeText(Outcome))
+      .input("BankSelected", sql.NVarChar(200), normalizeText(BankSelected))
+      .input("LoanRequired", sql.Bit, LoanRequired ? 1 : 0)
+      .input(
+        "ExpectedLoanAmount",
+        sql.Decimal(18, 2),
+        normalizeNumber(ExpectedLoanAmount),
+      )
+      .input(
+        "PreferredBanker",
+        sql.NVarChar(200),
+        normalizeText(PreferredBanker),
+      )
+      .input("AssignedTo", sql.Int, normalizeNumber(AssignedTo))
+      .input("Notes", sql.NVarChar(sql.MAX), normalizeText(Notes))
+      .input("Status", sql.NVarChar(50), normalizeText(Status) || "Scheduled")
+      .input("CreatedBy", sql.NVarChar(100), userName).query(`
         INSERT INTO dbo.FollowupWelcomeCalls
           (CallNo, BookingId, ApplicantId, CallDate, CallTime, Duration,
            Outcome, BankSelected, LoanRequired, ExpectedLoanAmount,
@@ -246,16 +283,20 @@ router.post("/", async (req, res) => {
     // ── Auto-draft Organisation NOC if bank was selected ────────────────────
     if (BankSelected) {
       try {
-        const nocInsert = await pool.request()
-          .input("ApplicantId",    sql.Int,          normalizeNumber(ApplicantId))
-          .input("UnitSelectionId",sql.Int,          null)
-          .input("AgreementId",    sql.Int,          null)
-          .input("ProjectId",      sql.Int,          null)
-          .input("CompanyId",      sql.Int,          null)
-          .input("Reason",         sql.NVarChar(500),`Bank NOC for ${BankSelected} — auto-created from Welcome Call ${callNo}`)
-          .input("Status",         sql.NVarChar(30), "Pending")
-          .input("CreatedBy",      sql.NVarChar(100),userName)
-          .query(`
+        const nocInsert = await pool
+          .request()
+          .input("ApplicantId", sql.Int, normalizeNumber(ApplicantId))
+          .input("UnitSelectionId", sql.Int, null)
+          .input("AgreementId", sql.Int, null)
+          .input("ProjectId", sql.Int, null)
+          .input("CompanyId", sql.Int, null)
+          .input(
+            "Reason",
+            sql.NVarChar(500),
+            `Bank NOC for ${BankSelected} — auto-created from Welcome Call ${callNo}`,
+          )
+          .input("Status", sql.NVarChar(30), "Pending")
+          .input("CreatedBy", sql.NVarChar(100), userName).query(`
             INSERT INTO dbo.FollowupNOCs (
               ApplicantId, UnitSelectionId, AgreementId, ProjectId, CompanyId,
               Reason, Status, CreatedBy, CreatedAt
@@ -269,8 +310,9 @@ router.post("/", async (req, res) => {
         const nocId = nocInsert.recordset[0]?.Id;
         if (nocId) {
           const nocNo = `NOC${String(nocId).padStart(6, "0")}`;
-          await pool.request()
-            .input("Id",    sql.Int,          nocId)
+          await pool
+            .request()
+            .input("Id", sql.Int, nocId)
             .input("NOCNo", sql.NVarChar(50), nocNo)
             .query(`UPDATE dbo.FollowupNOCs SET NOCNo = @NOCNo WHERE Id = @Id`);
           autoDraftNocNo = nocNo;
@@ -301,29 +343,47 @@ router.put("/:id", async (req, res) => {
   if (!userName) return;
 
   const {
-    BookingId, ApplicantId, CallDate, CallTime, Duration,
-    Outcome, BankSelected, LoanRequired, ExpectedLoanAmount,
-    PreferredBanker, AssignedTo, Notes, Status,
+    BookingId,
+    ApplicantId,
+    CallDate,
+    CallTime,
+    Duration,
+    Outcome,
+    BankSelected,
+    LoanRequired,
+    ExpectedLoanAmount,
+    PreferredBanker,
+    AssignedTo,
+    Notes,
+    Status,
   } = req.body || {};
 
   try {
-    const result = await getPool().request()
-      .input("Id",                 sql.Int,             id)
-      .input("BookingId",          sql.Int,             normalizeNumber(BookingId))
-      .input("ApplicantId",        sql.Int,             normalizeNumber(ApplicantId))
-      .input("CallDate",           sql.Date,            CallDate ? new Date(CallDate) : null)
-      .input("CallTime",           sql.NVarChar(10),   normalizeText(CallTime))
-      .input("Duration",           sql.NVarChar(20),   normalizeText(Duration))
-      .input("Outcome",            sql.NVarChar(50),   normalizeText(Outcome))
-      .input("BankSelected",       sql.NVarChar(200),  normalizeText(BankSelected))
-      .input("LoanRequired",       sql.Bit,             LoanRequired ? 1 : 0)
-      .input("ExpectedLoanAmount", sql.Decimal(18, 2), normalizeNumber(ExpectedLoanAmount))
-      .input("PreferredBanker",    sql.NVarChar(200),  normalizeText(PreferredBanker))
-      .input("AssignedTo",         sql.Int,             normalizeNumber(AssignedTo))
-      .input("Notes",              sql.NVarChar(sql.MAX), normalizeText(Notes))
-      .input("Status",             sql.NVarChar(50),   normalizeText(Status))
-      .input("UpdatedBy",          sql.NVarChar(100),  userName)
-      .query(`
+    const result = await getPool()
+      .request()
+      .input("Id", sql.Int, id)
+      .input("BookingId", sql.Int, normalizeNumber(BookingId))
+      .input("ApplicantId", sql.Int, normalizeNumber(ApplicantId))
+      .input("CallDate", sql.Date, CallDate ? new Date(CallDate) : null)
+      .input("CallTime", sql.NVarChar(10), normalizeText(CallTime))
+      .input("Duration", sql.NVarChar(20), normalizeText(Duration))
+      .input("Outcome", sql.NVarChar(50), normalizeText(Outcome))
+      .input("BankSelected", sql.NVarChar(200), normalizeText(BankSelected))
+      .input("LoanRequired", sql.Bit, LoanRequired ? 1 : 0)
+      .input(
+        "ExpectedLoanAmount",
+        sql.Decimal(18, 2),
+        normalizeNumber(ExpectedLoanAmount),
+      )
+      .input(
+        "PreferredBanker",
+        sql.NVarChar(200),
+        normalizeText(PreferredBanker),
+      )
+      .input("AssignedTo", sql.Int, normalizeNumber(AssignedTo))
+      .input("Notes", sql.NVarChar(sql.MAX), normalizeText(Notes))
+      .input("Status", sql.NVarChar(50), normalizeText(Status))
+      .input("UpdatedBy", sql.NVarChar(100), userName).query(`
         UPDATE dbo.FollowupWelcomeCalls SET
           BookingId          = ISNULL(@BookingId, BookingId),
           ApplicantId        = ISNULL(@ApplicantId, ApplicantId),
@@ -343,7 +403,8 @@ router.put("/:id", async (req, res) => {
         WHERE Id = @Id AND IsDeleted = 0
       `);
 
-    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Not found" });
+    if (!result.rowsAffected[0])
+      return res.status(404).json({ error: "Not found" });
     res.json({ success: true });
   } catch (err) {
     console.error("WelcomeCalls PUT error:", err.message);
@@ -360,16 +421,17 @@ router.delete("/:id", async (req, res) => {
   if (!userName) return;
 
   try {
-    const result = await getPool().request()
-      .input("Id",        sql.Int,          id)
-      .input("UpdatedBy", sql.NVarChar(100), userName)
-      .query(`
+    const result = await getPool()
+      .request()
+      .input("Id", sql.Int, id)
+      .input("UpdatedBy", sql.NVarChar(100), userName).query(`
         UPDATE dbo.FollowupWelcomeCalls
         SET IsDeleted = 1, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
       `);
 
-    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Not found" });
+    if (!result.rowsAffected[0])
+      return res.status(404).json({ error: "Not found" });
     res.json({ success: true });
   } catch (err) {
     console.error("WelcomeCalls DELETE error:", err.message);

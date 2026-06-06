@@ -100,7 +100,9 @@ function FilterSelect({
 
   return (
     <div className="flex-1 space-y-1.5">
-      <p className={`text-xs font-semibold uppercase tracking-wider ${c.label}`}>
+      <p
+        className={`text-xs font-semibold uppercase tracking-wider ${c.label}`}
+      >
         {label}
       </p>
       <div className="relative">
@@ -111,10 +113,17 @@ function FilterSelect({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={`w-full pl-9 pr-8 py-2.5 rounded-xl border-2 text-sm text-foreground outline-none appearance-none transition-colors ${c.border} ${c.bg}`}
+          style={{ colorScheme: "dark" }}
         >
-          <option value="">{placeholder}</option>
+          <option value="" className="bg-popover text-foreground">
+            {placeholder}
+          </option>
           {options.map((o) => (
-            <option key={o.value} value={o.value}>
+            <option
+              key={o.value}
+              value={o.value}
+              className="bg-popover text-foreground"
+            >
               {o.label}
             </option>
           ))}
@@ -177,12 +186,19 @@ function GodownSelect({
               ? "border-orange-400/40 bg-orange-500/5 focus:border-orange-500/60"
               : "border-emerald-400/40 bg-emerald-500/5 focus:border-emerald-500/60"
           }`}
+          style={{ colorScheme: "dark" }}
         >
-          <option value="">{placeholder}</option>
+          <option value="" className="bg-popover text-foreground">
+            {placeholder}
+          </option>
           {godowns
             .filter((g) => g.GodownID !== exclude)
             .map((g) => (
-              <option key={g.GodownID} value={g.GodownID}>
+              <option
+                key={g.GodownID}
+                value={g.GodownID}
+                className="bg-popover text-foreground"
+              >
                 {g.GodownName}
                 {g.IsMain ? " [Main]" : ""}
               </option>
@@ -203,7 +219,9 @@ function GodownSelect({
         >
           <Warehouse
             size={12}
-            className={isFrom ? "text-orange-500 shrink-0" : "text-emerald-600 shrink-0"}
+            className={
+              isFrom ? "text-orange-500 shrink-0" : "text-emerald-600 shrink-0"
+            }
           />
           <p
             className={`text-xs font-semibold truncate ${
@@ -283,7 +301,9 @@ function ItemSearchRow({
   return (
     <div
       className={`grid grid-cols-12 gap-2 items-start p-3 rounded-xl border transition-colors ${
-        overLimit ? "border-red-400/40 bg-red-500/5" : "border-border bg-muted/20"
+        overLimit
+          ? "border-red-400/40 bg-red-500/5"
+          : "border-border bg-muted/20"
       }`}
     >
       {/* # */}
@@ -305,7 +325,12 @@ function ItemSearchRow({
               setSearch(e.target.value);
               setOpen(true);
               if (!e.target.value) {
-                onUpdate(idx, { itemId: "", itemName: "", uom: "", availableQty: 0 });
+                onUpdate(idx, {
+                  itemId: "",
+                  itemName: "",
+                  uom: "",
+                  availableQty: 0,
+                });
               }
             }}
             onFocus={() => setOpen(true)}
@@ -336,7 +361,9 @@ function ItemSearchRow({
                       <p className="text-xs font-medium text-foreground truncate">
                         {a.itemName}
                       </p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">{a.uom}</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        {a.uom}
+                      </p>
                     </div>
                     <span
                       className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ml-2 ${
@@ -433,21 +460,24 @@ function TransferHistory() {
           disabled={isFetching}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
         >
-          <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} /> Refresh
+          <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />{" "}
+          Refresh
         </button>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead className="border-b border-border bg-muted/40">
             <tr>
-              {["Doc No", "Date", "From", "To", "Items", "Status", "By"].map((h) => (
-                <th
-                  key={h}
-                  className="px-4 py-3 text-left font-semibold text-muted-foreground"
-                >
-                  {h}
-                </th>
-              ))}
+              {["Doc No", "Date", "From", "To", "Items", "Status", "By"].map(
+                (h) => (
+                  <th
+                    key={h}
+                    className="px-4 py-3 text-left font-semibold text-muted-foreground"
+                  >
+                    {h}
+                  </th>
+                ),
+              )}
             </tr>
           </thead>
           <tbody>
@@ -463,7 +493,10 @@ function TransferHistory() {
               ))
             ) : transfers.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                <td
+                  colSpan={7}
+                  className="px-4 py-12 text-center text-muted-foreground"
+                >
                   No transfers yet.
                 </td>
               </tr>
@@ -490,7 +523,8 @@ function TransferHistory() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
-                    {t.TransferItems.length} item{t.TransferItems.length !== 1 ? "s" : ""}
+                    {t.TransferItems.length} item
+                    {t.TransferItems.length !== 1 ? "s" : ""}
                   </td>
                   <td className="px-4 py-3">
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-600 font-medium">
@@ -514,7 +548,9 @@ function TransferHistory() {
 export default function StockTransfer() {
   const qc = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<"transfer" | "history">("transfer");
+  const [activeTab, setActiveTab] = useState<"transfer" | "history">(
+    "transfer",
+  );
   const [filterCompanyId, setFilterCompanyId] = useState("");
   const [filterProjectId, setFilterProjectId] = useState("");
   const [fromGodownId, setFromGodownId] = useState<number | null>(null);
@@ -542,8 +578,11 @@ export default function StockTransfer() {
     queryFn: () => getEnterpriseOptions(undefined, "P"),
     staleTime: 120_000,
   });
-  const allProjects: { id: number; label: string; belongs_to: string | null }[] =
-    projectsData ?? [];
+  const allProjects: {
+    id: number;
+    label: string;
+    belongs_to: string | null;
+  }[] = projectsData ?? [];
 
   const filteredGodowns = useMemo(() => {
     return allGodowns.filter((g) => {
@@ -605,7 +644,9 @@ export default function StockTransfer() {
   });
 
   const updateItem = (idx: number, patch: Partial<TItem>) =>
-    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
+    setItems((prev) =>
+      prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)),
+    );
   const removeItem = (idx: number) =>
     setItems((prev) => prev.filter((_, i) => i !== idx));
   const addItem = () => setItems((prev) => [...prev, emptyItem()]);
@@ -644,8 +685,10 @@ export default function StockTransfer() {
     setErrorMsg("");
   };
 
-  const fromGodown = filteredGodowns.find((g) => g.GodownID === fromGodownId) || null;
-  const toGodown = filteredGodowns.find((g) => g.GodownID === toGodownId) || null;
+  const fromGodown =
+    filteredGodowns.find((g) => g.GodownID === fromGodownId) || null;
+  const toGodown =
+    filteredGodowns.find((g) => g.GodownID === toGodownId) || null;
 
   const companyOptions = (enterprisesData ?? []).map((e) => ({
     value: String(e.id),
@@ -670,7 +713,8 @@ export default function StockTransfer() {
               Stock Transfer
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Move stock between godowns — main to branch or any godown to godown
+              Move stock between godowns — main to branch or any godown to
+              godown
             </p>
           </div>
           <div className="flex items-center gap-1 p-1 rounded-xl bg-muted border border-border">
@@ -803,7 +847,10 @@ export default function StockTransfer() {
                   {filterCompanyId && (
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-blue-500/10 text-blue-600 border border-blue-400/20 font-medium">
                       <Building2 size={10} />
-                      {companyOptions.find((o) => o.value === filterCompanyId)?.label}
+                      {
+                        companyOptions.find((o) => o.value === filterCompanyId)
+                          ?.label
+                      }
                       <button
                         onClick={() => {
                           setFilterCompanyId("");
@@ -821,7 +868,11 @@ export default function StockTransfer() {
                   {filterProjectId && (
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-violet-500/10 text-violet-600 border border-violet-400/20 font-medium">
                       <FolderKanban size={10} />
-                      {projectSelectOptions.find((o) => o.value === filterProjectId)?.label}
+                      {
+                        projectSelectOptions.find(
+                          (o) => o.value === filterProjectId,
+                        )?.label
+                      }
                       <button
                         onClick={() => {
                           setFilterProjectId("");
@@ -842,18 +893,22 @@ export default function StockTransfer() {
                 </div>
               )}
 
-
               {fromGodownId && toGodownId && fromGodownId === toGodownId && (
                 <p className="text-xs text-red-500 flex items-center gap-1">
-                  <AlertCircle size={11} /> Source and destination must be different.
+                  <AlertCircle size={11} /> Source and destination must be
+                  different.
                 </p>
               )}
 
               {fromGodown && toGodown && fromGodownId !== toGodownId && (
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/50 border border-border text-xs text-muted-foreground">
-                  <span className="font-medium text-orange-600">{fromGodown.GodownName}</span>
+                  <span className="font-medium text-orange-600">
+                    {fromGodown.GodownName}
+                  </span>
                   <ArrowRight size={12} />
-                  <span className="font-medium text-emerald-600">{toGodown.GodownName}</span>
+                  <span className="font-medium text-emerald-600">
+                    {toGodown.GodownName}
+                  </span>
                 </div>
               )}
             </div>
@@ -955,7 +1010,8 @@ export default function StockTransfer() {
                     >
                       {transferMut.isPending ? (
                         <>
-                          <RefreshCw size={14} className="animate-spin" /> Processing…
+                          <RefreshCw size={14} className="animate-spin" />{" "}
+                          Processing…
                         </>
                       ) : (
                         <>

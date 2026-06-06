@@ -179,7 +179,7 @@ const ALL_ROUTES = [
   { path: "/api/lookups", file: "./routes/lookups" },
   {
     path: "/api/followup-agreement-workflow",
-    file: "./routes/followupAgreementWorkflow",
+    file: "./routes/followupagreementworkflow",
   },
   {
     path: "/api/followup-document-vault",

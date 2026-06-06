@@ -602,6 +602,84 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+// ── Line Changes (per-field audit trail) ─────────────────────────────────────
+
+router.get("/:id/line-changes", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid amendment id" });
+
+  try {
+    const result = await getPool()
+      .request()
+      .input("AmendmentId", sql.Int, id)
+      .query(`
+        SELECT
+          Id,
+          AmendmentId,
+          FieldName,
+          FieldLabel,
+          OldValue,
+          NewValue,
+          ChangedBy,
+          CONVERT(VARCHAR(23), ChangedAt, 126) AS ChangedAt
+        FROM dbo.AmendmentLineChanges
+        WHERE AmendmentId = @AmendmentId
+        ORDER BY ChangedAt ASC, Id ASC
+      `);
+
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("amendment line-changes GET error:", err);
+    res.status(500).json({ error: "Failed to fetch line changes" });
+  }
+});
+
+router.post("/:id/line-changes", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid amendment id" });
+
+  const userName = requireUserName(req, res);
+  if (!userName) return;
+
+  const changes = req.body?.changes;
+  if (!Array.isArray(changes) || changes.length === 0) {
+    return res.status(400).json({ error: "changes array is required" });
+  }
+
+  try {
+    const status = await getAmendmentStatus(id);
+    if (!status) return res.status(404).json({ error: "Amendment not found" });
+    if (status !== "Draft") {
+      return res.status(400).json({ error: "Line changes can only be added to Draft amendments" });
+    }
+
+    const pool = getPool();
+    for (const change of changes) {
+      const fieldName = normalizeText(change?.FieldName);
+      if (!fieldName) continue;
+
+      await pool.request()
+        .input("AmendmentId", sql.Int, id)
+        .input("FieldName", sql.NVarChar(200), fieldName)
+        .input("FieldLabel", sql.NVarChar(200), normalizeText(change?.FieldLabel))
+        .input("OldValue", sql.NVarChar(sql.MAX), normalizeText(change?.OldValue))
+        .input("NewValue", sql.NVarChar(sql.MAX), normalizeText(change?.NewValue))
+        .input("ChangedBy", sql.NVarChar(200), userName)
+        .query(`
+          INSERT INTO dbo.AmendmentLineChanges
+            (AmendmentId, FieldName, FieldLabel, OldValue, NewValue, ChangedBy)
+          VALUES
+            (@AmendmentId, @FieldName, @FieldLabel, @OldValue, @NewValue, @ChangedBy)
+        `);
+    }
+
+    res.status(201).json({ success: true, count: changes.length });
+  } catch (err) {
+    console.error("amendment line-changes POST error:", err);
+    res.status(500).json({ error: "Failed to save line changes" });
+  }
+});
+
 module.exports = router;
 
 
