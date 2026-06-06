@@ -62,7 +62,7 @@ BEGIN
             FOREIGN KEY (AgreementId) REFERENCES dbo.FollowupAgreements(Id),
 
         CONSTRAINT CK_FSD_Status
-            CHECK (Status IN ('Draft','Executed','Registered','Cancelled'))
+            CHECK (Status IN ('Draft','Executed','Registered','Overdue','Cancelled'))
     );
 END;
 GO

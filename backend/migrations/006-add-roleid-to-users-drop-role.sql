@@ -10,11 +10,14 @@ BEGIN
 END
 
 -- 2. Migrate existing string role -> RoleId
--- Map common strings to Role.RName (adjust if your roles have different names)
-UPDATE u SET RoleId = (SELECT RId FROM Role WHERE LOWER(RName) = 'admin') FROM dbo.users u WHERE LOWER(u.role) = 'admin' AND u.RoleId IS NULL;
-UPDATE u SET RoleId = (SELECT RId FROM Role WHERE LOWER(RName) = 'super_admin') FROM dbo.users u WHERE LOWER(u.role) = 'super_admin' AND u.RoleId IS NULL;
-UPDATE u SET RoleId = (SELECT RId FROM Role WHERE LOWER(RName) = 'dba') FROM dbo.users u WHERE LOWER(u.role) = 'dba' AND u.RoleId IS NULL;
-UPDATE u SET RoleId = (SELECT RId FROM Role WHERE LOWER(RName) = 'user') FROM dbo.users u WHERE LOWER(u.role) = 'user' AND u.RoleId IS NULL;
+-- Map existing string role values to dbo.Role.RName.
+UPDATE u
+SET RoleId = r.RId
+FROM dbo.users u
+JOIN dbo.Role r
+    ON LOWER(REPLACE(r.RName, ' ', '_')) = LOWER(REPLACE(u.role, ' ', '_'))
+WHERE u.RoleId IS NULL
+  AND u.role IS NOT NULL;
 
 PRINT 'Manual role string -> RoleId migration complete.';
 
