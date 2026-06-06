@@ -976,7 +976,7 @@ function printPDF(
   const el = printRef.current;
   if (!el) return;
 
-  const content = el.innerHTML;
+  const content = el.innerHTML.replace(/<script[\s\S]*?<\/script>/gi,'').replace(/on\w+\s*=/gi,'');
   const win = window.open("", "_blank");
   if (!win) return;
 
