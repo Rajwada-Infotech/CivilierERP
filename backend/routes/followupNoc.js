@@ -256,6 +256,7 @@ router.get("/", async (req, res) => {
     const search = normalizeText(req.query.search);
     const status = normalizeText(req.query.status);
     const applicantId = normalizeNumber(req.query.applicantId);
+    const bankNocStatus = normalizeText(req.query.bankNocStatus);
 
     if (Number.isNaN(applicantId)) {
       return res
@@ -278,6 +279,7 @@ router.get("/", async (req, res) => {
     }
     if (status) filters.push("fn.Status = @Status");
     if (applicantId) filters.push("fn.ApplicantId = @ApplicantId");
+    if (bankNocStatus) filters.push("fn.BankNOCStatus = @BankNOCStatus");
 
     const whereClause = `WHERE ${filters.join(" AND ")}`;
     const pool = getPool();
@@ -296,6 +298,8 @@ router.get("/", async (req, res) => {
       if (search) request.input("Search", sql.NVarChar(255), `%${search}%`);
       if (status) request.input("Status", sql.NVarChar(30), status);
       if (applicantId) request.input("ApplicantId", sql.Int, applicantId);
+      if (bankNocStatus)
+        request.input("BankNOCStatus", sql.NVarChar(30), bankNocStatus);
       return request;
     };
 

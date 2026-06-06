@@ -35,12 +35,12 @@ router.get("/summary", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.FollowupNOCs           WHERE IsDeleted = 0 AND Status = 'Issued')  AS issuedNOC,
 
         -- Sales Deed
-        (SELECT COUNT(*) FROM dbo.FollowupSalesDeed     WHERE IsDeleted = 0 AND Status = 'Draft')      AS draftSalesDeed,
-        (SELECT COUNT(*) FROM dbo.FollowupSalesDeed     WHERE IsDeleted = 0 AND Status = 'Registered') AS registeredSalesDeed,
+        (SELECT COUNT(*) FROM dbo.FollowupSalesDeeds    WHERE IsDeleted = 0 AND Status = 'Draft')      AS draftSalesDeed,
+        (SELECT COUNT(*) FROM dbo.FollowupSalesDeeds    WHERE IsDeleted = 0 AND Status = 'Registered') AS registeredSalesDeed,
 
         -- Handover
-        (SELECT COUNT(*) FROM dbo.FollowupHandover      WHERE IsDeleted = 0 AND Status = 'Completed')  AS handoverCompleted,
-        (SELECT COUNT(*) FROM dbo.FollowupHandover      WHERE IsDeleted = 0 AND Status = 'Scheduled')  AS handoverScheduled,
+        (SELECT COUNT(*) FROM dbo.FollowupHandovers     WHERE IsDeleted = 0 AND Status = 'Completed')  AS handoverCompleted,
+        (SELECT COUNT(*) FROM dbo.FollowupHandovers     WHERE IsDeleted = 0 AND Status = 'Scheduled')  AS handoverScheduled,
 
         -- Total value of confirmed bookings
         ISNULL((SELECT SUM(TotalValue) FROM dbo.FollowupBookings WHERE IsDeleted = 0 AND Status = 'Confirmed'), 0) AS totalConfirmedValue
@@ -90,7 +90,7 @@ router.get("/summary", async (req, res) => {
           HandoverNo,
           'Handover',
           CreatedBy, CreatedAt
-        FROM dbo.FollowupHandover WHERE IsDeleted = 0
+        FROM dbo.FollowupHandovers WHERE IsDeleted = 0
       ) AS combined
       ORDER BY CreatedAt DESC
     `);
@@ -171,7 +171,7 @@ router.get("/pipeline", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.FollowupWelcomeCalls  WHERE IsDeleted = 0 AND Status = 'Completed') AS stage3_welcome_calls,
         (SELECT COUNT(*) FROM dbo.FollowupAgreements    WHERE IsDeleted = 0 AND Status = 'Signed')    AS stage4_agreements,
         (SELECT COUNT(*) FROM dbo.FollowupNOCs           WHERE IsDeleted = 0 AND Status = 'Issued')    AS stage5_noc,
-        (SELECT COUNT(*) FROM dbo.FollowupHandover      WHERE IsDeleted = 0 AND Status = 'Completed') AS stage6_handover
+        (SELECT COUNT(*) FROM dbo.FollowupHandovers     WHERE IsDeleted = 0 AND Status = 'Completed') AS stage6_handover
     `);
     res.json(result.recordset[0]);
   } catch (err) {
