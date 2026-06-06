@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useFinYear } from "@/contexts/FinYearContext";
@@ -60,6 +61,7 @@ import {
   Truck,
   Package,
   AlertTriangle,
+  FilePenLine,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -1295,6 +1297,7 @@ const ALL_STATUSES = ["All", ...BOOKING_STATUSES] as const;
 const PAGE_SIZE = 20;
 
 export default function MaterialExpenseBooking() {
+  const navigate = useNavigate();
   const { finYears } = useFinYear();
   const activeFinYears = finYears
     .filter((fy) => fy.status === "Active")
@@ -1941,6 +1944,22 @@ export default function MaterialExpenseBooking() {
     _mastersCache.grn = null;
     fetchMasters();
     setView("form");
+  };
+
+  const openAmend = (rec: ExpenseRecord) => {
+    navigate("/material/amendment-menu", {
+      state: {
+        prefill: {
+          tab: "EB",
+          docId: rec.id ?? "",
+          docNo: rec.eDocNo ?? "",
+          supplierName: rec.eProjectName ?? "",
+          projectName: "",
+          companyName: "",
+          totalAmount: rec.eNetAmount ?? rec.eAmount ?? 0,
+        },
+      },
+    });
   };
 
   const requestDelete = async (id: string) => {
@@ -3253,7 +3272,7 @@ export default function MaterialExpenseBooking() {
                           : `booking-card-${index}`
                       }
                       rec={rec}
-                      onEdit={() => openEdit(rec)}
+                      onEdit={() => openAmend(rec)}
                       onPreview={() => setPreviewRecord(rec)}
                       onDelete={() => requestDelete(rec.id)}
                       onApprovalSuccess={fetchRecords}
@@ -3414,10 +3433,11 @@ export default function MaterialExpenseBooking() {
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      className="h-7 w-7 p-0"
-                                      onClick={() => openEdit(rec)}
+                                      className="h-7 w-7 p-0 border-amber-300 text-amber-600 hover:bg-amber-50"
+                                      onClick={() => openAmend(rec)}
+                                      title="Create Amendment"
                                     >
-                                      <Edit size={12} />
+                                      <FilePenLine size={12} />
                                     </Button>
                                     <Button
                                       variant="destructive"
@@ -3646,7 +3666,7 @@ export default function MaterialExpenseBooking() {
       <ExpenseBookingPreviewModal
         previewRecord={previewRecord}
         onClose={() => setPreviewRecord(null)}
-        onEdit={(record) => openEdit(record)}
+        onEdit={(record) => openAmend(record)}
       />
 
       {/* Remaining GRN Items — auto-created silently on save */}

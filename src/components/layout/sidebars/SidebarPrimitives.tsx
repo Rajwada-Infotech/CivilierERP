@@ -8,6 +8,7 @@ export interface SubItem {
   label: string;
   path: string;
   badge?: number;
+  state?: Record<string, unknown>;
 }
 
 export interface SubSection {
@@ -112,7 +113,7 @@ export const NavGroup = ({
           {item.children?.map((child: SubItem) => (
             <button
               key={child.path}
-              onClick={() => navigate(child.path)}
+              onClick={() => navigate(child.path, child.state ? { state: child.state } : undefined)}
               className={`w-full flex justify-between items-center text-xs px-2 py-1.5 rounded-md transition-colors ${
                 location.pathname === child.path
                   ? "bg-primary/15 text-primary font-medium"

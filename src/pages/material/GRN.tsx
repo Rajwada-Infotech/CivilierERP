@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -27,6 +28,7 @@ import {
   Filter,
   Layers,
   AlertTriangle,
+  FilePenLine,
 } from "lucide-react";
 import {
   Dialog,
@@ -533,11 +535,11 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
             <Eye size={15} />
           </button>
           <button
-            onClick={() => onEdit(grn)}
-            className="text-primary hover:bg-primary/10 p-2 rounded-lg transition-colors"
-            title="Edit"
+            onClick={() => goToGRNAmend(grn)}
+            className="text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 p-2 rounded-lg transition-colors"
+            title="Create Amendment"
           >
-            <Edit3 size={15} />
+            <FilePenLine size={15} />
           </button>
           <button
             onClick={() => handleDeleteGrn(String(grn.GRNID))}
@@ -635,6 +637,7 @@ function InfoPill({
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function GRN() {
   queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { finYears } = useFinYear();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingGrn, setViewingGrn] = useState<any | null>(null);
@@ -1079,6 +1082,22 @@ export default function GRN() {
     });
     setEditingId(String(fullGrn.GRNID));
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const goToGRNAmend = (grn: any) => {
+    navigate("/material/amendment-menu", {
+      state: {
+        prefill: {
+          tab: "GRN",
+          docId: String(grn.GRNID),
+          docNo: grn.GRNNo,
+          supplierName: grn.SupplierName,
+          projectName: grn.ProjectName ?? "",
+          companyName: grn.CompanyName ?? "",
+          totalAmount: grn.TotalAmount ?? 0,
+        },
+      },
+    });
   };
 
   const resetForm = () => {

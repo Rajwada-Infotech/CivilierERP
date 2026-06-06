@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -75,6 +75,7 @@ import {
   Receipt,
   ChevronDown,
   CalendarDays,
+  FilePenLine,
 } from "lucide-react";
 
 // ─── PO Chain Status Hook ─────────────────────────────────────────────────────
@@ -308,6 +309,7 @@ type ViewMode = "list" | "create" | "edit" | "view";
 const PurchaseOrderMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const location = useLocation();
+  const navigate = useNavigate();
   const { finYears } = useFinYear();
 
   // ── MR prefill (when navigated from Material Request "Create PO") ─────────
@@ -1541,6 +1543,22 @@ const PurchaseOrderMaster: React.FC = () => {
     setViewMode("view");
   };
 
+  const goToAmend = (item: POListItem) => {
+    navigate("/material/amendment-menu", {
+      state: {
+        prefill: {
+          tab: "PO",
+          docId: item._id,
+          docNo: item.poNumber || item.docNo,
+          supplierName: item.supplierName,
+          projectName: item.projectName,
+          companyName: item.companyName,
+          totalAmount: item.totalAmount,
+        },
+      },
+    });
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER: LIST VIEW
   // ─────────────────────────────────────────────────────────────────────────
@@ -1721,11 +1739,11 @@ const PurchaseOrderMaster: React.FC = () => {
                             <Eye size={14} />
                           </button>
                           <button
-                            onClick={() => goToEdit(item)}
-                            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition"
-                            title="Edit"
+                            onClick={() => goToAmend(item)}
+                            className="p-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-950/30 text-amber-600 hover:text-amber-700 transition"
+                            title="Create Amendment"
                           >
-                            <PenSquare size={14} />
+                            <FilePenLine size={14} />
                           </button>
                           <button
                             onClick={() => handleDelete(item._id)}
@@ -2056,11 +2074,14 @@ const PurchaseOrderMaster: React.FC = () => {
               Print
             </button>
             <button
-              onClick={() => setViewMode("edit")}
+              onClick={() => {
+                const item = listData.find((r) => r._id === editingId);
+                if (item) goToAmend(item);
+              }}
               className="gradient-accent inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold transition shadow-sm"
             >
-              <PenSquare size={14} />
-              Edit
+              <FilePenLine size={14} />
+              Amend
             </button>
           </div>
         )}
