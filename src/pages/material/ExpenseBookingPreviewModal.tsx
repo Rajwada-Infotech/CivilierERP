@@ -27,6 +27,7 @@ import {
   FileText,
   ArrowRight,
   Wallet,
+  Printer,
 } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { parseJsonArray } from "@/utils/parseJsonArray";
@@ -129,7 +130,15 @@ export function ExpenseBookingPreviewModal({
 
   return (
     <Dialog open={!!previewRecord} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="w-[calc(100vw-1rem)] max-w-5xl max-h-[96vh] overflow-y-auto">
+      <DialogContent className="w-[calc(100vw-1rem)] max-w-5xl max-h-[96vh] overflow-y-auto expense-preview-modal">
+        <style>{`
+          @media print {
+            body > * { display: none !important; }
+            [data-radix-dialog-overlay] { display: none !important; }
+            .expense-preview-modal { display: block !important; position: static !important; background: white !important; box-shadow: none !important; max-height: none !important; overflow: visible !important; border: none !important; border-radius: 0 !important; transform: none !important; }
+            .expense-preview-print-hide { display: none !important; }
+          }
+        `}</style>
         <DialogHeader>
           <DialogTitle>Expense Booking Preview</DialogTitle>
           <DialogDescription>
@@ -906,13 +915,13 @@ export function ExpenseBookingPreviewModal({
         </div>
 
         <div className="border-t border-border px-4 sm:px-6 py-3 flex flex-col-reverse sm:flex-row items-center justify-between gap-2 bg-muted/10">
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-[10px] text-muted-foreground expense-preview-print-hide">
             ID: <span className="font-mono">{previewRecord.id || "—"}</span>
           </p>
           <div className="flex gap-2 w-full sm:w-auto">
             <Button
               variant="outline"
-              className="flex-1 sm:flex-none h-8 text-xs"
+              className="flex-1 sm:flex-none h-8 text-xs expense-preview-print-hide"
               onClick={() => {
                 onClose();
                 onEdit(previewRecord);
@@ -922,7 +931,14 @@ export function ExpenseBookingPreviewModal({
             </Button>
             <Button
               variant="outline"
-              className="flex-1 sm:flex-none h-8 text-xs"
+              className="flex-1 sm:flex-none h-8 text-xs expense-preview-print-hide"
+              onClick={() => window.print()}
+            >
+              <Printer size={11} className="mr-1.5" /> Print
+            </Button>
+            <Button
+              variant="outline"
+              className="flex-1 sm:flex-none h-8 text-xs expense-preview-print-hide"
               onClick={onClose}
             >
               Close
