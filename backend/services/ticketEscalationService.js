@@ -74,11 +74,32 @@ function emitTicketEscalation(escalatedTickets) {
   }
 }
 
+async function tableExists(pool, tableName) {
+  const result = await pool
+    .request()
+    .input("TableName", sql.NVarChar(128), tableName)
+    .query(`
+      SELECT CASE
+        WHEN OBJECT_ID(N'dbo.' + @TableName, N'U') IS NULL THEN 0
+        ELSE 1
+      END AS existsFlag
+    `);
+  return Boolean(result.recordset[0]?.existsFlag);
+}
+
 async function runTicketEscalationJob(options = {}) {
   const pool = options.pool || getPool();
   const sla = options.slaMinutes || getTicketEscalationSlaMinutes();
 
   try {
+    if (!(await tableExists(pool, "tickets"))) {
+      logger.warn(
+        { event: "TICKET_ESCALATION_SKIPPED", table: "dbo.tickets" },
+        "Ticket auto-escalation skipped because tickets table is missing",
+      );
+      return [];
+    }
+
     const result = await pool
       .request()
       .input("urgentMinutes", sql.Int, sla.Urgent)
@@ -117,8 +138,20 @@ async function runTicketEscalationJob(options = {}) {
       `);
 
     const escalatedTickets = result.recordset || [];
-    for (const ticket of escalatedTickets) {
-      await addEscalationComment(pool, ticket);
+    const canWriteComments =
+      escalatedTickets.length > 0 && (await tableExists(pool, "ticket_comments"));
+
+    if (!canWriteComments && escalatedTickets.length > 0) {
+      logger.warn(
+        { event: "TICKET_ESCALATION_COMMENTS_SKIPPED", table: "dbo.ticket_comments" },
+        "Ticket escalation comments skipped because ticket_comments table is missing",
+      );
+    }
+
+    if (canWriteComments) {
+      for (const ticket of escalatedTickets) {
+        await addEscalationComment(pool, ticket);
+      }
     }
 
     if (escalatedTickets.length > 0) {

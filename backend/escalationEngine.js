@@ -25,6 +25,14 @@ const { logAudit } = require("./utils/auditLog");
 const INTERVAL_MS = 60 * 60 * 1000; // run every hour
 const SYSTEM_USER = "EscalationEngine";
 
+const REQUIRED_TABLES = [
+  { table: "FollowupLegalMilestones", migration: "095-create-followup-legal-milestones.sql" },
+  { table: "FollowupAgreementWorkflows", migration: "102-create-followup-agreement-workflows.sql" },
+  { table: "FollowupSalesDeeds", migration: "066-followup-salesdeed-table.sql" },
+  { table: "FollowupBookings", migration: "080-create-followup-bookings.sql" },
+  { table: "FollowupAuditLog", migration: "101-create-followup-audit-log.sql" },
+];
+
 // ── Legal Milestone steps ────────────────────────────────────────────────────
 
 const LM_STEPS = [
@@ -54,6 +62,47 @@ const AW_STEPS = [
 
 function today() {
   return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+}
+
+async function tableExists(tableName) {
+  const result = await getPool()
+    .request()
+    .input("TableName", sql.NVarChar(128), tableName)
+    .query(`
+      SELECT CASE
+        WHEN OBJECT_ID(N'dbo.' + @TableName, N'U') IS NULL THEN 0
+        ELSE 1
+      END AS existsFlag
+    `);
+  return Boolean(result.recordset[0]?.existsFlag);
+}
+
+async function assertRequiredSchema() {
+  const request = getPool().request();
+  REQUIRED_TABLES.forEach(({ table }, index) => {
+    request.input(`Table${index}`, sql.NVarChar(128), table);
+  });
+
+  const result = await request.query(`
+    SELECT t.name
+    FROM sys.tables t
+    JOIN sys.schemas s ON s.schema_id = t.schema_id
+    WHERE s.name = 'dbo'
+      AND t.name IN (${REQUIRED_TABLES.map((_, index) => `@Table${index}`).join(", ")})
+  `);
+
+  const existing = new Set(result.recordset.map((row) => row.name));
+  const missing = REQUIRED_TABLES.filter(({ table }) => !existing.has(table));
+  if (missing.length === 0) return;
+
+  const details = missing
+    .map(({ table, migration }) => `dbo.${table} (${migration})`)
+    .join(", ");
+
+  throw new Error(
+    `Escalation schema is incomplete; missing ${details}. ` +
+      "Point DB_SERVER/DB_NAME at a fully restored CivilierERP database, or restore the base schema and run `cd backend && npm run migrate`.",
+  );
 }
 
 /**
@@ -293,6 +342,8 @@ async function runEscalation() {
   console.log(`[EscalationEngine] Running at ${new Date().toISOString()}`);
 
   try {
+    await assertRequiredSchema();
+
     const [lm, aw, sd, bk] = await Promise.all([
       escalateLegalMilestones(),
       escalateAgreementWorkflows(),
@@ -324,4 +375,4 @@ function startEscalationEngine() {
   );
 }
 
-module.exports = { startEscalationEngine, runEscalation };
+module.exports = { startEscalationEngine, runEscalation, assertRequiredSchema };

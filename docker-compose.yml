@@ -16,6 +16,8 @@ services:
       - ${CIVILIER_ENV_FILE:-backend/.env}
     environment:
       NODE_ENV: production
+      DB_SERVER: sqlserver
+      DB_PORT: 1433
       REDIS_HOST: redis
       REDIS_PORT: 6379
     expose:
@@ -23,6 +25,8 @@ services:
     volumes:
       - backend_uploads:/app/uploads
     depends_on:
+      sqlserver:
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks:
@@ -40,6 +44,30 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${LOCAL_SA_PASSWORD:-infotech@123}
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    networks:
+      - civilier-network
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$${MSSQL_SA_PASSWORD}" -C -Q "SELECT 1" || exit 1',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
@@ -85,6 +113,7 @@ volumes:
   frontend_dist:
   frontend_node_modules:
   backend_uploads:
+  sqlserver_data:
 
 networks:
   civilier-network:
