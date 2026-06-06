@@ -61,7 +61,6 @@ import {
   Truck,
   Package,
   AlertTriangle,
-  FilePenLine,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -1952,11 +1951,11 @@ export default function MaterialExpenseBooking() {
         prefill: {
           tab: "EB",
           docId: rec.id ?? "",
-          docNo: rec.eDocNo ?? "",
-          supplierName: rec.eProjectName ?? "",
-          projectName: "",
-          companyName: "",
-          totalAmount: rec.eNetAmount ?? rec.eAmount ?? 0,
+          docNo: rec.bookingReference ?? "",
+          supplierName: rec.supplier ?? "",
+          projectName: rec.projectName ?? "",
+          companyName: rec.companyName ?? "",
+          totalAmount: rec.netAmount ?? rec.basicAmount ?? 0,
         },
       },
     });
@@ -3429,15 +3428,6 @@ export default function MaterialExpenseBooking() {
                                       title="Preview"
                                     >
                                       <Eye size={12} />
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-7 w-7 p-0 border-amber-300 text-amber-600 hover:bg-amber-50"
-                                      onClick={() => openAmend(rec)}
-                                      title="Create Amendment"
-                                    >
-                                      <FilePenLine size={12} />
                                     </Button>
                                     <Button
                                       variant="destructive"

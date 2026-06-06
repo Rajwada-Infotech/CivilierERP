@@ -28,7 +28,6 @@ import {
   Filter,
   Layers,
   AlertTriangle,
-  FilePenLine,
 } from "lucide-react";
 import {
   Dialog,
@@ -53,7 +52,7 @@ import type {
 // Extend the base type with GST fields sourced from PurchaseOrderItems.TaxPct
 // (which itself comes from ItemMaster / HSN master at PO creation time).
 type GRNItemLine = GRNItemLineBase & {
-  gstPct: number;    // GST % from PO line (TaxPct) ← HSN master
+  gstPct: number; // GST % from PO line (TaxPct) ← HSN master
   gstAmount: number; // base (rate × qty) × gstPct / 100
 };
 
@@ -213,8 +212,8 @@ const createEmptyItem = (): GRNItemLine => ({
   rate: 0,
   quantity: 0,
   totalAmount: 0,
-  gstPct: 0,      // GST % sourced from PurchaseOrderItems.TaxPct (HSN master)
-  gstAmount: 0,   // computed: totalAmount × gstPct / 100
+  gstPct: 0, // GST % sourced from PurchaseOrderItems.TaxPct (HSN master)
+  gstAmount: 0, // computed: totalAmount × gstPct / 100
 });
 
 const parseJsonArray = <T,>(val: unknown): T[] => {
@@ -417,6 +416,7 @@ let onEdit: (grn: any) => void;
 let onView: (grn: any) => void;
 let deleteMutation: { mutate: (id: string) => void };
 let handleDeleteGrn: (id: string) => void;
+let goToGRNAmend: (grn: any) => void;
 
 // ─── List Columns ─────────────────────────────────────────────────────────────
 const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
@@ -533,13 +533,6 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
             title="View"
           >
             <Eye size={15} />
-          </button>
-          <button
-            onClick={() => goToGRNAmend(grn)}
-            className="text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 p-2 rounded-lg transition-colors"
-            title="Create Amendment"
-          >
-            <FilePenLine size={15} />
           </button>
           <button
             onClick={() => handleDeleteGrn(String(grn.GRNID))}
@@ -1084,7 +1077,7 @@ export default function GRN() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const goToGRNAmend = (grn: any) => {
+  const goToGRNAmendLocal = (grn: any) => {
     navigate("/material/amendment-menu", {
       state: {
         prefill: {
@@ -1099,6 +1092,7 @@ export default function GRN() {
       },
     });
   };
+  goToGRNAmend = goToGRNAmendLocal;
 
   const resetForm = () => {
     setFormData(buildEmptyForm());

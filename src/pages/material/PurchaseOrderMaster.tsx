@@ -411,7 +411,8 @@ const PurchaseOrderMaster: React.FC = () => {
   // ── Remote data ───────────────────────────────────────────────────────────
   const { data: dbData, isLoading } = useQuery({
     queryKey: ["purchase-orders", page, limit, poTypeFilter],
-    queryFn: () => getPurchaseOrders({ page, limit, poType: poTypeFilter || undefined }),
+    queryFn: () =>
+      getPurchaseOrders({ page, limit, poType: poTypeFilter || undefined }),
   });
 
   const { data: suppliersRaw = [] } = useQuery({
@@ -1599,7 +1600,10 @@ const PurchaseOrderMaster: React.FC = () => {
           ].map((tab) => (
             <button
               key={tab.value}
-              onClick={() => { setPoTypeFilter(tab.value); setPage(1); }}
+              onClick={() => {
+                setPoTypeFilter(tab.value);
+                setPage(1);
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
                 poTypeFilter === tab.value
                   ? "bg-card text-foreground shadow-sm"
@@ -1695,7 +1699,11 @@ const PurchaseOrderMaster: React.FC = () => {
                           {item.poType === "WO_PO" && (
                             <span
                               className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
-                              title={item.sourceWODocNo ? `From Work Order: ${item.sourceWODocNo}` : "Auto-generated from Work Order"}
+                              title={
+                                item.sourceWODocNo
+                                  ? `From Work Order: ${item.sourceWODocNo}`
+                                  : "Auto-generated from Work Order"
+                              }
                             >
                               WO-PO
                             </span>
@@ -1737,13 +1745,6 @@ const PurchaseOrderMaster: React.FC = () => {
                             title="View"
                           >
                             <Eye size={14} />
-                          </button>
-                          <button
-                            onClick={() => goToAmend(item)}
-                            className="p-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-950/30 text-amber-600 hover:text-amber-700 transition"
-                            title="Create Amendment"
-                          >
-                            <FilePenLine size={14} />
                           </button>
                           <button
                             onClick={() => handleDelete(item._id)}
