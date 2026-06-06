@@ -28,6 +28,7 @@ import {
   Filter,
   Layers,
   AlertTriangle,
+  Printer,
 } from "lucide-react";
 import {
   Dialog,
@@ -1804,7 +1805,14 @@ export default function GRN() {
             );
             return (
               <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
-                <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
+                <style>{`
+                  @media print {
+                    body > * { display: none !important; }
+                    .grn-print-modal { display: block !important; position: static !important; background: white !important; box-shadow: none !important; max-height: none !important; overflow: visible !important; border: none !important; border-radius: 0 !important; }
+                    .grn-print-modal .sticky { position: static !important; }
+                  }
+                `}</style>
+                <div className="grn-print-modal bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
                   {/* Modal header */}
                   <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
                     <div>
@@ -1819,12 +1827,21 @@ export default function GRN() {
                         Goods Receipt Note
                       </p>
                     </div>
-                    <button
-                      onClick={() => setViewingGrn(null)}
-                      className="p-2 hover:bg-muted rounded-lg transition-colors"
-                    >
-                      <X size={18} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => window.print()}
+                        title="Print GRN"
+                        className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
+                      >
+                        <Printer size={18} />
+                      </button>
+                      <button
+                        onClick={() => setViewingGrn(null)}
+                        className="p-2 hover:bg-muted rounded-lg transition-colors print:hidden"
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
                   </div>
 
                   <div className="p-5 sm:p-6 space-y-6">
