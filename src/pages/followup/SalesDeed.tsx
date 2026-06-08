@@ -56,7 +56,7 @@ import { AuditLogDrawer } from "@/components/AuditLogDrawer";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type DeedStatus = "Draft" | "Executed" | "Registered" | "Cancelled";
+type DeedStatus = "Draft" | "Executed" | "Registered" | "Overdue" | "Cancelled";
 
 interface SalesDeed {
   Id: number;
@@ -239,6 +239,11 @@ const STATUS_META: Record<
     label: "Registered",
     icon: <BookOpen size={11} />,
     cls: "sd-badge-registered",
+  },
+  Overdue: {
+    label: "Overdue",
+    icon: <AlertCircle size={11} />,
+    cls: "sd-badge-overdue",
   },
   Cancelled: {
     label: "Cancelled",
@@ -472,6 +477,7 @@ export function SalesDeedPage() {
       draft: deeds.filter((d) => d.Status === "Draft").length,
       executed: deeds.filter((d) => d.Status === "Executed").length,
       registered: deeds.filter((d) => d.Status === "Registered").length,
+      overdue: deeds.filter((d) => d.Status === "Overdue").length,
     }),
     [deeds, pagination],
   );
@@ -641,6 +647,7 @@ export function SalesDeedPage() {
     "Draft",
     "Executed",
     "Registered",
+    "Overdue",
     "Cancelled",
   ];
   const STATUS_LABELS: Record<string, string> = {
@@ -648,6 +655,7 @@ export function SalesDeedPage() {
     Draft: "Draft",
     Executed: "Executed",
     Registered: "Registered",
+    Overdue: "Overdue",
     Cancelled: "Cancelled",
   };
 
@@ -733,6 +741,7 @@ export function SalesDeedPage() {
         .sd-pill.active-draft     { background: hsl(var(--muted)); border-color: hsl(var(--border)); color: hsl(var(--muted-foreground)); }
         .sd-pill.active-executed  { background: hsl(142 76% 36% / 0.12); border-color: hsl(142 76% 36% / 0.4); color: hsl(142 76% 36%); }
         .sd-pill.active-registered{ background: hsl(var(--primary) / 0.1); border-color: hsl(var(--primary) / 0.4); color: hsl(var(--primary)); }
+        .sd-pill.active-overdue   { background: hsl(0 84% 60% / 0.12); border-color: hsl(0 84% 60% / 0.4); color: hsl(0 84% 40%); }
         .sd-pill.active-cancelled { background: hsl(0 84% 60% / 0.12); border-color: hsl(0 84% 60% / 0.4); color: hsl(0 84% 40%); }
 
         /* ── Stats bar ── */
@@ -743,7 +752,8 @@ export function SalesDeedPage() {
         .sd-stat-label { font-size: 10px; font-weight: 600; color: hsl(var(--muted-foreground)); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
         .sd-stat-val.blue   { color: hsl(var(--primary)); }
         .sd-stat-val.green  { color: hsl(142 72% 38%); }
-        .sd-stat-val.amber  { color: hsl(38 92% 50%); }
+.sd-stat-val.amber  { color: hsl(38 92% 50%); }
+        .sd-stat-val.red    { color: hsl(0 84% 45%); }
 
         /* ── Body ── */
         .sd-body { padding: 24px 28px; width: 100%; display: flex; flex-direction: column; }
@@ -798,6 +808,7 @@ export function SalesDeedPage() {
         .sd-badge-draft      { background: hsl(var(--muted));           color: hsl(var(--muted-foreground)); }
         .sd-badge-executed   { background: hsl(142 76% 36% / 0.12);    color: hsl(142 76% 36%); }
         .sd-badge-registered { background: hsl(var(--primary) / 0.1);  color: hsl(var(--primary)); }
+        .sd-badge-overdue    { background: hsl(0 84% 60% / 0.12);      color: hsl(0 84% 40%); }
         .sd-badge-cancelled  { background: hsl(0 84% 60% / 0.12);      color: hsl(0 84% 40%); }
 
         /* ── Row actions ── */
@@ -999,9 +1010,11 @@ export function SalesDeedPage() {
                       ? "sd-pill active-draft"
                       : s === "Executed"
                         ? "sd-pill active-executed"
-                        : s === "Registered"
-                          ? "sd-pill active-registered"
-                          : "sd-pill active-cancelled"
+                    : s === "Registered"
+                      ? "sd-pill active-registered"
+                          : s === "Overdue"
+                            ? "sd-pill active-overdue"
+                            : "sd-pill active-cancelled"
                   : "sd-pill";
                 return (
                   <button
@@ -1026,6 +1039,7 @@ export function SalesDeedPage() {
             { label: "Draft", val: stats.draft, cls: "" },
             { label: "Executed", val: stats.executed, cls: "green" },
             { label: "Registered", val: stats.registered, cls: "amber" },
+            { label: "Overdue", val: stats.overdue, cls: "red" },
           ].map(({ label, val, cls }) => (
             <div key={label} className="sd-stat">
               <div className={`sd-stat-val ${cls}`}>{val}</div>
@@ -1589,6 +1603,7 @@ export function SalesDeedPage() {
                     "Draft",
                     "Executed",
                     "Registered",
+                    "Overdue",
                     "Cancelled",
                   ] as DeedStatus[])
                 ).map((s) => (

@@ -138,8 +138,31 @@ module.exports = {
   queryWithRetry,
 };
 
-// Retry a DB operation up to `retries` times on ECONNRESET.
+// Retry a DB operation up to `retries` times on transient connection failures.
 // Usage: await queryWithRetry(pool, req => req.input(...).query(...))
+function isTransientSqlError(err) {
+  const code = String(err?.code || "").toUpperCase();
+  const message = String(err?.message || "").toUpperCase();
+  const transientCodes = new Set([
+    "ECONNRESET",
+    "ETIMEDOUT",
+    "ESOCKET",
+    "ECONNCLOSED",
+    "ECONNREFUSED",
+    "ETIMEOUT",
+  ]);
+
+  return (
+    transientCodes.has(code) ||
+    message.includes("ECONNRESET") ||
+    message.includes("ETIMEDOUT") ||
+    message.includes("ESOCKET") ||
+    message.includes("TIMEOUT") ||
+    message.includes("CONNECTION IS CLOSED") ||
+    message.includes("ACQUIRE TIMEOUT")
+  );
+}
+
 async function queryWithRetry(poolOrFn, fn, retries = 2) {
   // Support both queryWithRetry(pool, fn) and queryWithRetry(fn) signatures
   if (typeof poolOrFn === "function") {
@@ -151,10 +174,7 @@ async function queryWithRetry(poolOrFn, fn, retries = 2) {
     try {
       return await fn(getP().request());
     } catch (err) {
-      const isReset =
-        err.code === "ECONNRESET" ||
-        (err.message && err.message.includes("ECONNRESET"));
-      if (i < retries && isReset) {
+      if (i < retries && isTransientSqlError(err)) {
         logger.warn(
           { event: "DB_ECONNRESET_RETRY", attempt: i + 1, retries },
           "ECONNRESET — retrying query",
