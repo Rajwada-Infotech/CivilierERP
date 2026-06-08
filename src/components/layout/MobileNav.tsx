@@ -34,6 +34,7 @@ import {
   Settings,
   Layers,
   Hash,
+  ReceiptIndianRupee,
   CreditCard,
   BookOpen,
   Tag,
@@ -213,7 +214,12 @@ const materialSetupItems: SetupItem[] = [
     path: "/masters/unit-measurement",
     color: "text-orange-400",
   },
-  { icon: Hash, label: "HSN", path: "/masters/hsn", color: "text-pink-400" },
+  {
+    icon: ReceiptIndianRupee,
+    label: "HSN",
+    path: "/masters/hsn",
+    color: "text-pink-400",
+  },
   {
     icon: BillingIcon,
     label: "Billing",
