@@ -166,7 +166,12 @@ export function DocNumberPreview({
                   !label.startsWith("WO_PO")
                 );
               })
-            : types;
+            : module === "PO"
+              ? types.filter((dt) => {
+                  const label = dt.DocNoPrefix ?? dt.FullPrefix ?? dt.Prefix;
+                  return !label.startsWith("ExB-PO");
+                })
+              : types;
         setDocTypes(filtered);
         if (!readOnly && !selectedDocTypeId && filtered.length > 0) {
           const first = filtered[0];
@@ -189,6 +194,7 @@ export function DocNumberPreview({
         const match = all.find((d) => d.TypeOfDocId === selectedDocTypeId);
         if (match) {
           // For WO, never inject ExB-* or WO-PO* even via the fallback path
+          // For PO, never inject ExB-PO* via the fallback path
           const label = match.DocNoPrefix ?? match.FullPrefix ?? match.Prefix;
           if (
             module === "WO" &&
@@ -197,6 +203,7 @@ export function DocNumberPreview({
               label.startsWith("WO_PO"))
           )
             return;
+          if (module === "PO" && label.startsWith("ExB-PO")) return;
           setDocTypes((prev) => [match, ...prev]);
         }
       })
