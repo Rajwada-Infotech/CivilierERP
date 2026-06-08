@@ -1,5 +1,4 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Phone,
@@ -377,7 +376,6 @@ function CallCard({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function WelcomeCallsPage() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const [search, setSearch] = useState("");
@@ -388,6 +386,19 @@ export function WelcomeCallsPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingSearch, setBookingSearch] = useState("");
+  const bookingRef = useRef<HTMLDivElement>(null);
+
+  // Bug 2 — close booking dropdown on outside click
+  useEffect(() => {
+    if (!bookingOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (bookingRef.current && !bookingRef.current.contains(e.target as Node)) {
+        setBookingOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [bookingOpen]);
 
   const {
     data: calls = [],
@@ -427,6 +438,8 @@ export function WelcomeCallsPage() {
       }
       queryClient.invalidateQueries({ queryKey: ["followup-welcome-calls"] });
       setForm(EMPTY_FORM);
+      setBookingOpen(false);
+      setBookingSearch("");
       setDialogOpen(false);
     },
     onError: (err: Error) => toast.error(err.message),
@@ -746,16 +759,8 @@ export function WelcomeCallsPage() {
       </div>
 
       {/* Log Call Dialog */}
-      <Dialog
-        open={dialogOpen}
-        onOpenChange={(v) => {
-          if (!v) setDialogOpen(false);
-        }}
-      >
-        <DialogContent
-          className="max-w-lg max-h-[90vh] overflow-y-auto"
-          aria-describedby={undefined}
-        >
+      <Dialog open={dialogOpen} onOpenChange={(v) => { if (!v) { setForm(EMPTY_FORM); setBookingOpen(false); setBookingSearch(""); setDialogOpen(false); } }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle className="text-base font-bold flex items-center gap-2">
               <div
@@ -828,10 +833,8 @@ export function WelcomeCallsPage() {
 
             {/* Booking selector (carries ApplicantId) */}
             <div className="space-y-2">
-              <Label>
-                Booking <span className="text-red-500">*</span>
-              </Label>
-              <div className="wc-booking-select relative">
+              <Label>Booking <span className="text-red-500">*</span></Label>
+              <div className="wc-booking-select relative" ref={bookingRef}>
                 <button
                   type="button"
                   className={`wc-booking-trigger${bookingOpen ? " open" : ""}${!form.BookingId ? " text-muted-foreground" : ""}`}
