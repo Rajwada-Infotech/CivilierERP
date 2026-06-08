@@ -1,4 +1,5 @@
 const express = require("express");
+const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -6,20 +7,23 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 
 // GET all
-router.get("/", async (req, res) => {
-  try {
-    const pool = getPool();
-    const request = pool.request();
+router.get(
+  "/",
+  cache("enterprises", 60, { shared: true }),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const request = pool.request();
 
-    // Allow filtering by business_type (e.g. ?business_type=S for suppliers,
-    // ?business_type=C for companies). Defaults to 'E' (Enterprises) when omitted.
-    const businessType = req.query.business_type
-      ? String(req.query.business_type).trim().toUpperCase()
-      : "E";
+      // Allow filtering by business_type (e.g. ?business_type=S for suppliers,
+      // ?business_type=C for companies). Defaults to 'E' (Enterprises) when omitted.
+      const businessType = req.query.business_type
+        ? String(req.query.business_type).trim().toUpperCase()
+        : "E";
 
-    request.input("businessType", sql.NVarChar(10), businessType);
+      request.input("businessType", sql.NVarChar(10), businessType);
 
-    const result = await request.query(`
+      const result = await request.query(`
       SELECT
         id, name, short_name, business_identity, entity_type,
         b_sub_identity_type, belongs_to,
@@ -39,19 +43,19 @@ router.get("/", async (req, res) => {
         gst_no, pan_no, contact_person, phone,
         logo, business_type
       FROM dbo.enterprise
-      WHERE (
-        business_type = @businessType
-        OR (LTRIM(RTRIM(ISNULL(business_type, ''))) = '' AND @businessType = 'E')
-        OR (business_type IS NULL AND @businessType = 'E')
-      )
-        AND (discontinue IS NULL OR discontinue = 0)
+      WHERE (business_type = @businessType OR (business_type IS NULL AND @businessType = 'E'))
       ORDER BY name
     `);
-    res.json(result.recordset);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+      res.json(result.recordset);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// Bust enterprise cache on module load so pre-existing DB rows are always visible
+// after a server restart (avoids serving a stale empty-array from Redis).
+bumpCacheVersion("enterprises").catch(() => {});
 
 // ADD
 router.post("/", async (req, res) => {
@@ -399,10 +403,11 @@ router.get("/options", async (req, res) => {
       request.input("businessType", sql.NVarChar(100), req.query.business_type);
     }
 
+    // Always exclude soft-deleted rows from dropdown options
+    conditions.push("(discontinue IS NULL OR discontinue = 0)");
+
     let query = "SELECT id, name AS label, belongs_to FROM dbo.enterprise";
-    if (conditions.length > 0) {
-      query += " WHERE " + conditions.join(" AND ");
-    }
+    query += " WHERE " + conditions.join(" AND ");
     query += " ORDER BY name";
 
     const result = await request.query(query);
