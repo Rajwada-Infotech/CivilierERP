@@ -11,13 +11,14 @@ const express = require("express");
 const router = express.Router();
 const nodemailer = require("nodemailer");
 const axios = require("axios");
+const sanitizeHtml = require("sanitize-html");
 const authMiddleware = require("../middleware/auth");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 const PERMISSION_MODULE = "Followup";
 const PERMISSION_SUBMODULE = "Communicator";
 
-router.use(authMiddleware);
+const rateLimit=require('express-rate-limit');router.use(rateLimit({windowMs:15*60*1000,max:50,validate:false}));router.use(authMiddleware);
 router.use(checkPermissionForMethod(PERMISSION_MODULE, PERMISSION_SUBMODULE));
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -92,7 +93,7 @@ async function sendEmail(config, { to, subject, body }) {
     from: config.from ?? config.user,
     to,
     subject,
-    html: body,
+    html: sanitizeHtml(body),
   });
 }
 

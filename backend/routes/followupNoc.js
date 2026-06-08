@@ -171,7 +171,6 @@ async function buildOptions() {
     projectsResult,
     companiesResult,
   ] = await Promise.all([
-    // Applicants from AccountHeadMaster where LHeadType = 'A'
     pool.request().query(`
         SELECT
           LHeadId                        AS Id,
@@ -182,7 +181,6 @@ async function buildOptions() {
           AND LHeadStatus = 1
         ORDER BY ISNULL(DisplayName, LHeadName)
       `),
-    // Unit selections (linked by ApplicantId = LHeadId)
     pool.request().query(`
         SELECT
           fus.Id,
@@ -195,7 +193,6 @@ async function buildOptions() {
         WHERE fus.IsDeleted = 0
         ORDER BY fus.CreatedAt DESC, fus.Id DESC
       `),
-    // Agreements
     pool.request().query(`
         SELECT
           fag.Id,
@@ -206,7 +203,6 @@ async function buildOptions() {
         WHERE fag.IsDeleted = 0
         ORDER BY fag.CreatedAt DESC, fag.Id DESC
       `),
-    // Projects from enterprise where business_type = 'P'
     pool.request().query(`
         SELECT id AS Id, name AS Name
         FROM dbo.enterprise
@@ -214,7 +210,6 @@ async function buildOptions() {
           AND ISNULL(discontinue, 0) = 0
         ORDER BY name
       `),
-    // Companies from enterprise where business_type = 'C'
     pool.request().query(`
         SELECT id AS Id, name AS Name
         FROM dbo.enterprise
@@ -245,7 +240,6 @@ router.get("/meta/options", async (req, res) => {
 });
 
 // ── Shared query helper ───────────────────────────────────────────────────────
-// Used by both GET / (non-sensitive) and POST /search (sensitive filters).
 async function queryNOCList({
   page,
   pageSize,
