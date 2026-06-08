@@ -134,14 +134,79 @@ router.get("/item-options", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
 
-    const colCheck = await pool.request().query(`
-      SELECT COUNT(1) AS cnt FROM sys.columns
-      WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_UOM'
-    `);
-    const hasUOM = colCheck.recordset[0].cnt > 0;
+    // Detect optional columns (same pattern as inventoryMaster.js)
+    const [hasUOM, hasGodownCol, hasCreatedDate, hasEntryDate] =
+      await Promise.all([
+        pool
+          .request()
+          .query(
+            `SELECT COUNT(1) AS cnt FROM sys.columns
+             WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_UOM'`,
+          )
+          .then((r) => r.recordset[0].cnt > 0),
+        pool
+          .request()
+          .query(
+            `SELECT COUNT(1) AS cnt FROM sys.columns
+             WHERE object_id = OBJECT_ID(N'dbo.StockLedger') AND name = N'GodownID'`,
+          )
+          .then((r) => r.recordset[0].cnt > 0),
+        pool
+          .request()
+          .query(
+            `SELECT COUNT(1) AS cnt FROM sys.columns
+             WHERE object_id = OBJECT_ID(N'dbo.StockLedger') AND name = N'CreatedDate'`,
+          )
+          .then((r) => r.recordset[0].cnt > 0),
+        pool
+          .request()
+          .query(
+            `SELECT COUNT(1) AS cnt FROM sys.columns
+             WHERE object_id = OBJECT_ID(N'dbo.StockLedger') AND name = N'EntryDate'`,
+          )
+          .then((r) => r.recordset[0].cnt > 0),
+      ]);
+
+    // Resolve main godown ID (scope stock to main godown, matching Stock page)
+    let mainGodownId = null;
+    if (hasGodownCol) {
+      try {
+        const gdRes = await pool
+          .request()
+          .query(
+            "SELECT TOP 1 GodownID FROM dbo.Godowns WHERE IsMain=1 AND IsDeleted=0",
+          );
+        mainGodownId = gdRes.recordset[0]?.GodownID ?? null;
+      } catch {
+        /* non-fatal */
+      }
+    }
+
+    // Date expression for the ledger rows (same logic as inventoryMaster.js)
+    const ledgerDateExpr =
+      hasCreatedDate && hasEntryDate
+        ? "COALESCE(sl.CreatedDate, sl.EntryDate)"
+        : hasCreatedDate
+          ? "sl.CreatedDate"
+          : hasEntryDate
+            ? "sl.EntryDate"
+            : null;
+
+    // Only count ledger rows up to and including today
+    const dateFilter = ledgerDateExpr
+      ? `AND (${ledgerDateExpr} IS NULL OR CAST(${ledgerDateExpr} AS DATE) <= CAST(GETDATE() AS DATE))`
+      : "";
+
+    // Scope to main godown if column exists
+    const godownFilter =
+      hasGodownCol && mainGodownId != null
+        ? `AND sl.GodownID = ${mainGodownId}`
+        : "";
 
     const result = await pool.request().query(`
-      SELECT  img.M_Id, img.M_Name, grp.M_Name AS M_Group,
+      SELECT  img.M_Id,
+              img.M_Name,
+              grp.M_Name AS M_Group,
               ${hasUOM ? "img.M_UOM AS DefaultUOM," : "NULL AS DefaultUOM,"}
               uom.UOMName  AS DefaultUOMName,
               uom.Symbol   AS DefaultUOMSymbol,
@@ -151,13 +216,17 @@ router.get("/item-options", authenticateToken, async (req, res) => {
       FROM    dbo.Item_Master_Group img
       LEFT JOIN dbo.Item_Master_Group grp ON grp.M_Id = img.Parent_Id
       LEFT JOIN dbo.StockLedger sl
-        ON CONVERT(NVARCHAR(50), sl.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
+        ON  CONVERT(NVARCHAR(50), sl.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
+        ${dateFilter}
+        ${godownFilter}
       ${hasUOM ? "LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = img.M_UOM" : "LEFT JOIN dbo.UOMMaster uom ON 1=0"}
       WHERE (img.Parent_Id IS NOT NULL OR img.M_IdentityCode = 1)
-      GROUP BY img.M_Id, img.M_Name, grp.M_Name${hasUOM ? ", img.M_UOM" : ""},
+      GROUP BY img.M_Id, img.M_Name, grp.M_Name
+               ${hasUOM ? ", img.M_UOM" : ""},
                uom.UOMName, uom.Symbol
       ORDER BY img.M_Name
     `);
+
     res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -791,7 +860,3 @@ router.put("/:id/mark-ordered", authenticateToken, async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
