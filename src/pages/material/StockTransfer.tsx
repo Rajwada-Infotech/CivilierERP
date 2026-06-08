@@ -586,17 +586,9 @@ export default function StockTransfer() {
 
   const filteredGodowns = useMemo(() => {
     return allGodowns.filter((g) => {
-      if (
-        filterCompanyId &&
-        g.EnterpriseID != null &&
-        String(g.EnterpriseID) !== filterCompanyId
-      )
+      if (filterCompanyId && String(g.EnterpriseID ?? "") !== filterCompanyId)
         return false;
-      if (
-        filterProjectId &&
-        g.ProjectID != null &&
-        String(g.ProjectID) !== filterProjectId
-      )
+      if (filterProjectId && String(g.ProjectID ?? "") !== filterProjectId)
         return false;
       return true;
     });
@@ -651,11 +643,17 @@ export default function StockTransfer() {
     setItems((prev) => prev.filter((_, i) => i !== idx));
   const addItem = () => setItems((prev) => [...prev, emptyItem()]);
 
+  const hasOverLimit = items.some(
+    (it) =>
+      it.itemId && it.availableQty > 0 && parseFloat(it.qty) > it.availableQty,
+  );
+
   const canTransfer =
     !!fromGodownId &&
     !!toGodownId &&
     fromGodownId !== toGodownId &&
     items.some((it) => it.itemId && parseFloat(it.qty) > 0) &&
+    !hasOverLimit &&
     !transferMut.isPending;
 
   const handleTransfer = () => {

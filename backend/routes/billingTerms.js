@@ -11,7 +11,7 @@ router.get("/", cache("billing-terms", 300), async (req, res) => {
     const pool = getPool();
     const result = await pool
       .request()
-      .query("SELECT * FROM dbo.Billing_Terms_Master");
+      .query("SELECT * FROM dbo.Billing_Terms_Master ORDER BY Name");
     res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -51,7 +51,7 @@ router.put("/:id", async (req, res) => {
     const pool = getPool();
     await pool
       .request()
-      .input("BillingTermID", sql.Int, req.params.id)
+      .input("BillingTermID", sql.Int, parseInt(req.params.id, 10))
       .input("Name", sql.NVarChar(200), Name || null)
       .input("Description", sql.NVarChar(sql.MAX), Description || null)
       .input("CalculationType", sql.NVarChar(20), CalculationType || null)
@@ -79,13 +79,17 @@ router.put("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
     const pool = getPool();
-    await pool
+    const delResult = await pool
       .request()
-      .input("BillingTermID", sql.Int, req.params.id)
+      .input("BillingTermID", sql.Int, id)
       .query(
         "DELETE FROM dbo.Billing_Terms_Master WHERE BillingTermID = @BillingTermID",
       );
+    if (delResult.rowsAffected[0] === 0)
+      return res.status(404).json({ error: "Billing term not found" });
     await bumpCacheVersion("billing-terms");
     res.json({ message: "Billing term deleted" });
   } catch (err) {

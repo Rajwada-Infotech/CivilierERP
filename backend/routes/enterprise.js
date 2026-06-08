@@ -403,10 +403,11 @@ router.get("/options", async (req, res) => {
       request.input("businessType", sql.NVarChar(100), req.query.business_type);
     }
 
+    // Always exclude soft-deleted rows from dropdown options
+    conditions.push("(discontinue IS NULL OR discontinue = 0)");
+
     let query = "SELECT id, name AS label, belongs_to FROM dbo.enterprise";
-    if (conditions.length > 0) {
-      query += " WHERE " + conditions.join(" AND ");
-    }
+    query += " WHERE " + conditions.join(" AND ");
     query += " ORDER BY name";
 
     const result = await request.query(query);
