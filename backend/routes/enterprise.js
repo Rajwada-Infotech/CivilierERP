@@ -43,7 +43,11 @@ router.get(
         gst_no, pan_no, contact_person, phone,
         logo, business_type
       FROM dbo.enterprise
-      WHERE (business_type = @businessType OR (business_type IS NULL AND @businessType = 'E'))
+      WHERE (
+        business_type = @businessType
+        OR (LTRIM(RTRIM(ISNULL(business_type, ''))) = '' AND @businessType = 'E')
+        OR (business_type IS NULL AND @businessType = 'E')
+      )
         AND (discontinue IS NULL OR discontinue = 0)
       ORDER BY name
     `);
