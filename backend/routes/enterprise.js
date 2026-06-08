@@ -406,7 +406,8 @@ router.get("/options", async (req, res) => {
     // Always exclude soft-deleted rows from dropdown options
     conditions.push("(discontinue IS NULL OR discontinue = 0)");
 
-    let query = "SELECT id, name AS label, belongs_to FROM dbo.enterprise";
+    let query =
+      "SELECT id, name AS label, belongs_to, company_id FROM dbo.enterprise";
     query += " WHERE " + conditions.join(" AND ");
     query += " ORDER BY name";
 
