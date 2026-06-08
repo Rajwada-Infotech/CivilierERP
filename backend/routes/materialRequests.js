@@ -102,7 +102,7 @@ router.get("/projects", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT id, name, short_name
+      SELECT id, name, short_name, company_id
       FROM   dbo.enterprise
       WHERE  business_type = 'P' AND (discontinue = 0 OR discontinue IS NULL)
       ORDER  BY name
