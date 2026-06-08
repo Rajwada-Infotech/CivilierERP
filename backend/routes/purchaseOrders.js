@@ -299,9 +299,22 @@ router.get("/:id", async (req, res) => {
         ORDER BY SortOrder
       `);
 
+    // Sum of all non-rejected GRNs already submitted against this PO.
+    // Used by the GRN form to show the true remaining balance.
+    const receivedResult = await pool.request().input("POID2", sql.Int, id)
+      .query(`
+        SELECT ISNULL(SUM(TotalAmount), 0) AS POTotalReceived
+        FROM dbo.GoodsReceiptNotes
+        WHERE POID = @POID2 AND Status != 'Rejected'
+      `);
+    const poTotalReceived = Number(
+      receivedResult.recordset[0]?.POTotalReceived ?? 0,
+    );
+
     res.json({
       ...mapRow(result.recordset[0]),
       LineItems: lineItems.recordset,
+      POTotalReceived: poTotalReceived,
     });
   } catch (err) {
     console.error("GET PurchaseOrder by id error:", err);

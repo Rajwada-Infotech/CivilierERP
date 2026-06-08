@@ -43,7 +43,7 @@ router.get(
         gst_no, pan_no, contact_person, phone,
         logo, business_type
       FROM dbo.enterprise
-      WHERE business_type = @businessType
+      WHERE (business_type = @businessType OR (business_type IS NULL AND @businessType = 'E'))
         AND (discontinue IS NULL OR discontinue = 0)
       ORDER BY name
     `);
@@ -291,7 +291,7 @@ router.put("/:id", async (req, res) => {
           tan=@tan, rera_no=@rera_no, rera_date=@rera_date, trade_license=@trade_license,
           status=@status, cr_code=@cr_code, discontinue=@discontinue,
           fiscal_year_start=@fiscal_year_start, cost_center=@cost_center, profit_center=@profit_center
-        WHERE id=@id AND business_type='E'
+        WHERE id=@id AND (business_type='E' OR business_type IS NULL)
       `);
     await bumpCacheVersion("enterprises");
     res.json({ message: "Enterprise updated successfully" });
@@ -314,7 +314,7 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("id", sql.Int, id)
       .query(
-        "SELECT id, name FROM dbo.enterprise WHERE id=@id AND business_type='E'",
+        "SELECT id, name FROM dbo.enterprise WHERE id=@id AND (business_type='E' OR business_type IS NULL)",
       );
 
     if (!entRow.recordset.length)
@@ -346,7 +346,9 @@ router.delete("/:id", async (req, res) => {
     await pool
       .request()
       .input("id", sql.Int, id)
-      .query("DELETE FROM dbo.enterprise WHERE id=@id AND business_type='E'");
+      .query(
+        "DELETE FROM dbo.enterprise WHERE id=@id AND (business_type='E' OR business_type IS NULL)",
+      );
 
     await bumpCacheVersion("enterprises");
     res.json({ message: "Enterprise deleted successfully" });
