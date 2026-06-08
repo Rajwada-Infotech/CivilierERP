@@ -427,7 +427,7 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
       .input("Status", sql.NVarChar(50), Status || "Draft")
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
       .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
-      .input("DocNo", sql.NVarChar(100), finalDocNo || null)
+      .input("DocNo", sql.NVarChar(100), finalDocNo)
       .input("CreatedBy", sql.NVarChar(100), userEmail)
       .input("CreatedAt", sql.DateTime2, new Date())
       .input("POItems", sql.NVarChar(sql.MAX), poItemsJson)
@@ -495,7 +495,7 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
     // Sync normalised child table
     await syncLineItems(transaction, sql, newId, poItemsArray, uomMap);
 
-    if (DocTypeId && finalDocNo) {
+    if (DocTypeId) {
       await backPatchRecordId(pool, sql, finalDocNo, "PurchaseOrders", newId);
     }
 
