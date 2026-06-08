@@ -36,7 +36,12 @@ import { Textarea } from "@/components/ui/textarea";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type CallOutcome = "connected" | "no_answer" | "callback" | "voicemail" | "completed";
+type CallOutcome =
+  | "connected"
+  | "no_answer"
+  | "callback"
+  | "voicemail"
+  | "completed";
 
 interface WelcomeCall {
   Id: number;
@@ -98,14 +103,17 @@ const EMPTY_FORM: FormState = {
 
 // ─── Outcome config ───────────────────────────────────────────────────────────
 
-const OUTCOME_CONFIG: Record<CallOutcome, {
-  label: string;
-  icon: React.ReactNode;
-  color: string;
-  dot: string;
-  bg: string;
-  iconBg: string;
-}> = {
+const OUTCOME_CONFIG: Record<
+  CallOutcome,
+  {
+    label: string;
+    icon: React.ReactNode;
+    color: string;
+    dot: string;
+    bg: string;
+    iconBg: string;
+  }
+> = {
   connected: {
     label: "Connected",
     icon: <PhoneCall className="w-4 h-4" />,
@@ -150,16 +158,32 @@ const OUTCOME_CONFIG: Record<CallOutcome, {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function initials(name: string) {
-  return (
-    name.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?"
-  );
+function initials(name: string | null | undefined) {
+  const n = (name ?? "").trim();
+  if (!n) return "–";
+  return n
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
 }
 
-const AVATAR_COLORS = ["#2563eb","#7c3aed","#0891b2","#059669","#d97706","#dc2626","#db2777","#4f46e5"];
-function avatarColor(name: string) {
+const AVATAR_COLORS = [
+  "#2563eb",
+  "#7c3aed",
+  "#0891b2",
+  "#059669",
+  "#d97706",
+  "#dc2626",
+  "#db2777",
+  "#4f46e5",
+];
+function avatarColor(name: string | null | undefined) {
+  const n = name ?? "?";
   let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
   return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
 
@@ -173,12 +197,19 @@ function relativeTime(isoStr: string) {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   if (days < 7) return `${days}d ago`;
-  return new Date(isoStr).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+  return new Date(isoStr).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+  });
 }
 
 function fmtDate(str: string) {
   if (!str) return "";
-  return new Date(str).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  return new Date(str).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function fmtAmount(n: number | null) {
@@ -205,7 +236,9 @@ async function createCall(payload: Record<string, unknown>) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error((err as { error?: string }).error || "Failed to create entry");
+    throw new Error(
+      (err as { error?: string }).error || "Failed to create entry",
+    );
   }
   return res.json();
 }
@@ -236,10 +269,18 @@ async function fetchMeta(): Promise<MetaOptions> {
 
 // ─── Call Card ────────────────────────────────────────────────────────────────
 
-function CallCard({ entry, onDelete }: { entry: WelcomeCall; onDelete: () => void }) {
+function CallCard({
+  entry,
+  onDelete,
+}: {
+  entry: WelcomeCall;
+  onDelete: () => void;
+}) {
   const outcome = (entry.Outcome as CallOutcome) || "connected";
   const cfg = OUTCOME_CONFIG[outcome] ?? OUTCOME_CONFIG.connected;
-  const color = avatarColor(entry.ApplicantName || "?");
+  const displayName =
+    entry.ApplicantName || entry.BookingNo || `Applicant #${entry.ApplicantId}`;
+  const color = avatarColor(displayName);
 
   return (
     <div className="wc-card group">
@@ -253,10 +294,10 @@ function CallCard({ entry, onDelete }: { entry: WelcomeCall; onDelete: () => voi
       <div className="wc-card-body">
         <div className="wc-card-header">
           <div className="wc-avatar" style={{ background: color }}>
-            {initials(entry.ApplicantName || "?")}
+            {initials(displayName)}
           </div>
           <div className="wc-card-meta">
-            <span className="wc-customer-name">{entry.ApplicantName}</span>
+            <span className="wc-customer-name">{displayName}</span>
             <div className="wc-card-sub">
               {entry.CallDate && (
                 <span className="wc-meta-item">
@@ -310,14 +351,22 @@ function CallCard({ entry, onDelete }: { entry: WelcomeCall; onDelete: () => voi
           <div className="wc-card-right">
             <span className={`wc-outcome-chip ${cfg.bg}`}>
               <span className={`wc-chip-icon ${cfg.iconBg}`}>{cfg.icon}</span>
-              {cfg.label}
+              <span className="wc-chip-label">{cfg.label}</span>
             </span>
-            <span className="wc-time-ago">{relativeTime(entry.CreatedAt)}</span>
+            <span className="wc-time-ago">
+              {entry.CallTime
+                ? entry.CallTime.slice(0, 5)
+                : fmtDate(entry.CallDate)}
+            </span>
             <span className="wc-call-no">{entry.CallNo}</span>
           </div>
         </div>
         {entry.Notes && <p className="wc-notes">{entry.Notes}</p>}
-        <button className="wc-delete-btn" onClick={onDelete} title="Delete entry">
+        <button
+          className="wc-delete-btn"
+          onClick={onDelete}
+          title="Delete entry"
+        >
           <X className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -332,13 +381,20 @@ export function WelcomeCallsPage() {
   const queryClient = useQueryClient();
 
   const [search, setSearch] = useState("");
-  const [outcomeFilter, setOutcomeFilter] = useState<CallOutcome | "all">("all");
+  const [outcomeFilter, setOutcomeFilter] = useState<CallOutcome | "all">(
+    "all",
+  );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingSearch, setBookingSearch] = useState("");
 
-  const { data: calls = [], isLoading, isFetching, refetch } = useQuery({
+  const {
+    data: calls = [],
+    isLoading,
+    isFetching,
+    refetch,
+  } = useQuery({
     queryKey: ["followup-welcome-calls"],
     queryFn: fetchCalls,
   });
@@ -353,7 +409,9 @@ export function WelcomeCallsPage() {
     const q = bookingSearch.toLowerCase();
     if (!q) return meta?.bookings ?? [];
     return (meta?.bookings ?? []).filter(
-      (b) => b.BookingNo.toLowerCase().includes(q) || b.ApplicantName.toLowerCase().includes(q)
+      (b) =>
+        b.BookingNo.toLowerCase().includes(q) ||
+        b.ApplicantName.toLowerCase().includes(q),
     );
   }, [meta?.bookings, bookingSearch]);
 
@@ -385,7 +443,9 @@ export function WelcomeCallsPage() {
 
   const stats = useMemo(() => {
     const total = calls.length;
-    const connected = calls.filter((c) => c.Outcome === "connected" || c.Outcome === "completed").length;
+    const connected = calls.filter(
+      (c) => c.Outcome === "connected" || c.Outcome === "completed",
+    ).length;
     const noAnswer = calls.filter((c) => c.Outcome === "no_answer").length;
     const callback = calls.filter((c) => c.Outcome === "callback").length;
     const rate = total > 0 ? Math.round((connected / total) * 100) : 0;
@@ -394,10 +454,15 @@ export function WelcomeCallsPage() {
 
   const filtered = useMemo(() => {
     return calls.filter((c) => {
-      const matchOutcome = outcomeFilter === "all" || c.Outcome === outcomeFilter;
+      const matchOutcome =
+        outcomeFilter === "all" || c.Outcome === outcomeFilter;
       const q = search.toLowerCase();
-      const matchSearch = !q || [c.ApplicantName, c.Notes, c.BankSelected, c.CallNo]
-        .join(" ").toLowerCase().includes(q);
+      const matchSearch =
+        !q ||
+        [c.ApplicantName, c.Notes, c.BankSelected, c.CallNo]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
       return matchOutcome && matchSearch;
     });
   }, [calls, outcomeFilter, search]);
@@ -419,7 +484,9 @@ export function WelcomeCallsPage() {
       Outcome: form.Outcome,
       BankSelected: form.BankSelected || undefined,
       LoanRequired: form.LoanRequired,
-      ExpectedLoanAmount: form.ExpectedLoanAmount ? Number(form.ExpectedLoanAmount) : undefined,
+      ExpectedLoanAmount: form.ExpectedLoanAmount
+        ? Number(form.ExpectedLoanAmount)
+        : undefined,
       PreferredBanker: form.PreferredBanker || undefined,
       AssignedTo: form.AssignedTo ? Number(form.AssignedTo) : undefined,
       Notes: form.Notes || undefined,
@@ -458,9 +525,9 @@ export function WelcomeCallsPage() {
         .wc-card-sub { display: flex; flex-wrap: wrap; gap: 10px; }
         .wc-meta-item { display: flex; align-items: center; gap: 4px; font-size: 12px; color: hsl(var(--muted-foreground)); }
         .wc-card-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; padding-right: 2px; }
-        .wc-outcome-chip { display: inline-flex; align-items: center; gap: 0; font-size: 11.5px; font-weight: 600; border-radius: 8px; border: 1.5px solid; line-height: 1; }
+        .wc-outcome-chip { display: inline-flex; align-items: center; gap: 0; font-size: 11.5px; font-weight: 600; border-radius: 8px; border: 1.5px solid; line-height: 1; overflow: hidden; }
         .wc-chip-icon { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; flex-shrink: 0; }
-        .wc-outcome-chip span.wc-chip-icon + * { padding: 0 12px 0 6px; }
+        .wc-chip-label { padding: 0 10px 0 5px; white-space: nowrap; }
         .wc-time-ago { font-size: 11px; color: hsl(var(--muted-foreground)); }
         .wc-call-no { font-size: 10px; color: hsl(var(--muted-foreground)); font-family: monospace; }
         .wc-notes { margin: 10px 0 0 0; font-size: 13px; color: hsl(var(--muted-foreground)); line-height: 1.55; background: hsl(var(--muted)); border-radius: 8px; padding: 8px 12px; border-left: 3px solid hsl(var(--border)); }
@@ -503,18 +570,23 @@ export function WelcomeCallsPage() {
         }
       `}</style>
 
-      <Breadcrumbs items={[
-        { label: "Follow-Up", path: "/followup" },
-        { label: "Welcome Calls", path: "/followup/sales/welcome-calls" },
-      ]} />
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Welcome Calls", path: "/followup/sales/welcome-calls" },
+        ]}
+      />
 
       <div className="relative space-y-8 mt-6">
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">Welcome Calls</h1>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Welcome Calls
+            </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Log and track welcome call outcomes, bank selection and loan details
+              Log and track welcome call outcomes, bank selection and loan
+              details
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -523,7 +595,10 @@ export function WelcomeCallsPage() {
               disabled={isFetching}
               className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
-              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              <RefreshCw
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
+              />
               Refresh
             </button>
             <Button
@@ -540,14 +615,27 @@ export function WelcomeCallsPage() {
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           {[
             { label: "Total", value: stats.total, dot: "bg-slate-400" },
-            { label: "Connected", value: stats.connected, dot: "bg-emerald-500" },
+            {
+              label: "Connected",
+              value: stats.connected,
+              dot: "bg-emerald-500",
+            },
             { label: "No Answer", value: stats.noAnswer, dot: "bg-red-400" },
             { label: "Callback", value: stats.callback, dot: "bg-blue-500" },
-            { label: "Connect Rate", value: `${stats.rate}%`, dot: "bg-violet-500" },
+            {
+              label: "Connect Rate",
+              value: `${stats.rate}%`,
+              dot: "bg-violet-500",
+            },
           ].map(({ label, value, dot }) => (
-            <div key={label} className="rounded-xl border border-border bg-card p-4">
+            <div
+              key={label}
+              className="rounded-xl border border-border bg-card p-4"
+            >
               <div className={`w-2 h-2 rounded-full ${dot} mb-3`} />
-              <p className="text-2xl font-bold font-heading text-foreground leading-none">{value}</p>
+              <p className="text-2xl font-bold font-heading text-foreground leading-none">
+                {value}
+              </p>
               <p className="text-[11px] text-muted-foreground mt-1">{label}</p>
             </div>
           ))}
@@ -570,13 +658,22 @@ export function WelcomeCallsPage() {
             )}
           </div>
           <div className="wc-pills">
-            {(["all", "connected", "no_answer", "callback", "voicemail", "completed"] as const).map((o) => (
+            {(
+              [
+                "all",
+                "connected",
+                "no_answer",
+                "callback",
+                "voicemail",
+                "completed",
+              ] as const
+            ).map((o) => (
               <button
                 key={o}
                 className={`wc-pill ${outcomeFilter === o ? "active" : ""}`}
                 onClick={() => setOutcomeFilter(o)}
               >
-                {o === "all" ? "All" : OUTCOME_CONFIG[o]?.label ?? o}
+                {o === "all" ? "All" : (OUTCOME_CONFIG[o]?.label ?? o)}
               </button>
             ))}
           </div>
@@ -588,9 +685,21 @@ export function WelcomeCallsPage() {
             <div className="wc-feed">
               {Array.from({ length: 5 }).map((_, i) => (
                 <div key={i} className="wc-skeleton-card">
-                  <div className="wc-skel" style={{ width: 20, height: 20, borderRadius: "50%", marginTop: 18, flexShrink: 0 }} />
+                  <div
+                    className="wc-skel"
+                    style={{
+                      width: 20,
+                      height: 20,
+                      borderRadius: "50%",
+                      marginTop: 18,
+                      flexShrink: 0,
+                    }}
+                  />
                   <div style={{ flex: 1 }}>
-                    <div className="wc-skel" style={{ height: 80, borderRadius: 12, marginBottom: 10 }} />
+                    <div
+                      className="wc-skel"
+                      style={{ height: 80, borderRadius: 12, marginBottom: 10 }}
+                    />
                   </div>
                 </div>
               ))}
@@ -598,10 +707,21 @@ export function WelcomeCallsPage() {
           ) : filtered.length === 0 ? (
             <div className="wc-empty">
               <div className="wc-empty-icon">
-                <PhoneCall style={{ width: 26, height: 26 }} className="text-primary" />
+                <PhoneCall
+                  style={{ width: 26, height: 26 }}
+                  className="text-primary"
+                />
               </div>
-              <h3>{search || outcomeFilter !== "all" ? "No matching calls" : "No welcome calls yet"}</h3>
-              <p>{search || outcomeFilter !== "all" ? "Try changing your search or filter" : "Log the first welcome call to get started"}</p>
+              <h3>
+                {search || outcomeFilter !== "all"
+                  ? "No matching calls"
+                  : "No welcome calls yet"}
+              </h3>
+              <p>
+                {search || outcomeFilter !== "all"
+                  ? "Try changing your search or filter"
+                  : "Log the first welcome call to get started"}
+              </p>
               {!search && outcomeFilter === "all" && (
                 <Button
                   onClick={() => setDialogOpen(true)}
@@ -614,7 +734,11 @@ export function WelcomeCallsPage() {
           ) : (
             <div className="wc-feed">
               {filtered.map((entry) => (
-                <CallCard key={entry.Id} entry={entry} onDelete={() => deleteMutation.mutate(entry.Id)} />
+                <CallCard
+                  key={entry.Id}
+                  entry={entry}
+                  onDelete={() => deleteMutation.mutate(entry.Id)}
+                />
               ))}
             </div>
           )}
@@ -622,12 +746,36 @@ export function WelcomeCallsPage() {
       </div>
 
       {/* Log Call Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={(v) => { if (!v) setDialogOpen(false); }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(v) => {
+          if (!v) setDialogOpen(false);
+        }}
+      >
+        <DialogContent
+          className="max-w-lg max-h-[90vh] overflow-y-auto"
+          aria-describedby={undefined}
+        >
           <DialogHeader>
             <DialogTitle className="text-base font-bold flex items-center gap-2">
-              <div style={{ width: 28, height: 28, background: "#2563eb", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Phone style={{ width: 14, height: 14, color: "hsl(var(--primary-foreground))" }} />
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  background: "#2563eb",
+                  borderRadius: 7,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Phone
+                  style={{
+                    width: 14,
+                    height: 14,
+                    color: "hsl(var(--primary-foreground))",
+                  }}
+                />
               </div>
               Log Welcome Call
             </DialogTitle>
@@ -636,9 +784,19 @@ export function WelcomeCallsPage() {
           <div className="space-y-4 py-1">
             {/* Outcome */}
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Call Outcome</Label>
+              <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                Call Outcome
+              </Label>
               <div className="wc-outcome-grid">
-                {(["connected", "no_answer", "callback", "voicemail", "completed"] as CallOutcome[]).map((o) => {
+                {(
+                  [
+                    "connected",
+                    "no_answer",
+                    "callback",
+                    "voicemail",
+                    "completed",
+                  ] as CallOutcome[]
+                ).map((o) => {
                   const cfg = OUTCOME_CONFIG[o];
                   return (
                     <button
@@ -649,8 +807,14 @@ export function WelcomeCallsPage() {
                       <div
                         className="icon-wrap"
                         style={{
-                          background: form.Outcome === o ? "hsl(var(--primary) / 0.15)" : "hsl(var(--muted))",
-                          color: form.Outcome === o ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))",
+                          background:
+                            form.Outcome === o
+                              ? "hsl(var(--primary) / 0.15)"
+                              : "hsl(var(--muted))",
+                          color:
+                            form.Outcome === o
+                              ? "hsl(var(--primary))"
+                              : "hsl(var(--muted-foreground))",
                         }}
                       >
                         {cfg.icon}
@@ -664,12 +828,17 @@ export function WelcomeCallsPage() {
 
             {/* Booking selector (carries ApplicantId) */}
             <div className="space-y-2">
-              <Label>Booking <span className="text-red-500">*</span></Label>
+              <Label>
+                Booking <span className="text-red-500">*</span>
+              </Label>
               <div className="wc-booking-select relative">
                 <button
                   type="button"
                   className={`wc-booking-trigger${bookingOpen ? " open" : ""}${!form.BookingId ? " text-muted-foreground" : ""}`}
-                  onClick={() => { setBookingOpen((v) => !v); setBookingSearch(""); }}
+                  onClick={() => {
+                    setBookingOpen((v) => !v);
+                    setBookingSearch("");
+                  }}
                 >
                   <span>
                     {form.BookingId
@@ -679,7 +848,12 @@ export function WelcomeCallsPage() {
                   {form.BookingId && (
                     <span
                       className="text-muted-foreground hover:text-foreground"
-                      onClick={(e) => { e.stopPropagation(); set("BookingId", ""); set("ApplicantId", ""); set("ApplicantName", ""); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        set("BookingId", "");
+                        set("ApplicantId", "");
+                        set("ApplicantName", "");
+                      }}
                     >
                       <X style={{ width: 13, height: 13 }} />
                     </span>
@@ -699,7 +873,9 @@ export function WelcomeCallsPage() {
                     </div>
                     <div className="wc-booking-list">
                       {filteredBookings.length === 0 ? (
-                        <div className="wc-booking-empty">No bookings found</div>
+                        <div className="wc-booking-empty">
+                          No bookings found
+                        </div>
                       ) : (
                         filteredBookings.map((b) => (
                           <button
@@ -717,18 +893,27 @@ export function WelcomeCallsPage() {
                                       ...f,
                                       BookingId: String(b.Id),
                                       ApplicantId: String(data.ApplicantId),
-                                      ApplicantName: data.ApplicantName ?? b.ApplicantName,
+                                      ApplicantName:
+                                        data.ApplicantName ?? b.ApplicantName,
                                     }));
                                   }
                                 })
                                 .catch(() => {
-                                  setForm((f) => ({ ...f, BookingId: String(b.Id), ApplicantName: b.ApplicantName }));
+                                  setForm((f) => ({
+                                    ...f,
+                                    BookingId: String(b.Id),
+                                    ApplicantName: b.ApplicantName,
+                                  }));
                                 });
                               setBookingOpen(false);
                             }}
                           >
-                            <span className="wc-booking-item-no">{b.BookingNo}</span>
-                            <span className="wc-booking-item-name">{b.ApplicantName}</span>
+                            <span className="wc-booking-item-no">
+                              {b.BookingNo}
+                            </span>
+                            <span className="wc-booking-item-name">
+                              {b.ApplicantName}
+                            </span>
                           </button>
                         ))
                       )}
@@ -743,7 +928,10 @@ export function WelcomeCallsPage() {
               <div className="space-y-2">
                 <Label>Call Date</Label>
                 <div className="relative">
-                  <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <Calendar
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
                   <input
                     type="date"
                     value={form.CallDate}
@@ -782,8 +970,12 @@ export function WelcomeCallsPage() {
                   onChange={(e) => set("Status", e.target.value)}
                   className="w-full h-10 px-3 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
                 >
-                  {(meta?.statuses ?? ["Scheduled", "Completed", "Cancelled"]).map((s) => (
-                    <option key={s} value={s}>{s}</option>
+                  {(
+                    meta?.statuses ?? ["Scheduled", "Completed", "Cancelled"]
+                  ).map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -804,7 +996,8 @@ export function WelcomeCallsPage() {
                   className="rounded-[9px]"
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  Selecting a bank will auto-create an Organisation NOC draft in Closure → NOC.
+                  Selecting a bank will auto-create an Organisation NOC draft in
+                  Closure → NOC.
                 </p>
               </div>
 
@@ -816,7 +1009,9 @@ export function WelcomeCallsPage() {
                   onChange={(e) => set("LoanRequired", e.target.checked)}
                   className="rounded"
                 />
-                <label htmlFor="loan-req" className="text-sm cursor-pointer">Loan Required</label>
+                <label htmlFor="loan-req" className="text-sm cursor-pointer">
+                  Loan Required
+                </label>
               </div>
 
               {form.LoanRequired && (
@@ -827,7 +1022,9 @@ export function WelcomeCallsPage() {
                       type="number"
                       min="0"
                       value={form.ExpectedLoanAmount}
-                      onChange={(e) => set("ExpectedLoanAmount", e.target.value)}
+                      onChange={(e) =>
+                        set("ExpectedLoanAmount", e.target.value)
+                      }
                       placeholder="e.g. 5000000"
                       className="rounded-[9px]"
                     />
@@ -856,7 +1053,9 @@ export function WelcomeCallsPage() {
                 >
                   <option value="">— Not assigned —</option>
                   {meta.assignees.map((u) => (
-                    <option key={u.Id} value={u.Id}>{u.Name}</option>
+                    <option key={u.Id} value={u.Id}>
+                      {u.Name}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -876,7 +1075,11 @@ export function WelcomeCallsPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)} className="rounded-[9px]">
+            <Button
+              variant="outline"
+              onClick={() => setDialogOpen(false)}
+              className="rounded-[9px]"
+            >
               Cancel
             </Button>
             <Button
@@ -884,8 +1087,12 @@ export function WelcomeCallsPage() {
               onClick={handleSubmit}
               className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
-              {createMutation.isPending ? "Saving…" : (
-                <><CheckCircle2 className="w-4 h-4" /> Save Call</>
+              {createMutation.isPending ? (
+                "Saving…"
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" /> Save Call
+                </>
               )}
             </Button>
           </DialogFooter>
