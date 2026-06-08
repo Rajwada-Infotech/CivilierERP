@@ -11,8 +11,8 @@ const LIST_COLUMNS = `
   fus.Id,
   fus.SelectionNo,
   fus.ApplicantId,
-  ahm.LHeadCode AS ApplicantNo,
-  ISNULL(ahm.DisplayName, ahm.LHeadName) AS ApplicantName,
+  fa.ApplicantNo,
+  fa.ApplicantName,
   fus.ProjectId,
   pm.name AS ProjectName,
   fus.CompanyId,
@@ -70,9 +70,9 @@ async function getApplicantSnapshot(applicantId) {
   const result = await getPool()
     .request()
     .input("ApplicantId", sql.Int, applicantId).query(`
-      SELECT TOP 1 LHeadId AS Id
-      FROM dbo.AccountHeadMaster
-      WHERE LHeadId = @ApplicantId AND LHeadType = 'A' AND LHeadStatus = 1
+      SELECT TOP 1 Id
+      FROM dbo.FollowupApplications
+      WHERE Id = @ApplicantId AND IsDeleted = 0
     `);
 
   return result.recordset[0] ?? null;
@@ -143,15 +143,15 @@ async function buildOptions() {
   const pool = getPool();
   const [applicantsResult, projectsResult, companiesResult] = await Promise.all(
     [
-      // Applicants — AccountHeadMaster where LHeadType = 'A'
+      // Applicants — FollowupApplications (ApplicantId FK references this table)
       pool.request().query(`
       SELECT
-        LHeadId   AS Id,
-        LHeadCode AS ApplicantNo,
-        ISNULL(DisplayName, LHeadName) AS ApplicantName
-      FROM dbo.AccountHeadMaster
-      WHERE LHeadType = 'A' AND LHeadStatus = 1
-      ORDER BY LHeadName
+        Id,
+        ApplicantNo,
+        ApplicantName
+      FROM dbo.FollowupApplications
+      WHERE IsDeleted = 0
+      ORDER BY ApplicantName
     `),
       // Projects — enterprise where business_type = 'P'
       pool.request().query(`
@@ -210,8 +210,8 @@ router.get("/", async (req, res) => {
       filters.push(`
         (
           fus.SelectionNo LIKE @Search
-          OR ahm.LHeadCode LIKE @Search
-          OR ISNULL(ahm.DisplayName, ahm.LHeadName) LIKE @Search
+          OR fa.ApplicantNo LIKE @Search
+          OR fa.ApplicantName LIKE @Search
           OR fus.UnitNo LIKE @Search
           OR pm.name LIKE @Search
         )
@@ -233,7 +233,7 @@ router.get("/", async (req, res) => {
     const countResult = await buildRequest().query(`
       SELECT COUNT(*) AS Total
       FROM dbo.FollowupUnitSelections fus
-      INNER JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = fus.ApplicantId AND ahm.LHeadType = 'A'
+      INNER JOIN dbo.FollowupApplications fa ON fa.Id = fus.ApplicantId AND fa.IsDeleted = 0
       LEFT JOIN dbo.enterprise pm ON pm.id = fus.ProjectId AND pm.business_type = 'P'
       ${whereClause}
     `);
@@ -243,7 +243,7 @@ router.get("/", async (req, res) => {
       .input("PageSize", sql.Int, pageSize).query(`
         SELECT ${LIST_COLUMNS}
         FROM dbo.FollowupUnitSelections fus
-        INNER JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = fus.ApplicantId AND ahm.LHeadType = 'A'
+        INNER JOIN dbo.FollowupApplications fa ON fa.Id = fus.ApplicantId AND fa.IsDeleted = 0
         LEFT JOIN dbo.enterprise pm ON pm.id = fus.ProjectId AND pm.business_type = 'P'
         LEFT JOIN dbo.enterprise cm ON cm.id = fus.CompanyId AND cm.business_type = 'C'
         ${whereClause}
@@ -282,13 +282,16 @@ router.post("/", async (req, res) => {
       return res.status(404).json({ error: "Applicant not found" });
     }
 
-    const transaction = new sql.Transaction(getPool());
-    await transaction.begin();
-
+    const pool = getPool();
     const projectId = payload.ProjectId || null;
     const companyId = payload.CompanyId || null;
 
-    const insertResult = await new sql.Request(transaction)
+    // INSERT with SelectionNo as a computed expression so we avoid a transaction.
+    // MSSQL allows referencing INSERTED.Id inside the same statement via OUTPUT,
+    // but not in VALUES. We insert NULL, then immediately UPDATE in a single
+    // round-trip using the returned Id — same pattern used across other routes.
+    const insertResult = await pool
+      .request()
       .input("ApplicantId", sql.Int, payload.ApplicantId)
       .input("ProjectId", sql.Int, projectId)
       .input("CompanyId", sql.Int, companyId)
@@ -323,7 +326,6 @@ router.post("/", async (req, res) => {
           CreatedBy,
           CreatedAt
         )
-        OUTPUT INSERTED.Id
         VALUES (
           NULL,
           @ApplicantId,
@@ -342,13 +344,19 @@ router.post("/", async (req, res) => {
           @Notes,
           @CreatedBy,
           SYSDATETIME()
-        )
+        );
+        SELECT SCOPE_IDENTITY() AS Id;
       `);
 
-    const id = insertResult.recordset[0]?.Id;
+    const id = insertResult.recordset[0]?.Id
+      ? Number(insertResult.recordset[0].Id)
+      : null;
+    if (!id) throw new Error("INSERT did not return a record Id");
+
     const selectionNo = `SEL${String(id).padStart(6, "0")}`;
 
-    await new sql.Request(transaction)
+    await pool
+      .request()
       .input("Id", sql.Int, id)
       .input("SelectionNo", sql.NVarChar(50), selectionNo).query(`
         UPDATE dbo.FollowupUnitSelections
@@ -356,7 +364,6 @@ router.post("/", async (req, res) => {
         WHERE Id = @Id
       `);
 
-    await transaction.commit();
     res
       .status(201)
       .json({ Id: id, SelectionNo: selectionNo, Status: payload.Status });
@@ -484,7 +491,3 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
