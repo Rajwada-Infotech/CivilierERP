@@ -23,6 +23,28 @@ async function hasColumn(pool, tableName, columnName) {
   return result.recordset[0].cnt > 0;
 }
 
+// ─── Schema cache (probed once on first request, reused thereafter) ───────────
+let _schemaCache = null;
+
+async function getSchema(pool) {
+  if (_schemaCache) return _schemaCache;
+  const [
+    hasCreatedDate,
+    hasEntryDate,
+    hasUomCol,
+    hasUomOnItem,
+    hasGodownCol,
+  ] = await Promise.all([
+    hasColumn(pool, "dbo.StockLedger", "CreatedDate"),
+    hasColumn(pool, "dbo.StockLedger", "EntryDate"),
+    hasColumn(pool, "dbo.StockLedger", "UOM"),
+    hasColumn(pool, "dbo.Item_Master_Group", "M_UOM"),
+    hasColumn(pool, "dbo.StockLedger", "GodownID"),
+  ]);
+  _schemaCache = { hasCreatedDate, hasEntryDate, hasUomCol, hasUomOnItem, hasGodownCol };
+  return _schemaCache;
+}
+
 /**
  * GET /api/inventory-master
  * ?date=YYYY-MM-DD  (default: today)
@@ -32,20 +54,14 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
   try {
     const pool = getPool();
 
-    // ── Detect optional columns ──────────────────────────────────────────────
-    const [
+    // ── Detect optional columns (cached after first request) ─────────────────
+    const {
       hasCreatedDate,
       hasEntryDate,
       hasUomCol,
       hasUomOnItem,
       hasGodownCol,
-    ] = await Promise.all([
-      hasColumn(pool, "dbo.StockLedger", "CreatedDate"),
-      hasColumn(pool, "dbo.StockLedger", "EntryDate"),
-      hasColumn(pool, "dbo.StockLedger", "UOM"),
-      hasColumn(pool, "dbo.Item_Master_Group", "M_UOM"),
-      hasColumn(pool, "dbo.StockLedger", "GodownID"),
-    ]);
+    } = await getSchema(pool);
 
     const ledgerDateExpr =
       hasCreatedDate && hasEntryDate
