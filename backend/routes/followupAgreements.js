@@ -259,7 +259,7 @@ router.get("/", async (req, res) => {
     const countResult = await buildRequest().query(`
       SELECT COUNT(*) AS Total
       FROM dbo.FollowupAgreements fag
-      INNER JOIN dbo.FollowupApplications fa ON fa.Id = fag.ApplicantId
+      LEFT JOIN dbo.FollowupApplications fa ON fa.Id = fag.ApplicantId
       LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = fag.UnitSelectionId
       LEFT JOIN dbo.FollowupBookings fb ON fb.Id = fag.BookingId
       ${whereClause}
@@ -270,7 +270,7 @@ router.get("/", async (req, res) => {
       .input("PageSize", sql.Int, pageSize).query(`
         SELECT ${LIST_COLUMNS}
         FROM dbo.FollowupAgreements fag
-        INNER JOIN dbo.FollowupApplications fa ON fa.Id = fag.ApplicantId
+        LEFT JOIN dbo.FollowupApplications fa ON fa.Id = fag.ApplicantId
         LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = fag.UnitSelectionId
         LEFT JOIN dbo.FollowupBookings fb ON fb.Id = fag.BookingId
           ${whereClause}
@@ -324,8 +324,8 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const transaction = new sql.Transaction(getPool());
-    await transaction.begin();
+  try {
+    const pool = getPool();
 
     const projectId =
       payload.ProjectId ||
@@ -338,7 +338,7 @@ router.post("/", async (req, res) => {
       applicant.CompanyId ||
       null;
 
-    const insertResult = await new sql.Request(transaction)
+    const insertResult = await pool.request()
       .input("ApplicantId", sql.Int, payload.ApplicantId)
       .input("UnitSelectionId", sql.Int, payload.UnitSelectionId)
       .input("BookingId", sql.Int, payload.BookingId)
@@ -353,46 +353,25 @@ router.post("/", async (req, res) => {
       .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
       .input("CreatedBy", sql.NVarChar(100), userName).query(`
         INSERT INTO dbo.FollowupAgreements (
-          AgreementNo,
-          ApplicantId,
-          UnitSelectionId,
-          BookingId,
-          ProjectId,
-          CompanyId,
-          AgreementDate,
-          AgreementValue,
-          AdvanceAmount,
-          BalanceAmount,
-          RegistrationDate,
-          Status,
-          Notes,
-          CreatedBy,
-          CreatedAt
+          AgreementNo, ApplicantId, UnitSelectionId, BookingId,
+          ProjectId, CompanyId, AgreementDate, AgreementValue,
+          AdvanceAmount, BalanceAmount, RegistrationDate,
+          Status, Notes, CreatedBy, CreatedAt
         )
-        OUTPUT INSERTED.Id
         VALUES (
-          NULL,
-          @ApplicantId,
-          @UnitSelectionId,
-          @BookingId,
-          @ProjectId,
-          @CompanyId,
-          @AgreementDate,
-          @AgreementValue,
-          @AdvanceAmount,
-          @BalanceAmount,
-          @RegistrationDate,
-          @Status,
-          @Notes,
-          @CreatedBy,
-          SYSDATETIME()
-        )
+          NULL, @ApplicantId, @UnitSelectionId, @BookingId,
+          @ProjectId, @CompanyId, @AgreementDate, @AgreementValue,
+          @AdvanceAmount, @BalanceAmount, @RegistrationDate,
+          @Status, @Notes, @CreatedBy, SYSDATETIME()
+        );
+        SELECT SCOPE_IDENTITY() AS Id;
       `);
 
-    const id = insertResult.recordset[0]?.Id;
+    const id = Number(insertResult.recordset[0]?.Id);
+    if (!id) throw new Error("Insert returned no Id");
     const agreementNo = `AGR${String(id).padStart(6, "0")}`;
 
-    await new sql.Request(transaction)
+    await pool.request()
       .input("Id", sql.Int, id)
       .input("AgreementNo", sql.NVarChar(50), agreementNo).query(`
         UPDATE dbo.FollowupAgreements
@@ -400,10 +379,7 @@ router.post("/", async (req, res) => {
         WHERE Id = @Id
       `);
 
-    await transaction.commit();
-    res
-      .status(201)
-      .json({ Id: id, AgreementNo: agreementNo, Status: payload.Status });
+    res.status(201).json({ Id: id, AgreementNo: agreementNo, Status: payload.Status });
   } catch (err) {
     console.error("followupAgreements POST error:", err);
     res.status(500).json({ error: "Failed to create agreement" });
@@ -522,7 +498,18 @@ router.delete("/:id", async (req, res) => {
   if (!userName) return;
 
   try {
-    await getPool()
+    const pool = getPool();
+
+    const checkResult = await pool.request().input("Id", sql.Int, id).query(`
+      SELECT Status FROM dbo.FollowupAgreements WHERE Id = @Id AND IsDeleted = 0
+    `);
+    const existing = checkResult.recordset[0];
+    if (!existing) return res.status(404).json({ error: "Agreement not found" });
+    if (existing.Status === "Signed") {
+      return res.status(409).json({ error: "Signed agreements cannot be deleted." });
+    }
+
+    await pool
       .request()
       .input("Id", sql.Int, id)
       .input("UpdatedBy", sql.NVarChar(100), userName).query(`
@@ -539,7 +526,3 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
