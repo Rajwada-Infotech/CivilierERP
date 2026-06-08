@@ -1,7 +1,5 @@
 -- Migration 004: Create GoodsReceiptNotes and StockLedger tables
--- Run: sqlcmd or SSMS on your DB
-
-USE [YourDatabaseName]; -- Replace with actual DB name
+-- Run through backend/migrate.js against the configured database.
 
 -- Create GoodsReceiptNotes table
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'GoodsReceiptNotes')

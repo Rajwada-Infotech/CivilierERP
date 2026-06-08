@@ -55,6 +55,17 @@ const APPROVER_ROLES = ["admin", "super_admin", "dba"];
 async function validateApprovalModuleMap(log = console) {
   const pool = getPool();
   const missing = [];
+  const tableCheck = await pool.request().query(`
+    SELECT CASE WHEN OBJECT_ID(N'dbo.TypeOfDoc', N'U') IS NULL THEN 0 ELSE 1 END AS existsFlag
+  `);
+
+  if (!tableCheck.recordset[0]?.existsFlag) {
+    log.warn(
+      { event: "APPROVAL_MODULE_VALIDATION_SKIPPED", table: "dbo.TypeOfDoc" },
+      "Approval module startup validation skipped because TypeOfDoc is missing",
+    );
+    return missing;
+  }
 
   for (const [module, linkLabel] of Object.entries(MODULE_DOC_LINKS)) {
     const result = await pool
