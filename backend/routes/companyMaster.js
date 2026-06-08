@@ -5,7 +5,6 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const allowRoles = require("../middleware/role");
 const { bumpCacheVersion } = require("../redis");
-const { cache } = require("../middleware/cache");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 const GST_STATUSES = new Set(["Registered", "Unregistered"]);
@@ -42,13 +41,10 @@ function normalizeCompanyGst(f) {
 }
 
 // GET all — reads from enterprise where business_type = 'C'
-router.get(
-  "/",
-  cache("company-master", 300, { shared: true }),
-  async (req, res) => {
-    try {
-      const pool = getPool();
-      const result = await pool.request().query(`
+router.get("/", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
       SELECT
         c.id                        AS Id,
         c.business_identity         AS Code,
@@ -102,12 +98,11 @@ router.get(
         AND (c.discontinue IS NULL OR c.discontinue = 0)
       ORDER BY c.name
     `);
-      res.json(result.recordset);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  },
-);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // POST — inserts into enterprise with business_type = 'C'
 router.post("/", adminOnly, async (req, res) => {
@@ -160,7 +155,11 @@ router.post("/", adminOnly, async (req, res) => {
       .input("auditor_name", sql.NVarChar(255), f.auditorName || null)
       .input("remarks", sql.NVarChar(500), f.remarks || null)
       .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
-      .input("enterprise_id", sql.Int, Number.isInteger(enterpriseId) ? enterpriseId : null)
+      .input(
+        "enterprise_id",
+        sql.Int,
+        Number.isInteger(enterpriseId) ? enterpriseId : null,
+      )
       .input("discontinue", sql.Bit, f.isActive ? 0 : 1)
       .input("status", sql.NVarChar(50), f.isActive ? "Active" : "Inactive")
       .input("date_of_entry", sql.Date, new Date()).query(`
@@ -241,7 +240,11 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("auditor_name", sql.NVarChar(255), f.auditorName || null)
       .input("remarks", sql.NVarChar(500), f.remarks || null)
       .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
-      .input("enterprise_id", sql.Int, Number.isInteger(enterpriseId) ? enterpriseId : null)
+      .input(
+        "enterprise_id",
+        sql.Int,
+        Number.isInteger(enterpriseId) ? enterpriseId : null,
+      )
       .input("discontinue", sql.Bit, f.isActive ? 0 : 1)
       .input("status", sql.NVarChar(50), f.isActive ? "Active" : "Inactive")
       .query(`
