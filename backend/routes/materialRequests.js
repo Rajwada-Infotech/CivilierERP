@@ -615,7 +615,21 @@ router.put("/:id", authenticateToken, async (req, res) => {
       items = [],
     } = req.body;
 
-    await pool
+    // Bug 1 — guard against editing a non-Draft MR.
+    // The frontend restricts Edit to Draft rows, but a direct API call or race
+    // condition could reach here with an Approved/Pending record.
+    const statusCheck = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query("SELECT Status FROM dbo.MaterialRequests WHERE MRId=@id");
+    if (!statusCheck.recordset.length)
+      return res.status(404).json({ error: "Not found" });
+    if (statusCheck.recordset[0].Status !== "Draft")
+      return res.status(409).json({
+        error: `Cannot edit a Material Request with status "${statusCheck.recordset[0].Status}". Only Draft requests can be edited.`,
+      });
+
+    const updateResult = await pool
       .request()
       .input("id", sql.Int, id)
       .input("CompanyId", sql.Int, CompanyId || null)
@@ -633,8 +647,15 @@ router.put("/:id", authenticateToken, async (req, res) => {
             RequestDate=@RequestDate, RequiredByDate=@RequiredByDate,
             Priority=@Priority, Reason=@Reason, Remarks=@Remarks,
             Status=@Status, UpdatedBy=@UpdatedBy, UpdatedAt=GETDATE()
-        WHERE MRId=@id
+        WHERE MRId=@id AND Status='Draft'
       `);
+
+    // Race-condition guard: if another request approved/submitted this MR
+    // between our status check and the UPDATE, rowsAffected will be 0.
+    if (updateResult.rowsAffected[0] === 0)
+      return res.status(409).json({
+        error: "Update failed: the request status changed before the update could be applied.",
+      });
 
     // Replace items
     await pool
@@ -677,10 +698,12 @@ router.delete("/:id", authenticateToken, async (req, res) => {
       .query("SELECT Status FROM dbo.MaterialRequests WHERE MRId=@id");
     if (!check.recordset.length)
       return res.status(404).json({ error: "Not found" });
-    if (check.recordset[0].Status !== "Draft")
-      return res
-        .status(400)
-        .json({ error: "Only Draft requests can be deleted" });
+    // Bug 2 — the view modal shows a Delete button for both Draft and Rejected.
+    // Backend now matches that intent; all other statuses are still blocked.
+    if (!["Draft", "Rejected"].includes(check.recordset[0].Status))
+      return res.status(409).json({
+        error: `Cannot delete a Material Request with status "${check.recordset[0].Status}". Only Draft or Rejected requests can be deleted.`,
+      });
 
     await pool
       .request()
