@@ -577,6 +577,27 @@ router.delete("/:id", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
+
+    // Bug 6a — guard against NaN id (e.g. non-numeric route segment)
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    // Bug 6b — existence + status check: only Draft or Rejected issues may be deleted.
+    // Deleting an Approved/Pending issue would silently reverse stock movements
+    // without any audit trail.
+    const existing = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query("SELECT Status FROM dbo.MaterialIssues WHERE IssueId = @id");
+
+    if (existing.recordset.length === 0)
+      return res.status(404).json({ error: "Issue not found" });
+
+    const { Status } = existing.recordset[0];
+    if (!["Draft", "Rejected"].includes(Status))
+      return res.status(409).json({
+        error: `Cannot delete an issue with status "${Status}". Only Draft or Rejected issues can be deleted.`,
+      });
+
     await pool
       .request()
       .input("id", sql.Int, id)
@@ -902,6 +923,3 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
   }
 });
 module.exports = router;
-
-
-

@@ -21,6 +21,23 @@ async function hasColumn(pool, tableName, columnName) {
   return result.recordset[0].cnt > 0;
 }
 
+// ─── Schema cache (probed once on first request, reused thereafter) ───────────
+let _schemaCache = null;
+
+async function getSchema(pool) {
+  if (_schemaCache) return _schemaCache;
+  const [hasCreatedDate, hasEntryDate, hasUom, hasDocNo, hasGodownID] =
+    await Promise.all([
+      hasColumn(pool, "dbo.StockLedger", "CreatedDate"),
+      hasColumn(pool, "dbo.StockLedger", "EntryDate"),
+      hasColumn(pool, "dbo.StockLedger", "UOM"),
+      hasColumn(pool, "dbo.StockLedger", "DocNo"),
+      hasColumn(pool, "dbo.StockLedger", "GodownID"),
+    ]);
+  _schemaCache = { hasCreatedDate, hasEntryDate, hasUom, hasDocNo, hasGodownID };
+  return _schemaCache;
+}
+
 function bindFilters(request, filters) {
   if (filters.itemId) {
     request.input("itemId", sql.NVarChar(50), String(filters.itemId));
@@ -125,15 +142,9 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
       return res.status(400).json({ error: "godownId must be a number" });
     }
 
-    // ── Schema probing (parallel) ─────────────────────────────────────────────
-    const [hasCreatedDate, hasEntryDate, hasUom, hasDocNo, hasGodownID] =
-      await Promise.all([
-        hasColumn(pool, "dbo.StockLedger", "CreatedDate"),
-        hasColumn(pool, "dbo.StockLedger", "EntryDate"),
-        hasColumn(pool, "dbo.StockLedger", "UOM"),
-        hasColumn(pool, "dbo.StockLedger", "DocNo"),
-        hasColumn(pool, "dbo.StockLedger", "GodownID"),
-      ]);
+    // ── Schema probing (cached after first request) ───────────────────────────
+    const { hasCreatedDate, hasEntryDate, hasUom, hasDocNo, hasGodownID } =
+      await getSchema(pool);
 
     const ledgerDateExpr =
       hasCreatedDate && hasEntryDate
@@ -329,7 +340,3 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
 bumpCacheVersion("stock-ledger").catch(() => {});
 
 module.exports = router;
-
-
-
-

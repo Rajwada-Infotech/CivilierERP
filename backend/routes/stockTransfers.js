@@ -34,6 +34,17 @@ router.get("/", cache("stock-transfers", 60), async (req, res) => {
       where += " AND st.ToGodownID=@to";
     }
 
+    // ── Total count (real DB count, not page size) ────────────────────────────
+    const countReq = pool.request();
+    if (fromGodown) countReq.input("from", sql.Int, parseInt(fromGodown));
+    if (toGodown)   countReq.input("to",   sql.Int, parseInt(toGodown));
+    const countResult = await countReq.query(`
+      SELECT COUNT(*) AS total
+      FROM dbo.StockTransfers st
+      ${where}
+    `);
+    const dbTotal = Number(countResult.recordset[0].total || 0);
+
     const result = await request.query(`
       SELECT
         st.TransferID, st.DocNo, st.TransferDate,
@@ -54,7 +65,7 @@ router.get("/", cache("stock-transfers", 60), async (req, res) => {
       TransferItems: parseItems(r.TransferItems),
     }));
 
-    res.json({ data: rows, total: rows.length });
+    res.json({ data: rows, total: dbTotal });
   } catch (err) {
     console.error("[stock-transfers] GET /:", err.message);
     res.status(500).json({ error: err.message });
@@ -222,7 +233,3 @@ router.get("/:id", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
