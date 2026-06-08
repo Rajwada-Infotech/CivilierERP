@@ -321,10 +321,18 @@ router.delete("/:id", async (req, res) => {
       return res.status(404).json({ error: "Enterprise not found" });
 
     // 2. Check for linked companies and projects
-    const usageCheck = await pool.request().input("EnterpriseId", sql.Int, id)
+    const usageCheck = await pool
+      .request()
+      .input("EnterpriseId", sql.Int, id)
+      .input("EnterpriseName", sql.NVarChar(255), entRow.recordset[0].name)
       .query(`
       SELECT
-        (SELECT COUNT(*) FROM dbo.enterprise WHERE enterprise_id = @EnterpriseId AND business_type = 'C') AS CompanyCount,
+        (SELECT COUNT(*) FROM dbo.enterprise
+         WHERE business_type = 'C'
+           AND (
+             enterprise_id = @EnterpriseId
+             OR LTRIM(RTRIM(ISNULL(belongs_to, ''))) = LTRIM(RTRIM(ISNULL(@EnterpriseName, '')))
+           )) AS CompanyCount,
         (SELECT COUNT(*) FROM dbo.enterprise WHERE enterprise_id = @EnterpriseId AND business_type = 'P') AS ProjectCount
     `);
 
