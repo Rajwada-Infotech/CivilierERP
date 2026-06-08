@@ -629,7 +629,10 @@ export default function EnterpriseMaster() {
             <option key={o}>{o}</option>
           ))}
         </select>
-        <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <ChevronDown
+          size={13}
+          className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+        />
       </div>
     </div>
   );
@@ -645,300 +648,309 @@ export default function EnterpriseMaster() {
 
       {/* Header */}
       <div className="relative space-y-6 mt-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
-            <Building2 size={20} className="text-blue-500" />
-          </div>
-          <div>
-            <h1 className="text-xl font-heading font-semibold text-foreground">
-              Enterprise Master
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              Manage enterprises, companies and business units
-            </p>
-          </div>
-        </div>
-        {!showForm && (
-          <button
-            onClick={openNew}
-            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
-          >
-            <Plus size={16} /> Add Enterprise
-          </button>
-        )}
-      </div>
-
-      {/* Table */}
-      {!showForm && (
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <div className="p-4 border-b border-border flex items-center gap-3">
-            <div className="relative flex-1 max-w-sm">
-              <Search
-                size={15}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search name, type…"
-                className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
+              <Building2 size={20} className="text-blue-500" />
             </div>
-            <span className="text-xs text-muted-foreground">
-              {filtered.length} record{filtered.length !== 1 ? "s" : ""}
-            </span>
+            <div>
+              <h1 className="text-xl font-heading font-semibold text-foreground">
+                Enterprise Master
+              </h1>
+              <p className="text-xs text-muted-foreground">
+                Manage enterprises, companies and business units
+              </p>
+            </div>
           </div>
-          {isLoading ? (
-            <div className="p-10 text-center text-muted-foreground text-sm">
-              Loading…
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <DataTable
-                data={filtered}
-                columns={columns}
-                searchable={false}
-                paginated={true}
-                defaultPageSize={20}
-                emptyMessage="No records found."
-              />
-            </div>
+          {!showForm && (
+            <button
+              onClick={openNew}
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
+            >
+              <Plus size={16} /> Add Enterprise
+            </button>
           )}
         </div>
-      )}
 
-      {/* Form */}
-      {showForm && (
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
-            <div className="flex items-center gap-3">
-              <LogoAvatar
-                logo={logoPreview || null}
-                name={form.name || "?"}
-                size="md"
-              />
-              <h2 className="font-heading font-semibold text-foreground">
-                {editId
-                  ? `Edit — ${form.name || "Enterprise"}`
-                  : "New Enterprise"}
-              </h2>
+        {/* Table */}
+        {!showForm && (
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center gap-3">
+              <div className="relative flex-1 max-w-sm">
+                <Search
+                  size={15}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search name, type…"
+                  className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {filtered.length} record{filtered.length !== 1 ? "s" : ""}
+              </span>
             </div>
-            <button
-              onClick={() => setShowForm(false)}
-              className="text-xs text-muted-foreground hover:text-foreground px-3 py-1 rounded border border-border hover:bg-muted transition-colors"
-            >
-              Cancel
-            </button>
+            {isLoading ? (
+              <div className="p-10 text-center text-muted-foreground text-sm">
+                Loading…
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <DataTable
+                  data={filtered}
+                  columns={columns}
+                  searchable={false}
+                  paginated={true}
+                  defaultPageSize={20}
+                  emptyMessage="No records found."
+                />
+              </div>
+            )}
           </div>
+        )}
 
-          {/* Tabs */}
-          <div className="flex gap-1 p-3 border-b border-border bg-muted/20">
-            {(["general", "address", "legal"] as Tab[]).map((t) => (
+        {/* Form */}
+        {showForm && (
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
+              <div className="flex items-center gap-3">
+                <LogoAvatar
+                  logo={logoPreview || null}
+                  name={form.name || "?"}
+                  size="md"
+                />
+                <h2 className="font-heading font-semibold text-foreground">
+                  {editId
+                    ? `Edit — ${form.name || "Enterprise"}`
+                    : "New Enterprise"}
+                </h2>
+              </div>
               <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${tab === t ? "gradient-accent text-white" : "text-muted-foreground hover:bg-muted"}`}
+                onClick={() => setShowForm(false)}
+                className="text-xs text-muted-foreground hover:text-foreground px-3 py-1 rounded border border-border hover:bg-muted transition-colors"
               >
-                {t === "legal" ? "Legal / Compliance" : t}
+                Cancel
               </button>
-            ))}
-          </div>
+            </div>
 
-          <div className="p-6">
-            {/* General */}
-            {tab === "general" && (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                <div className="col-span-full">
-                  <label className="block text-xs font-medium text-muted-foreground mb-2">
-                    Enterprise Logo
-                  </label>
-                  <div className="flex items-center gap-4">
-                    {logoPreview ? (
-                      <div className="relative group">
-                        <img
-                          src={logoPreview}
-                          alt="Logo preview"
-                          className="w-16 h-16 rounded-xl object-contain border border-border bg-muted/30"
+            {/* Tabs */}
+            <div className="flex gap-1 p-3 border-b border-border bg-muted/20">
+              {(["general", "address", "legal"] as Tab[]).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${tab === t ? "gradient-accent text-white" : "text-muted-foreground hover:bg-muted"}`}
+                >
+                  {t === "legal" ? "Legal / Compliance" : t}
+                </button>
+              ))}
+            </div>
+
+            <div className="p-6">
+              {/* General */}
+              {tab === "general" && (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="col-span-full">
+                    <label className="block text-xs font-medium text-muted-foreground mb-2">
+                      Enterprise Logo
+                    </label>
+                    <div className="flex items-center gap-4">
+                      {logoPreview ? (
+                        <div className="relative group">
+                          <img
+                            src={logoPreview}
+                            alt="Logo preview"
+                            className="w-16 h-16 rounded-xl object-contain border border-border bg-muted/30"
+                          />
+                          <button
+                            onClick={removeLogo}
+                            className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X size={11} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="w-16 h-16 rounded-xl border-2 border-dashed border-border bg-muted/20 flex items-center justify-center">
+                          <Building2
+                            size={20}
+                            className="text-muted-foreground/40"
+                          />
+                        </div>
+                      )}
+                      <div>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleLogoChange}
+                          className="hidden"
+                          id="enterprise-logo-input"
                         />
-                        <button
-                          onClick={removeLogo}
-                          className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        <label
+                          htmlFor="enterprise-logo-input"
+                          className="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border border-border hover:bg-muted cursor-pointer transition-colors"
                         >
-                          <X size={11} />
-                        </button>
+                          <Upload size={13} />
+                          {logoPreview ? "Change Logo" : "Upload Logo"}
+                        </label>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          PNG, JPG, SVG · Max 2 MB
+                        </p>
                       </div>
-                    ) : (
-                      <div className="w-16 h-16 rounded-xl border-2 border-dashed border-border bg-muted/20 flex items-center justify-center">
-                        <Building2
-                          size={20}
-                          className="text-muted-foreground/40"
-                        />
-                      </div>
-                    )}
-                    <div>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*"
-                        onChange={handleLogoChange}
-                        className="hidden"
-                        id="enterprise-logo-input"
-                      />
-                      <label
-                        htmlFor="enterprise-logo-input"
-                        className="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border border-border hover:bg-muted cursor-pointer transition-colors"
-                      >
-                        <Upload size={13} />
-                        {logoPreview ? "Change Logo" : "Upload Logo"}
-                      </label>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        PNG, JPG, SVG · Max 2 MB
-                      </p>
                     </div>
                   </div>
-                </div>
 
-                {field("Name *", "name", "text", "Full legal name")}
-                {field("Short Name", "short_name", "text", "Abbreviated name")}
-                {sel("Type", "entity_type", ENTITY_TYPES)}
-                {field("Description", "description", "text")}
-                {field("Start Date", "start_date", "date")}
-                {field(
-                  "Start Financial Year",
-                  "start_fin_year",
-                  "text",
-                  "e.g. 2024-25",
-                )}
-                {sel("Status", "status", ["Active", "Inactive", "Suspended"])}
-                <div className="flex items-center gap-3 pt-5">
-                  <button
-                    onClick={() => set("discontinue", !form.discontinue)}
-                    className="flex items-center gap-2 text-sm"
-                  >
-                    {form.discontinue ? (
-                      <ToggleRight size={24} className="text-red-500" />
-                    ) : (
-                      <ToggleLeft size={24} className="text-muted-foreground" />
-                    )}
-                    <span
-                      className={
-                        form.discontinue
-                          ? "text-red-500"
-                          : "text-muted-foreground"
-                      }
+                  {field("Name *", "name", "text", "Full legal name")}
+                  {field(
+                    "Short Name",
+                    "short_name",
+                    "text",
+                    "Abbreviated name",
+                  )}
+                  {sel("Type", "entity_type", ENTITY_TYPES)}
+                  {field("Description", "description", "text")}
+                  {field("Start Date", "start_date", "date")}
+                  {field(
+                    "Start Financial Year",
+                    "start_fin_year",
+                    "text",
+                    "e.g. 2024-25",
+                  )}
+                  {sel("Status", "status", ["Active", "Inactive", "Suspended"])}
+                  <div className="flex items-center gap-3 pt-5">
+                    <button
+                      onClick={() => set("discontinue", !form.discontinue)}
+                      className="flex items-center gap-2 text-sm"
                     >
-                      {form.discontinue ? "Discontinued" : "Not Discontinued"}
-                    </span>
-                  </button>
+                      {form.discontinue ? (
+                        <ToggleRight size={24} className="text-red-500" />
+                      ) : (
+                        <ToggleLeft
+                          size={24}
+                          className="text-muted-foreground"
+                        />
+                      )}
+                      <span
+                        className={
+                          form.discontinue
+                            ? "text-red-500"
+                            : "text-muted-foreground"
+                        }
+                      >
+                        {form.discontinue ? "Discontinued" : "Not Discontinued"}
+                      </span>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Address */}
-            {tab === "address" && (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                <div className="col-span-full">
-                  {field("Address Line 1", "address")}
+              {/* Address */}
+              {tab === "address" && (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="col-span-full">
+                    {field("Address Line 1", "address")}
+                  </div>
+                  <div className="col-span-full">
+                    {field("Address Line 2", "address_line2")}
+                  </div>
+                  {field("City", "city")}
+                  {field("State", "state")}
+                  {field("Country", "country")}
+                  {field("Pincode", "pincode")}
+                  {field("Phone", "phone_number", "tel")}
+                  {field("Email", "email", "email")}
+                  {field("Website", "website", "url")}
+                  {field("Latitude", "latitude", "number")}
+                  {field("Longitude", "longitude", "number")}
                 </div>
-                <div className="col-span-full">
-                  {field("Address Line 2", "address_line2")}
+              )}
+
+              {/* Legal / Compliance */}
+              {tab === "legal" && (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {sel("GST Type", "gst_type", GST_TYPES)}
+                  {field("GST Issue Date", "gst_issue_date", "date")}
+                  {field("TAN", "tan", "text", "Tax Deduction Account Number")}
+                  {field("PAN", "pan", "text", "AAAAA0000A")}
+                  {field("CIN", "cin", "text", "Company Identification Number")}
+                  {field("CR Code", "cr_code")}
+                  {field("RERA No.", "rera_no")}
+                  {field("RERA Date", "rera_date", "date")}
+                  {field("Trade License", "trade_license")}
+                  {field("Date of Entry", "date_of_entry", "date")}
+                  {field(
+                    "Date of Establishment",
+                    "date_of_establishment",
+                    "date",
+                  )}
                 </div>
-                {field("City", "city")}
-                {field("State", "state")}
-                {field("Country", "country")}
-                {field("Pincode", "pincode")}
-                {field("Phone", "phone_number", "tel")}
-                {field("Email", "email", "email")}
-                {field("Website", "website", "url")}
-                {field("Latitude", "latitude", "number")}
-                {field("Longitude", "longitude", "number")}
-              </div>
-            )}
-
-            {/* Legal / Compliance */}
-            {tab === "legal" && (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {sel("GST Type", "gst_type", GST_TYPES)}
-                {field("GST Issue Date", "gst_issue_date", "date")}
-                {field("TAN", "tan", "text", "Tax Deduction Account Number")}
-                {field("PAN", "pan", "text", "AAAAA0000A")}
-                {field("CIN", "cin", "text", "Company Identification Number")}
-                {field("CR Code", "cr_code")}
-                {field("RERA No.", "rera_no")}
-                {field("RERA Date", "rera_date", "date")}
-                {field("Trade License", "trade_license")}
-                {field("Date of Entry", "date_of_entry", "date")}
-                {field(
-                  "Date of Establishment",
-                  "date_of_establishment",
-                  "date",
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="p-4 border-t border-border flex justify-end gap-3">
-            <button
-              onClick={() => setShowForm(false)}
-              className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving || !form.name?.trim()}
-              className="gradient-accent font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              {saving ? "Saving…" : editId ? "Update" : "Save"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* View Modal */}
-      {viewTarget && (
-        <EnterpriseViewModal
-          enterprise={viewTarget}
-          onClose={() => setViewTarget(null)}
-        />
-      )}
-
-      {/* Delete Confirm */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
-                <Trash2 size={18} className="text-red-500" />
-              </div>
-              <div>
-                <p className="font-heading font-semibold text-foreground">
-                  Delete Enterprise?
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  This action cannot be undone.
-                </p>
-              </div>
+              )}
             </div>
-            <div className="flex gap-3">
+
+            <div className="p-4 border-t border-border flex justify-end gap-3">
               <button
-                onClick={() => setDeleteTarget(null)}
-                className="flex-1 py-2 text-sm rounded-lg border border-border hover:bg-muted"
+                onClick={() => setShowForm(false)}
+                className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
               >
                 Cancel
               </button>
               <button
-                onClick={handleDelete}
-                className="flex-1 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600"
+                onClick={handleSave}
+                disabled={saving || !form.name?.trim()}
+                className="gradient-accent font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
-                Delete
+                {saving ? "Saving…" : editId ? "Update" : "Save"}
               </button>
             </div>
           </div>
-        </div>
-      )}
-      </div>{/* end space-y-6 mt-6 */}
+        )}
+
+        {/* View Modal */}
+        {viewTarget && (
+          <EnterpriseViewModal
+            enterprise={viewTarget}
+            onClose={() => setViewTarget(null)}
+          />
+        )}
+
+        {/* Delete Confirm */}
+        {deleteTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
+                  <Trash2 size={18} className="text-red-500" />
+                </div>
+                <div>
+                  <p className="font-heading font-semibold text-foreground">
+                    Delete Enterprise?
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    This action cannot be undone.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteTarget(null)}
+                  className="flex-1 py-2 text-sm rounded-lg border border-border hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDelete}
+                  className="flex-1 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      {/* end space-y-6 mt-6 */}
     </>
   );
 }
