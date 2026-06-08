@@ -128,12 +128,7 @@ function GodownDrawer({
     if (editing) {
       updateMut.mutate({ id: editing.GodownID, payload: form });
     } else {
-      createGodown(form)
-        .then(() => {
-          qc.invalidateQueries({ queryKey: ["godowns"] });
-          onClose();
-        })
-        .catch((e: Error) => setErr(e.message));
+      createMut.mutate(form);
     }
   };
 
@@ -281,6 +276,9 @@ function DeleteDialog({
       onClose();
     },
   });
+
+  // Reset stale error state when the dialog opens for a new godown
+  React.useEffect(() => { if (godown) mut.reset(); }, [godown?.GodownID]);
 
   if (!godown) return null;
 

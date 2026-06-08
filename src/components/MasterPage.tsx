@@ -363,20 +363,27 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const handleDelete = (id: string) => {
-    setData((prev) => {
-      const next = prev.filter((r) => r._id !== id);
-      const stripped = next.map(({ _id, ...rest }) => rest);
+  const handleDelete = async (id: string) => {
+    // Compute next state first so we can pass records to onDataEvent
+    const next = data.filter((r) => r._id !== id);
+    const stripped = next.map(({ _id, ...rest }) => rest);
+    try {
+      await onDataEvent?.({ action: "delete", id, records: stripped });
+      // API confirmed — now update local state
+      setData(next);
       onDataChange?.(stripped);
-      onDataEvent?.({ action: "delete", id, records: stripped });
-      return next;
-    });
-    setDeleteConfirmId(null);
-    if (editingId === id) {
-      setEditingId(null);
-      setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
+      setDeleteConfirmId(null);
+      if (editingId === id) {
+        setEditingId(null);
+        setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
+      }
+      toast.success("Record deleted");
+    } catch (err) {
+      setDeleteConfirmId(null);
+      toast.error(
+        err instanceof Error ? err.message : "Failed to delete. Please try again.",
+      );
     }
-    toast.success("Record deleted");
   };
 
   const handleReset = () => {
