@@ -1749,7 +1749,8 @@ export default function BookingsPage() {
   const hasFilters = !!(search || statusFilter || projectFilter);
   const confirmed = bookings.filter((b) => b.Status === "Confirmed").length;
   const pending = bookings.filter((b) => b.Status === "Pending").length;
-  const totalValue = bookings
+  // Note: confirmed/pending/totalValue are page-scoped (current page only)
+  const totalValuePage = bookings
     .filter((b) => b.Status === "Confirmed")
     .reduce((s, b) => s + (b.TotalValue ?? 0), 0);
 
@@ -1805,17 +1806,22 @@ export default function BookingsPage() {
       const created = await res.json();
       toast.success("Booking created");
 
+      // Fetch full booking record so communicator has correct name/email/phone
+      const fullCreated = await fetchWithAuth(`${API}/${created.Id ?? created.id}`)
+        .then((r) => r.ok ? r.json() : created)
+        .catch(() => created);
+
       // Auto-create a Welcome Call record linked to this booking
       try {
         await fetchWithAuth("/api/followup-welcome-calls", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            BookingId: created.id ?? created.Id,
+            BookingId: created.Id ?? created.id,
             ApplicantId: payload.ApplicantId,
             CallDate: new Date().toISOString().slice(0, 10),
-            Status: "Scheduled",
-            Notes: `Auto-created on booking ${created.bookingNo ?? ""}`.trim(),
+            Outcome: "callback",
+            Notes: `Auto-created on booking ${created.BookingNo ?? created.bookingNo ?? ""}`.trim(),
           }),
         });
         toast.info("Welcome Call scheduled — go to Sales → Welcome Calls to log the outcome.");
@@ -1828,16 +1834,14 @@ export default function BookingsPage() {
         followupCommunicatorApi.trigger({
           triggerType:   "booking",
           applicantId:   payload.ApplicantId,
-          bookingId:     created.id ?? created.Id,
-          applicantName: created.ApplicantName ?? "",
-          email:         created.Email         ?? undefined,
-          phone:         created.PrimaryMobile ?? created.Phone ?? undefined,
-          projectName:   created.ProjectName   ?? undefined,
-          unitNo:        created.UnitNo        ?? payload.UnitNo,
+          bookingId:     created.Id ?? created.id,
+          applicantName: fullCreated.ApplicantName ?? "",
+          email:         fullCreated.Email         ?? undefined,
+          phone:         fullCreated.PrimaryMobile ?? undefined,
+          projectName:   fullCreated.ProjectName   ?? undefined,
+          unitNo:        fullCreated.UnitNo        ?? payload.UnitNo,
           bookingDate:   payload.BookingDate,
-        }).catch(() => {
-          // Communication failure is non-blocking
-        });
+        }).catch(() => {});
       }).catch(() => {});
     }
     await queryClient.invalidateQueries({ queryKey: ["followup-bookings"] });
@@ -1953,7 +1957,7 @@ export default function BookingsPage() {
           />
           <KpiCard
             label="Confirmed Value"
-            value={fmtCurrency(totalValue) ?? "—"}
+            value={fmtCurrency(totalValuePage) ?? "—"}
             icon={<IndianRupee size={16} />}
             accent="text-violet-600 dark:text-violet-400"
             bg="bg-violet-50 dark:bg-violet-900/30"

@@ -1,5 +1,4 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useMemo, useRef, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -348,6 +347,7 @@ function Combobox({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
   const selected = items.find((i) => i.value === value);
   const filtered = useMemo(() => {
     if (!q) return items;
@@ -359,8 +359,17 @@ function Combobox({
     );
   }, [items, q]);
 
+  useEffect(() => {
+    if (!open) return;
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [open]);
+
   return (
-    <div className="noc-combo">
+    <div className="noc-combo" ref={ref}>
       <button
         type="button"
         className={`noc-combo-trigger${open ? " open" : ""}${!value ? " empty" : ""}${disabled ? " disabled" : ""}`}
@@ -441,7 +450,6 @@ function Combobox({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function NOCPage() {
-  const navigate = useNavigate();
   const qc = useQueryClient();
   const { currentUser } = useAuth();
   const canDeleteRecords = currentUser?.role !== "engineer";
@@ -485,6 +493,7 @@ export function NOCPage() {
       pending: nocs.filter((n) => n.Status === "Pending").length,
       approved: nocs.filter((n) => n.Status === "Approved").length,
       issued: nocs.filter((n) => n.Status === "Issued").length,
+      isPageScoped: (pagination?.totalPages ?? 1) > 1,
     }),
     [nocs, pagination],
   );
@@ -627,6 +636,8 @@ export function NOCPage() {
       toast.success("NOC created");
       invalidate();
       setDialogOpen(false);
+      setEditId(null);
+      setForm(EMPTY_FORM);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -637,6 +648,8 @@ export function NOCPage() {
       toast.success("NOC updated");
       invalidate();
       setDialogOpen(false);
+      setEditId(null);
+      setForm(EMPTY_FORM);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -1039,9 +1052,9 @@ export function NOCPage() {
         <div className="noc-stats">
           {[
             { label: "Total", val: pagination?.total ?? 0, cls: "blue" },
-            { label: "Pending", val: stats.pending, cls: "" },
-            { label: "Approved", val: stats.approved, cls: "green" },
-            { label: "Issued", val: stats.issued, cls: "amber" },
+            { label: stats.isPageScoped ? "Pending (Page)" : "Pending", val: stats.pending, cls: "" },
+            { label: stats.isPageScoped ? "Approved (Page)" : "Approved", val: stats.approved, cls: "green" },
+            { label: stats.isPageScoped ? "Issued (Page)" : "Issued", val: stats.issued, cls: "amber" },
           ].map(({ label, val, cls }) => (
             <div key={label} className="noc-stat">
               <div className={`noc-stat-val ${cls}`}>{val}</div>
@@ -1396,7 +1409,7 @@ export function NOCPage() {
       <Dialog
         open={dialogOpen}
         onOpenChange={(v) => {
-          if (!v) setDialogOpen(false);
+          if (!v) { setDialogOpen(false); setEditId(null); setForm(EMPTY_FORM); }
         }}
       >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -1695,7 +1708,7 @@ export function NOCPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+            <Button variant="outline" onClick={() => { setDialogOpen(false); setEditId(null); setForm(EMPTY_FORM); }}>
               Cancel
             </Button>
             <Button

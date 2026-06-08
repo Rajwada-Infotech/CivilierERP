@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -306,6 +306,7 @@ function Combobox({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const ref = React.useRef<HTMLDivElement>(null);
   const selected = items.find((i) => i.value === value);
   const filtered = useMemo(() => {
     if (!q) return items;
@@ -317,8 +318,17 @@ function Combobox({
     );
   }, [items, q]);
 
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
   return (
-    <div className="ag-combo">
+    <div className="ag-combo" ref={ref}>
       <button
         type="button"
         className={`ag-combo-trigger${open ? " open" : ""}${!value ? " empty" : ""}${disabled ? " disabled" : ""}`}
@@ -497,7 +507,7 @@ export function AgreementsPage() {
     [meta],
   );
 
-  function set(k: keyof FormState, v: string) {
+  function set(k: keyof FormState, v: string | AgreementStatus) {
     setForm((f) => {
       const next = { ...f, [k]: v };
       // auto-fill project/company from applicant
@@ -1326,7 +1336,16 @@ export function AgreementsPage() {
       </div>
 
       {/* ── Create / Edit Dialog ── */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDialogOpen(false);
+            setEditId(null);
+            setForm(EMPTY_FORM);
+          }
+        }}
+      >
         <DialogContent
           style={{ maxWidth: 640, maxHeight: "90vh", overflowY: "auto" }}
         >
@@ -1537,7 +1556,7 @@ export function AgreementsPage() {
           </div>
 
           <DialogFooter style={{ marginTop: 8 }}>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+            <Button variant="outline" onClick={() => { setDialogOpen(false); setEditId(null); setForm(EMPTY_FORM); }}>
               Cancel
             </Button>
             <Button
