@@ -37,6 +37,7 @@ const mapRow = (
   discountType: "none",
   discountValue: 0,
   paymentDueDays: 0,
+  appliedOn: row.CalculationType === "After GST" ? "post-gst" : "pre-gst",
   status: Boolean(row.IsActive),
   deductionType: row.DeductionType === "Deduction" ? "Deduction" : "Addition",
   // Raw DB columns — required by the form fields (Name, CalculationType, etc.)
@@ -138,6 +139,9 @@ const BillingTermsMaster: React.FC = () => {
 
   const columns: ColumnDef[] = [
     { key: "name", label: "Term Name" },
+    { key: "CalculationType", label: "Calculation Type" },
+    { key: "DeductionType", label: "Type" },
+    { key: "description", label: "Remarks" },
     { key: "status", label: "Status" },
   ];
 
@@ -156,6 +160,27 @@ const BillingTermsMaster: React.FC = () => {
           }`}
         />
         {value ? "Active" : "Inactive"}
+      </span>
+    ),
+    DeductionType: (value: unknown) => (
+      <span
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
+          value === "Addition"
+            ? "bg-green-500/10 text-green-500 border-green-500/20"
+            : "bg-destructive/10 text-destructive border-destructive/20"
+        }`}
+      >
+        {value === "Addition" ? "+ Addition" : "− Deduction"}
+      </span>
+    ),
+    CalculationType: (value: unknown) => (
+      <span className="text-xs text-muted-foreground font-heading">
+        {String(value ?? "")}
+      </span>
+    ),
+    description: (value: unknown) => (
+      <span className="text-xs text-muted-foreground truncate max-w-[200px] block">
+        {value ? String(value) : "—"}
       </span>
     ),
   };
@@ -236,6 +261,7 @@ const BillingTermsMaster: React.FC = () => {
               { header: "Term Name", accessor: "Name" },
               { header: "Calculation Type", accessor: "CalculationType" },
               { header: "Type", accessor: "DeductionType" },
+              { header: "Remarks", accessor: "Description" },
               {
                 header: "Status",
                 accessor: (r) => (r.IsActive ? "Active" : "Inactive"),

@@ -29,6 +29,7 @@ import {
   Layers,
   AlertTriangle,
   Printer,
+  CopyPlus,
 } from "lucide-react";
 import {
   Dialog,
@@ -79,7 +80,13 @@ interface PendingItemsData {
   hasPending: boolean;
 }
 
-function RemainingItemsPanel({ grnId }: { grnId: number }) {
+function RemainingItemsPanel({
+  grnId,
+  onCreateNewGRN,
+}: {
+  grnId: number;
+  onCreateNewGRN?: (data: PendingItemsData) => void;
+}) {
   const [data, setData] = useState<PendingItemsData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -193,12 +200,21 @@ function RemainingItemsPanel({ grnId }: { grnId: number }) {
           </tfoot>
         </table>
       </div>
-      <div className="px-4 py-2.5 border-t border-amber-500/15 bg-amber-500/5">
+      <div className="px-4 py-2.5 border-t border-amber-500/15 bg-amber-500/5 flex items-center justify-between gap-3 flex-wrap">
         <p className="text-[10px] text-amber-600 dark:text-amber-500">
           These items have been received but not yet booked as expenses. Create
           an Expense Booking from the Material → Expense Booking page to book
           them.
         </p>
+        {onCreateNewGRN && data && (
+          <button
+            onClick={() => onCreateNewGRN(data)}
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white transition-colors"
+          >
+            <CopyPlus size={12} />
+            New GRN for Remaining
+          </button>
+        )}
       </div>
     </div>
   );
@@ -673,6 +689,7 @@ export default function GRN() {
     poNumber: "",
     poTotalAmount: 0 as number,
     poSubtotalAmount: 0 as number,
+    poReceivedAmount: 0 as number,
     remarks: "",
     status: "Draft" as const,
     items: [createEmptyItem()] as GRNItemLine[],
@@ -935,7 +952,106 @@ export default function GRN() {
         docNo: "",
         poTotalAmount: Number(po.TotalAmount ?? 0),
         poSubtotalAmount: Number(po.SubtotalAmount ?? 0),
+        poReceivedAmount: Number(po.POTotalReceived ?? 0),
       }));
+    } catch (e: any) {
+      toast.error(e.message || "Failed to load PO details");
+    } finally {
+      setLoadingPO(false);
+    }
+  };
+
+  // ── Create new GRN from remaining items ───────────────────────────────────────
+  // Called from RemainingItemsPanel "New GRN for Remaining" button.
+  // Seeds the form with the same PO but pre-fills receivedQty = remainingQty
+  // so the user only needs to confirm quantities and submit.
+  const handleCreateGRNFromRemaining = async (pending: PendingItemsData) => {
+    // Close the view modal first
+    setViewingGrn(null);
+
+    // We need the PO details (supplierId, parentDocNo, projectId etc.)
+    // Fetch via the existing PO endpoint using the poNo to find the PO id.
+    // The pending payload has poNo (string) but we need the numeric POID —
+    // find it from the already-loaded POs list.
+    const matchedPO = (posData ?? []).find(
+      (po: PurchaseOrder) => po.PurchaseOrderNo === pending.poNo,
+    );
+
+    if (!matchedPO) {
+      // Fallback: open a blank form and toast a hint
+      setFormData((prev) => ({
+        ...buildEmptyForm(),
+        finYear: prev.finYear || activeFinYear || "",
+      }));
+      setEditingId(null);
+      toast.info(
+        `Open the form and select PO ${pending.poNo ?? ""} to create a follow-up GRN.`,
+      );
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    setLoadingPO(true);
+    try {
+      const token = localStorage.getItem("token") ?? "";
+      const res = await fetch(
+        `/api/purchase-orders/${matchedPO.PurchaseOrderID}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!res.ok) throw new Error("Failed to fetch PO details");
+      const po = await res.json();
+
+      // Build items using remainingQty from pending as the new receivedQty
+      const pendingMap = new Map(
+        pending.pendingItems.map((p) => [String(p.itemId), p]),
+      );
+
+      const lineItems: GRNItemLine[] = (po.LineItems ?? [])
+        .map((li: any) => {
+          const p = pendingMap.get(String(li.ItemId ?? ""));
+          if (!p || p.remainingQty <= 0) return null;
+          const rate = Number(li.Rate ?? p.rate ?? 0);
+          const gstPct = Number(li.TaxPct ?? 0);
+          const receivedQty = p.remainingQty;
+          const totalAmount = rate * receivedQty;
+          return {
+            itemId: String(li.ItemId ?? ""),
+            itemName: li.ItemName ?? li.Description ?? p.itemName ?? "",
+            orderedQty: p.orderedQty,
+            receivedQty,
+            remainingQty: 0, // will be recalculated on qty change
+            uom: li.UomName ?? li.UomId ?? p.uom ?? "",
+            rate,
+            quantity: receivedQty, // default billing qty = received qty
+            totalAmount,
+            gstPct,
+            gstAmount: totalAmount * (gstPct / 100),
+          } as GRNItemLine;
+        })
+        .filter(Boolean) as GRNItemLine[];
+
+      setFormData({
+        ...buildEmptyForm(),
+        poId: String(matchedPO.PurchaseOrderID),
+        poNumber: po.PurchaseOrderNo ?? "",
+        supplierId: String(po.SupplierID ?? ""),
+        supplierName: po.SupplierName ?? "",
+        projectId: po.ProjectId ? String(po.ProjectId) : "",
+        items: lineItems.length ? lineItems : [createEmptyItem()],
+        docTypeId: null,
+        parentDocNo: po.DocNo || po.PurchaseOrderNo || "",
+        rootExBDocNo: po.RootExBDocNo || "",
+        finYear: activeFinYear || "",
+        poTotalAmount: Number(po.TotalAmount ?? 0),
+        poSubtotalAmount: Number(po.SubtotalAmount ?? 0),
+        poReceivedAmount: Number(po.POTotalReceived ?? 0),
+      });
+      setEditingId(null);
+      setErrors({});
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      toast.success(
+        `Form pre-filled with ${lineItems.length} remaining item${lineItems.length !== 1 ? "s" : ""} from ${pending.poNo ?? "PO"}`,
+      );
     } catch (e: any) {
       toast.error(e.message || "Failed to load PO details");
     } finally {
@@ -1470,7 +1586,10 @@ export default function GRN() {
                     </div>
                     {formData.poTotalAmount > 0 &&
                       (() => {
-                        const diff = formData.poTotalAmount - grnTotalWithGST;
+                        const diff =
+                          formData.poTotalAmount -
+                          formData.poReceivedAmount -
+                          grnTotalWithGST;
                         return (
                           <div className="grid grid-cols-2 gap-1.5">
                             <div className="flex flex-col px-3 py-2.5 rounded-xl bg-muted/40 border border-border">
@@ -1481,6 +1600,16 @@ export default function GRN() {
                                 ₹{fmt(formData.poTotalAmount)}
                               </span>
                             </div>
+                            {formData.poReceivedAmount > 0 && (
+                              <div className="flex flex-col px-3 py-2.5 rounded-xl bg-muted/40 border border-border">
+                                <span className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                  Already Received
+                                </span>
+                                <span className="text-xs font-semibold text-foreground">
+                                  ₹{fmt(formData.poReceivedAmount)}
+                                </span>
+                              </div>
+                            )}
                             <div
                               className={`flex flex-col px-3 py-2.5 rounded-xl border ${diff > 0.005 ? "bg-amber-500/10 border-amber-500/30" : "bg-green-500/10 border-green-500/30"}`}
                             >
@@ -1642,7 +1771,10 @@ export default function GRN() {
                       </tr>
                       {formData.poTotalAmount > 0 &&
                         (() => {
-                          const diff = formData.poTotalAmount - grnTotalWithGST;
+                          const diff =
+                            formData.poTotalAmount -
+                            formData.poReceivedAmount -
+                            grnTotalWithGST;
                           return (
                             <>
                               <tr className="bg-muted/30 border-t border-border/50">
@@ -1656,6 +1788,19 @@ export default function GRN() {
                                   ₹{fmt(formData.poTotalAmount)}
                                 </td>
                               </tr>
+                              {formData.poReceivedAmount > 0 && (
+                                <tr className="bg-muted/20 border-t border-border/50">
+                                  <td
+                                    colSpan={7}
+                                    className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                  >
+                                    Already Received
+                                  </td>
+                                  <td className="px-4 py-2 text-right text-xs font-semibold text-foreground">
+                                    −₹{fmt(formData.poReceivedAmount)}
+                                  </td>
+                                </tr>
+                              )}
                               <tr
                                 className={
                                   diff > 0.005
@@ -1803,6 +1948,11 @@ export default function GRN() {
               (s, i) => s + (Number(i.totalAmount) || 0),
               0,
             );
+            const gstTotal = items.reduce(
+              (s, i) => s + (Number(i.gstAmount) || 0),
+              0,
+            );
+            const subtotalInclGST = subtotal + gstTotal;
             return (
               <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
                 <style>{`
@@ -2073,7 +2223,7 @@ export default function GRN() {
                               </tr>
                             )}
                           </tbody>
-                          {subtotal > 0 && (
+                          {subtotalInclGST > 0 && (
                             <tfoot>
                               <tr className="bg-primary/5 border-t-2 border-primary/20">
                                 <td
@@ -2083,7 +2233,7 @@ export default function GRN() {
                                   GRN Total (received)
                                 </td>
                                 <td className="px-4 py-3 text-right font-bold text-primary">
-                                  ₹{fmt(subtotal)}
+                                  ₹{fmt(subtotalInclGST)}
                                 </td>
                               </tr>
                               {Number(viewingGrn.POTotalAmount) > 0 &&
@@ -2091,7 +2241,7 @@ export default function GRN() {
                                   const poTotal = Number(
                                     viewingGrn.POTotalAmount,
                                   );
-                                  const diff = poTotal - subtotal;
+                                  const diff = poTotal - subtotalInclGST;
                                   return (
                                     <>
                                       <tr className="bg-muted/30 border-t border-border/50">
@@ -2137,49 +2287,19 @@ export default function GRN() {
 
                     {/* GST Breakdown */}
                     {(() => {
-                      const gst = viewingGrn.ParentGST;
-                      if (!gst) return null;
-                      type GSTRow = {
-                        label: string;
-                        rate: number;
-                        amount: number;
-                      };
-                      let rows: GSTRow[] = [];
-                      if (Array.isArray(gst)) {
-                        rows = gst
-                          .filter((g: any) => Number(g.rate) > 0)
-                          .map((g: any) => ({
-                            label: g.name || g.label || `GST ${g.rate}%`,
-                            rate: Number(g.rate),
-                            amount: (subtotal * Number(g.rate)) / 100,
-                          }));
-                      } else if (typeof gst === "object") {
-                        const push = (label: string, key: string) => {
-                          const r = Number((gst as any)[key]);
-                          if (r > 0)
-                            rows.push({
-                              label,
-                              rate: r,
-                              amount: (subtotal * r) / 100,
-                            });
-                        };
-                        push("CGST", "cgst");
-                        push("SGST", "sgst");
-                        push("IGST", "igst");
-                        if (
-                          rows.length === 0 &&
-                          Number((gst as any).rate) > 0
-                        ) {
-                          const r = Number((gst as any).rate);
-                          rows.push({
-                            label: `GST ${r}%`,
-                            rate: r,
-                            amount: (subtotal * r) / 100,
-                          });
-                        }
-                      }
-                      if (rows.length === 0) return null;
-                      const totalGST = rows.reduce((s, r) => s + r.amount, 0);
+                      if (subtotal <= 0 || gstTotal <= 0) return null;
+
+                      // Group by gstPct so lines with same rate are merged
+                      const rateMap = new Map<number, number>();
+                      items.forEach((i) => {
+                        const pct = Number(i.gstPct || 0);
+                        const amt = Number(i.gstAmount || 0);
+                        if (pct > 0 && amt > 0)
+                          rateMap.set(pct, (rateMap.get(pct) ?? 0) + amt);
+                      });
+
+                      if (rateMap.size === 0) return null;
+
                       return (
                         <div>
                           <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
@@ -2194,28 +2314,30 @@ export default function GRN() {
                                 ₹{fmt(subtotal)}
                               </span>
                             </div>
-                            {rows.map((row, idx) => (
-                              <div
-                                key={idx}
-                                className="flex items-center justify-between px-4 py-2.5 border-b border-border"
-                              >
-                                <span className="text-xs text-muted-foreground">
-                                  {row.label}{" "}
-                                  <span className="font-mono text-[10px] bg-muted px-1 rounded">
-                                    {row.rate}%
+                            {Array.from(rateMap.entries()).map(
+                              ([rate, amount], idx) => (
+                                <div
+                                  key={idx}
+                                  className="flex items-center justify-between px-4 py-2.5 border-b border-border"
+                                >
+                                  <span className="text-xs text-muted-foreground">
+                                    GST{" "}
+                                    <span className="font-mono text-[10px] bg-muted px-1 rounded">
+                                      {rate}%
+                                    </span>
                                   </span>
-                                </span>
-                                <span className="font-medium text-amber-600 dark:text-amber-400">
-                                  +₹{fmt(row.amount)}
-                                </span>
-                              </div>
-                            ))}
+                                  <span className="font-medium text-amber-600 dark:text-amber-400">
+                                    +₹{fmt(amount)}
+                                  </span>
+                                </div>
+                              ),
+                            )}
                             <div className="flex items-center justify-between px-4 py-3 bg-primary/5 border-t-2 border-primary/20">
                               <span className="text-xs font-semibold uppercase tracking-widest">
                                 Grand Total (incl. GST)
                               </span>
                               <span className="font-bold text-primary">
-                                ₹{fmt(subtotal + totalGST)}
+                                ₹{fmt(subtotalInclGST)}
                               </span>
                             </div>
                           </div>
@@ -2238,7 +2360,10 @@ export default function GRN() {
                         <AlertTriangle size={10} className="text-amber-500" />{" "}
                         Remaining Items
                       </p>
-                      <RemainingItemsPanel grnId={viewingGrn.GRNID} />
+                      <RemainingItemsPanel
+                        grnId={viewingGrn.GRNID}
+                        onCreateNewGRN={handleCreateGRNFromRemaining}
+                      />
                     </div>
 
                     {/* Remarks */}
