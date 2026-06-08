@@ -26,9 +26,18 @@ const INTERVAL_MS = 60 * 60 * 1000; // run every hour
 const SYSTEM_USER = "EscalationEngine";
 
 const REQUIRED_TABLES = [
-  { table: "FollowupLegalMilestones", migration: "095-create-followup-legal-milestones.sql" },
-  { table: "FollowupAgreementWorkflows", migration: "102-create-followup-agreement-workflows.sql" },
-  { table: "FollowupSalesDeeds", migration: "066-followup-salesdeed-table.sql" },
+  {
+    table: "FollowupLegalMilestones",
+    migration: "095-create-followup-legal-milestones.sql",
+  },
+  {
+    table: "FollowupAgreementWorkflows",
+    migration: "102-create-followup-agreement-workflows.sql",
+  },
+  {
+    table: "FollowupSalesDeeds",
+    migration: "066-followup-salesdeed-table.sql",
+  },
   { table: "FollowupBookings", migration: "080-create-followup-bookings.sql" },
   { table: "FollowupAuditLog", migration: "101-create-followup-audit-log.sql" },
 ];
@@ -62,19 +71,6 @@ const AW_STEPS = [
 
 function today() {
   return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
-}
-
-async function tableExists(tableName) {
-  const result = await getPool()
-    .request()
-    .input("TableName", sql.NVarChar(128), tableName)
-    .query(`
-      SELECT CASE
-        WHEN OBJECT_ID(N'dbo.' + @TableName, N'U') IS NULL THEN 0
-        ELSE 1
-      END AS existsFlag
-    `);
-  return Boolean(result.recordset[0]?.existsFlag);
 }
 
 async function assertRequiredSchema() {
@@ -155,10 +151,7 @@ async function escalateLegalMilestones() {
 
     if (setClauses.length === 0) continue;
 
-    await pool
-      .request()
-      .input("Id", sql.Int, row.Id)
-      .query(`
+    await pool.request().input("Id", sql.Int, row.Id).query(`
         UPDATE dbo.FollowupLegalMilestones
         SET ${setClauses.join(", ")}, UpdatedBy = '${SYSTEM_USER}', UpdatedAt = SYSDATETIME()
         WHERE Id = @Id
@@ -219,10 +212,7 @@ async function escalateAgreementWorkflows() {
 
     if (setClauses.length === 0) continue;
 
-    await pool
-      .request()
-      .input("Id", sql.Int, row.Id)
-      .query(`
+    await pool.request().input("Id", sql.Int, row.Id).query(`
         UPDATE dbo.FollowupAgreementWorkflows
         SET ${setClauses.join(", ")}, UpdatedBy = '${SYSTEM_USER}', UpdatedAt = SYSDATETIME()
         WHERE Id = @Id
@@ -357,7 +347,7 @@ async function runEscalation() {
         `LegalMilestones: ${lm} steps blocked, ` +
         `AgreementWorkflows: ${aw} steps blocked, ` +
         `SalesDeeds: ${sd} flagged, ` +
-        `Bookings: ${bk} flagged`
+        `Bookings: ${bk} flagged`,
     );
   } catch (err) {
     console.error("[EscalationEngine] Error:", err.message);
@@ -371,7 +361,7 @@ function startEscalationEngine() {
   runEscalation();
   setInterval(runEscalation, INTERVAL_MS);
   console.log(
-    `[EscalationEngine] Started — interval: ${INTERVAL_MS / 1000 / 60} min`
+    `[EscalationEngine] Started — interval: ${INTERVAL_MS / 1000 / 60} min`,
   );
 }
 
