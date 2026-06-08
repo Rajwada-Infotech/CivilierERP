@@ -260,21 +260,39 @@ async function createApp() {
       legacyHeaders: false,
     });
 
+    // Cache the dynamic limit for 10 s to avoid 3 Redis round-trips on every
+    // request. Without this, page load fires ~15 concurrent requests and each
+    // one awaits redisZScore + getSystemMetrics + getPredictedRPM, causing
+    // 2-3 s queuing before the route handler even starts.
+    let _cachedLimit = 500;
+    let _limitCachedAt = 0;
+    async function getDynamicLimitCached(userId) {
+      const now = Date.now();
+      if (now - _limitCachedAt < 10_000) return _cachedLimit;
+      try {
+        const score = Number(
+          (await redisZScore("engagement:score", userId)) || 0,
+        );
+        const metrics = await getSystemMetrics();
+        const predictedRPM = await getPredictedRPM();
+        _cachedLimit = getDynamicLimit(
+          score,
+          predictedRPM || metrics.rpm,
+          metrics.memoryUsage,
+        );
+        _limitCachedAt = now;
+      } catch {
+        // keep last cached value
+      }
+      return _cachedLimit;
+    }
+
     const apiLimiter = rateLimit({
       windowMs: 60 * 1000,
       max: async (req) => {
         if (!req.user?.userId) return 1000;
         try {
-          const score = Number(
-            (await redisZScore("engagement:score", req.user.userId)) || 0,
-          );
-          const metrics = await getSystemMetrics();
-          const predictedRPM = await getPredictedRPM();
-          return getDynamicLimit(
-            score,
-            predictedRPM || metrics.rpm,
-            metrics.memoryUsage,
-          );
+          return await getDynamicLimitCached(req.user.userId);
         } catch (err) {
           logger.warn(
             { event: "RATE_LIMIT_FALLBACK", err },

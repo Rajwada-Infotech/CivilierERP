@@ -5,18 +5,14 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const allowRoles = require("../middleware/role");
 const { bumpCacheVersion } = require("../redis");
-const { cache } = require("../middleware/cache");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
 // ── GET all projects ──────────────────────────────────────────────────────────
-router.get(
-  "/",
-  cache("project-master", 300, { shared: true }),
-  async (req, res) => {
-    try {
-      const pool = getPool();
-      const result = await pool.request().query(`
+router.get("/", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
       SELECT
         p.id                    AS Id,
         p.business_identity     AS Code,
@@ -60,12 +56,11 @@ router.get(
       WHERE p.business_type = 'P'
       ORDER BY p.name
     `);
-      res.json(result.recordset);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  },
-);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ── GET /company/:id — fetch compliance fields from linked Company ─────────────
 router.get("/company/:id", async (req, res) => {
