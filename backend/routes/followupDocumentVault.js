@@ -228,8 +228,14 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 
     res.status(201).json({ id: result.recordset[0].Id, docNo });
   } catch (err) {
-    // Clean up uploaded file on DB error
-    fs.unlink(req.file.path, () => {});
+    // Clean up uploaded file on DB error — path comes from multer (trusted),
+    // but guard anyway for consistency
+    if (req.file?.path) {
+      const resolvedPath = path.resolve(req.file.path);
+      if (resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) {
+        fs.unlink(resolvedPath, () => {});
+      }
+    }
     console.error("DocumentVault POST error:", err.message);
     res.status(500).json({ error: "Failed to save document" });
   }
@@ -252,12 +258,22 @@ router.get("/file/:id", async (req, res) => {
       return res.status(404).json({ error: "Not found" });
 
     const doc = result.recordset[0];
-    if (!fs.existsSync(doc.FilePath))
+
+    // ── Path-traversal guard ──────────────────────────────────────────────────
+    // Resolve the stored path and confirm it lives inside UPLOAD_DIR.
+    // This prevents an attacker (or corrupted DB value) from reading arbitrary
+    // files on the server (e.g. ../../etc/passwd).
+    const resolvedPath = path.resolve(doc.FilePath);
+    if (!resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    if (!fs.existsSync(resolvedPath))
       return res.status(404).json({ error: "File not found on disk" });
 
     res.setHeader("Content-Type", doc.MimeType);
     res.setHeader("Content-Disposition", `inline; filename="${doc.FileName}"`);
-    const resolvedPath=require('path').resolve(doc.FilePath);const resolvedUploadDir=require('path').resolve(require('path').join(__dirname,'../uploads/vault'));if(!resolvedPath.startsWith(resolvedUploadDir))return res.status(403).json({error:'Access denied'});const safeFileName=require('path').basename(doc.FileName).replace(/[^\w.\-]/g,'_');fs.createReadStream(resolvedPath).pipe(res);
+    fs.createReadStream(resolvedPath).pipe(res);
   } catch (err) {
     console.error("DocumentVault file GET error:", err.message);
     res.status(500).json({ error: "Failed to serve file" });
@@ -336,9 +352,17 @@ router.delete("/:id", async (req, res) => {
     if (!result.rowsAffected[0])
       return res.status(404).json({ error: "Not found" });
 
-    // Best-effort physical cleanup
+    // Best-effort physical cleanup — guard against path traversal
     const filePath = fileRes.recordset[0].FilePath;
-    if (filePath && fs.existsSync(filePath)) fs.unlink(filePath, () => {});
+    if (filePath) {
+      const resolvedPath = path.resolve(filePath);
+      if (
+        resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep) &&
+        fs.existsSync(resolvedPath)
+      ) {
+        fs.unlink(resolvedPath, () => {});
+      }
+    }
 
     res.json({ success: true });
   } catch (err) {

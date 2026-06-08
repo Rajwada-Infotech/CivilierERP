@@ -221,14 +221,18 @@ async function fetchBankNOCs(params: {
     totalPages: number;
   };
 }> {
-  const q = new URLSearchParams({
-    page: String(params.page),
-    pageSize: String(params.pageSize),
-    ...(params.search ? { search: params.search } : {}),
-    ...(params.bankNocStatus ? { bankNocStatus: params.bankNocStatus } : {}),
+  // POST /search keeps sensitive filter params (bankNocStatus) in the request
+  // body instead of the URL. Fixes CodeQL js/sensitive-get-query (#523).
+  const res = await fetchWithAuth("/api/followup-noc/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      page: params.page,
+      pageSize: params.pageSize,
+      ...(params.search ? { search: params.search } : {}),
+      ...(params.bankNocStatus ? { bankNocStatus: params.bankNocStatus } : {}),
+    }),
   });
-  // Reuse the same followup-noc endpoint with a bankNoc=1 flag
-  const res = await fetchWithAuth(`/api/followup-noc?${q}&bankNocView=1`);
   if (!res.ok) throw new Error("Failed to load Bank NOC records");
   return res.json();
 }
@@ -962,7 +966,10 @@ export function BankNOCPage() {
                                   {bMeta.icon} {bMeta.label}
                                 </span>
                                 {rec.BankNOCDate && (
-                                  <div className="bnoc-sub" style={{ marginTop: 4 }}>
+                                  <div
+                                    className="bnoc-sub"
+                                    style={{ marginTop: 4 }}
+                                  >
                                     {fmtDate(rec.BankNOCDate)}
                                   </div>
                                 )}
@@ -1178,7 +1185,9 @@ export function BankNOCPage() {
                 >
                   <option value="">— Not set —</option>
                   <option value="Pending">Pending</option>
-                  <option value="PartiallyDisbursed">Partially Disbursed</option>
+                  <option value="PartiallyDisbursed">
+                    Partially Disbursed
+                  </option>
                   <option value="FullyDisbursed">Fully Disbursed</option>
                 </select>
               </div>
