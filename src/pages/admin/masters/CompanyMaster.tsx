@@ -629,8 +629,11 @@ export default function CompanyMaster() {
         throw new Error(err.reason || err.error || "Delete failed");
       }
     },
-    onSuccess: () => {
+    onSuccess: (_, id) => {
       toast.success("Company deleted");
+      qc.setQueryData(["company-master"], (old: any[]) =>
+        (old ?? []).filter((c: any) => c.Id !== id),
+      );
       qc.invalidateQueries({ queryKey: ["company-master"] });
       setDeleteConfirm(null);
     },
@@ -706,11 +709,18 @@ export default function CompanyMaster() {
     key: keyof Company,
     type = "text",
     ph = "",
-    options?: { disabled?: boolean; title?: string; required?: boolean },
-  ) => (
+    options?: { disabled?: boolean; title?: string; required?: boolean; showAsterisk?: boolean },
+  ) => {
+    // Strip any trailing " *" from label string (legacy) — asterisk is rendered separately
+    const cleanLabel = label.replace(/\s*\*$/, "");
+    const showStar = options?.showAsterisk || options?.required;
+    return (
     <div key={key}>
       <label className="block text-xs font-medium text-muted-foreground mb-1">
-        {label}
+        {cleanLabel}
+        {showStar && (
+          <span className="ml-0.5">*</span>
+        )}
       </label>
       {type === "date" ? (
         <>
@@ -755,7 +765,8 @@ export default function CompanyMaster() {
         </>
       )}
     </div>
-  );
+    );
+  };
 
   const se = (label: string, key: keyof Company, options: string[]) => (
     <div key={key}>
@@ -937,8 +948,8 @@ export default function CompanyMaster() {
                     </div>
                   </div>
 
-                  {fi("Company Code *", "code", "text", "e.g. MAIN")}
-                  {fi("Company Name *", "name")}
+                  {fi("Company Code", "code", "text", "e.g. MAIN", { required: true })}
+                  {fi("Company Name", "name", "text", "", { required: true })}
                   {fi("Legal Name", "legalName")}
                   {fi("Short Name", "shortName")}
                   {se("Company Type", "type", coTypes)}
@@ -1061,6 +1072,7 @@ export default function CompanyMaster() {
                     disabled: form.gstType !== "Registered",
                     title: "Available only for registered companies",
                     required: form.gstType === "Registered",
+                    showAsterisk: true,
                   })}
                   {fi(
                     "GST Registration Date",
@@ -1071,6 +1083,7 @@ export default function CompanyMaster() {
                       disabled: form.gstType !== "Registered",
                       title: "Available only for registered companies",
                       required: form.gstType === "Registered",
+                      showAsterisk: true,
                     },
                   )}
 

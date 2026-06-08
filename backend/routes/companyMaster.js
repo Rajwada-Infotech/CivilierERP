@@ -92,7 +92,7 @@ router.get(
         status,
         belongs_to
       FROM dbo.enterprise
-      WHERE business_type = 'C'
+      WHERE business_type = 'C' AND (discontinue = 0 OR discontinue IS NULL)
       ORDER BY name
     `);
       res.json(result.recordset);
