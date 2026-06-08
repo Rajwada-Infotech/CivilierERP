@@ -43,10 +43,18 @@ const safeJson = (str) => {
 const computeTotal = (items, activities) => {
   let sum = 0;
   if (Array.isArray(items)) {
-    sum += items.reduce((s, it) => s + (parseFloat(it.quantity) || 0) * (parseFloat(it.rate) || 0), 0);
+    sum += items.reduce(
+      (s, it) =>
+        s + (parseFloat(it.quantity) || 0) * (parseFloat(it.rate) || 0),
+      0,
+    );
   }
   if (Array.isArray(activities)) {
-    sum += activities.reduce((s, ac) => s + (parseFloat(ac.quantity) || 0) * (parseFloat(ac.rate) || 0), 0);
+    sum += activities.reduce(
+      (s, ac) =>
+        s + (parseFloat(ac.quantity) || 0) * (parseFloat(ac.rate) || 0),
+      0,
+    );
   }
   return sum;
 };
@@ -75,13 +83,19 @@ const syncBoqItems = async (transaction, sqlRef, boqID, items, uomMap) => {
 
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
-    const itemName = String(it.itemDescription || it.itemName || "").substring(0, 255);
+    const itemName = String(it.itemDescription || it.itemName || "").substring(
+      0,
+      255,
+    );
     if (!itemName) continue;
 
     const qty = parseFloat(it.quantity) || 0;
     const rate = parseFloat(it.rate) || 0;
-    const amount = parseFloat(it.amount) || (qty * rate);
-    const uomName = String(it.unit || it.uomName || it.uom || "").substring(0, 50);
+    const amount = parseFloat(it.amount) || qty * rate;
+    const uomName = String(it.unit || it.uomName || it.uom || "").substring(
+      0,
+      50,
+    );
     const uomId = uomMap[uomName] || null;
 
     await transaction
@@ -97,8 +111,7 @@ const syncBoqItems = async (transaction, sqlRef, boqID, items, uomMap) => {
       .input("Rate", sqlRef.Decimal(18, 4), rate)
       .input("TaxPct", sqlRef.Decimal(5, 2), parseFloat(it.tax) || 0)
       .input("LineAmount", sqlRef.Decimal(18, 2), amount)
-      .input("SortOrder", sqlRef.Int, i)
-      .query(`
+      .input("SortOrder", sqlRef.Int, i).query(`
         INSERT INTO dbo.BoqItems
           (BoqID, ItemId, ItemName, ItemCode, Description,
            Quantity, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder)
@@ -109,7 +122,13 @@ const syncBoqItems = async (transaction, sqlRef, boqID, items, uomMap) => {
   }
 };
 
-const syncBoqActivities = async (transaction, sqlRef, boqID, activities, uomMap) => {
+const syncBoqActivities = async (
+  transaction,
+  sqlRef,
+  boqID,
+  activities,
+  uomMap,
+) => {
   if (!Array.isArray(activities) || activities.length === 0) return;
 
   await transaction
@@ -119,13 +138,18 @@ const syncBoqActivities = async (transaction, sqlRef, boqID, activities, uomMap)
 
   for (let i = 0; i < activities.length; i++) {
     const ac = activities[i];
-    const activityName = String(ac.activityName || ac.description || "").substring(0, 255);
+    const activityName = String(
+      ac.activityName || ac.description || "",
+    ).substring(0, 255);
     if (!activityName) continue;
 
     const qty = parseFloat(ac.quantity) || 0;
     const rate = parseFloat(ac.rate) || 0;
-    const amount = parseFloat(ac.amount) || (qty * rate);
-    const uomName = String(ac.unit || ac.uomName || ac.uom || "").substring(0, 50);
+    const amount = parseFloat(ac.amount) || qty * rate;
+    const uomName = String(ac.unit || ac.uomName || ac.uom || "").substring(
+      0,
+      50,
+    );
     const uomId = uomMap[uomName] || null;
 
     await transaction
@@ -141,8 +165,7 @@ const syncBoqActivities = async (transaction, sqlRef, boqID, activities, uomMap)
       .input("Rate", sqlRef.Decimal(18, 4), rate)
       .input("TaxPct", sqlRef.Decimal(5, 2), parseFloat(ac.tax) || 0)
       .input("LineAmount", sqlRef.Decimal(18, 2), amount)
-      .input("SortOrder", sqlRef.Int, i)
-      .query(`
+      .input("SortOrder", sqlRef.Int, i).query(`
         INSERT INTO dbo.BoqActivities
           (BoqID, ActivityId, ActivityName, ActivityCode, Description,
            Quantity, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder)
@@ -265,19 +288,31 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ error: "BOQ not found" });
 
     const boq = result.recordset[0];
-    
-    const itemsResult = await pool.request()
+
+    const itemsResult = await pool
+      .request()
       .input("BoqID", sql.Int, boq.BoqID)
-      .query("SELECT * FROM dbo.BoqItems WHERE BoqID = @BoqID ORDER BY SortOrder");
-      
-    const activitiesResult = await pool.request()
+      .query(
+        "SELECT * FROM dbo.BoqItems WHERE BoqID = @BoqID ORDER BY SortOrder",
+      );
+
+    const activitiesResult = await pool
+      .request()
       .input("BoqID", sql.Int, boq.BoqID)
-      .query("SELECT * FROM dbo.BoqActivities WHERE BoqID = @BoqID ORDER BY SortOrder");
+      .query(
+        "SELECT * FROM dbo.BoqActivities WHERE BoqID = @BoqID ORDER BY SortOrder",
+      );
 
     res.json({
       ...boq,
-      BoqItems: itemsResult.recordset.length > 0 ? itemsResult.recordset : (safeJson(boq.BoqItems) ?? []),
-      BoqActivities: activitiesResult.recordset.length > 0 ? activitiesResult.recordset : (safeJson(boq.BoqActivities) ?? []),
+      BoqItems:
+        itemsResult.recordset.length > 0
+          ? itemsResult.recordset
+          : (safeJson(boq.BoqItems) ?? []),
+      BoqActivities:
+        activitiesResult.recordset.length > 0
+          ? activitiesResult.recordset
+          : (safeJson(boq.BoqActivities) ?? []),
     });
   } catch (err) {
     console.error("GET BOQ by id error:", err);
@@ -301,8 +336,12 @@ router.post("/", async (req, res) => {
     finYear,
   } = req.body;
 
-  const itemsArray = Array.isArray(BoqItems) ? BoqItems : (safeJson(parseJson(BoqItems)) ?? []);
-  const activitiesArray = Array.isArray(BoqActivities) ? BoqActivities : (safeJson(parseJson(BoqActivities)) ?? []);
+  const itemsArray = Array.isArray(BoqItems)
+    ? BoqItems
+    : (safeJson(parseJson(BoqItems)) ?? []);
+  const activitiesArray = Array.isArray(BoqActivities)
+    ? BoqActivities
+    : (safeJson(parseJson(BoqActivities)) ?? []);
   const itemsJson = JSON.stringify(itemsArray);
   const activitiesJson = JSON.stringify(activitiesArray);
   const totalAmount = computeTotal(itemsArray, activitiesArray);
@@ -347,7 +386,7 @@ router.post("/", async (req, res) => {
       .input("Status", sql.NVarChar(50), Status || "Draft")
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
       .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
-      .input("DocNo", sql.NVarChar(100), finalDocNo || null)
+      .input("DocNo", sql.NVarChar(100), finalDocNo)
       .input("CreatedBy", sql.NVarChar(100), userEmail)
       .input("CreatedAt", sql.DateTime2, new Date())
       .input("BoqItems", sql.NVarChar(sql.MAX), itemsJson)
@@ -370,7 +409,7 @@ router.post("/", async (req, res) => {
     await syncBoqItems(transaction, sql, newId, itemsArray, uomMap);
     await syncBoqActivities(transaction, sql, newId, activitiesArray, uomMap);
 
-    if (DocTypeId && finalDocNo) {
+    if (DocTypeId) {
       await backPatchRecordId(transaction, sql, finalDocNo, "BOQ", newId);
     }
 
@@ -379,7 +418,13 @@ router.post("/", async (req, res) => {
 
     // Auto-submit: move Draft → Pending so it appears in approval inbox
     try {
-      await transition("boq", newId, "Pending", req.user?.email, req.user?.role);
+      await transition(
+        "boq",
+        newId,
+        "Pending",
+        req.user?.email,
+        req.user?.role,
+      );
       await bumpCacheVersion("boq");
     } catch (e) {
       console.warn("[BOQ auto-submit]", e.message);
@@ -393,7 +438,7 @@ router.post("/", async (req, res) => {
   } catch (err) {
     try {
       if (transaction) await transaction.rollback();
-    } catch (_) { }
+    } catch (_) {}
     console.error("POST BOQ error:", err);
     res.status(500).json({ error: err.message });
   }
@@ -403,12 +448,25 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const {
-    BoqNo, BoqDate, CompanyId, ProjectId, Description,
-    BoqItems, BoqActivities, Status, Remarks, DocTypeId, DocNo,
+    BoqNo,
+    BoqDate,
+    CompanyId,
+    ProjectId,
+    Description,
+    BoqItems,
+    BoqActivities,
+    Status,
+    Remarks,
+    DocTypeId,
+    DocNo,
   } = req.body;
 
-  const itemsArray = Array.isArray(BoqItems) ? BoqItems : (safeJson(parseJson(BoqItems)) ?? []);
-  const activitiesArray = Array.isArray(BoqActivities) ? BoqActivities : (safeJson(parseJson(BoqActivities)) ?? []);
+  const itemsArray = Array.isArray(BoqItems)
+    ? BoqItems
+    : (safeJson(parseJson(BoqItems)) ?? []);
+  const activitiesArray = Array.isArray(BoqActivities)
+    ? BoqActivities
+    : (safeJson(parseJson(BoqActivities)) ?? []);
   const itemsJson = JSON.stringify(itemsArray);
   const activitiesJson = JSON.stringify(activitiesArray);
   const totalAmount = computeTotal(itemsArray, activitiesArray);
@@ -466,7 +524,10 @@ router.put("/:id", async (req, res) => {
     try {
       const currentStatus = await (async () => {
         const pool = getPool();
-        const r = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.BOQ WHERE BoqID = @id");
+        const r = await pool
+          .request()
+          .input("id", sql.Int, id)
+          .query("SELECT Status FROM dbo.BOQ WHERE BoqID = @id");
         return r.recordset[0]?.Status;
       })();
       if (currentStatus === "Draft" || currentStatus === "Rejected") {
@@ -481,7 +542,7 @@ router.put("/:id", async (req, res) => {
   } catch (err) {
     try {
       if (transaction) await transaction.rollback();
-    } catch (_) { }
+    } catch (_) {}
     console.error("PUT BOQ error:", err);
     res.status(500).json({ error: err.message });
   }
@@ -496,11 +557,13 @@ router.delete("/:id", async (req, res) => {
     transaction = pool.transaction();
     await transaction.begin();
 
-    await transaction.request()
+    await transaction
+      .request()
       .input("BoqID", sql.Int, boqID)
       .query("DELETE FROM dbo.BoqItems WHERE BoqID = @BoqID");
 
-    await transaction.request()
+    await transaction
+      .request()
       .input("BoqID", sql.Int, boqID)
       .query("DELETE FROM dbo.BoqActivities WHERE BoqID = @BoqID");
 
@@ -519,7 +582,9 @@ router.delete("/:id", async (req, res) => {
     await bumpCacheVersion("boq");
     res.json({ message: "BOQ deleted successfully" });
   } catch (err) {
-    try { if (transaction) await transaction.rollback(); } catch (_) { }
+    try {
+      if (transaction) await transaction.rollback();
+    } catch (_) {}
     console.error("DELETE BOQ error:", err.message);
     res.status(500).json({ error: err.message });
   }
@@ -532,7 +597,13 @@ router.put("/:id/submit", async (req, res) => {
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await transition("boq", id, "Pending", userEmail, req.user?.role);
+    const result = await transition(
+      "boq",
+      id,
+      "Pending",
+      userEmail,
+      req.user?.role,
+    );
     await bumpCacheVersion("boq");
     res.json({ message: "BOQ submitted for approval", ...result });
   } catch (err) {
@@ -545,11 +616,19 @@ router.put("/:id/approve", async (req, res) => {
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await transition("boq", id, "Approved", userEmail, req.user?.role);
+    const result = await transition(
+      "boq",
+      id,
+      "Approved",
+      userEmail,
+      req.user?.role,
+    );
     await bumpCacheVersion("boq");
     res.json({ message: "BOQ approved", ...result });
   } catch (err) {
-    res.status(err.message.includes("not authorized") ? 403 : 400).json({ error: err.message });
+    res
+      .status(err.message.includes("not authorized") ? 403 : 400)
+      .json({ error: err.message });
   }
 });
 
@@ -559,16 +638,21 @@ router.put("/:id/reject", async (req, res) => {
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await transition("boq", id, "Rejected", userEmail, req.user?.role, note || null);
+    const result = await transition(
+      "boq",
+      id,
+      "Rejected",
+      userEmail,
+      req.user?.role,
+      note || null,
+    );
     await bumpCacheVersion("boq");
     res.json({ message: "BOQ rejected", ...result });
   } catch (err) {
-    res.status(err.message.includes("not authorized") ? 403 : 400).json({ error: err.message });
+    res
+      .status(err.message.includes("not authorized") ? 403 : 400)
+      .json({ error: err.message });
   }
 });
 
 module.exports = router;
-
-
-
-
