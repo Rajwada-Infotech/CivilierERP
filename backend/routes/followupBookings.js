@@ -475,7 +475,6 @@ router.post(
             LoanApproved, LoanBank, LoanAmount,
             AssignedTo, Status, Notes, CreatedBy, CreatedAt
           )
-          OUTPUT INSERTED.Id
           VALUES (
             @ApplicantId, @UnitSelectionId, @ProjectId, @CompanyId,
             @UnitNo, @BlockName, @FloorName, @UnitType,
@@ -483,10 +482,12 @@ router.post(
             @BookingDate, @PaymentMode, @ChequeNo, @BankName,
             @LoanApproved, @LoanBank, @LoanAmount,
             @AssignedTo, @Status, @Notes, @CreatedBy, SYSDATETIME()
-          )
+          );
+          SELECT SCOPE_IDENTITY() AS Id;
         `);
 
-      const id = insertResult.recordset[0]?.Id;
+      const id = Number(insertResult.recordset[0]?.Id);
+      if (!id) throw new Error("Insert returned no Id");
       const bookingNo = `BKG${String(id).padStart(6, "0")}`;
 
       await new sql.Request(transaction)
@@ -620,7 +621,7 @@ router.put(
           WHERE Id = @Id AND IsDeleted = 0
         `);
 
-      // Always sync payment terms and back-fill BookingAmount
+      // Sync payment terms — only overwrite BookingAmount if terms are actually provided
       const { totalComputed, paymentPlanSummary } =
         await upsertBookingPaymentTerms(
           transaction,
@@ -629,13 +630,15 @@ router.put(
           payload.PaymentTermIds,
           payload.TotalValue,
         );
-      await new sql.Request(transaction)
-        .input("Id", sql.Int, id)
-        .input("BookingAmount", sql.Decimal(18, 2), totalComputed)
-        .input("PaymentPlanSummary", sql.NVarChar(500), paymentPlanSummary)
-        .query(
-          "UPDATE dbo.FollowupBookings SET BookingAmount = @BookingAmount, PaymentPlanSummary = @PaymentPlanSummary WHERE Id = @Id",
-        );
+      if (payload.PaymentTermIds && payload.PaymentTermIds.length > 0) {
+        await new sql.Request(transaction)
+          .input("Id", sql.Int, id)
+          .input("BookingAmount", sql.Decimal(18, 2), totalComputed)
+          .input("PaymentPlanSummary", sql.NVarChar(500), paymentPlanSummary)
+          .query(
+            "UPDATE dbo.FollowupBookings SET BookingAmount = @BookingAmount, PaymentPlanSummary = @PaymentPlanSummary WHERE Id = @Id",
+          );
+      }
 
       await transaction.commit();
       logAudit({ module: "Booking", recordId: id, recordNo: bookingNo, action: "Updated", notes: `Status: ${payload.Status}`, changedBy: userName });
@@ -660,7 +663,27 @@ router.delete(
     if (!userName) return;
 
     try {
-      await getPool()
+      const pool = getPool();
+
+      // Block deletion of Confirmed bookings or those with downstream records
+      const guardResult = await pool.request().input("Id", sql.Int, id).query(`
+        SELECT
+          fb.Status,
+          (SELECT COUNT(*) FROM dbo.FollowupAgreements    WHERE BookingId = @Id AND IsDeleted = 0) AS Agreements,
+          (SELECT COUNT(*) FROM dbo.FollowupWelcomeCalls  WHERE BookingId = @Id AND IsDeleted = 0) AS WelcomeCalls
+        FROM dbo.FollowupBookings fb
+        WHERE fb.Id = @Id AND fb.IsDeleted = 0
+      `);
+      const guard = guardResult.recordset[0];
+      if (!guard) return res.status(404).json({ error: "Booking not found" });
+      if (guard.Status === "Confirmed") {
+        return res.status(409).json({ error: "Confirmed bookings cannot be deleted. Cancel the booking first." });
+      }
+      if (Number(guard.Agreements) > 0 || Number(guard.WelcomeCalls) > 0) {
+        return res.status(400).json({ error: "This booking has linked records and cannot be deleted." });
+      }
+
+      await pool
         .request()
         .input("Id", sql.Int, id)
         .input("UpdatedBy", sql.NVarChar(100), userName).query(`

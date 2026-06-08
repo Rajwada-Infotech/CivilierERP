@@ -62,6 +62,10 @@ interface BankNOCRecord {
   ApplicantId: number;
   ApplicantNo: string | null;
   ApplicantName: string;
+  UnitSelectionId: number | null;
+  AgreementId: number | null;
+  ProjectId: number | null;
+  CompanyId: number | null;
   UnitNo: string | null;
   SelectionNo: string | null;
   ProjectName: string | null;
@@ -94,6 +98,13 @@ interface MetaOptions {
 
 interface BankNOCFormState {
   // Read-only display (set from NOC record, not editable here)
+  // Core NOC fields required by PUT endpoint
+  ApplicantId: string;
+  UnitSelectionId: string;
+  AgreementId: string;
+  ProjectId: string;
+  CompanyId: string;
+  NOCStatus: string;
   BankName: string;
   LoanAccountNo: string;
   LoanAmount: string;
@@ -107,6 +118,12 @@ interface BankNOCFormState {
 }
 
 const EMPTY_FORM: BankNOCFormState = {
+  ApplicantId: "",
+  UnitSelectionId: "",
+  AgreementId: "",
+  ProjectId: "",
+  CompanyId: "",
+  NOCStatus: "Pending",
   BankName: "",
   LoanAccountNo: "",
   LoanAmount: "",
@@ -404,6 +421,7 @@ export function BankNOCPage() {
       pending: records.filter((r) => r.BankNOCStatus === "Pending").length,
       applied: records.filter((r) => r.BankNOCStatus === "Applied").length,
       received: records.filter((r) => r.BankNOCStatus === "Received").length,
+      isPageScoped: (pagination?.totalPages ?? 1) > 1,
     }),
     [records, pagination],
   );
@@ -415,6 +433,12 @@ export function BankNOCPage() {
   function openEdit(rec: BankNOCRecord) {
     setEditId(rec.Id);
     setForm({
+      ApplicantId: String(rec.ApplicantId),
+      UnitSelectionId: rec.UnitSelectionId ? String(rec.UnitSelectionId) : "",
+      AgreementId: rec.AgreementId ? String(rec.AgreementId) : "",
+      ProjectId: rec.ProjectId ? String(rec.ProjectId) : "",
+      CompanyId: rec.CompanyId ? String(rec.CompanyId) : "",
+      NOCStatus: rec.NOCStatus ?? "Pending",
       BankName: rec.BankName ?? "",
       LoanAccountNo: rec.LoanAccountNo ?? "",
       LoanAmount: rec.LoanAmount != null ? String(rec.LoanAmount) : "",
@@ -431,6 +455,14 @@ export function BankNOCPage() {
 
   function buildPayload() {
     return {
+      // Required by PUT getPayload() — pass through from stored form
+      ApplicantId: form.ApplicantId || null,
+      UnitSelectionId: form.UnitSelectionId || null,
+      AgreementId: form.AgreementId || null,
+      ProjectId: form.ProjectId || null,
+      CompanyId: form.CompanyId || null,
+      Status: form.NOCStatus || "Pending",
+      // Bank NOC fields
       BankName: form.BankName || null,
       LoanAccountNo: form.LoanAccountNo || null,
       LoanAmount: form.LoanAmount ? parseFloat(form.LoanAmount) : null,
@@ -452,6 +484,8 @@ export function BankNOCPage() {
       toast.success("Bank NOC updated");
       invalidate();
       setDialogOpen(false);
+      setEditId(null);
+      setForm(EMPTY_FORM);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -723,9 +757,9 @@ export function BankNOCPage() {
         <div className="bnoc-stats">
           {[
             { label: "Total", val: pagination?.total ?? 0, cls: "blue" },
-            { label: "Pending", val: stats.pending, cls: "" },
-            { label: "Applied", val: stats.applied, cls: "amber" },
-            { label: "Received", val: stats.received, cls: "green" },
+            { label: stats.isPageScoped ? "Pending (Page)" : "Pending", val: stats.pending, cls: "" },
+            { label: stats.isPageScoped ? "Applied (Page)" : "Applied", val: stats.applied, cls: "amber" },
+            { label: stats.isPageScoped ? "Received (Page)" : "Received", val: stats.received, cls: "green" },
           ].map(({ label, val, cls }) => (
             <div key={label} className="bnoc-stat">
               <div className={`bnoc-stat-val ${cls}`}>{val}</div>
@@ -1079,7 +1113,7 @@ export function BankNOCPage() {
       <Dialog
         open={dialogOpen}
         onOpenChange={(v) => {
-          if (!v) setDialogOpen(false);
+          if (!v) { setDialogOpen(false); setEditId(null); setForm(EMPTY_FORM); }
         }}
       >
         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
@@ -1232,7 +1266,7 @@ export function BankNOCPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+            <Button variant="outline" onClick={() => { setDialogOpen(false); setEditId(null); setForm(EMPTY_FORM); }}>
               Cancel
             </Button>
             <Button
