@@ -1445,15 +1445,6 @@ export default function MaterialDashboard() {
                   data={stockData}
                   columns={[
                     {
-                      accessorKey: "ItemCode",
-                      header: "Code",
-                      cell: ({ getValue }: any) => (
-                        <span className="font-mono text-xs text-primary">
-                          {(getValue() as string) || "—"}
-                        </span>
-                      ),
-                    },
-                    {
                       accessorKey: "ItemName",
                       header: "Item Name",
                       cell: ({ getValue }: any) => (
@@ -1463,8 +1454,8 @@ export default function MaterialDashboard() {
                       ),
                     },
                     {
-                      accessorKey: "TransactionType",
-                      header: "Type",
+                      accessorKey: "ItemGroupName",
+                      header: "Group",
                       cell: ({ getValue }: any) => (
                         <span className="text-xs text-muted-foreground">
                           {(getValue() as string) || "—"}
@@ -1472,7 +1463,21 @@ export default function MaterialDashboard() {
                       ),
                     },
                     {
-                      accessorKey: "Quantity",
+                      accessorKey: "Type",
+                      header: "Type",
+                      cell: ({ getValue }: any) => {
+                        const v = getValue() as string;
+                        return (
+                          <span
+                            className={`text-xs font-semibold ${v === "IN" ? "text-emerald-600" : "text-red-500"}`}
+                          >
+                            {v || "—"}
+                          </span>
+                        );
+                      },
+                    },
+                    {
+                      accessorKey: "Qty",
                       header: "Qty",
                       cell: ({ getValue }: any) => (
                         <span className="text-xs font-medium">
@@ -1481,7 +1486,34 @@ export default function MaterialDashboard() {
                       ),
                     },
                     {
-                      accessorKey: "TransactionDate",
+                      accessorKey: "UOMSymbol",
+                      header: "UOM",
+                      cell: ({ getValue }: any) => (
+                        <span className="text-xs text-muted-foreground">
+                          {(getValue() as string) || "—"}
+                        </span>
+                      ),
+                    },
+                    {
+                      accessorKey: "GodownName",
+                      header: "Godown",
+                      cell: ({ getValue }: any) => (
+                        <span className="text-xs text-muted-foreground">
+                          {(getValue() as string) || "—"}
+                        </span>
+                      ),
+                    },
+                    {
+                      accessorKey: "DocNo",
+                      header: "Ref Doc",
+                      cell: ({ getValue }: any) => (
+                        <span className="font-mono text-xs text-primary">
+                          {(getValue() as string) || "—"}
+                        </span>
+                      ),
+                    },
+                    {
+                      accessorKey: "LedgerDate",
                       header: "Date",
                       cell: ({ getValue }: any) => (
                         <span className="text-xs text-muted-foreground">

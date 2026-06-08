@@ -191,6 +191,11 @@ export default function MaterialRequest() {
     staleTime: 5 * 60_000,
   });
 
+  const filteredProjects = (projects as any[]).filter(
+    (p) =>
+      !header.companyId || String(p.company_id) === String(header.companyId),
+  );
+
   const { data: finYears = [] } = useQuery({
     queryKey: ["mr-finyears"],
     queryFn: mrApi.getMRFinYears,
@@ -819,7 +824,10 @@ export default function MaterialRequest() {
             <Field label="Company" required>
               <Select
                 value={header.companyId}
-                onValueChange={(v) => setH("companyId", v)}
+                onValueChange={(v) => {
+                  setH("companyId", v);
+                  setH("projectId", "");
+                }}
               >
                 <SelectTrigger className="h-9 gap-2">
                   <Building2
@@ -851,7 +859,7 @@ export default function MaterialRequest() {
                   <SelectValue placeholder="Select project" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(projects as any[]).map((p) => (
+                  {filteredProjects.map((p) => (
                     <SelectItem key={p.id} value={String(p.id)}>
                       {p.name}
                     </SelectItem>
