@@ -50,50 +50,57 @@ router.get(
       const pool = getPool();
       const result = await pool.request().query(`
       SELECT
-        id                        AS Id,
-        business_identity         AS Code,
-        name                      AS Name,
-        description               AS LegalName,
-        short_name                AS ShortName,
-        entity_type               AS Type,
-        cr_code                   AS Industry,
-        date_of_establishment     AS IncorporationDate,
-        cin                       AS CIN,
-        pan                       AS PAN,
-        tan                       AS TAN,
+        c.id                        AS Id,
+        c.business_identity         AS Code,
+        c.name                      AS Name,
+        c.description               AS LegalName,
+        c.short_name                AS ShortName,
+        c.entity_type               AS Type,
+        c.cr_code                   AS Industry,
+        c.date_of_establishment     AS IncorporationDate,
+        c.cin                       AS CIN,
+        c.pan                       AS PAN,
+        c.tan                       AS TAN,
         CASE
-          WHEN gst_type IN ('Registered', 'Unregistered') THEN gst_type
-          WHEN gst_type IS NOT NULL AND gst_type <> '' AND gst_type <> 'Unregistered' THEN 'Registered'
-          WHEN b_sub_identity_type IS NOT NULL OR gst_issue_date IS NOT NULL THEN 'Registered'
+          WHEN c.gst_type IN ('Registered', 'Unregistered') THEN c.gst_type
+          WHEN c.gst_type IS NOT NULL AND c.gst_type <> '' AND c.gst_type <> 'Unregistered' THEN 'Registered'
+          WHEN c.b_sub_identity_type IS NOT NULL OR c.gst_issue_date IS NOT NULL THEN 'Registered'
           ELSE 'Unregistered'
         END                       AS GSTType,
-        b_sub_identity_type       AS GST,
-        gst_issue_date            AS GSTDate,
-        trade_license             AS TradeLicenseNo,
-        rera_date                 AS TradeLicenseDate,
-        address                   AS RegisteredAddress,
-        address_line2             AS Address2,
-        city          AS City,
-        state         AS State,
-        country       AS Country,
-        pincode       AS Pincode,
-        phone_number              AS Phone,
-        fax                       AS Fax,
-        email         AS Email,
-        website       AS Website,
-        authorized_capital        AS AuthorizedCapital,
-        paid_up_capital           AS PaidUpCapital,
-        currency,
-        fiscal_year_start         AS FiscalYearStart,
-        auditor_name              AS AuditorName,
-        CASE WHEN discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
-        remarks                   AS Remarks,
-        logo                      AS LogoUrl,
-        status,
-        belongs_to
-      FROM dbo.enterprise
-      WHERE business_type = 'C' AND (discontinue = 0 OR discontinue IS NULL)
-      ORDER BY name
+        c.b_sub_identity_type       AS GST,
+        c.gst_issue_date            AS GSTDate,
+        c.trade_license             AS TradeLicenseNo,
+        c.rera_date                 AS TradeLicenseDate,
+        c.address                   AS RegisteredAddress,
+        c.address_line2             AS Address2,
+        c.city          AS City,
+        c.state         AS State,
+        c.country       AS Country,
+        c.pincode       AS Pincode,
+        c.phone_number              AS Phone,
+        c.fax                       AS Fax,
+        c.email         AS Email,
+        c.website       AS Website,
+        c.authorized_capital        AS AuthorizedCapital,
+        c.paid_up_capital           AS PaidUpCapital,
+        c.currency,
+        c.fiscal_year_start         AS FiscalYearStart,
+        c.auditor_name              AS AuditorName,
+        CASE WHEN c.discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
+        c.remarks                   AS Remarks,
+        c.logo                      AS LogoUrl,
+        c.status,
+        COALESCE(parent.id, legacyParent.id) AS EnterpriseId,
+        COALESCE(parent.name, legacyParent.name, c.belongs_to) AS belongs_to
+      FROM dbo.enterprise c
+      LEFT JOIN dbo.enterprise parent
+        ON parent.id = c.enterprise_id AND parent.business_type = 'E'
+      LEFT JOIN dbo.enterprise legacyParent
+        ON legacyParent.business_type = 'E'
+       AND LTRIM(RTRIM(legacyParent.name)) = LTRIM(RTRIM(c.belongs_to))
+      WHERE c.business_type = 'C'
+        AND (c.discontinue IS NULL OR c.discontinue = 0)
+      ORDER BY c.name
     `);
       res.json(result.recordset);
     } catch (err) {
@@ -110,6 +117,7 @@ router.post("/", adminOnly, async (req, res) => {
 
   try {
     const pool = getPool();
+    const enterpriseId = f.belongsTo ? parseInt(f.belongsTo, 10) : null;
     await pool
       .request()
       .input("name", sql.NVarChar(255), f.name || null)
@@ -152,11 +160,7 @@ router.post("/", adminOnly, async (req, res) => {
       .input("auditor_name", sql.NVarChar(255), f.auditorName || null)
       .input("remarks", sql.NVarChar(500), f.remarks || null)
       .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
-      .input(
-        "belongs_to",
-        sql.NVarChar(50),
-        f.belongsTo ? String(f.belongsTo) : null,
-      )
+      .input("enterprise_id", sql.Int, Number.isInteger(enterpriseId) ? enterpriseId : null)
       .input("discontinue", sql.Bit, f.isActive ? 0 : 1)
       .input("status", sql.NVarChar(50), f.isActive ? "Active" : "Inactive")
       .input("date_of_entry", sql.Date, new Date()).query(`
@@ -166,14 +170,16 @@ router.post("/", adminOnly, async (req, res) => {
           trade_license, rera_date, address, city, state, country, pincode,
           phone_number, fax, email, website,
           authorized_capital, paid_up_capital, currency, fiscal_year_start, auditor_name,
-          remarks, logo, belongs_to, discontinue, status, date_of_entry
+          remarks, logo, enterprise_id, belongs_to, discontinue, status, date_of_entry
         ) VALUES (
           @name, @short_name, @business_identity, @business_type, @entity_type, @description,
           @cr_code, @date_of_establishment, @cin, @pan, @tan, @gst_type, @b_sub_identity_type, @gst_issue_date,
           @trade_license, @rera_date, @address, @city, @state, @country, @pincode,
           @phone_number, @fax, @email, @website,
           @authorized_capital, @paid_up_capital, @currency, @fiscal_year_start, @auditor_name,
-          @remarks, @logo, @belongs_to, @discontinue, @status, @date_of_entry
+          @remarks, @logo, @enterprise_id,
+          (SELECT name FROM dbo.enterprise WHERE id = @enterprise_id AND business_type = 'E'),
+          @discontinue, @status, @date_of_entry
         )
       `);
     await bumpCacheVersion("enterprises");
@@ -192,6 +198,7 @@ router.put("/:id", adminOnly, async (req, res) => {
 
   try {
     const pool = getPool();
+    const enterpriseId = f.belongsTo ? parseInt(f.belongsTo, 10) : null;
     await pool
       .request()
       .input("id", sql.Int, parseInt(req.params.id))
@@ -234,11 +241,7 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("auditor_name", sql.NVarChar(255), f.auditorName || null)
       .input("remarks", sql.NVarChar(500), f.remarks || null)
       .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
-      .input(
-        "belongs_to",
-        sql.NVarChar(50),
-        f.belongsTo ? String(f.belongsTo) : null,
-      )
+      .input("enterprise_id", sql.Int, Number.isInteger(enterpriseId) ? enterpriseId : null)
       .input("discontinue", sql.Bit, f.isActive ? 0 : 1)
       .input("status", sql.NVarChar(50), f.isActive ? "Active" : "Inactive")
       .query(`
@@ -253,7 +256,10 @@ router.put("/:id", adminOnly, async (req, res) => {
           phone_number=@phone_number, fax=@fax, email=@email, website=@website,
           authorized_capital=@authorized_capital, paid_up_capital=@paid_up_capital,
           currency=@currency, fiscal_year_start=@fiscal_year_start, auditor_name=@auditor_name,
-          remarks=@remarks, logo=@logo, belongs_to=@belongs_to, discontinue=@discontinue, status=@status
+          remarks=@remarks, logo=@logo,
+          enterprise_id=@enterprise_id,
+          belongs_to=(SELECT name FROM dbo.enterprise WHERE id = @enterprise_id AND business_type = 'E'),
+          discontinue=@discontinue, status=@status
         WHERE id=@id AND business_type='C'
       `);
     await bumpCacheVersion("enterprises");

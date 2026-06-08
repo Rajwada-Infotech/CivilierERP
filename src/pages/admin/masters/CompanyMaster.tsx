@@ -60,6 +60,7 @@ interface Company {
   remarks: string;
   logoUrl: string;
   belongsTo: string | number;
+  enterpriseName: string;
 }
 
 const empty: Company = {
@@ -96,6 +97,7 @@ const empty: Company = {
   remarks: "",
   logoUrl: "",
   belongsTo: "",
+  enterpriseName: "",
 };
 
 function rowToForm(row: any): Company {
@@ -153,8 +155,13 @@ function rowToForm(row: any): Company {
     isActive: row.IsActive !== 0,
     remarks: row.Remarks ?? "",
     logoUrl: row.LogoUrl ?? "",
-    // belongs_to stores the enterprise name string
-    belongsTo: row.belongs_to ?? "",
+    belongsTo:
+      row.EnterpriseId != null
+        ? String(row.EnterpriseId)
+        : row.enterprise_id != null
+          ? String(row.enterprise_id)
+          : "",
+    enterpriseName: row.belongs_to ?? "",
   };
 }
 
@@ -207,7 +214,7 @@ function printCompanyPreview(c: Company) {
           { label: "Incorporation Date", value: c.incorporationDate },
           { label: "Currency", value: c.currency },
           { label: "Fiscal Year Start", value: c.fiscalYearStart },
-          { label: "Enterprise Parent", value: c.belongsTo as string },
+          { label: "Enterprise Parent", value: c.enterpriseName },
           { label: "Status", value: c.isActive ? "Active" : "Inactive" },
           { label: "Remarks", value: c.remarks },
         ],
@@ -325,7 +332,7 @@ function CompanyViewModal({ row, onClose }: { row: any; onClose: () => void }) {
             <Row label="Incorporation Date" value={c.incorporationDate} />
             <Row label="Currency" value={c.currency} />
             <Row label="Fiscal Year Start" value={c.fiscalYearStart} />
-            <Row label="Enterprise (Parent)" value={c.belongsTo as string} />
+            <Row label="Enterprise (Parent)" value={c.enterpriseName} />
             <Row label="Remarks" value={c.remarks} />
 
             <Section title="Address" />
@@ -559,7 +566,7 @@ export default function CompanyMaster() {
       if (!res.ok) throw new Error("Failed to load");
       return res.json();
     },
-    staleTime: 30_000,
+    staleTime: 0,
     refetchOnWindowFocus: false,
   });
 
@@ -976,8 +983,7 @@ export default function CompanyMaster() {
                           const name = e.name ?? e.Name ?? "";
                           const id = String(e.id ?? e.Id ?? "");
                           return (
-                            // Store enterprise name in belongs_to (nvarchar column)
-                            <option key={id} value={name}>
+                            <option key={id} value={id}>
                               {name}
                             </option>
                           );
