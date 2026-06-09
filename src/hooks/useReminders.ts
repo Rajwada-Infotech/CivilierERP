@@ -75,7 +75,6 @@ async function fetchEmiReminders(): Promise<ReminderItem[]> {
       for (const inst of schedule) {
         if (inst.status === "Paid") continue;
         const urgency = classifyUrgency(inst.dueDate);
-        if (urgency === "upcoming") continue; // only overdue / today / soon
 
         items.push({
           id: `emi-${row.Eid}-${inst.installmentNo}`,
@@ -124,9 +123,8 @@ async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
         // Skip records with no usable date — can't determine urgency
         const dateStr = r.RequiredByDate || r.RequestDate;
         if (!dateStr) return false;
-        // Only surface overdue / today / soon (≤7 days) — same rule as all other reminder types
         const urgency = classifyUrgency(dateStr);
-        return urgency !== "upcoming";
+        return true; // show all items with a due date
       })
       .map((r) => {
         const dateStr = r.RequiredByDate || r.RequestDate;
@@ -185,7 +183,6 @@ export async function fetchAllReminders(
         if (!d || !recordId) return;
 
         const urgency = classifyUrgency(d);
-        if (urgency === "upcoming") return;
 
         items.push({
           id: `${type}-${recordId}`,
@@ -339,8 +336,6 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
-  const badgeCount = reminders.filter(
-    (r) => r.urgency === "overdue" || r.urgency === "today",
-  ).length;
+  const badgeCount = reminders.length; // all items with a due date trigger the bell
   return { reminders, loading, badgeCount, refresh, isLocked };
 }
