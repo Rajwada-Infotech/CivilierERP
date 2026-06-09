@@ -586,6 +586,7 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
     finYear,
     parentDocNo = null, // DocNo of the parent PO or WO
     rootExBDocNo = null, // Root ExB DocNo when raised under Expense Booking
+    godownId = null, // Target godown for stock credit (null → Main Godown)
   } = req.body;
 
   if (!grnDate || !supplierId) {
@@ -649,29 +650,33 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
       .input("ParentDocNo", sql.NVarChar(100), parentDocNo)
       .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo)
       .input("TotalAmount", sql.Decimal(18, 2), computeGRNTotal(grnItems))
+      .input("GodownID", sql.Int, godownId ? parseInt(godownId, 10) : null)
       .input("CreatedDate", sql.DateTime2, new Date()).query(`
         INSERT INTO GoodsReceiptNotes
           (GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks,
            DocTypeId, DocNo, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
-           TotalAmount, CreatedDate)
+           TotalAmount, GodownID, CreatedDate)
         OUTPUT INSERTED.GRNID
         VALUES
           (@GRNNo, @GRNDate, @SupplierID, @POID, @GRNItems, @Status, @Remarks,
            @DocTypeId, @DocNo, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
-           @TotalAmount, @CreatedDate)
+           @TotalAmount, @GodownID, @CreatedDate)
       `);
 
     const grnId = grnResult.recordset[0].GRNID;
 
     await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
 
-    const mainGodownId = await resolveMainGodownId(pool);
+    // Use the godown sent by the client; fall back to Main Godown only if none given
+    const resolvedGodownId = godownId
+      ? parseInt(godownId, 10)
+      : await resolveMainGodownId(pool);
     await insertStockLedgerEntries(
       transaction,
       grnId,
       grnItems,
       finalDocNo,
-      mainGodownId,
+      resolvedGodownId,
     );
 
     await transaction.commit();
@@ -834,13 +839,21 @@ router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
         "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
       );
 
-    const mainGodownId = await resolveMainGodownId(pool);
+    // Preserve the godown that was set when the GRN was created
+    const grnGodownRes = await pool
+      .request()
+      .input("GID", sql.Int, grnId)
+      .query(
+        "SELECT TOP 1 GodownID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GID",
+      );
+    const putGodownId =
+      grnGodownRes.recordset[0]?.GodownID ?? (await resolveMainGodownId(pool));
     await insertStockLedgerEntries(
       transaction,
       grnId,
       grnItems,
       docNo,
-      mainGodownId,
+      putGodownId,
     );
     await transaction.commit();
 

@@ -80,7 +80,6 @@ interface IssueHeader {
   docNoPreview: string;
   issuedTo: string;
   costCenter: string;
-  purpose: string;
 }
 
 const defaultHeader: IssueHeader = {
@@ -95,7 +94,6 @@ const defaultHeader: IssueHeader = {
   docNoPreview: "",
   issuedTo: "",
   costCenter: "",
-  purpose: "",
 };
 
 const blankCartItem = (): CartItem => ({
@@ -495,6 +493,19 @@ export default function Issues() {
     [godowns, header.godownId],
   );
 
+  // ── Company → Project filtering ──────────────────────────────────────────
+
+  const filteredProjects = useMemo(() => {
+    if (!header.companyId) return projects as any[];
+    const cid = Number(header.companyId);
+    return (projects as any[]).filter((p) => Number(p.company_id) === cid);
+  }, [projects, header.companyId]);
+
+  const handleCompanyChange = (v: string) => {
+    setH("companyId", v);
+    setH("projectId", ""); // reset project when company changes
+  };
+
   // ── Cart helpers ─────────────────────────────────────────────────────────
 
   const updateCartItem = useCallback(
@@ -511,8 +522,18 @@ export default function Issues() {
   const pickItem = useCallback(
     (cartKey: string, itemId: string) => {
       const found = itemMap[itemId];
-      const defaultUom =
-        found?.DefaultUOM || (uoms as any[]).find(Boolean)?.UOMCode || "";
+      const rawDefault = found?.DefaultUOM ?? "";
+      const uomList = uoms as any[];
+
+      // Resolve DefaultUOM → valid UOMCode:
+      // Backend already resolves by code then name, but verify it's in our list.
+      // Also try matching by UOMName in case backend returned a display name.
+      const resolvedUom =
+        uomList.find((u) => u.UOMCode === rawDefault)?.UOMCode ||
+        uomList.find((u) => u.UOMName === rawDefault)?.UOMCode ||
+        uomList[0]?.UOMCode ||
+        "";
+
       setCart((prev) =>
         prev.map((ci) =>
           ci._key === cartKey
@@ -521,8 +542,8 @@ export default function Issues() {
                 ItemId: itemId,
                 ItemName: found?.M_Name,
                 AvailableStock: Number(found?.AvailableStock ?? 0),
-                DefaultUOM: defaultUom,
-                UOMCode: defaultUom,
+                DefaultUOM: resolvedUom,
+                UOMCode: resolvedUom,
               }
             : ci,
         ),
@@ -530,6 +551,31 @@ export default function Issues() {
     },
     [itemMap, uoms],
   );
+
+  // Re-resolve UOMCode for any cart rows that have an item but blank UOM
+  // (handles the race where pickItem fired before uoms finished loading).
+  useEffect(() => {
+    const uomList = uoms as any[];
+    if (!uomList.length) return;
+    setCart((prev) => {
+      let changed = false;
+      const next = prev.map((ci) => {
+        if (!ci.ItemId || ci.UOMCode) return ci; // already has a UOM
+        const found = itemMap[ci.ItemId];
+        if (!found) return ci;
+        const raw = found.DefaultUOM ?? "";
+        const resolved =
+          uomList.find((u) => u.UOMCode === raw)?.UOMCode ||
+          uomList.find((u) => u.UOMName === raw)?.UOMCode ||
+          uomList[0]?.UOMCode ||
+          "";
+        if (!resolved) return ci;
+        changed = true;
+        return { ...ci, UOMCode: resolved, DefaultUOM: resolved };
+      });
+      return changed ? next : prev;
+    });
+  }, [uoms, itemMap]);
 
   // When godown changes, reset cart items (stock values no longer valid)
   const handleGodownChange = (val: string) => {
@@ -641,7 +687,6 @@ export default function Issues() {
       docNoPreview: "",
       issuedTo: record.IssuedTo ?? "",
       costCenter: record.CostCenter ?? "",
-      purpose: record.Purpose ?? "",
     });
     const items: CartItem[] = (record.items || []).map((it: any) => ({
       _key: crypto.randomUUID(),
@@ -688,13 +733,14 @@ export default function Issues() {
       DocTypeId: header.docTypeId || null,
       IssuedTo: header.issuedTo || null,
       CostCenter: header.costCenter || null,
-      Purpose: header.purpose || null,
-      items: cart.map((ci) => ({
-        ItemId: ci.ItemId,
-        UOMCode: ci.UOMCode,
-        Quantity: Number(ci.Quantity),
-        Remarks: ci.Remarks || null,
-      })),
+      items: cart
+        .filter((ci) => ci.ItemId && ci.ItemId.trim() !== "")
+        .map((ci) => ({
+          ItemId: ci.ItemId,
+          UOMCode: ci.UOMCode,
+          Quantity: Number(ci.Quantity),
+          Remarks: ci.Remarks || null,
+        })),
     };
     if (editingId) {
       updateMutation.mutate(payload);
@@ -1097,7 +1143,7 @@ export default function Issues() {
               <Field label="Company" required>
                 <Select
                   value={header.companyId}
-                  onValueChange={(v) => setH("companyId", v)}
+                  onValueChange={handleCompanyChange}
                 >
                   <SelectTrigger className="h-9 gap-2">
                     <Building2
@@ -1132,12 +1178,16 @@ export default function Issues() {
                     />
                     <SelectValue
                       placeholder={
-                        loadingProjects ? "Loading…" : "Select project"
+                        loadingProjects
+                          ? "Loading…"
+                          : header.companyId
+                            ? "Select project"
+                            : "Select company first"
                       }
                     />
                   </SelectTrigger>
                   <SelectContent>
-                    {(projects as any[]).map((p) => (
+                    {filteredProjects.map((p: any) => (
                       <SelectItem key={p.id} value={String(p.id)}>
                         {p.name}
                       </SelectItem>
@@ -1193,8 +1243,8 @@ export default function Issues() {
               </Field>
             </div>
 
-            {/* Row 2: Issued To | Cost Center | Purpose */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Row 2: Issued To | Cost Center */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Issued To (Dept / Employee)">
                 <div className="relative">
                   <User
@@ -1216,15 +1266,6 @@ export default function Issues() {
                   onChange={(e) => setH("costCenter", e.target.value)}
                   className="h-9 text-sm"
                   placeholder="Cost centre or GL code…"
-                />
-              </Field>
-
-              <Field label="Purpose of Consumption">
-                <Input
-                  value={header.purpose}
-                  onChange={(e) => setH("purpose", e.target.value)}
-                  className="h-9 text-sm"
-                  placeholder="Brief purpose or work order ref…"
                 />
               </Field>
             </div>
@@ -1682,13 +1723,6 @@ export default function Issues() {
                 <DetailRow
                   label="Cost Center"
                   value={viewingRecord.CostCenter}
-                />
-              )}
-              {viewingRecord.Purpose && (
-                <DetailRow
-                  label="Purpose"
-                  value={viewingRecord.Purpose}
-                  className="col-span-2"
                 />
               )}
             </div>

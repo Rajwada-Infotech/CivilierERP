@@ -154,6 +154,56 @@ router.post("/", adminOnly, async (req, res) => {
       `);
     await bumpCacheVersion("enterprises");
     await bumpCacheVersion("project-master");
+
+    // Auto-create a dedicated godown for this project
+    try {
+      const projectRow = await pool
+        .request()
+        .input("name", sql.NVarChar(255), f.name || null)
+        .input("btype", sql.NVarChar(10), "P")
+        .query(
+          "SELECT TOP 1 id FROM dbo.enterprise WHERE name=@name AND business_type=@btype ORDER BY id DESC",
+        );
+      const newProjectId = projectRow.recordset[0]?.id;
+      if (newProjectId) {
+        const code = (f.code || f.name || "PRJ")
+          .replace(/\s+/g, "_")
+          .toUpperCase()
+          .slice(0, 40);
+        const godownCode = `PRJ-${code}-${newProjectId}`;
+        const godownName = `${f.name} Godown`;
+        // Only create if no godown already linked to this project
+        const existing = await pool
+          .request()
+          .input("pid", sql.Int, newProjectId)
+          .query(
+            "SELECT TOP 1 GodownID FROM dbo.Godowns WHERE ProjectID=@pid AND IsDeleted=0",
+          );
+        if (existing.recordset.length === 0) {
+          await pool
+            .request()
+            .input("GodownCode", sql.NVarChar(50), godownCode)
+            .input("GodownName", sql.NVarChar(255), godownName)
+            .input("ShortDesc", sql.NVarChar(100), f.shortName || f.name)
+            .input("ProjectID", sql.Int, newProjectId)
+            .input(
+              "EnterpriseID",
+              sql.Int,
+              f.enterpriseId ? parseInt(f.enterpriseId) : null,
+            ).query(`
+              INSERT INTO dbo.Godowns (GodownCode, GodownName, ShortDesc, ProjectID, EnterpriseID, IsMain, IsActive, IsDeleted)
+              VALUES (@GodownCode, @GodownName, @ShortDesc, @ProjectID, @EnterpriseID, 0, 1, 0)
+            `);
+        }
+      }
+    } catch (godownErr) {
+      // Non-fatal — project was created, godown creation failed
+      console.warn(
+        "[projectMaster] Auto-godown creation failed:",
+        godownErr.message,
+      );
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
