@@ -75,7 +75,6 @@ async function fetchEmiReminders(): Promise<ReminderItem[]> {
       for (const inst of schedule) {
         if (inst.status === "Paid") continue;
         const urgency = classifyUrgency(inst.dueDate);
-        if (urgency === "upcoming") continue; // only overdue / today / soon
 
         items.push({
           id: `emi-${row.Eid}-${inst.installmentNo}`,
@@ -97,22 +96,48 @@ async function fetchEmiReminders(): Promise<ReminderItem[]> {
 
 async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
   try {
-    const res = await fetchWithAuth("/api/material-requests?limit=200");
+    let res: Response;
+    try {
+      // Fetch without a status filter so both Pending and Approved MRs are
+      // included — Draft/Ordered/Cancelled are excluded below client-side.
+      res = await fetchWithAuth(
+        "/api/material-requests?limit=200&page=1",
+      );
+    } catch {
+      // fetchWithAuth throws on 403, network errors, etc. — treat as empty, never propagate
+      return [];
+    }
     if (!res.ok) return [];
     const raw = await res.json();
+    // API always returns { data: [], page, limit, total, totalPages }
     const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
 
+    // Statuses that need action / attention — Draft has no due pressure,
+    // Ordered/Cancelled are already resolved.
+    const ACTIONABLE = new Set(["Pending", "Approved", "Partially Ordered"]);
+
     return list
-      .filter((r) => r.Status === "Pending" || r.Status === "pending")
-      .map((r) => ({
-        id: `mr-${r.MRId}`,
-        type: "material_request" as ReminderType,
-        title: `MR #${r.DocNo || r.MRId}`,
-        subtitle: `${r.ProjectName || r.CompanyName || "Material Request"} · ${r.Priority || "Normal"} priority`,
-        dueDate: r.RequiredByDate || r.RequestDate,
-        urgency: classifyUrgency(r.RequiredByDate || r.RequestDate),
-        path: "/material/material-request",
-      }));
+      .filter((r) => {
+        // Only actionable statuses
+        if (!ACTIONABLE.has(r.Status)) return false;
+        // Skip records with no usable date — can't determine urgency
+        const dateStr = r.RequiredByDate || r.RequestDate;
+        if (!dateStr) return false;
+        const urgency = classifyUrgency(dateStr);
+        return true; // show all items with a due date
+      })
+      .map((r) => {
+        const dateStr = r.RequiredByDate || r.RequestDate;
+        return {
+          id: `mr-${r.MRId}`,
+          type: "material_request" as ReminderType,
+          title: `MR #${r.DocNo || r.MRId}`,
+          subtitle: `${r.ProjectName || r.CompanyName || "Material Request"} · ${r.Status} · ${r.Priority || "Normal"} priority`,
+          dueDate: dateStr,
+          urgency: classifyUrgency(dateStr),
+          path: "/material/material-request",
+        };
+      });
   } catch {
     return [];
   }
@@ -124,7 +149,9 @@ export async function fetchCustomerReminders(): Promise<ReminderItem[]> {
   return [];
 }
 
-export async function fetchAllReminders(role?: string): Promise<ReminderItem[]> {
+export async function fetchAllReminders(
+  role?: string,
+): Promise<ReminderItem[]> {
   if (role === "customer") return fetchCustomerReminders();
   const [poRes, grnRes, chequeRes, tdsRes, woRes] = await Promise.allSettled([
     fetchWithAuth("/api/purchase-orders"),
@@ -156,7 +183,6 @@ export async function fetchAllReminders(role?: string): Promise<ReminderItem[]> 
         if (!d || !recordId) return;
 
         const urgency = classifyUrgency(d);
-        if (urgency === "upcoming") return;
 
         items.push({
           id: `${type}-${recordId}`,
@@ -172,7 +198,13 @@ export async function fetchAllReminders(role?: string): Promise<ReminderItem[]> 
     }
   };
 
-  const FINANCE_ROLES = ["admin", "super_admin", "dba", "finance_manager", "branch_manager"];
+  const FINANCE_ROLES = [
+    "admin",
+    "super_admin",
+    "dba",
+    "finance_manager",
+    "branch_manager",
+  ];
   const hasFinanceAccess = FINANCE_ROLES.includes(role || "");
   const [, emiItems, mrItems] = await Promise.all([
     Promise.all([
@@ -188,8 +220,11 @@ export async function fetchAllReminders(role?: string): Promise<ReminderItem[]> 
       process(tdsRes, "tds", "Id", "TDS", "/masters/tds"),
       process(woRes, "work_order", "Id", "WO", "/material/work-order"),
     ]),
-    hasFinanceAccess ? fetchEmiReminders() : Promise.resolve([]),
-    fetchMaterialRequestReminders(),
+    (hasFinanceAccess
+      ? fetchEmiReminders()
+      : Promise.resolve([] as ReminderItem[])
+    ).catch(() => [] as ReminderItem[]),
+    fetchMaterialRequestReminders().catch(() => [] as ReminderItem[]),
   ]);
 
   items.push(...emiItems);
@@ -301,8 +336,6 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
-  const badgeCount = reminders.filter(
-    (r) => r.urgency === "overdue" || r.urgency === "today",
-  ).length;
+  const badgeCount = reminders.length; // all items with a due date trigger the bell
   return { reminders, loading, badgeCount, refresh, isLocked };
 }

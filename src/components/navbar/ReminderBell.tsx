@@ -63,8 +63,11 @@ export const ReminderBell = () => {
   }, [open]);
 
   const handleBellClick = useCallback(() => {
-    setOpen((prev) => !prev);
-  }, []);
+    setOpen((prev) => {
+      if (!prev) refresh(true);
+      return !prev;
+    });
+  }, [refresh]);
 
   const filtered =
     filter === "all" ? reminders : reminders.filter((r) => r.type === filter);
