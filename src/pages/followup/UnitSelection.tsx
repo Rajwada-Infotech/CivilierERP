@@ -10,6 +10,7 @@ import {
   Layers,
   MapPin,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
   X,
@@ -732,7 +733,7 @@ export function UnitSelectionPage() {
     queryFn: fetchOptions,
   });
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["followup-unit-selections", search, statusFilter, page],
     queryFn: () => fetchSelections(search, statusFilter, page),
   });
@@ -791,7 +792,8 @@ export function UnitSelectionPage() {
       <Breadcrumbs
         items={[
           { label: "Follow-Up", path: "/followup" },
-          { label: "Unit Selection", path: "/followup/sales/unit-selection" },
+          { label: "Sales" },
+          { label: "Unit Selection" },
         ]}
       />
       <div className="relative space-y-8 mt-6">
@@ -805,53 +807,36 @@ export function UnitSelectionPage() {
               Manage unit bookings and applicant selections
             </p>
           </div>
-          <Button
-            size="sm"
-            onClick={openCreate}
-            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-          >
-            <Plus size={14} /> New Selection
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              Refresh
+            </button>
+            <Button
+              size="sm"
+              onClick={openCreate}
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+            >
+              <Plus size={14} /> New Selection
+            </Button>
+          </div>
         </div>
 
         {/* ── KPI strip ── */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {[
-            {
-              icon: <Layers size={16} />,
-              label: "Total",
-              value: stats.total,
-              accent: "text-primary",
-              bg: "bg-primary/10",
-            },
-            {
-              icon: <Building2 size={16} />,
-              label: "Confirmed",
-              value: stats.confirmed,
-              accent: "text-emerald-600",
-              bg: "bg-emerald-500/10",
-            },
-            {
-              icon: <IndianRupee size={16} />,
-              label: "Visible Value",
-              value: `₹${stats.totalValue.toLocaleString("en-IN")}`,
-              accent: "text-amber-600",
-              bg: "bg-amber-500/10",
-            },
-          ].map((t) => (
-            <div
-              key={t.label}
-              className="rounded-xl border border-border bg-card p-4"
-            >
-              <div className={`p-2 rounded-lg ${t.bg} w-fit mb-3`}>
-                <span className={t.accent}>{t.icon}</span>
-              </div>
-              <p className="text-2xl font-bold font-heading text-foreground leading-none">
-                {t.value}
-              </p>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                {t.label}
-              </p>
+            { label: "Total", value: stats.total, dot: "bg-blue-400" },
+            { label: "Confirmed", value: stats.confirmed, dot: "bg-emerald-500" },
+            { label: "Visible Value", value: `₹${stats.totalValue.toLocaleString("en-IN")}`, dot: "bg-amber-400" },
+          ].map(({ label, value, dot }) => (
+            <div key={label} className="rounded-xl border border-border bg-card p-4">
+              <div className={`w-2 h-2 rounded-full ${dot} mb-3`} />
+              <p className="text-2xl font-bold font-heading text-foreground leading-none">{value}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">{label}</p>
             </div>
           ))}
         </div>
@@ -891,10 +876,10 @@ export function UnitSelectionPage() {
                 setStatusFilter(s);
                 setPage(1);
               }}
-              className={`px-3.5 py-[9px] rounded-lg text-xs font-semibold border transition-all ${
+              className={`px-3.5 py-[7px] rounded-[9px] text-xs font-semibold border-[1.5px] transition-all leading-none ${
                 statusFilter === s
                   ? "gradient-accent text-white border-transparent shadow-sm"
-                  : "bg-card text-muted-foreground border-border hover:border-primary/40"
+                  : "bg-muted text-muted-foreground border-border hover:border-primary/40"
               }`}
             >
               {s === "all" ? "All" : s}

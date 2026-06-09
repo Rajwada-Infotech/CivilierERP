@@ -253,7 +253,7 @@ function CallCard({ entry, onDelete }: { entry: WelcomeCall; onDelete: () => voi
       <div className="wc-card-body">
         <div className="wc-card-header">
           <div className="wc-avatar" style={{ background: color }}>
-            {initials(entry.ApplicantName || "?")}
+            {entry.ApplicantName ? initials(entry.ApplicantName) : <User className="w-4 h-4" />}
           </div>
           <div className="wc-card-meta">
             <span className="wc-customer-name">{entry.ApplicantName}</span>
@@ -439,8 +439,8 @@ export function WelcomeCallsPage() {
         .wc-search-clear { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: hsl(var(--muted-foreground)); padding: 2px; display: flex; }
         .wc-pills { display: flex; gap: 6px; flex-wrap: wrap; }
         .wc-pill { display: flex; align-items: center; justify-content: center; gap: 5px; padding: 7px 14px; border-radius: 9px; font-size: 12px; font-weight: 600; border: 1.5px solid hsl(var(--border)); background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); cursor: pointer; transition: all .15s; white-space: nowrap; line-height: 1; }
-        .wc-pill:hover { border-color: hsl(var(--primary)); color: hsl(var(--primary)); }
-        .wc-pill.active { background: hsl(var(--primary)); border-color: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
+        .wc-pill:hover { border-color: hsl(var(--primary) / 0.4); }
+        .wc-pill.active { background: linear-gradient(135deg, hsl(var(--accent-1)), hsl(var(--accent-2))); border-color: hsl(var(--primary)); color: hsl(var(--primary-foreground)); box-shadow: 0 2px 8px hsl(var(--primary) / 0.25); }
         .wc-body { padding: 24px 28px; width: 100%; display: flex; flex-direction: column; }
         .wc-feed { display: flex; flex-direction: column; gap: 0; }
         .wc-card { display: flex; gap: 0; position: relative; }
@@ -505,7 +505,8 @@ export function WelcomeCallsPage() {
 
       <Breadcrumbs items={[
         { label: "Follow-Up", path: "/followup" },
-        { label: "Welcome Calls", path: "/followup/sales/welcome-calls" },
+        { label: "Sales" },
+        { label: "Welcome Calls" },
       ]} />
 
       <div className="relative space-y-8 mt-6">
