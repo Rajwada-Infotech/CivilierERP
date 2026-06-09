@@ -25,8 +25,8 @@ const LIST_COLUMNS = `
   wc.BookingId,
   fb.BookingNo,
   wc.ApplicantId,
-  ISNULL(ahm.DisplayName, ahm.LHeadName) AS ApplicantName,
-  ahm.LHeadCode                          AS ApplicantNo,
+  fa.ApplicantName,
+  fa.ApplicantNo,
   CONVERT(VARCHAR(10), wc.CallDate, 23)  AS CallDate,
   wc.CallTime,
   wc.Duration,
@@ -77,10 +77,10 @@ function normalizeNumber(v) {
 
 async function generateCallNo(pool) {
   const result = await pool.request().query(`
-    SELECT COUNT(*) AS cnt FROM dbo.FollowupWelcomeCalls
+    SELECT ISNULL(MAX(Id), 0) AS maxId FROM dbo.FollowupWelcomeCalls
   `);
-  const cnt = result.recordset[0].cnt + 1;
-  return `WC${String(cnt).padStart(5, "0")}`;
+  const next = result.recordset[0].maxId + 1;
+  return `WC${String(next).padStart(5, "0")}`;
 }
 
 // ── GET /meta/options ─────────────────────────────────────────────────────────
@@ -91,10 +91,10 @@ router.get("/meta/options", async (req, res) => {
     const [bookingsRes, usersRes] = await Promise.all([
       pool.request().query(`
         SELECT fb.Id, fb.BookingNo,
-               ISNULL(ahm.DisplayName, ahm.LHeadName) AS ApplicantName
+               fa.ApplicantName
         FROM   dbo.FollowupBookings fb
-        LEFT JOIN dbo.AccountHeadMaster ahm
-               ON ahm.LHeadId = fb.ApplicantId
+        LEFT JOIN dbo.FollowupApplications fa
+               ON fa.Id = fb.ApplicantId AND fa.IsDeleted = 0
         WHERE  fb.IsDeleted = 0
         ORDER  BY fb.BookingNo
       `),
@@ -136,8 +136,8 @@ router.get("/", async (req, res) => {
 
     if (search) {
       filters.push(`(
-        ahm.LHeadName LIKE @search OR
-        ahm.DisplayName LIKE @search OR
+        fa.ApplicantName LIKE @search OR
+        fa.ApplicantNo LIKE @search OR
         wc.CallNo LIKE @search OR
         wc.BankSelected LIKE @search
       )`);
@@ -158,17 +158,22 @@ router.get("/", async (req, res) => {
       SELECT ${LIST_COLUMNS}
       FROM   dbo.FollowupWelcomeCalls wc
       LEFT JOIN dbo.FollowupBookings  fb  ON fb.Id   = wc.BookingId
-      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId  = wc.ApplicantId
+      LEFT JOIN dbo.FollowupApplications fa ON fa.Id = wc.ApplicantId AND fa.IsDeleted = 0
       LEFT JOIN dbo.users             u   ON u.id    = wc.AssignedTo
       WHERE  ${where}
       ORDER  BY wc.CreatedAt DESC, wc.Id DESC
       OFFSET ${offset} ROWS FETCH NEXT ${pageSize} ROWS ONLY
     `);
 
-    const countResult = await pool.request().query(`
+    const countRequest = pool.request();
+    if (search) countRequest.input("search", sql.NVarChar(255), `%${search}%`);
+    if (status) countRequest.input("status", sql.NVarChar(50), status);
+    if (bookingId) countRequest.input("bookingId", sql.Int, bookingId);
+
+    const countResult = await countRequest.query(`
       SELECT COUNT(*) AS total
       FROM   dbo.FollowupWelcomeCalls wc
-      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = wc.ApplicantId
+      LEFT JOIN dbo.FollowupApplications fa ON fa.Id = wc.ApplicantId AND fa.IsDeleted = 0
       WHERE  ${where}
     `);
 
@@ -198,7 +203,7 @@ router.get("/:id", async (req, res) => {
         SELECT ${LIST_COLUMNS}
         FROM   dbo.FollowupWelcomeCalls wc
         LEFT JOIN dbo.FollowupBookings  fb  ON fb.Id  = wc.BookingId
-        LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = wc.ApplicantId
+        LEFT JOIN dbo.FollowupApplications fa ON fa.Id = wc.ApplicantId AND fa.IsDeleted = 0
         LEFT JOIN dbo.users             u   ON u.id   = wc.AssignedTo
         WHERE  wc.Id = @Id AND wc.IsDeleted = 0
       `);
@@ -271,11 +276,11 @@ router.post("/", async (req, res) => {
           (CallNo, BookingId, ApplicantId, CallDate, CallTime, Duration,
            Outcome, BankSelected, LoanRequired, ExpectedLoanAmount,
            PreferredBanker, AssignedTo, Notes, Status, CreatedBy)
-        OUTPUT INSERTED.Id, INSERTED.CallNo
         VALUES
           (@CallNo, @BookingId, @ApplicantId, @CallDate, @CallTime, @Duration,
            @Outcome, @BankSelected, @LoanRequired, @ExpectedLoanAmount,
-           @PreferredBanker, @AssignedTo, @Notes, @Status, @CreatedBy)
+           @PreferredBanker, @AssignedTo, @Notes, @Status, @CreatedBy);
+        SELECT SCOPE_IDENTITY() AS Id, @CallNo AS CallNo;
       `);
 
     const id = result.recordset[0].Id;
@@ -301,11 +306,11 @@ router.post("/", async (req, res) => {
               ApplicantId, UnitSelectionId, AgreementId, ProjectId, CompanyId,
               Reason, Status, CreatedBy, CreatedAt
             )
-            OUTPUT INSERTED.Id
             VALUES (
               @ApplicantId, @UnitSelectionId, @AgreementId, @ProjectId, @CompanyId,
               @Reason, @Status, @CreatedBy, SYSDATETIME()
-            )
+            );
+            SELECT SCOPE_IDENTITY() AS Id;
           `);
         const nocId = nocInsert.recordset[0]?.Id;
         if (nocId) {

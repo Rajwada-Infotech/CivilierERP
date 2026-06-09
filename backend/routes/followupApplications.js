@@ -384,12 +384,10 @@ router.post(
       return res.status(400).json({ error: payload.error });
     }
 
-    const transaction = new sql.Transaction(getPool());
+    const pool = getPool();
 
     try {
-      await transaction.begin();
-
-      const insertResult = await new sql.Request(transaction)
+      const insertResult = await pool.request()
         .input("CustomerId", sql.Int, payload.CustomerId)
         .input("ApplicantName", sql.NVarChar(255), payload.ApplicantName)
         .input("PrimaryMobile", sql.NVarChar(20), payload.PrimaryMobile)
@@ -398,22 +396,14 @@ router.post(
         .input("ApplicantAddress", sql.NVarChar(500), payload.ApplicantAddress)
         .input("CoApplicantName", sql.NVarChar(255), payload.CoApplicantName)
         .input("CoApplicantPhone", sql.NVarChar(20), payload.CoApplicantPhone)
-        .input(
-          "CorrespondenceAddress",
-          sql.NVarChar(500),
-          payload.CorrespondenceAddress,
-        )
+        .input("CorrespondenceAddress", sql.NVarChar(500), payload.CorrespondenceAddress)
         .input("ApplicationDate", sql.Date, payload.ApplicationDate)
         .input("City", sql.NVarChar(100), payload.City)
         .input("Source", sql.NVarChar(100), payload.Source)
         .input("ProjectId", sql.Int, payload.ProjectId)
         .input("UnitId", sql.Int, payload.UnitId)
         .input("CompanyId", sql.Int, payload.CompanyId)
-        .input(
-          "PreferredUnitType",
-          sql.NVarChar(100),
-          payload.PreferredUnitType,
-        )
+        .input("PreferredUnitType", sql.NVarChar(100), payload.PreferredUnitType)
         .input("BudgetAmount", sql.Decimal(18, 2), payload.BudgetAmount)
         .input("Status", sql.NVarChar(30), payload.Status)
         .input("AssignedTo", sql.Int, payload.AssignedTo)
@@ -428,7 +418,6 @@ router.post(
           PreferredUnitType, BudgetAmount, Status, AssignedTo,
           Notes, CreatedBy, CreatedAt
         )
-        OUTPUT INSERTED.Id
         VALUES (
           NULL,
           @CustomerId, @ApplicantName, @PrimaryMobile, @Email,
@@ -437,13 +426,15 @@ router.post(
           @City, @Source, @ProjectId, @UnitId, @CompanyId,
           @PreferredUnitType, @BudgetAmount, @Status, @AssignedTo,
           @Notes, @CreatedBy, SYSDATETIME()
-        )
+        );
+        SELECT SCOPE_IDENTITY() AS Id;
       `);
 
-      const id = insertResult.recordset[0]?.Id;
+      const id = Number(insertResult.recordset[0]?.Id);
+      if (!id) throw new Error("Insert returned no Id");
       const applicantNo = `APP${String(id).padStart(6, "0")}`;
 
-      await new sql.Request(transaction)
+      await pool.request()
         .input("Id", sql.Int, id)
         .input("ApplicantNo", sql.NVarChar(50), applicantNo).query(`
         UPDATE dbo.FollowupApplications
@@ -451,14 +442,8 @@ router.post(
         WHERE Id = @Id
       `);
 
-      await transaction.commit();
-      res
-        .status(201)
-        .json({ Id: id, ApplicantNo: applicantNo, Status: payload.Status });
+      res.status(201).json({ Id: id, ApplicantNo: applicantNo, Status: payload.Status });
     } catch (err) {
-      try {
-        await transaction.rollback();
-      } catch {}
       console.error("followupApplicants POST error:", err);
       res.status(500).json({ error: "Failed to create applicant" });
     }
@@ -578,14 +563,16 @@ router.delete(
         .request()
         .input("Id", sql.Int, id).query(`
         SELECT
-          (SELECT COUNT(*) FROM dbo.FollowupUnitSelections WHERE ApplicantId = @Id AND IsDeleted = 0) AS UnitSelections,
-          (SELECT COUNT(*) FROM dbo.FollowupAgreements WHERE ApplicantId = @Id AND IsDeleted = 0) AS Agreements
+          (SELECT COUNT(*) FROM dbo.FollowupBookings        WHERE ApplicantId = @Id AND IsDeleted = 0) AS Bookings,
+          (SELECT COUNT(*) FROM dbo.FollowupUnitSelections  WHERE ApplicantId = @Id AND IsDeleted = 0) AS UnitSelections,
+          (SELECT COUNT(*) FROM dbo.FollowupAgreements      WHERE ApplicantId = @Id AND IsDeleted = 0) AS Agreements
       `);
 
       const dependency = dependencyResult.recordset[0];
       if (
+        Number(dependency?.Bookings      ?? 0) > 0 ||
         Number(dependency?.UnitSelections ?? 0) > 0 ||
-        Number(dependency?.Agreements ?? 0) > 0
+        Number(dependency?.Agreements     ?? 0) > 0
       ) {
         return res.status(400).json({
           error:

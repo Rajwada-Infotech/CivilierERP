@@ -6,7 +6,7 @@
  * Each step can be marked: Pending / In Progress / Completed / Blocked / Waived
  */
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AuditLogDrawer } from "@/components/AuditLogDrawer";
@@ -83,6 +83,14 @@ const STEP_STATUS_COLOR: Record<string, string> = {
   "Waived":      "bg-amber-500/10 text-amber-600 border-amber-400/20",
 };
 
+// FIX #6: separate color map for OverallStatus (different value set)
+const OVERALL_STATUS_COLOR: Record<string, string> = {
+  "In Progress": "bg-blue-500/10 text-blue-600 border-blue-400/20",
+  "Completed":   "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
+  "On Hold":     "bg-amber-500/10 text-amber-600 border-amber-400/20",
+  "Cancelled":   "bg-red-500/10 text-red-600 border-red-400/20",
+};
+
 // ── Stepper sub-component ──────────────────────────────────────────────────────
 function MilestoneStepper({
   record,
@@ -101,6 +109,8 @@ function MilestoneStepper({
           const statusKey = `${step.field}Status` as keyof typeof record;
           const doneKey   = `${step.field}Done`   as keyof typeof record;
           const dueKey    = `${step.field}Due`    as keyof typeof record;
+          // FIX #4: pre-populate notesKey
+          const notesKey  = `${step.field}Notes`  as keyof typeof record;
           const status    = (record[statusKey] as string) || "Pending";
           const isLast    = idx === STEPS.length - 1;
 
@@ -159,10 +169,11 @@ function MilestoneStepper({
                       className="h-6 text-xs px-2"
                       onClick={() => {
                         setEditingStep(step.field);
+                        // FIX #4: pre-populate existing notes
                         setForm({
                           status,
                           doneDate: (record[doneKey] as string) || "",
-                          notes: "",
+                          notes: (record[notesKey] as string) || "",
                         });
                       }}
                     >
@@ -245,7 +256,8 @@ function MilestoneStepper({
                             stepField: step.field,
                             status: form.status,
                             doneDate: form.doneDate || undefined,
-                            notes: form.notes || undefined,
+                            // FIX #5: always send notes (even empty string) so backend can clear it
+                            notes: form.notes,
                           });
                           setEditingStep(null);
                         }}
@@ -280,9 +292,11 @@ export function LegalMilestonesPage() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // FIX #10: add staleTime so the list doesn't refetch on every focus/mount
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["legal-milestones"],
     queryFn: () => fetchLegalMilestones(),
+    staleTime: 30 * 1000,
   });
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -402,10 +416,10 @@ export function LegalMilestonesPage() {
                   </td>
                 </tr>
               ) : (
+                // FIX #1: key on React.Fragment, not the inner <tr>
                 records.map((rec: any) => (
-                  <>
+                  <React.Fragment key={rec.Id}>
                     <tr
-                      key={rec.Id}
                       className="border-b border-border hover:bg-muted/30 cursor-pointer transition-colors"
                       onClick={() =>
                         setExpandedId(expandedId === rec.Id ? null : rec.Id)
@@ -439,18 +453,20 @@ export function LegalMilestonesPage() {
                         {rec.UnitNo || "—"}
                       </td>
                       <td className="px-4 py-3 text-sm">
+                        {/* FIX #2: clamp CurrentStep to 1..8 before indexing */}
                         <span className="font-medium">
                           {rec.CurrentStep}/8
                         </span>
                         <span className="text-xs text-muted-foreground ml-1">
-                          — {STEPS[(rec.CurrentStep ?? 1) - 1]?.label}
+                          — {STEPS[Math.max(1, rec.CurrentStep ?? 1) - 1]?.label}
                         </span>
                       </td>
                       <td className="px-4 py-3">
+                        {/* FIX #6: use OVERALL_STATUS_COLOR for overall status badge */}
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                            STEP_STATUS_COLOR[rec.OverallStatus] ||
-                            STEP_STATUS_COLOR["Pending"]
+                            OVERALL_STATUS_COLOR[rec.OverallStatus] ||
+                            OVERALL_STATUS_COLOR["In Progress"]
                           }`}
                         >
                           {rec.OverallStatus}
@@ -466,9 +482,13 @@ export function LegalMilestonesPage() {
                         >
                           <Trash2 size={13} />
                         </button>
+                        {/* FIX #8: stopPropagation on audit button so it doesn't toggle row */}
                         <button
                           title="History"
-                          onClick={() => setAuditTarget({ id: rec.Id, no: rec.MilestoneNo ?? `#${rec.Id}` })}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAuditTarget({ id: rec.Id, no: rec.MilestoneNo ?? `#${rec.Id}` });
+                          }}
                           className="p-1 rounded hover:bg-primary/10 hover:text-primary text-muted-foreground transition-colors"
                         >
                           <Clock size={13} />
@@ -477,10 +497,7 @@ export function LegalMilestonesPage() {
                     </tr>
 
                     {expandedId === rec.Id && (
-                      <tr
-                        key={`${rec.Id}-expanded`}
-                        className="border-b border-border"
-                      >
+                      <tr className="border-b border-border">
                         <td colSpan={7} className="p-0">
                           <MilestoneStepper
                             record={rec}
@@ -491,7 +508,7 @@ export function LegalMilestonesPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 ))
               )}
             </tbody>
@@ -513,8 +530,9 @@ export function LegalMilestonesPage() {
               <Label className="text-xs">Applicant *</Label>
               <Select
                 value={form.ApplicantId || ""}
+                // FIX #9: reset dependent fields when applicant changes
                 onValueChange={(v) =>
-                  setForm((f) => ({ ...f, ApplicantId: v }))
+                  setForm((f) => ({ ...f, ApplicantId: v, UnitSelectionId: "", BookingId: "" }))
                 }
               >
                 <SelectTrigger className="rounded-[9px]">

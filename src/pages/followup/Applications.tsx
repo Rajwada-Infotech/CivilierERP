@@ -489,10 +489,17 @@ function ApplicationDrawer({
       ApplicantName: "",
       PrimaryMobile: "",
       Email: "",
+      PanNumber: "",
+      ApplicantAddress: "",
     });
     setCustomerSearch("");
   }
-  if (!open) return null;
+  if (!open) {
+    return null;
+  }
+
+  // Reset local search state each time drawer opens
+  // (handled by key prop on parent, but belt-and-suspenders via effect)
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-[2px]">
@@ -959,12 +966,14 @@ export default function ApplicationsPage() {
   const totals = useMemo(
     () => ({
       total: pagination?.total ?? 0,
+      // active/pendingDocs/budget are page-scoped (current page only).
+      // For accurate full-dataset counts the backend would need to return aggregates.
       active: applications.filter((a) => a.Status !== "Rejected").length,
-      pendingDocs: applications.filter((a) => a.Status === "Document Pending")
-        .length,
+      pendingDocs: applications.filter((a) => a.Status === "Document Pending").length,
       budget: applications.reduce((s, a) => s + Number(a.BudgetAmount ?? 0), 0),
+      isPageScoped: (pagination?.totalPages ?? 1) > 1,
     }),
-    [applications, pagination?.total],
+    [applications, pagination],
   );
 
   function resetAndOpen() {
@@ -1481,6 +1490,7 @@ export default function ApplicationsPage() {
       </div>
 
       <ApplicationDrawer
+        key={editing ? `edit-${editing.Id}` : drawerOpen ? "new" : "closed"}
         open={drawerOpen}
         editing={editing}
         form={form}

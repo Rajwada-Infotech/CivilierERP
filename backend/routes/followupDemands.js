@@ -3,10 +3,8 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
-const rateLimit = require("express-rate-limit");
 
 const router = express.Router();
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false }));
 router.use(authMiddleware);
 
 const PERMISSION_MODULE = "Followup";
@@ -21,7 +19,6 @@ function getUserName(req, res) {
   const name = req.user?.name || req.user?.email || null;
   if (!name) {
     res.status(401).json({ error: "Unauthorized" });
-    return null;
   }
   return name;
 }
@@ -34,7 +31,7 @@ function buildDemandNo(bookingNo, sortOrder) {
 // ── GET / ─────────────────────────────────────────────────────────────────────
 router.get(
   "/",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "read"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -170,7 +167,7 @@ router.get(
 // ── GET /projects ──────────────────────────────────────────────────────────────
 router.get(
   "/projects",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "read"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -191,7 +188,7 @@ router.get(
 // ── GET /booking/:bookingId ────────────────────────────────────────────────────
 router.get(
   "/booking/:bookingId",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "read"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -229,14 +226,15 @@ router.get(
 // ── PATCH /:id/raise ──────────────────────────────────────────────────────────
 router.patch(
   "/:id/raise",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "write"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanEdit"),
   async (req, res) => {
     try {
       const pool = getPool();
       const termRowId = parseId(req.params.id);
       if (!termRowId) return res.status(400).json({ error: "Invalid ID" });
 
-      getUserName(req, res);
+      const raisedBy = getUserName(req, res);
+      if (!raisedBy) return;
 
       const existing = await pool.request().input("Id", sql.Int, termRowId)
         .query(`
@@ -289,7 +287,7 @@ router.patch(
 // ── PATCH /:id/undo-raise ─────────────────────────────────────────────────────
 router.patch(
   "/:id/undo-raise",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "write"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanEdit"),
   async (req, res) => {
     try {
       const pool = getPool();

@@ -5,6 +5,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { computeBreakdown, fmt } from "./helpers";
 import type { ExpenseRecord } from "./types";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 
 interface Props {
   rec: ExpenseRecord;
@@ -86,14 +87,19 @@ export function RecordCard({
             Rs.{fmt(displayNet)}
           </p>
         </div>
-        <div className="flex gap-1.5 items-center">
-          <ApprovalActions
-            status={rec.status}
-            recordId={rec.id}
-            endpoint="/api/expense-booking"
-            submitOnly
-            onSuccess={onApprovalSuccess}
+        <div className="flex flex-col gap-1.5">
+          <ApprovalStatusChain table="ExpenseBooking" recordId={rec.id} 
+            compact
           />
+          <div className="flex gap-1.5 items-center">
+            <ApprovalActions
+              status={rec.status}
+              recordId={rec.id}
+              endpoint="/api/expense-booking"
+              submitOnly
+              onSuccess={onApprovalSuccess}
+            />
+          </div>
           <Button
             variant="outline"
             size="sm"
