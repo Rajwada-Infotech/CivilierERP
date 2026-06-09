@@ -3,10 +3,8 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
-const rateLimit = require("express-rate-limit");
 
 const router = express.Router();
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false }));
 router.use(authMiddleware);
 
 const PERMISSION_MODULE = "Followup";
@@ -28,7 +26,7 @@ function buildReceiptNo(bookingNo, seq) {
 // with their receipt records joined. Supports pagination + filters.
 router.get(
   "/",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "read"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -43,6 +41,7 @@ router.get(
       const statusFilter = ["Demanded", "Paid"].includes(req.query.status)
         ? req.query.status
         : null;
+      const overdueOnly = req.query.overdue === "1";
       const search = (req.query.search || "").trim();
 
       const conditions = [
@@ -61,6 +60,9 @@ router.get(
       if (statusFilter) {
         conditions.push("bpt.DemandStatus = @status");
         rData.input("status", sql.NVarChar(20), statusFilter);
+      }
+      if (overdueOnly) {
+        conditions.push("bpt.DemandStatus = 'Demanded' AND bpt.DueDate < CAST(GETDATE() AS DATE)");
       }
       if (search) {
         conditions.push(
@@ -111,7 +113,6 @@ router.get(
         OFFSET @skip ROWS FETCH NEXT @take ROWS ONLY
       `);
 
-      // Count
       const rCount = pool.request();
       if (projectId) rCount.input("projectId", sql.Int, projectId);
       if (statusFilter) rCount.input("status", sql.NVarChar(20), statusFilter);
@@ -156,7 +157,7 @@ router.get(
 // ── GET /projects ─────────────────────────────────────────────────────────────
 router.get(
   "/projects",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "read"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -178,7 +179,7 @@ router.get(
 // All receipts for a specific milestone (for receipt history modal)
 router.get(
   "/receipts/:termId",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "read"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -207,7 +208,7 @@ router.get(
 // Marks the milestone Paid when full amount is received.
 router.post(
   "/:termId/record",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "write"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanEdit"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -324,7 +325,7 @@ router.post(
 // Remove a receipt (admin correction). Re-evaluates Paid status.
 router.delete(
   "/receipts/:receiptId",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "write"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanEdit"),
   async (req, res) => {
     try {
       const pool = getPool();
