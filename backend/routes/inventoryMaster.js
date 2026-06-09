@@ -28,20 +28,21 @@ let _schemaCache = null;
 
 async function getSchema(pool) {
   if (_schemaCache) return _schemaCache;
-  const [
+  const [hasCreatedDate, hasEntryDate, hasUomCol, hasUomOnItem, hasGodownCol] =
+    await Promise.all([
+      hasColumn(pool, "dbo.StockLedger", "CreatedDate"),
+      hasColumn(pool, "dbo.StockLedger", "EntryDate"),
+      hasColumn(pool, "dbo.StockLedger", "UOM"),
+      hasColumn(pool, "dbo.Item_Master_Group", "M_UOM"),
+      hasColumn(pool, "dbo.StockLedger", "GodownID"),
+    ]);
+  _schemaCache = {
     hasCreatedDate,
     hasEntryDate,
     hasUomCol,
     hasUomOnItem,
     hasGodownCol,
-  ] = await Promise.all([
-    hasColumn(pool, "dbo.StockLedger", "CreatedDate"),
-    hasColumn(pool, "dbo.StockLedger", "EntryDate"),
-    hasColumn(pool, "dbo.StockLedger", "UOM"),
-    hasColumn(pool, "dbo.Item_Master_Group", "M_UOM"),
-    hasColumn(pool, "dbo.StockLedger", "GodownID"),
-  ]);
-  _schemaCache = { hasCreatedDate, hasEntryDate, hasUomCol, hasUomOnItem, hasGodownCol };
+  };
   return _schemaCache;
 }
 
@@ -80,16 +81,20 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
         : new Date().toISOString().slice(0, 10);
 
     const rawGodownId = req.query.godownId;
+    const rawProjectId = req.query.projectId;
     let godownId = rawGodownId ? parseInt(rawGodownId, 10) : null;
 
-    if (!godownId) {
+    if (!godownId && rawProjectId) {
+      // Resolve the godown that belongs to this project
       try {
-        const mainRes = await pool
+        const projId = parseInt(rawProjectId, 10);
+        const projRes = await pool
           .request()
+          .input("projId", sql.Int, projId)
           .query(
-            "SELECT TOP 1 GodownID FROM dbo.Godowns WHERE IsMain=1 AND IsDeleted=0",
+            "SELECT TOP 1 GodownID FROM dbo.Godowns WHERE ProjectID=@projId AND IsMain=0 AND IsDeleted=0 ORDER BY GodownID",
           );
-        godownId = mainRes.recordset[0]?.GodownID || null;
+        godownId = projRes.recordset[0]?.GodownID || null;
       } catch {
         godownId = null;
       }
