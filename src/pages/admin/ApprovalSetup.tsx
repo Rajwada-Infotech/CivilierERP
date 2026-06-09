@@ -18,19 +18,18 @@ import {
   ShieldCheck,
   Info,
   Loader2,
-  GripVertical,
+  ArrowDown,
+  Users,
+  GitMerge,
+  GitBranch,
+  CheckCircle2,
+  ToggleLeft,
+  ToggleRight,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -55,13 +54,72 @@ export interface ApprovalWorkflow {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const MODULE_OPTIONS = [
-  { id: "GRN", label: "GRN", icon: "📦" },
-  { id: "PurchaseOrders", label: "Purchase Order", icon: "🛒" },
-  { id: "MaterialIssues", label: "Material Issue", icon: "🚚" },
-  { id: "Expenses", label: "Expense Booking", icon: "🧾" },
-  { id: "WorkOrderHeader", label: "Work Order", icon: "🔧" },
-  { id: "NewPayment", label: "Payment", icon: "💳" },
-  { id: "StockTransfer", label: "Stock Transfer", icon: "🔄" },
+  {
+    id: "GRN",
+    label: "Goods Receipt (GRN)",
+    icon: "📦",
+    desc: "When goods arrive at site",
+  },
+  {
+    id: "PurchaseOrders",
+    label: "Purchase Order",
+    icon: "🛒",
+    desc: "Before a PO is raised",
+  },
+  {
+    id: "MaterialIssues",
+    label: "Material Issue",
+    icon: "🚚",
+    desc: "When materials leave store",
+  },
+  {
+    id: "Expenses",
+    label: "Expense Booking",
+    icon: "🧾",
+    desc: "Staff expense claims",
+  },
+  {
+    id: "WorkOrderHeader",
+    label: "Work Order",
+    icon: "🔧",
+    desc: "Before work begins",
+  },
+  {
+    id: "NewPayment",
+    label: "Payment",
+    icon: "💳",
+    desc: "Before payments are made",
+  },
+  {
+    id: "StockTransfer",
+    label: "Stock Transfer",
+    icon: "🔄",
+    desc: "Moving stock between sites",
+  },
+] as const;
+
+const APPROVAL_TYPES = [
+  {
+    id: "sequential" as const,
+    label: "One by one",
+    icon: ArrowDown,
+    desc: "Each person must approve before the next is asked. Like a chain — first Manager, then Director.",
+    example: "Manager → Director → CFO",
+  },
+  {
+    id: "any" as const,
+    label: "Anyone can approve",
+    icon: Users,
+    desc: "Any one person from the list can approve. Useful when multiple people share the same role.",
+    example: "Manager A or Manager B",
+  },
+  {
+    id: "parallel" as const,
+    label: "Everyone at once",
+    icon: GitBranch,
+    desc: "All approvers are asked at the same time. All must approve before it moves forward.",
+    example: "Manager + Director + CFO (simultaneously)",
+  },
 ] as const;
 
 const APPROVAL_API = "/api/approval-workflows";
@@ -99,14 +157,13 @@ async function apiDelete(id: number) {
   if (!res.ok) throw new Error("Delete failed");
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+// ─── UserMultiSelect ──────────────────────────────────────────────────────────
 
-/** Multi-select user picker with avatar tags */
 function UserMultiSelect({
   value,
   onChange,
   users,
-  placeholder = "Select approvers…",
+  placeholder = "Click to choose people…",
 }: {
   value: number[];
   onChange: (ids: number[]) => void;
@@ -114,7 +171,9 @@ function UserMultiSelect({
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handle(e: MouseEvent) {
@@ -124,6 +183,51 @@ function UserMultiSelect({
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
   }, []);
+
+  const updatePosition = useCallback(() => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const DROPDOWN_HEIGHT = 320;
+      const spaceBelow = window.innerHeight - rect.bottom - 8;
+      const spaceAbove = rect.top - 8;
+      const openUpward =
+        spaceBelow < DROPDOWN_HEIGHT && spaceAbove > spaceBelow;
+
+      if (openUpward) {
+        setDropdownStyle({
+          position: "fixed",
+          bottom: window.innerHeight - rect.top + 4,
+          left: rect.left,
+          width: rect.width,
+          zIndex: 9999,
+          maxHeight: `${Math.min(DROPDOWN_HEIGHT, spaceAbove)}px`,
+        });
+      } else {
+        setDropdownStyle({
+          position: "fixed",
+          top: rect.bottom + 4,
+          left: rect.left,
+          width: rect.width,
+          zIndex: 9999,
+          maxHeight: `${Math.min(DROPDOWN_HEIGHT, spaceBelow)}px`,
+        });
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) updatePosition();
+  }, [open, updatePosition]);
+
+  useEffect(() => {
+    if (!open) return;
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [open, updatePosition]);
 
   function toggle(id: number) {
     onChange(
@@ -145,29 +249,28 @@ function UserMultiSelect({
   return (
     <div ref={ref} className="relative">
       <div
+        ref={triggerRef}
         className={cn(
-          "min-h-9 flex flex-wrap gap-1 items-center px-2 py-1.5 rounded-lg border cursor-pointer transition-colors",
-          "bg-muted/40 border-border hover:border-primary/50",
-          open && "border-primary ring-1 ring-primary/20",
+          "min-h-10 flex flex-wrap gap-1.5 items-center px-3 py-2 rounded-lg border cursor-pointer transition-all",
+          "bg-muted/30 border-border hover:border-primary/50",
+          open && "border-primary ring-2 ring-primary/20",
         )}
         onClick={() => setOpen((o) => !o)}
       >
         {selectedUsers.length === 0 ? (
-          <span className="text-xs text-muted-foreground px-1">
-            {placeholder}
-          </span>
+          <span className="text-sm text-muted-foreground">{placeholder}</span>
         ) : (
           selectedUsers.map((u) => (
             <span
               key={u.id}
-              className="inline-flex items-center gap-1 pl-1 pr-1.5 py-0.5 rounded-full text-[11px] font-medium bg-primary/10 text-primary border border-primary/20"
+              className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary border border-primary/20"
             >
-              <span className="w-4 h-4 rounded-full bg-primary/20 flex items-center justify-center text-[9px] font-bold">
+              <span className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[9px] font-bold">
                 {initials(u.name)}
               </span>
               {u.name.split(" ")[0]}
               <button
-                className="ml-0.5 opacity-60 hover:opacity-100"
+                className="ml-0.5 opacity-60 hover:opacity-100 rounded-full hover:bg-primary/20 p-0.5"
                 onClick={(e) => {
                   e.stopPropagation();
                   toggle(u.id);
@@ -178,64 +281,87 @@ function UserMultiSelect({
             </span>
           ))
         )}
+        <span className="ml-auto text-muted-foreground/50 text-xs pl-1">
+          {open ? "▲" : "▼"}
+        </span>
       </div>
 
       {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-popover shadow-lg max-h-44 overflow-y-auto">
-          {users.length === 0 ? (
-            <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-              No users available
-            </div>
-          ) : (
-            users.map((u) => {
-              const sel = value.includes(u.id);
-              return (
-                <div
-                  key={u.id}
-                  className={cn(
-                    "flex items-center gap-2.5 px-3 py-2 cursor-pointer text-sm transition-colors",
-                    "hover:bg-muted/60",
-                    sel && "bg-primary/5",
-                  )}
-                  onClick={() => toggle(u.id)}
-                >
-                  <span
-                    className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
-                    style={{
-                      background: `hsl(${(u.id * 47) % 360} 60% 40% / 0.2)`,
-                      color: `hsl(${(u.id * 47) % 360} 60% 55%)`,
-                    }}
+        <div
+          style={dropdownStyle}
+          className="rounded-xl border border-border bg-popover shadow-xl overflow-hidden"
+        >
+          <div className="px-3 py-2 border-b border-border bg-muted/30">
+            <p className="text-xs text-muted-foreground font-medium">
+              {selectedUsers.length === 0
+                ? "Select who can approve at this level"
+                : `${selectedUsers.length} person${selectedUsers.length > 1 ? "s" : ""} selected — click to add/remove`}
+            </p>
+          </div>
+          <div className="max-h-72 overflow-y-auto">
+            {users.length === 0 ? (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                No users available
+              </div>
+            ) : (
+              users.map((u) => {
+                const sel = value.includes(u.id);
+                return (
+                  <div
+                    key={u.id}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm transition-colors",
+                      "hover:bg-muted/60",
+                      sel && "bg-primary/5",
+                    )}
+                    onClick={() => toggle(u.id)}
                   >
-                    {initials(u.name)}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-foreground truncate">
-                      {u.name}
+                    <span
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
+                      style={{
+                        background: `hsl(${(u.id * 47) % 360} 60% 40% / 0.2)`,
+                        color: `hsl(${(u.id * 47) % 360} 60% 55%)`,
+                      }}
+                    >
+                      {initials(u.name)}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-foreground truncate">
+                        {u.name}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {u.role}
+                      </div>
                     </div>
-                    <div className="text-[10px] text-muted-foreground">
-                      {u.role}
+                    <div
+                      className={cn(
+                        "w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all",
+                        sel ? "border-primary bg-primary" : "border-border",
+                      )}
+                    >
+                      {sel && <Check className="w-3 h-3 text-white" />}
                     </div>
                   </div>
-                  {sel && (
-                    <Check className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-                  )}
-                </div>
-              );
-            })
-          )}
+                );
+              })
+            )}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-/** Inline "Add Level" form row */
+// ─── AddLevelRow ──────────────────────────────────────────────────────────────
+
 function AddLevelRow({
   users,
+  levelNumber,
   onConfirm,
   onCancel,
 }: {
   users: User[];
+  levelNumber: number;
   onConfirm: (level: Omit<ApprovalLevel, "id">) => void;
   onCancel: () => void;
 }) {
@@ -256,57 +382,74 @@ function AddLevelRow({
   }
 
   return (
-    <div className="ml-9 rounded-lg border border-primary/40 bg-card p-3">
-      <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
+    <div className="rounded-xl border-2 border-primary/30 bg-primary/3 p-4 space-y-3">
+      <div className="flex items-center gap-2 mb-1">
+        <div className="w-6 h-6 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center">
+          {levelNumber}
+        </div>
+        <span className="text-sm font-semibold text-foreground">
+          New approval step
+        </span>
+      </div>
+
+      <div className="space-y-3">
         <div>
-          <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1 block">
-            Level Label
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+            What is this step called?{" "}
+            <span className="text-destructive">*</span>
           </label>
           <Input
             ref={labelRef}
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            placeholder="e.g. Site Manager"
-            className="h-8 text-sm"
+            placeholder="e.g. Site Manager, Finance Head, Director…"
+            className="h-9 text-sm"
             onKeyDown={(e) => {
               if (e.key === "Enter") confirm();
               if (e.key === "Escape") onCancel();
             }}
           />
         </div>
+
         <div>
-          <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1 block">
-            Approvers
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+            Who can approve at this step?
           </label>
           <UserMultiSelect
             value={userIds}
             onChange={setUserIds}
             users={users}
           />
+          <p className="text-[11px] text-muted-foreground mt-1">
+            You can assign multiple people — anyone assigned can approve unless
+            you chose "Everyone at once" above.
+          </p>
         </div>
-        <div className="flex gap-1.5 pb-0.5">
-          <Button
-            size="sm"
-            className="h-8 w-8 p-0 bg-primary hover:bg-primary/90"
-            onClick={confirm}
-          >
-            <Check className="w-3.5 h-3.5" />
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 w-8 p-0"
-            onClick={onCancel}
-          >
-            <X className="w-3.5 h-3.5" />
-          </Button>
-        </div>
+      </div>
+
+      <div className="flex gap-2 pt-1">
+        <Button
+          size="sm"
+          className="gap-1.5 bg-primary hover:bg-primary/90 text-white"
+          onClick={confirm}
+        >
+          <Check className="w-3.5 h-3.5" /> Add this step
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onCancel}
+          className="gap-1.5"
+        >
+          <X className="w-3.5 h-3.5" /> Cancel
+        </Button>
       </div>
     </div>
   );
 }
 
-/** Single level card in the hierarchy */
+// ─── LevelCard ────────────────────────────────────────────────────────────────
+
 function LevelCard({
   level,
   index,
@@ -336,35 +479,37 @@ function LevelCard({
   const levelUsers = users.filter((u) => level.userIds.includes(u.id));
 
   return (
-    <div className="flex items-center gap-2.5">
-      {/* Connector line + number */}
-      <div className="flex flex-col items-center gap-0 flex-shrink-0">
-        {index > 0 && <div className="w-px h-3 bg-border" />}
-        <div className="w-7 h-7 rounded-full bg-primary/10 border-2 border-primary flex items-center justify-center text-[11px] font-bold text-primary">
+    <div className="flex items-stretch gap-3">
+      {/* Step number + connector */}
+      <div className="flex flex-col items-center flex-shrink-0 w-8">
+        {index > 0 && <div className="w-0.5 h-3 bg-primary/30" />}
+        <div className="w-8 h-8 rounded-full bg-primary text-white text-sm font-bold flex items-center justify-center shadow-sm">
           {index + 1}
         </div>
-        {index < total - 1 && <div className="w-px h-3 bg-border" />}
+        {index < total - 1 && (
+          <div className="w-0.5 flex-1 bg-primary/30 mt-1" />
+        )}
       </div>
 
       {/* Card */}
-      <div className="flex-1 flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2.5 hover:border-primary/30 transition-colors">
+      <div className="flex-1 flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 mb-1 hover:border-primary/30 hover:shadow-sm transition-all">
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-foreground">
+          <div className="text-sm font-semibold text-foreground">
             {level.label}
           </div>
-          <div className="flex items-center gap-1 mt-1 flex-wrap">
+          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
             {levelUsers.length === 0 ? (
-              <span className="text-[11px] text-muted-foreground italic">
-                No approvers assigned
+              <span className="inline-flex items-center gap-1 text-[11px] text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-full px-2 py-0.5">
+                <AlertCircle className="w-3 h-3" /> No one assigned yet
               </span>
             ) : (
               levelUsers.map((u) => (
                 <span
                   key={u.id}
-                  className="inline-flex items-center gap-1 pl-1 pr-1.5 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground border border-border"
+                  className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full text-[11px] bg-muted text-muted-foreground border border-border"
                 >
                   <span
-                    className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[8px] font-bold"
+                    className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
                     style={{
                       background: `hsl(${(u.id * 47) % 360} 60% 40% / 0.25)`,
                       color: `hsl(${(u.id * 47) % 360} 60% 55%)`,
@@ -372,7 +517,7 @@ function LevelCard({
                   >
                     {initials(u.name)}
                   </span>
-                  {u.name.split(" ")[0]}
+                  {u.name}
                 </span>
               ))
             )}
@@ -380,32 +525,36 @@ function LevelCard({
         </div>
 
         <div className="flex items-center gap-1 flex-shrink-0">
-          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-            L{index + 1}
-          </span>
+          {total > 1 && (
+            <div className="flex flex-col gap-0.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                disabled={index === 0}
+                onClick={onMoveUp}
+                title="Move up"
+              >
+                <ChevronUp className="w-3.5 h-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                disabled={index === total - 1}
+                onClick={onMoveDown}
+                title="Move down"
+              >
+                <ChevronDown className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          )}
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-            disabled={index === 0}
-            onClick={onMoveUp}
-          >
-            <ChevronUp className="w-3.5 h-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-            disabled={index === total - 1}
-            onClick={onMoveDown}
-          >
-            <ChevronDown className="w-3.5 h-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10 ml-1"
             onClick={onRemove}
+            title="Remove this step"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </Button>
@@ -415,7 +564,43 @@ function LevelCard({
   );
 }
 
-// ─── Config form (new / edit) ─────────────────────────────────────────────────
+// ─── Step wrapper ─────────────────────────────────────────────────────────────
+
+function FormStep({
+  number,
+  title,
+  subtitle,
+  children,
+}: {
+  number: number;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex gap-4">
+      <div className="flex flex-col items-center flex-shrink-0">
+        <div className="w-7 h-7 rounded-full bg-primary/10 border-2 border-primary/30 text-primary text-xs font-bold flex items-center justify-center">
+          {number}
+        </div>
+        <div className="w-0.5 flex-1 bg-border/50 mt-1" />
+      </div>
+      <div className="flex-1 pb-6">
+        <div className="mb-3">
+          <div className="text-sm font-semibold text-foreground">{title}</div>
+          {subtitle && (
+            <div className="text-xs text-muted-foreground mt-0.5">
+              {subtitle}
+            </div>
+          )}
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── ConfigForm ───────────────────────────────────────────────────────────────
 
 function ConfigForm({
   initial,
@@ -470,15 +655,15 @@ function ConfigForm({
 
   function submit() {
     if (!name.trim()) {
-      toast.error("Configuration name is required");
+      toast.error("Please give this approval rule a name");
       return;
     }
     if (!selectedModules.length) {
-      toast.error("Select at least one module");
+      toast.error("Please select at least one area where this applies");
       return;
     }
     if (!levels.length) {
-      toast.error("Add at least one approval level");
+      toast.error("Please add at least one approval step");
       return;
     }
     onSave({
@@ -491,21 +676,16 @@ function ConfigForm({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
+    <div className="rounded-xl border border-border bg-card">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-muted/30">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-            <Layers className="w-4 h-4 text-primary" />
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-foreground">
-              {initial ? "Edit Configuration" : "New Approval Configuration"}
-            </div>
-            <div className="text-[11px] text-muted-foreground">
-              Define hierarchy and assign approvers per level
-            </div>
-          </div>
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20 rounded-t-xl">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">
+            {initial ? "Edit Approval Rule" : "Create a New Approval Rule"}
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Follow the steps below — it only takes a minute
+          </p>
         </div>
         <Button
           variant="outline"
@@ -517,49 +697,27 @@ function ConfigForm({
         </Button>
       </div>
 
-      <div className="p-5 space-y-5">
-        {/* Row 1: name + type */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 block">
-              Configuration Name *
-            </label>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Material Approval Chain"
-              className="h-9 text-sm"
-            />
-          </div>
-          <div>
-            <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 block">
-              Approval Type
-            </label>
-            <Select
-              value={type}
-              onValueChange={(v) => setType(v as typeof type)}
-            >
-              <SelectTrigger className="h-9 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="sequential">
-                  Sequential — one by one
-                </SelectItem>
-                <SelectItem value="any">
-                  Any Approver — one is enough
-                </SelectItem>
-                <SelectItem value="parallel">Parallel — all at once</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
+      <div className="p-6">
+        {/* Step 1: Name */}
+        <FormStep
+          number={1}
+          title="Give this rule a name"
+          subtitle="Something clear so your team knows what it's for"
+        >
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Site Manager Approval, Finance Sign-off…"
+            className="h-10 text-sm max-w-md"
+          />
+        </FormStep>
 
-        {/* Module chips */}
-        <div>
-          <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 block">
-            Apply to Modules *
-          </label>
+        {/* Step 2: Where it applies */}
+        <FormStep
+          number={2}
+          title="Where does this rule apply?"
+          subtitle="Choose the areas of the system that need this approval before proceeding"
+        >
           <div className="flex flex-wrap gap-2">
             {MODULE_OPTIONS.map((m) => {
               const active = selectedModules.includes(m.id);
@@ -568,108 +726,198 @@ function ConfigForm({
                   key={m.id}
                   type="button"
                   onClick={() => toggleModule(m.id)}
+                  title={m.desc}
                   className={cn(
-                    "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all",
+                    "inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-all",
                     active
-                      ? "bg-primary/10 border-primary/50 text-primary"
-                      : "bg-muted/40 border-border text-muted-foreground hover:border-primary/30 hover:text-foreground",
+                      ? "bg-primary/10 border-primary text-primary font-medium shadow-sm"
+                      : "bg-muted/30 border-border text-muted-foreground hover:border-primary/40 hover:text-foreground hover:bg-muted/60",
                   )}
                 >
-                  <span>{m.icon}</span>
-                  {m.label}
-                  {active && <Check className="w-3 h-3" />}
+                  <span className="text-base">{m.icon}</span>
+                  <span>{m.label}</span>
+                  {active && <Check className="w-3.5 h-3.5 ml-0.5" />}
                 </button>
               );
             })}
           </div>
-        </div>
+          {selectedModules.length > 0 && (
+            <p className="text-xs text-primary mt-2 font-medium">
+              ✓ {selectedModules.length} area
+              {selectedModules.length > 1 ? "s" : ""} selected
+            </p>
+          )}
+        </FormStep>
 
-        {/* Hierarchy builder */}
-        <div>
-          <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 block">
-            Approval Levels *
-          </label>
-
-          {/* Info bar */}
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/15 text-xs text-primary mb-3">
-            <Info className="w-3.5 h-3.5 flex-shrink-0" />
-            Approvals flow top → bottom. Each level must approve before
-            proceeding to the next.
+        {/* Step 3: Approval style */}
+        <FormStep
+          number={3}
+          title="How should approvals work?"
+          subtitle="Choose how approvers respond when a request comes in"
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {APPROVAL_TYPES.map((t) => {
+              const Icon = t.icon;
+              const selected = type === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setType(t.id)}
+                  className={cn(
+                    "text-left p-4 rounded-xl border-2 transition-all",
+                    selected
+                      ? "border-primary bg-primary/5 shadow-sm"
+                      : "border-border bg-muted/20 hover:border-primary/30 hover:bg-muted/40",
+                  )}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <div
+                      className={cn(
+                        "w-7 h-7 rounded-lg flex items-center justify-center",
+                        selected
+                          ? "bg-primary/15 text-primary"
+                          : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      <Icon className="w-4 h-4" />
+                    </div>
+                    <span
+                      className={cn(
+                        "text-sm font-semibold",
+                        selected ? "text-primary" : "text-foreground",
+                      )}
+                    >
+                      {t.label}
+                    </span>
+                    {selected && (
+                      <Check className="w-4 h-4 text-primary ml-auto" />
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {t.desc}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground/60 mt-2 font-mono">
+                    {t.example}
+                  </p>
+                </button>
+              );
+            })}
           </div>
+        </FormStep>
 
-          {/* Levels list */}
-          <div className="space-y-0">
+        {/* Step 4: Approval steps */}
+        <div className="flex gap-4">
+          <div className="flex flex-col items-center flex-shrink-0">
+            <div className="w-7 h-7 rounded-full bg-primary/10 border-2 border-primary/30 text-primary text-xs font-bold flex items-center justify-center">
+              4
+            </div>
+          </div>
+          <div className="flex-1 pb-2">
+            <div className="mb-3">
+              <div className="text-sm font-semibold text-foreground">
+                Who needs to approve, and in what order?
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                Add approval steps — each step is one person or group that must
+                sign off
+              </div>
+            </div>
+
+            {/* Empty state */}
             {levels.length === 0 && !addingLevel && (
-              <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-                <Layers className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                No levels yet. Click "Add Level" to define your first approver.
+              <div className="rounded-xl border-2 border-dashed border-border bg-muted/10 px-5 py-8 text-center mb-3">
+                <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-3">
+                  <Users className="w-6 h-6 text-muted-foreground/40" />
+                </div>
+                <p className="text-sm font-medium text-foreground mb-1">
+                  No approval steps yet
+                </p>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Click the button below to add your first approver.
+                  <br />
+                  Example: Step 1 → Site Manager, Step 2 → Finance Head
+                </p>
               </div>
             )}
 
-            {levels.map((lv, idx) => (
-              <LevelCard
-                key={lv.id}
-                level={lv}
-                index={idx}
-                total={levels.length}
-                users={users}
-                onMoveUp={() => moveUp(idx)}
-                onMoveDown={() => moveDown(idx)}
-                onRemove={() =>
-                  setLevels((prev) => prev.filter((_, i) => i !== idx))
-                }
-              />
-            ))}
+            {/* Level cards */}
+            <div className="space-y-0">
+              {levels.map((lv, idx) => (
+                <LevelCard
+                  key={lv.id}
+                  level={lv}
+                  index={idx}
+                  total={levels.length}
+                  users={users}
+                  onMoveUp={() => moveUp(idx)}
+                  onMoveDown={() => moveDown(idx)}
+                  onRemove={() =>
+                    setLevels((prev) => prev.filter((_, i) => i !== idx))
+                  }
+                />
+              ))}
 
-            {/* Connector dot to add-level area */}
-            {levels.length > 0 && (
-              <div
-                className="flex flex-col items-center"
-                style={{ marginLeft: "14px", width: "28px" }}
-              >
-                <div className="w-px h-3 bg-border" />
-              </div>
-            )}
+              {/* Arrow between last card and add row */}
+              {levels.length > 0 && !addingLevel && (
+                <div className="flex items-center gap-3 py-1 pl-3.5">
+                  <div className="w-0.5 h-5 bg-primary/30" />
+                </div>
+              )}
 
-            {addingLevel ? (
-              <AddLevelRow
-                users={users}
-                onConfirm={addLevel}
-                onCancel={() => setAddingLevel(false)}
-              />
-            ) : (
-              <div className={cn("flex", levels.length > 0 && "ml-9")}>
+              {addingLevel ? (
+                <AddLevelRow
+                  users={users}
+                  levelNumber={levels.length + 1}
+                  onConfirm={addLevel}
+                  onCancel={() => setAddingLevel(false)}
+                />
+              ) : (
                 <button
                   type="button"
                   onClick={() => setAddingLevel(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-border text-xs text-muted-foreground hover:border-primary hover:text-primary hover:bg-primary/5 transition-all"
+                  className={cn(
+                    "inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border-2 border-dashed text-sm transition-all",
+                    "border-border text-muted-foreground hover:border-primary hover:text-primary hover:bg-primary/5",
+                    levels.length > 0 && "ml-11",
+                  )}
                 >
-                  <Plus className="w-3.5 h-3.5" /> Add Level
+                  <Plus className="w-4 h-4" />
+                  {levels.length === 0
+                    ? "Add first approval step"
+                    : "Add another step"}
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </div>
 
       {/* Footer */}
-      <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/20">
-        <Button variant="outline" size="sm" onClick={onCancel}>
-          Discard
-        </Button>
-        <Button
-          size="sm"
-          className="gap-1.5 gradient-accent text-white font-semibold"
-          onClick={submit}
-          disabled={saving}
-        >
-          {saving ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Check className="w-3.5 h-3.5" />
-          )}
-          {initial ? "Save Changes" : "Create Configuration"}
-        </Button>
+      <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-border bg-muted/10 rounded-b-xl">
+        <p className="text-xs text-muted-foreground">
+          {levels.length > 0 && selectedModules.length > 0
+            ? `✓ Ready — ${levels.length} step${levels.length > 1 ? "s" : ""} across ${selectedModules.length} area${selectedModules.length > 1 ? "s" : ""}`
+            : "Fill in all steps above to save"}
+        </p>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={onCancel}>
+            Discard
+          </Button>
+          <Button
+            size="sm"
+            className="gap-1.5 gradient-accent text-white font-semibold px-5"
+            onClick={submit}
+            disabled={saving}
+          >
+            {saving ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <CheckCircle2 className="w-3.5 h-3.5" />
+            )}
+            {initial ? "Save Changes" : "Save Rule"}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -705,7 +953,9 @@ export default function ApprovalSetup() {
       setSaving(true);
       try {
         await apiSave(data, editing?.id);
-        toast.success(editing ? "Workflow updated" : "Workflow created");
+        toast.success(
+          editing ? "Approval rule updated" : "Approval rule created",
+        );
         qc.invalidateQueries({ queryKey: ["approval-workflows"] });
         setMode("list");
         setEditing(null);
@@ -732,10 +982,15 @@ export default function ApprovalSetup() {
 
   const handleDelete = useCallback(
     async (id: number) => {
-      if (!confirm("Delete this workflow?")) return;
+      if (
+        !confirm(
+          "Are you sure you want to delete this approval rule? This cannot be undone.",
+        )
+      )
+        return;
       try {
         await apiDelete(id);
-        toast.success("Workflow deleted");
+        toast.success("Approval rule deleted");
         qc.invalidateQueries({ queryKey: ["approval-workflows"] });
       } catch (err: any) {
         toast.error(err.message);
@@ -767,10 +1022,11 @@ export default function ApprovalSetup() {
           <div>
             <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
               <ShieldCheck className="text-primary w-5 h-5" />
-              Approval Setup
+              Approval Rules
             </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Configure multi-level approval hierarchies for each module
+            <p className="text-sm text-muted-foreground mt-1 max-w-lg">
+              Control who needs to approve requests before they go through —
+              like purchase orders, expenses, and more.
             </p>
           </div>
           {mode === "list" && canCreate && (
@@ -781,12 +1037,12 @@ export default function ApprovalSetup() {
                 setMode("new");
               }}
             >
-              <Plus className="h-4 w-4" /> New Configuration
+              <Plus className="h-4 w-4" /> New Approval Rule
             </Button>
           )}
         </div>
 
-        {/* Form (new / edit) */}
+        {/* Form */}
         {(mode === "new" || mode === "edit") && (
           <ConfigForm
             initial={mode === "edit" ? (editing ?? undefined) : undefined}
@@ -800,160 +1056,154 @@ export default function ApprovalSetup() {
           />
         )}
 
-        {/* Existing configurations table */}
+        {/* List */}
         {mode === "list" && (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-border bg-muted/30">
+            <div className="flex items-center gap-3 px-5 py-4 border-b border-border bg-muted/20">
               <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
                 <ShieldCheck className="w-4 h-4 text-primary" />
               </div>
               <div>
                 <div className="text-sm font-semibold text-foreground">
-                  Active Configurations
+                  Your Approval Rules
                 </div>
-                <div className="text-[11px] text-muted-foreground">
-                  Approval chains currently in use
+                <div className="text-xs text-muted-foreground">
+                  {workflows.length === 0
+                    ? "No rules set up yet"
+                    : `${workflows.length} rule${workflows.length > 1 ? "s" : ""} — toggle to turn them on or off`}
                 </div>
               </div>
             </div>
 
             {workflows.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <Layers className="w-12 h-12 text-muted-foreground/30 mb-3" />
-                <div className="text-sm font-medium text-foreground mb-1">
-                  No configurations yet
+              <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+                <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
+                  <ShieldCheck className="w-8 h-8 text-muted-foreground/30" />
                 </div>
-                <p className="text-xs text-muted-foreground mb-4">
-                  Create your first approval hierarchy to get started.
+                <div className="text-base font-semibold text-foreground mb-1">
+                  No approval rules yet
+                </div>
+                <p className="text-sm text-muted-foreground mb-5 max-w-sm">
+                  Once you create a rule, any matching request will
+                  automatically be sent for approval before it's processed.
                 </p>
                 {canCreate && (
                   <Button
-                    size="sm"
                     className="gradient-accent text-white gap-1.5 font-semibold"
                     onClick={() => {
                       setEditing(null);
                       setMode("new");
                     }}
                   >
-                    <Plus className="w-3.5 h-3.5" /> New Configuration
+                    <Plus className="w-4 h-4" /> Create your first rule
                   </Button>
                 )}
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Name
-                      </th>
-                      <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Modules
-                      </th>
-                      <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Levels
-                      </th>
-                      <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Type
-                      </th>
-                      <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Status
-                      </th>
-                      <th className="px-4 py-2.5 w-24" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {workflows.map((wf) => {
-                      const modLabels = wf.modules
-                        .map(
-                          (mid) =>
-                            MODULE_OPTIONS.find((m) => m.id === mid)?.label ??
-                            mid,
-                        )
-                        .join(", ");
-                      return (
-                        <tr
-                          key={wf.id}
-                          className="border-b border-border/60 hover:bg-muted/20 transition-colors"
-                        >
-                          <td className="px-4 py-3 font-medium text-foreground">
+              <div className="divide-y divide-border/60">
+                {workflows.map((wf) => {
+                  const typeInfo = APPROVAL_TYPES.find((t) => t.id === wf.type);
+                  const TypeIcon = typeInfo?.icon ?? ArrowDown;
+                  return (
+                    <div
+                      key={wf.id}
+                      className={cn(
+                        "flex items-center gap-4 px-5 py-4 transition-colors",
+                        wf.active
+                          ? "hover:bg-muted/20"
+                          : "opacity-60 hover:bg-muted/10",
+                      )}
+                    >
+                      {/* Active indicator */}
+                      <div
+                        className={cn(
+                          "w-2 h-2 rounded-full flex-shrink-0",
+                          wf.active ? "bg-green-500" : "bg-muted-foreground/30",
+                        )}
+                      />
+
+                      {/* Main info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-semibold text-foreground">
                             {wf.name}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-1">
-                              {wf.modules.slice(0, 3).map((mid) => {
-                                const m = MODULE_OPTIONS.find(
-                                  (x) => x.id === mid,
-                                );
-                                return (
-                                  <span
-                                    key={mid}
-                                    className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted border border-border text-muted-foreground"
-                                  >
-                                    {m?.label ?? mid}
-                                  </span>
-                                );
-                              })}
-                              {wf.modules.length > 3 && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted border border-border text-muted-foreground">
-                                  +{wf.modules.length - 3}
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full border border-border">
+                            <TypeIcon className="w-3 h-3" />
+                            {typeInfo?.label}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                          {/* Modules */}
+                          <div className="flex flex-wrap gap-1">
+                            {wf.modules.slice(0, 4).map((mid) => {
+                              const m = MODULE_OPTIONS.find(
+                                (x) => x.id === mid,
+                              );
+                              return (
+                                <span
+                                  key={mid}
+                                  className="text-[11px] px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground"
+                                >
+                                  {m?.icon} {m?.label ?? mid}
                                 </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                              <Layers className="w-3.5 h-3.5" />
-                              {wf.levels.length} level
-                              {wf.levels.length !== 1 ? "s" : ""}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="text-xs text-muted-foreground capitalize">
-                              {wf.type === "sequential"
-                                ? "Sequential"
-                                : wf.type === "any"
-                                  ? "Any approver"
-                                  : "Parallel"}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <Switch
-                              checked={wf.active}
-                              onCheckedChange={() => handleToggle(wf.id)}
-                              disabled={!canEdit}
-                            />
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1 justify-end">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                                disabled={!canEdit}
-                                onClick={() => {
-                                  setEditing(wf);
-                                  setMode("edit");
-                                }}
-                              >
-                                <Pencil className="w-3.5 h-3.5" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                                disabled={!canDel}
-                                onClick={() => handleDelete(wf.id)}
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                              );
+                            })}
+                            {wf.modules.length > 4 && (
+                              <span className="text-[11px] px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground">
+                                +{wf.modules.length - 4} more
+                              </span>
+                            )}
+                          </div>
+                          {/* Levels summary */}
+                          <span className="text-[11px] text-muted-foreground">
+                            {wf.levels.length} approval step
+                            {wf.levels.length !== 1 ? "s" : ""}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Toggle + actions */}
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        <div className="flex flex-col items-center gap-0.5">
+                          <Switch
+                            checked={wf.active}
+                            onCheckedChange={() => handleToggle(wf.id)}
+                            disabled={!canEdit}
+                          />
+                          <span className="text-[10px] text-muted-foreground">
+                            {wf.active ? "On" : "Off"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 border-l border-border pl-3">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                            disabled={!canEdit}
+                            title="Edit this rule"
+                            onClick={() => {
+                              setEditing(wf);
+                              setMode("edit");
+                            }}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            disabled={!canDel}
+                            title="Delete this rule"
+                            onClick={() => handleDelete(wf.id)}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

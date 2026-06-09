@@ -77,15 +77,21 @@ router.post("/", authMiddleware, async (req, res) => {
       .input("modules", sql.NVarChar(sql.MAX), JSON.stringify(modules))
       .input("LevelsJson", sql.NVarChar(sql.MAX), JSON.stringify(levels))
       .input("active", sql.Bit, active ? 1 : 0)
-      .input("CreatedBy", sql.NVarChar(100), req.user?.name || null).query(`
+      .input("CreatedBy", sql.NVarChar(100), req.user?.name || null)
+      // Legacy NOT NULL columns that must be populated
+      .input("Module", sql.NVarChar(100), modules[0] || "General")
+      .input("LevelCount", sql.Int, levels.length)
+      .input("Status", sql.NVarChar(20), "Active").query(`
         INSERT INTO dbo.ApprovalWorkflows
-          (Name, type, modules, LevelsJson, active, CreatedBy, CreatedAt)
+          (Name, type, modules, LevelsJson, active, CreatedBy, CreatedAt,
+           Module, Levels, Status)
         OUTPUT
           INSERTED.Id, INSERTED.Name, INSERTED.type,
           INSERTED.modules, INSERTED.LevelsJson,
           INSERTED.active, INSERTED.CreatedAt
         VALUES
-          (@Name, @type, @modules, @LevelsJson, @active, @CreatedBy, SYSDATETIME())
+          (@Name, @type, @modules, @LevelsJson, @active, @CreatedBy, SYSDATETIME(),
+           @Module, @LevelCount, @Status)
       `);
 
     await bumpCacheVersion(CACHE_NS);
@@ -123,7 +129,10 @@ router.put("/:id", authMiddleware, async (req, res) => {
       .input("modules", sql.NVarChar(sql.MAX), JSON.stringify(modules))
       .input("LevelsJson", sql.NVarChar(sql.MAX), JSON.stringify(levels))
       .input("active", sql.Bit, active ? 1 : 0)
-      .input("UpdatedBy", sql.NVarChar(100), req.user?.name || null).query(`
+      .input("UpdatedBy", sql.NVarChar(100), req.user?.name || null)
+      // Keep legacy NOT NULL columns in sync
+      .input("Module", sql.NVarChar(100), modules[0] || "General")
+      .input("LevelCount", sql.Int, levels.length).query(`
         UPDATE dbo.ApprovalWorkflows SET
           Name       = @Name,
           type       = @type,
@@ -131,7 +140,9 @@ router.put("/:id", authMiddleware, async (req, res) => {
           LevelsJson = @LevelsJson,
           active     = @active,
           UpdatedBy  = @UpdatedBy,
-          UpdatedAt  = SYSDATETIME()
+          UpdatedAt  = SYSDATETIME(),
+          Module     = @Module,
+          Levels     = @LevelCount
         WHERE Id = @Id
       `);
 
