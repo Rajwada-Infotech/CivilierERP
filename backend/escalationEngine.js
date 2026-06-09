@@ -339,7 +339,6 @@ async function escalateBookings() {
 
 async function runEscalation() {
   const start = Date.now();
-  console.log(`[EscalationEngine] Running at ${new Date().toISOString()}`);
 
   try {
     await assertRequiredSchema();
@@ -352,13 +351,19 @@ async function runEscalation() {
     ]);
 
     const elapsed = Date.now() - start;
-    console.log(
-      `[EscalationEngine] Done in ${elapsed}ms — ` +
-        `LegalMilestones: ${lm} steps blocked, ` +
-        `AgreementWorkflows: ${aw} steps blocked, ` +
-        `SalesDeeds: ${sd} flagged, ` +
-        `Bookings: ${bk} flagged`
-    );
+    const totalActions = lm + aw + sd + bk;
+
+    // Only log when something was actually escalated — zero-result runs are noise.
+    // Errors are always logged regardless.
+    if (totalActions > 0) {
+      console.info(
+        `[EscalationEngine] Done in ${elapsed}ms — ` +
+          `LegalMilestones: ${lm} steps blocked, ` +
+          `AgreementWorkflows: ${aw} steps blocked, ` +
+          `SalesDeeds: ${sd} flagged, ` +
+          `Bookings: ${bk} flagged`
+      );
+    }
   } catch (err) {
     console.error("[EscalationEngine] Error:", err.message);
   }
@@ -370,9 +375,6 @@ function startEscalationEngine() {
   // Run immediately on startup, then on interval
   runEscalation();
   setInterval(runEscalation, INTERVAL_MS);
-  console.log(
-    `[EscalationEngine] Started — interval: ${INTERVAL_MS / 1000 / 60} min`
-  );
 }
 
 module.exports = { startEscalationEngine, runEscalation, assertRequiredSchema };

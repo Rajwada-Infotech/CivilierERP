@@ -13,12 +13,14 @@ const nodemailer = require("nodemailer");
 const axios = require("axios");
 const sanitizeHtml = require("sanitize-html");
 const authMiddleware = require("../middleware/auth");
+const { getPool } = require("../db");
+const { getIo } = require("../socket");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 const PERMISSION_MODULE = "Followup";
 const PERMISSION_SUBMODULE = "Communicator";
 
-const rateLimit=require('express-rate-limit');router.use(rateLimit({windowMs:15*60*1000,max:50,validate:false}));router.use(authMiddleware);
+router.use(authMiddleware);
 router.use(checkPermissionForMethod(PERMISSION_MODULE, PERMISSION_SUBMODULE));
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -58,8 +60,8 @@ async function logMessage(
 ) {
   await pool
     .request()
-    .input("ApplicantId", applicantId ?? null)
-    .input("BookingId", bookingId ?? null)
+    .input("ApplicantId", applicantId != null ? parseInt(applicantId, 10) : null)
+    .input("BookingId", bookingId != null ? parseInt(bookingId, 10) : null)
     .input("Channel", channel)
     .input("Recipient", recipient)
     .input("Subject", subject ?? null)
@@ -81,16 +83,18 @@ async function logMessage(
 
 async function sendEmail(config, { to, subject, body }) {
   const transporter = nodemailer.createTransport({
-    host: config.host,
-    port: config.port ?? 587,
-    secure: config.secure ?? false,
+    host: config.smtpHost,
+    port: parseInt(config.smtpPort ?? "587", 10),
+    secure: (config.encryption ?? "").toUpperCase() === "SSL",
     auth: {
-      user: config.user,
-      pass: config.pass,
+      user: config.smtpUser,
+      pass: config.smtpPassword,
     },
   });
   await transporter.sendMail({
-    from: config.from ?? config.user,
+    from: config.fromName
+      ? `"${config.fromName}" <${config.fromEmail}>`
+      : (config.fromEmail ?? config.smtpUser),
     to,
     subject,
     html: sanitizeHtml(body),
@@ -132,13 +136,13 @@ async function sendSms(config, { to, body }) {
 }
 
 async function sendWhatsApp(config, { to, body }) {
-  // Supports generic WhatsApp Business API (WATI, AiSensy, etc.)
-  // Config keys: apiUrl, apiKey, senderNumber
+  // Supports WhatsApp Cloud API (Meta) and third-party providers (WATI, AiSensy, etc.)
+  // Config keys saved by WhatsAppSetup: apiUrl, accessToken, phoneNumberId, businessAccountId
   // Normalise number — strip spaces, ensure +91 prefix for Indian numbers
   const normalised = to
     .replace(/\s+/g, "")
     .replace(/^0/, "+91")
-    .replace(/^91/, "+91");
+    .replace(/^(?!\+)91/, "+91");
 
   await axios.post(
     config.apiUrl,
@@ -148,7 +152,7 @@ async function sendWhatsApp(config, { to, body }) {
     },
     {
       headers: {
-        Authorization: `Bearer ${config.apiKey}`,
+        Authorization: `Bearer ${config.accessToken}`,
         "Content-Type": "application/json",
       },
     },
@@ -161,7 +165,7 @@ async function dispatch(
   pool,
   { channel, recipient, subject, body, applicantId, bookingId, sentBy },
 ) {
-  const cfg = await getConfig(pool, `${channel}-api`);
+  const cfg = await getConfig(pool, channel);
   if (!cfg) {
     throw new Error(`Channel '${channel}' is not configured or inactive`);
   }
@@ -232,7 +236,7 @@ function buildWelcomeTemplates({
 // POST /api/followup-communicator/send
 // Body: { channel, recipient, subject?, body, applicantId?, bookingId? }
 router.post("/send", async (req, res) => {
-  const pool = req.app.locals.db;
+  const pool = getPool();
   const { channel, recipient, subject, body, applicantId, bookingId } =
     req.body;
 
@@ -252,6 +256,8 @@ router.post("/send", async (req, res) => {
       bookingId,
       sentBy: req.body.sentBy ?? "User",
     });
+    // Notify all connected clients so the log panel refreshes live
+    try { getIo().emit("communicator:sent", { channel, applicantId: applicantId ?? null }); } catch (_) {}
     res.json({ success: true, message: `${channel} sent successfully` });
   } catch (err) {
     // Log failure
@@ -279,7 +285,7 @@ router.post("/send", async (req, res) => {
 //         applicantName, email?, phone?, projectName?, unitNo?, bookingDate?,
 //         contactName?, contactPhone? }
 router.post("/trigger", async (req, res) => {
-  const pool = req.app.locals.db;
+  const pool = getPool();
   const {
     triggerType,
     applicantId,
@@ -404,12 +410,14 @@ router.post("/trigger", async (req, res) => {
     }
   }
 
+  // Notify all connected clients so the log panel refreshes live
+  try { getIo().emit("communicator:sent", { triggerType, applicantId: applicantId ?? null }); } catch (_) {}
   res.json({ success: true, results });
 });
 
 // GET /api/followup-communicator/logs?applicantId=&bookingId=&channel=&status=&page=&limit=
 router.get("/logs", async (req, res) => {
-  const pool = req.app.locals.db;
+  const pool = getPool();
   const {
     applicantId,
     bookingId,
@@ -453,16 +461,7 @@ router.get("/logs", async (req, res) => {
        OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY`,
     );
 
-    const countResult = await pool.request().query(
-      `SELECT COUNT(*) AS Total FROM dbo.FollowupCommunicatorLog ${where.replace(
-        /@\w+/g,
-        (m) => {
-          // re-bind not needed for count — just run separate simple count
-          return m;
-        },
-      )}`,
-    );
-    // Simple approach: just return the rows and let the frontend paginate
+    // Frontend uses page/limit for pagination; no total count needed
     res.json({
       data: result.recordset,
       page: parseInt(page),
@@ -476,7 +475,7 @@ router.get("/logs", async (req, res) => {
 
 // GET /api/followup-communicator/logs/:id
 router.get("/logs/:id", async (req, res) => {
-  const pool = req.app.locals.db;
+  const pool = getPool();
   try {
     const result = await pool
       .request()
