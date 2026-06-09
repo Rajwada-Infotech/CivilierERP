@@ -387,6 +387,9 @@ const PurchaseOrderMaster: React.FC = () => {
   const [mrDropdownValue, setMrDropdownValue] = useState<string>("");
   const [mrDropdownLoading, setMrDropdownLoading] = useState(false);
   const [mrDropdownError, setMrDropdownError] = useState<string | null>(null);
+  // Filters applied BEFORE the MR dropdown to narrow approved MRs
+  const [mrFilterCompanyId, setMrFilterCompanyId] = useState<string>("");
+  const [mrFilterProjectId, setMrFilterProjectId] = useState<string>("");
 
   // Source WD reference — set when form is opened from a Work Done entry
   const [sourceWD, setSourceWD] = useState<{
@@ -402,8 +405,12 @@ const PurchaseOrderMaster: React.FC = () => {
 
   // Must be declared after sourceMR, sourceWD, sourceWO — all used in `enabled`
   const { data: approvedMRs = [], isLoading: approvedMRsLoading } = useQuery({
-    queryKey: ["approvedMRList"],
-    queryFn: getApprovedMRList,
+    queryKey: ["approvedMRList", mrFilterCompanyId, mrFilterProjectId],
+    queryFn: () =>
+      getApprovedMRList({
+        companyId: mrFilterCompanyId || undefined,
+        projectId: mrFilterProjectId || undefined,
+      }),
     enabled: viewMode === "create" && !sourceMR && !sourceWD && !sourceWO,
     staleTime: 30_000,
   });
@@ -469,9 +476,23 @@ const PurchaseOrderMaster: React.FC = () => {
       ensureArray<any>(projectsRaw).map((p) => ({
         id: String(p.id),
         name: p.label ?? "",
+        belongsTo: p.belongs_to ?? null,
+        companyId: p.company_id != null ? String(p.company_id) : null,
       })),
     [projectsRaw],
   );
+
+  // Projects filtered by the MR filter company (for the MR filter dropdown)
+  const filteredMRProjects = useMemo(() => {
+    if (!mrFilterCompanyId) return allProjects;
+    return allProjects.filter((p) => p.companyId === mrFilterCompanyId);
+  }, [allProjects, mrFilterCompanyId]);
+
+  // Projects filtered by the form's selected company (for Order Details)
+  const filteredFormProjects = useMemo(() => {
+    if (!form.companyId) return allProjects;
+    return allProjects.filter((p) => p.companyId === form.companyId);
+  }, [allProjects, form.companyId]);
 
   const uoms = useMemo(
     () =>
@@ -2102,9 +2123,59 @@ const PurchaseOrderMaster: React.FC = () => {
                 Load from Material Request
               </h3>
               <p className="text-xs text-muted-foreground mb-3">
-                Select an approved Material Request to auto-fill items, company,
-                project and financial year.
+                Filter by company and project, then select an approved Material
+                Request to auto-fill items and details.
               </p>
+
+              {/* MR Filters: Company + Project */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <div className="relative">
+                  <select
+                    value={mrFilterCompanyId}
+                    onChange={(e) => {
+                      setMrFilterCompanyId(e.target.value);
+                      setMrFilterProjectId("");
+                      setMrDropdownValue("");
+                    }}
+                    className={`${inputCls} pr-8 appearance-none`}
+                  >
+                    <option value="">— Filter by Company —</option>
+                    {companies.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown
+                    size={13}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                </div>
+                <div className="relative">
+                  <select
+                    value={mrFilterProjectId}
+                    onChange={(e) => {
+                      setMrFilterProjectId(e.target.value);
+                      setMrDropdownValue("");
+                    }}
+                    disabled={filteredMRProjects.length === 0}
+                    className={`${inputCls} pr-8 appearance-none`}
+                  >
+                    <option value="">— Filter by Project —</option>
+                    {filteredMRProjects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown
+                    size={13}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                </div>
+              </div>
+
+              {/* MR Dropdown */}
               <div className="flex items-start gap-2">
                 <div className="flex-1 relative">
                   <select
@@ -2294,7 +2365,10 @@ const PurchaseOrderMaster: React.FC = () => {
                 <div className="relative">
                   <select
                     value={form.companyId}
-                    onChange={(e) => setField("companyId", e.target.value)}
+                    onChange={(e) => {
+                      setField("companyId", e.target.value);
+                      setField("projectId", "");
+                    }}
                     className={`${selectCls} ${errors.companyId ? "border-red-400" : ""}`}
                   >
                     <option value="">— Select Company —</option>
@@ -2333,7 +2407,7 @@ const PurchaseOrderMaster: React.FC = () => {
                     className={`${selectCls} ${errors.projectId ? "border-red-400" : ""}`}
                   >
                     <option value="">— Select Project —</option>
-                    {allProjects.map((p) => (
+                    {filteredFormProjects.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
                       </option>

@@ -102,7 +102,7 @@ router.get("/projects", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT id, name, short_name
+      SELECT id, name, short_name, company_id
       FROM   dbo.enterprise
       WHERE  business_type = 'P' AND (discontinue = 0 OR discontinue IS NULL)
       ORDER  BY name
@@ -326,12 +326,26 @@ router.get("/", authenticateToken, async (req, res) => {
 
 // ── GET /approved-list ────────────────────────────────────────────────────────
 // Returns a lightweight list of all Approved MRs for use in dropdown pickers.
+// Optional query params: ?companyId=<id>&projectId=<id>
 router.get("/approved-list", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const request = pool.request();
+    const conditions = ["mr.Status = 'Approved'", "mr.DocNo IS NOT NULL"];
+
+    if (req.query.companyId) {
+      conditions.push("mr.CompanyId = @companyId");
+      request.input("companyId", sql.Int, parseInt(req.query.companyId, 10));
+    }
+    if (req.query.projectId) {
+      conditions.push("mr.ProjectId = @projectId");
+      request.input("projectId", sql.Int, parseInt(req.query.projectId, 10));
+    }
+
+    const result = await request.query(`
       SELECT
         mr.MRId, mr.DocNo, mr.FinYearId,
+        mr.CompanyId, mr.ProjectId,
         fy.FName  AS FinYearName,
         ec.name   AS CompanyName,
         ep.name   AS ProjectName
@@ -339,7 +353,7 @@ router.get("/approved-list", authenticateToken, async (req, res) => {
       LEFT JOIN dbo.FinYear    fy ON fy.FId = mr.FinYearId
       LEFT JOIN dbo.enterprise ec ON ec.id  = mr.CompanyId
       LEFT JOIN dbo.enterprise ep ON ep.id  = mr.ProjectId
-      WHERE mr.Status = 'Approved' AND mr.DocNo IS NOT NULL
+      WHERE ${conditions.join(" AND ")}
       ORDER BY mr.CreatedAt DESC
     `);
     res.json(result.recordset);

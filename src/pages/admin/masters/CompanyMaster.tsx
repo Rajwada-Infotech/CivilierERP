@@ -566,7 +566,7 @@ export default function CompanyMaster() {
       if (!res.ok) throw new Error("Failed to load");
       return res.json();
     },
-    staleTime: 0,
+    staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
 
@@ -636,8 +636,11 @@ export default function CompanyMaster() {
         throw new Error(err.reason || err.error || "Delete failed");
       }
     },
-    onSuccess: () => {
+    onSuccess: (_, id) => {
       toast.success("Company deleted");
+      qc.setQueryData(["company-master"], (old: any[]) =>
+        (old ?? []).filter((c: any) => c.Id !== id),
+      );
       qc.invalidateQueries({ queryKey: ["company-master"] });
       setDeleteConfirm(null);
     },
@@ -713,56 +716,71 @@ export default function CompanyMaster() {
     key: keyof Company,
     type = "text",
     ph = "",
-    options?: { disabled?: boolean; title?: string; required?: boolean },
-  ) => (
-    <div key={key}>
-      <label className="block text-xs font-medium text-muted-foreground mb-1">
-        {label}
-      </label>
-      {type === "date" ? (
-        <>
-          <div className="relative">
-            <CalendarDays
-              size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-            />
+    options?: {
+      disabled?: boolean;
+      title?: string;
+      required?: boolean;
+      showAsterisk?: boolean;
+    },
+  ) => {
+    // Strip any trailing " *" from label string (legacy) — asterisk is rendered separately
+    const cleanLabel = label.replace(/\s*\*$/, "");
+    const showStar = options?.showAsterisk || options?.required;
+    return (
+      <div key={key}>
+        <label className="block text-xs font-medium text-muted-foreground mb-1">
+          {cleanLabel}
+          {showStar && <span className="ml-0.5">*</span>}
+        </label>
+        {type === "date" ? (
+          <>
+            <div className="relative">
+              <CalendarDays
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <input
+                type="date"
+                value={form[key] as string}
+                onChange={(e) =>
+                  setForm((c) => ({ ...c, [key]: e.target.value }))
+                }
+                disabled={options?.disabled}
+                required={options?.required}
+                title={options?.title}
+                className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer disabled:bg-muted/60 disabled:text-muted-foreground disabled:cursor-not-allowed"
+              />
+            </div>
+            {options?.disabled && options?.title && (
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {options.title}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
             <input
-              type="date"
+              type={type}
               value={form[key] as string}
-              onChange={(e) => setForm((c) => ({ ...c, [key]: e.target.value }))}
+              onChange={(e) =>
+                setForm((c) => ({ ...c, [key]: e.target.value }))
+              }
+              placeholder={ph || label}
               disabled={options?.disabled}
               required={options?.required}
               title={options?.title}
-              className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer disabled:bg-muted/60 disabled:text-muted-foreground disabled:cursor-not-allowed"
+              className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all disabled:bg-muted/60 disabled:text-muted-foreground disabled:cursor-not-allowed"
             />
-          </div>
-          {options?.disabled && options?.title && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              {options.title}
-            </p>
-          )}
-        </>
-      ) : (
-        <>
-          <input
-            type={type}
-            value={form[key] as string}
-            onChange={(e) => setForm((c) => ({ ...c, [key]: e.target.value }))}
-            placeholder={ph || label}
-            disabled={options?.disabled}
-            required={options?.required}
-            title={options?.title}
-            className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all disabled:bg-muted/60 disabled:text-muted-foreground disabled:cursor-not-allowed"
-          />
-          {options?.disabled && options?.title && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              {options.title}
-            </p>
-          )}
-        </>
-      )}
-    </div>
-  );
+            {options?.disabled && options?.title && (
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {options.title}
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    );
+  };
 
   const se = (label: string, key: keyof Company, options: string[]) => (
     <div key={key}>
@@ -779,7 +797,10 @@ export default function CompanyMaster() {
             <option key={o}>{o}</option>
           ))}
         </select>
-        <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <ChevronDown
+          size={13}
+          className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+        />
       </div>
     </div>
   );
@@ -944,8 +965,10 @@ export default function CompanyMaster() {
                     </div>
                   </div>
 
-                  {fi("Company Code *", "code", "text", "e.g. MAIN")}
-                  {fi("Company Name *", "name")}
+                  {fi("Company Code", "code", "text", "e.g. MAIN", {
+                    required: true,
+                  })}
+                  {fi("Company Name", "name", "text", "", { required: true })}
                   {fi("Legal Name", "legalName")}
                   {fi("Short Name", "shortName")}
                   {se("Company Type", "type", coTypes)}
@@ -978,7 +1001,10 @@ export default function CompanyMaster() {
                           );
                         })}
                       </select>
-                      <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      <ChevronDown
+                        size={13}
+                        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
                     </div>
                   </div>
                   {fi("Incorporation Date", "incorporationDate", "date")}
@@ -1060,13 +1086,17 @@ export default function CompanyMaster() {
                           <option key={o}>{o}</option>
                         ))}
                       </select>
-                      <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      <ChevronDown
+                        size={13}
+                        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
                     </div>
                   </div>
                   {fi("GST Number", "gstNumber", "text", "Enter GSTIN", {
                     disabled: form.gstType !== "Registered",
                     title: "Available only for registered companies",
                     required: form.gstType === "Registered",
+                    showAsterisk: true,
                   })}
                   {fi(
                     "GST Registration Date",
@@ -1077,6 +1107,7 @@ export default function CompanyMaster() {
                       disabled: form.gstType !== "Registered",
                       title: "Available only for registered companies",
                       required: form.gstType === "Registered",
+                      showAsterisk: true,
                     },
                   )}
 

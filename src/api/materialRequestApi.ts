@@ -180,14 +180,24 @@ export interface ApprovedMRSummary {
   DocNo: string;
   FinYearId: number | null;
   FinYearName: string | null;
+  CompanyId: number | null;
   CompanyName: string | null;
+  ProjectId: number | null;
   ProjectName: string | null;
 }
 
-export const getApprovedMRList = () =>
-  fetchWithAuth(`${BASE}/approved-list`).then((r) =>
+export const getApprovedMRList = (params?: {
+  companyId?: string;
+  projectId?: string;
+}) => {
+  const qs = new URLSearchParams();
+  if (params?.companyId) qs.set("companyId", params.companyId);
+  if (params?.projectId) qs.set("projectId", params.projectId);
+  const query = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchWithAuth(`${BASE}/approved-list${query}`).then((r) =>
     handleResponse<ApprovedMRSummary[]>(r),
   );
+};
 
 export const getMRPOPrefillByDocNo = (docNo: string) =>
   fetchWithAuth(

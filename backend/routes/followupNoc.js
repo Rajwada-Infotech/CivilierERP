@@ -171,7 +171,6 @@ async function buildOptions() {
     projectsResult,
     companiesResult,
   ] = await Promise.all([
-    // Applicants from AccountHeadMaster where LHeadType = 'A'
     pool.request().query(`
         SELECT
           LHeadId                        AS Id,
@@ -182,7 +181,6 @@ async function buildOptions() {
           AND LHeadStatus = 1
         ORDER BY ISNULL(DisplayName, LHeadName)
       `),
-    // Unit selections (linked by ApplicantId = LHeadId)
     pool.request().query(`
         SELECT
           fus.Id,
@@ -195,7 +193,6 @@ async function buildOptions() {
         WHERE fus.IsDeleted = 0
         ORDER BY fus.CreatedAt DESC, fus.Id DESC
       `),
-    // Agreements
     pool.request().query(`
         SELECT
           fag.Id,
@@ -206,7 +203,6 @@ async function buildOptions() {
         WHERE fag.IsDeleted = 0
         ORDER BY fag.CreatedAt DESC, fag.Id DESC
       `),
-    // Projects from enterprise where business_type = 'P'
     pool.request().query(`
         SELECT id AS Id, name AS Name
         FROM dbo.enterprise
@@ -214,7 +210,6 @@ async function buildOptions() {
           AND ISNULL(discontinue, 0) = 0
         ORDER BY name
       `),
-    // Companies from enterprise where business_type = 'C'
     pool.request().query(`
         SELECT id AS Id, name AS Name
         FROM dbo.enterprise
@@ -244,7 +239,91 @@ router.get("/meta/options", async (req, res) => {
   }
 });
 
+// ── Shared query helper ───────────────────────────────────────────────────────
+async function queryNOCList({
+  page,
+  pageSize,
+  search,
+  status,
+  applicantId,
+  bankNocStatus,
+  bankNocView,
+}) {
+  const offset = (page - 1) * pageSize;
+
+  const filters = ["fn.IsDeleted = 0"];
+  if (search) {
+    filters.push(`
+      (
+        fn.NOCNo                                    LIKE @Search
+        OR ahm.LHeadCode                            LIKE @Search
+        OR ISNULL(ahm.DisplayName, ahm.LHeadName)  LIKE @Search
+        OR fus.UnitNo                               LIKE @Search
+        OR fag.AgreementNo                          LIKE @Search
+        OR ep.name                                  LIKE @Search
+      )
+    `);
+  }
+  if (status) filters.push("fn.Status = @Status");
+  if (applicantId) filters.push("fn.ApplicantId = @ApplicantId");
+  if (bankNocStatus) filters.push("fn.BankNOCStatus = @BankNOCStatus");
+  if (bankNocView)
+    filters.push("fn.BankName IS NOT NULL AND fn.BankName <> ''");
+
+  const whereClause = `WHERE ${filters.join(" AND ")}`;
+  const pool = getPool();
+
+  const BASE_JOINS = `
+    FROM dbo.FollowupNOCs fn
+    INNER JOIN dbo.AccountHeadMaster ahm  ON ahm.LHeadId = fn.ApplicantId AND ahm.LHeadType = 'A'
+    LEFT JOIN  dbo.FollowupUnitSelections fus ON fus.Id  = fn.UnitSelectionId
+    LEFT JOIN  dbo.FollowupAgreements fag     ON fag.Id  = fn.AgreementId
+    LEFT JOIN  dbo.enterprise ep              ON ep.id   = fn.ProjectId  AND ep.business_type = 'P'
+    LEFT JOIN  dbo.enterprise ec              ON ec.id   = fn.CompanyId  AND ec.business_type = 'C'
+  `;
+
+  const buildRequest = () => {
+    const request = pool.request();
+    if (search) request.input("Search", sql.NVarChar(255), `%${search}%`);
+    if (status) request.input("Status", sql.NVarChar(30), status);
+    if (applicantId) request.input("ApplicantId", sql.Int, applicantId);
+    if (bankNocStatus)
+      request.input("BankNOCStatus", sql.NVarChar(30), bankNocStatus);
+    return request;
+  };
+
+  const countResult = await buildRequest().query(`
+    SELECT COUNT(*) AS Total
+    ${BASE_JOINS}
+    ${whereClause}
+  `);
+
+  const dataResult = await buildRequest()
+    .input("Offset", sql.Int, offset)
+    .input("PageSize", sql.Int, pageSize).query(`
+      SELECT ${LIST_COLUMNS}
+      ${BASE_JOINS}
+      ${whereClause}
+      ORDER BY fn.CreatedAt DESC, fn.Id DESC
+      OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
+    `);
+
+  const total = Number(countResult.recordset[0]?.Total ?? 0);
+  return {
+    data: dataResult.recordset,
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize),
+    },
+  };
+}
+
 // ── GET / ─────────────────────────────────────────────────────────────────────
+// Non-sensitive bulk loader (used by dashboard / widgets). Accepts only page
+// and pageSize. For filtered queries (status, applicantId, bankNocStatus) use
+// POST /search below — sensitive data must not travel in the URL.
 router.get("/", async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
@@ -252,90 +331,59 @@ router.get("/", async (req, res) => {
       100,
       Math.max(1, parseInt(req.query.pageSize, 10) || 20),
     );
-    const offset = (page - 1) * pageSize;
-    const search = normalizeText(req.query.search);
-    // Sensitive query params handled securely via parameterized queries only
-    const status = normalizeText(req.query.status);
-    const applicantId = normalizeNumber(req.query.applicantId);
-    const bankNocStatus = normalizeText(req.query.bankNocStatus);
+    const result = await queryNOCList({
+      page,
+      pageSize,
+      search: null,
+      status: null,
+      applicantId: null,
+      bankNocStatus: null,
+      bankNocView: false,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error("followupNoc GET error:", err);
+    res.status(500).json({ error: "Failed to fetch NOCs" });
+  }
+});
 
-    if (Number.isNaN(applicantId)) {
+// ── POST /search ──────────────────────────────────────────────────────────────
+// Filtered list endpoint. Sensitive filter params (status, applicantId,
+// bankNocStatus) are passed in the request body — never in the URL — to prevent
+// them appearing in server logs, browser history, or Referer headers.
+// Fixes CodeQL js/sensitive-get-query (alert #523).
+// bankNocView is a non-sensitive display hint so it may remain a query param.
+router.post("/search", async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.body.page, 10) || 1);
+    const pageSize = Math.min(
+      100,
+      Math.max(1, parseInt(req.body.pageSize, 10) || 20),
+    );
+    const search = normalizeText(req.body.search);
+    const status = normalizeText(req.body.status);
+    const applicantId = normalizeNumber(req.body.applicantId);
+    const bankNocStatus = normalizeText(req.body.bankNocStatus);
+    const bankNocView = req.query.bankNocView === "1";
+
+    if (req.body.applicantId !== undefined && Number.isNaN(applicantId)) {
       return res
         .status(400)
         .json({ error: "applicantId must be a valid number" });
     }
 
-    const filters = ["fn.IsDeleted = 0"];
-    if (search) {
-      filters.push(`
-        (
-          fn.NOCNo                                    LIKE @Search
-          OR ahm.LHeadCode                            LIKE @Search
-          OR ISNULL(ahm.DisplayName, ahm.LHeadName)  LIKE @Search
-          OR fus.UnitNo                               LIKE @Search
-          OR fag.AgreementNo                          LIKE @Search
-          OR ep.name                                  LIKE @Search
-        )
-      `);
-    }
-    if (status) filters.push("fn.Status = @Status");
-    if (applicantId) filters.push("fn.ApplicantId = @ApplicantId");
-    if (bankNocStatus) filters.push("fn.BankNOCStatus = @BankNOCStatus");
-
-    const whereClause = `WHERE ${filters.join(" AND ")}`;
-    const pool = getPool();
-
-    const BASE_JOINS = `
-      FROM dbo.FollowupNOCs fn
-      LEFT JOIN dbo.AccountHeadMaster ahm  ON ahm.LHeadId = fn.ApplicantId AND ahm.LHeadType = 'A'
-      LEFT JOIN  dbo.FollowupUnitSelections fus ON fus.Id  = fn.UnitSelectionId
-      LEFT JOIN  dbo.FollowupAgreements fag     ON fag.Id  = fn.AgreementId
-      LEFT JOIN  dbo.enterprise ep              ON ep.id   = fn.ProjectId  AND ep.business_type = 'P'
-      LEFT JOIN  dbo.enterprise ec              ON ec.id   = fn.CompanyId  AND ec.business_type = 'C'
-    `;
-
-    // bankNocView=1: only show records that have a bank name set (for BankNOC page)
-    const bankNocView = req.query.bankNocView === "1";
-    if (bankNocView) filters.push("fn.BankName IS NOT NULL AND fn.BankName <> ''");
-
-    const buildRequest = () => {
-      const request = pool.request();
-      if (search) request.input("Search", sql.NVarChar(255), `%${search}%`);
-      if (status) request.input("Status", sql.NVarChar(30), status);
-      if (applicantId) request.input("ApplicantId", sql.Int, applicantId);
-      if (bankNocStatus)
-        request.input("BankNOCStatus", sql.NVarChar(30), bankNocStatus);
-      return request;
-    };
-
-    const countResult = await buildRequest().query(`
-      SELECT COUNT(*) AS Total
-      ${BASE_JOINS}
-      ${whereClause}
-    `);
-
-    const dataResult = await buildRequest()
-      .input("Offset", sql.Int, offset)
-      .input("PageSize", sql.Int, pageSize).query(`
-        SELECT ${LIST_COLUMNS}
-        ${BASE_JOINS}
-        ${whereClause}
-        ORDER BY fn.CreatedAt DESC, fn.Id DESC
-        OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
-      `);
-
-    const total = Number(countResult.recordset[0]?.Total ?? 0);
-    res.json({
-      data: dataResult.recordset,
-      pagination: {
-        page,
-        pageSize,
-        total,
-        totalPages: Math.ceil(total / pageSize),
-      },
+    const result = await queryNOCList({
+      page,
+      pageSize,
+      search,
+      status,
+      applicantId,
+      bankNocStatus,
+      bankNocView,
     });
+    res.json(result);
   } catch (err) {
-    console.error("followupNoc GET error:", err);
+    console.error("followupNoc POST /search error:", err);
     res.status(500).json({ error: "Failed to fetch NOCs" });
   }
 });
@@ -556,12 +604,16 @@ router.delete("/:id", async (req, res) => {
     const existing = await getPool()
       .request()
       .input("Id", sql.Int, id)
-      .query(`SELECT Id, Status FROM dbo.FollowupNOCs WHERE Id = @Id AND IsDeleted = 0`);
+      .query(
+        `SELECT Id, Status FROM dbo.FollowupNOCs WHERE Id = @Id AND IsDeleted = 0`,
+      );
 
     const rec = existing.recordset[0];
     if (!rec) return res.status(404).json({ error: "NOC not found" });
     if (rec.Status === "Issued" || rec.Status === "Approved") {
-      return res.status(409).json({ error: `Cannot delete a NOC with status "${rec.Status}"` });
+      return res
+        .status(409)
+        .json({ error: `Cannot delete a NOC with status "${rec.Status}"` });
     }
 
     await getPool()
