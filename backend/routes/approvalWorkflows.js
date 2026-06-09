@@ -246,58 +246,115 @@ router.get("/trail", authMiddleware, async (req, res) => {
       } catch {}
     }
 
-    // 2. Fetch audit trail for this record (latest entry per level)
+    // 2. Fetch full audit trail (all rows, Level > 0 only — Level 0 is submission marker)
     const auditResult = await pool
       .request()
       .input("TableName", sql.NVarChar(100), module)
       .input("RecordId", sql.Int, recordId).query(`
         SELECT Level, Role, ApproverEmail, ActionStatus, Note, ActionAt
-        FROM (
-          SELECT *,
-            ROW_NUMBER() OVER (PARTITION BY Level ORDER BY ActionAt DESC) AS rn
-          FROM dbo.ApprovalAuditLog
-          WHERE TableName = @TableName AND RecordId = @RecordId
-        ) t
-        WHERE rn = 1
-        ORDER BY Level ASC
+        FROM dbo.ApprovalAuditLog
+        WHERE TableName = @TableName AND RecordId = @RecordId AND Level > 0
+        ORDER BY Level ASC, ActionAt ASC
       `);
 
-    const auditRows = auditResult.recordset;
+    const allAuditRows = auditResult.recordset;
+    const workflowType = wfRow?.type || "sequential";
+
+    // For sequential/any: collapse to latest entry per level
+    const auditRows = workflowType === "parallel"
+      ? allAuditRows
+      : Object.values(
+          allAuditRows.reduce((acc, row) => {
+            if (!acc[row.Level] || new Date(row.ActionAt) > new Date(acc[row.Level].ActionAt)) {
+              acc[row.Level] = row;
+            }
+            return acc;
+          }, {})
+        ).sort((a, b) => a.Level - b.Level);
 
     // 3. Merge workflow levels with audit entries
     const steps = workflowLevels.map((lvl, idx) => {
       const levelNum = idx + 1;
-      const audit = auditRows.find((a) => a.Level === levelNum);
+      const levelRows = auditRows.filter((a) => a.Level === levelNum);
+
+      if (workflowType === "parallel") {
+        const approvers = levelRows.map((r) => ({
+          email: r.ApproverEmail,
+          name: r.ApproverEmail?.split("@")[0] || null,
+          role: r.Role,
+          status: r.ActionStatus,
+          actionAt: r.ActionAt,
+        }));
+        const allApproved = approvers.length > 0 && approvers.every((a) => a.status === "Approved");
+        const anyRejected = approvers.some((a) => a.status === "Rejected");
+        const latestActor = [...approvers]
+          .filter((a) => a.status === "Approved" || a.status === "Rejected")
+          .sort((a, b) => new Date(b.actionAt) - new Date(a.actionAt))[0] || null;
+        return {
+          level: levelNum,
+          label: lvl.label || `Level ${levelNum}`,
+          userIds: lvl.userIds || [],
+          status: anyRejected ? "Rejected" : allApproved ? "Approved" : "Pending",
+          approverEmail: latestActor?.email || null,
+          approverName: latestActor?.name || null,
+          role: latestActor?.role || null,
+          actionAt: latestActor?.actionAt || null,
+          note: null,
+          approvers,
+          workflowType,
+        };
+      }
+
+      if (workflowType === "any") {
+        // First to act wins
+        const actor = levelRows.find((r) => r.ActionStatus === "Approved" || r.ActionStatus === "Rejected")
+          || levelRows[0] || null;
+        return {
+          level: levelNum,
+          label: lvl.label || `Level ${levelNum}`,
+          userIds: lvl.userIds || [],
+          status: actor?.ActionStatus || "Pending",
+          approverEmail: actor?.ApproverEmail || null,
+          approverName: actor?.ApproverEmail?.split("@")[0] || null,
+          role: actor?.Role || null,
+          actionAt: actor?.ActionAt || null,
+          note: actor?.Note || null,
+          workflowType,
+        };
+      }
+
+      // sequential — latest entry at this level
+      const audit = levelRows[levelRows.length - 1] || null;
       return {
         level: levelNum,
         label: lvl.label || `Level ${levelNum}`,
         userIds: lvl.userIds || [],
         status: audit?.ActionStatus || "Pending",
         approverEmail: audit?.ApproverEmail || null,
+        approverName: audit?.ApproverEmail?.split("@")[0] || null,
         role: audit?.Role || null,
         actionAt: audit?.ActionAt || null,
         note: audit?.Note || null,
+        workflowType,
       };
     });
 
-    // If no workflow configured, still return any audit rows.
-    // Level 0 is a submission marker written by approvalService — NOT an approver
-    // step. Filter it out so it never appears as a "Level 0 · Pending" pill.
-    if (workflowLevels.length === 0 && auditRows.length > 0) {
-      auditRows
-        .filter((a) => a.Level > 0)
-        .forEach((a) => {
-          steps.push({
-            level: a.Level,
-            label: `Level ${a.Level}`,
-            userIds: [],
-            status: a.ActionStatus,
-            approverEmail: a.ApproverEmail,
-            role: a.Role,
-            actionAt: a.ActionAt,
-            note: a.Note,
-          });
+    // If no workflow configured, surface raw audit rows (Level > 0 only)
+    if (workflowLevels.length === 0 && allAuditRows.length > 0) {
+      allAuditRows.forEach((a) => {
+        steps.push({
+          level: a.Level,
+          label: `Level ${a.Level}`,
+          userIds: [],
+          status: a.ActionStatus,
+          approverEmail: a.ApproverEmail,
+          approverName: a.ApproverEmail?.split("@")[0] || null,
+          role: a.Role,
+          actionAt: a.ActionAt,
+          note: a.Note,
+          workflowType,
         });
+      });
     }
 
     const currentLevel =
