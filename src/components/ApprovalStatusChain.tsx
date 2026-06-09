@@ -1,13 +1,13 @@
 /**
  * ApprovalStatusChain
  *
- * Renders a single compact badge showing the approval state of any record.
- * Format: "{Level label} · Approved / Rejected / Pending"
+ * Single badge showing approval state. Display logic varies by workflow type:
  *
- * Usage:
- *   <ApprovalStatusChain table="MaterialRequests" recordId={mr.MRId} />
+ *  sequential — show the latest approver's name (who last acted)
+ *  any        — show who acted first (they unlocked the record)
+ *  parallel   — show who acted most recently across all parallel approvers
  *
- * `table` must match the TableName written by approvalService to ApprovalAuditLog.
+ * Badge format:  "{Level label} · {approverName} · Approved / Rejected / Pending"
  */
 
 import { useEffect, useState } from "react";
@@ -27,18 +27,30 @@ export type ApprovalTable =
   | "BOQ"
   | "WorkDone";
 
+interface Approver {
+  email: string | null;
+  name: string | null;
+  role: string | null;
+  status: string;
+  actionAt: string | null;
+}
+
 interface TrailStep {
   level: number;
   label: string;
   status: "Pending" | "Approved" | "Rejected";
   approverEmail: string | null;
+  approverName: string | null;
   role: string | null;
   actionAt: string | null;
   note: string | null;
+  approvers?: Approver[];   // parallel only
+  workflowType?: string;
 }
 
 interface TrailData {
   workflowName: string | null;
+  workflowType: string;
   steps: TrailStep[];
   currentLevel: number;
   fullyApproved: boolean;
@@ -49,9 +61,31 @@ interface TrailData {
 interface Props {
   table: ApprovalTable;
   recordId: string | number | null | undefined;
-  /** @deprecated — all usages are now single-badge; prop kept for backward compat */
-  compact?: boolean;
+  compact?: boolean; // kept for compat, no-op
   className?: string;
+}
+
+function fmtDate(iso: string | null) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+
+function badgeText(step: TrailStep, status: "Approved" | "Rejected" | "Pending"): string {
+  const label = step.label;
+  const name = step.approverName || step.approverEmail?.split("@")[0] || null;
+  const who = name ? ` · ${name}` : "";
+  return `${label}${who} · ${status}`;
+}
+
+function tooltipText(step: TrailStep): string {
+  if (step.workflowType === "parallel" && step.approvers?.length) {
+    return step.approvers
+      .map((a) => `${a.name || a.email} — ${a.status}${a.actionAt ? ` (${fmtDate(a.actionAt)})` : ""}`)
+      .join("\n");
+  }
+  const who = step.approverEmail || step.approverName || "";
+  const when = step.actionAt ? ` (${fmtDate(step.actionAt)})` : "";
+  return who ? `${who}${when}` : step.label;
 }
 
 export function ApprovalStatusChain({ table, recordId, className }: Props) {
@@ -73,19 +107,17 @@ export function ApprovalStatusChain({ table, recordId, className }: Props) {
   if (loading) {
     return (
       <div className={cn("flex gap-1 items-center", className)}>
-        <div className="h-4 w-20 rounded-full bg-muted animate-pulse" />
+        <div className="h-4 w-24 rounded-full bg-muted animate-pulse" />
       </div>
     );
   }
 
   if (!trail) return null;
 
-  // Filter out Level 0 — it's a submission marker, not an approver step.
-  // This makes the frontend resilient even if the backend sends Level 0.
+  // Filter out Level 0 (submission marker) — resilient even if backend sends it
   const steps = trail.steps.filter((s) => s.level > 0);
   if (steps.length === 0) return null;
 
-  // Derive state from the filtered steps
   const fullyApproved = steps.every((s) => s.status === "Approved");
   const rejectedStep  = steps.find((s) => s.status === "Rejected");
   const currentStep   = steps.find((s) => s.status !== "Approved") ?? steps[steps.length - 1];
@@ -93,12 +125,9 @@ export function ApprovalStatusChain({ table, recordId, className }: Props) {
   // ── Fully approved ──────────────────────────────────────────────────────────
   if (fullyApproved) {
     const last = steps[steps.length - 1];
-    const tip = last.approverEmail
-      ? `${last.label} — ${last.approverEmail}${last.actionAt ? ` (${new Date(last.actionAt).toLocaleDateString("en-IN")})` : ""}`
-      : last.label;
     return (
       <span
-        title={tip}
+        title={tooltipText(last)}
         className={cn(
           "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold",
           "bg-emerald-100 text-emerald-700 border border-emerald-200",
@@ -107,19 +136,16 @@ export function ApprovalStatusChain({ table, recordId, className }: Props) {
         )}
       >
         <CheckCircle2 size={10} />
-        {last.label} · Approved
+        {badgeText(last, "Approved")}
       </span>
     );
   }
 
   // ── Rejected ────────────────────────────────────────────────────────────────
   if (rejectedStep) {
-    const tip = rejectedStep.approverEmail
-      ? `${rejectedStep.label} — ${rejectedStep.approverEmail}${rejectedStep.note ? `: ${rejectedStep.note}` : ""}`
-      : rejectedStep.label;
     return (
       <span
-        title={tip}
+        title={tooltipText(rejectedStep)}
         className={cn(
           "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold",
           "bg-red-100 text-red-700 border border-red-200",
@@ -128,15 +154,15 @@ export function ApprovalStatusChain({ table, recordId, className }: Props) {
         )}
       >
         <XCircle size={10} />
-        {rejectedStep.label} · Rejected
+        {badgeText(rejectedStep, "Rejected")}
       </span>
     );
   }
 
-  // ── Pending at current level ────────────────────────────────────────────────
+  // ── Pending ─────────────────────────────────────────────────────────────────
   return (
     <span
-      title={currentStep.label}
+      title={tooltipText(currentStep)}
       className={cn(
         "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold",
         "bg-amber-100 text-amber-700 border border-amber-200",
@@ -145,7 +171,7 @@ export function ApprovalStatusChain({ table, recordId, className }: Props) {
       )}
     >
       <Clock size={10} />
-      {currentStep.label} · Pending
+      {badgeText(currentStep, "Pending")}
     </span>
   );
 }
