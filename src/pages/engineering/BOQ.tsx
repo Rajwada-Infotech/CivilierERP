@@ -40,6 +40,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -1504,7 +1505,10 @@ const FormModal: React.FC<FormModalProps> = ({
 
               <Field label="BOQ Date" required error={errors.BoqDate}>
                 <div className="relative">
-                  <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={14} />
+                  <CalendarIcon
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    size={14}
+                  />
                   <input
                     type="date"
                     value={form.BoqDate}
@@ -1749,6 +1753,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
               {record.BoqNo || record.DocNo}
             </span>
             <StatusBadge status={record.Status} />
+            <ApprovalStatusChain table="BOQ" recordId={record.BoqID} />
           </div>
 
           {/* Right-side actions */}

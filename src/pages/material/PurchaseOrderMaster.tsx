@@ -44,6 +44,7 @@ import { type WOPOPrefill } from "@/api/workOrderApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { getTCRecords } from "@/api/tcMasterApi";
 import { getEnterprises } from "@/api/enterpriseApi";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import {
   Plus,
   Trash2,
@@ -1747,7 +1748,13 @@ const PurchaseOrderMaster: React.FC = () => {
                         {fmt(item.totalAmount)}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <StatusChip status={item.status} />
+                        <div className="flex flex-col items-center gap-1">
+                          <StatusChip status={item.status} />
+                          <ApprovalStatusChain
+                            table="PurchaseOrders"
+                            recordId={item._id}
+                          />
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-center gap-1">
