@@ -97,10 +97,15 @@ async function fetchEmiReminders(): Promise<ReminderItem[]> {
 
 async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
   try {
-    // Use server-side status filter + high limit to avoid the 100-row cap silently dropping records
-    const res = await fetchWithAuth(
-      "/api/material-requests?status=Pending&limit=100&page=1",
-    );
+    let res: Response;
+    try {
+      res = await fetchWithAuth(
+        "/api/material-requests?status=Pending&limit=100&page=1",
+      );
+    } catch {
+      // fetchWithAuth throws on 403, network errors, etc. — treat as empty, never propagate
+      return [];
+    }
     if (!res.ok) return [];
     const raw = await res.json();
     // API always returns { data: [], page, limit, total, totalPages }
@@ -210,8 +215,11 @@ export async function fetchAllReminders(
       process(tdsRes, "tds", "Id", "TDS", "/masters/tds"),
       process(woRes, "work_order", "Id", "WO", "/material/work-order"),
     ]),
-    hasFinanceAccess ? fetchEmiReminders() : Promise.resolve([]),
-    fetchMaterialRequestReminders(),
+    (hasFinanceAccess
+      ? fetchEmiReminders()
+      : Promise.resolve([] as ReminderItem[])
+    ).catch(() => [] as ReminderItem[]),
+    fetchMaterialRequestReminders().catch(() => [] as ReminderItem[]),
   ]);
 
   items.push(...emiItems);
