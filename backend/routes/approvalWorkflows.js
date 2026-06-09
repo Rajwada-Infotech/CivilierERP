@@ -192,3 +192,126 @@ router.delete("/:id", authMiddleware, async (req, res) => {
 });
 
 module.exports = router;
+
+// GET /api/approval-workflows/trail?module=GoodsReceiptNotes&id=123
+// Returns the active workflow levels + audit log for a specific record.
+// Only returns the LATEST entry per level (handles resubmissions).
+router.get("/trail", authMiddleware, async (req, res) => {
+  const { module, id } = req.query;
+  if (!module || !id) {
+    return res.status(400).json({ error: "module and id are required" });
+  }
+
+  // Map frontend module slug → { tableName, workflowModuleId }
+  // tableName matches what approvalService writes to ApprovalAuditLog
+  // workflowModuleId matches what ApprovalWorkflows.modules JSON array contains
+  const MODULE_TABLE_MAP = {
+    GoodsReceiptNotes: { workflowId: "GRN" },
+    PurchaseOrders: { workflowId: "PurchaseOrders" },
+    WorkOrderHeader: { workflowId: "WorkOrderHeader" },
+    ExpenseBooking: { workflowId: "Expenses" },
+    NewPayment: { workflowId: "NewPayment" },
+    MaterialIssues: { workflowId: "MaterialIssues" },
+    MaterialRequests: { workflowId: "MaterialRequests" },
+    StockTransfers: { workflowId: "StockTransfer" },
+    BOQ: { workflowId: "BOQ" },
+    WorkDone: { workflowId: "WorkDone" },
+  };
+
+  const entry = MODULE_TABLE_MAP[module];
+  if (!entry) {
+    return res.status(400).json({ error: `Unknown module table: ${module}` });
+  }
+
+  try {
+    const pool = getPool();
+    const recordId = parseInt(id, 10);
+
+    // 1. Fetch workflow config (levels + type)
+    const wfResult = await pool
+      .request()
+      .input("WorkflowId", sql.NVarChar(100), entry.workflowId).query(`
+        SELECT TOP 1 Id, Name, type, LevelsJson, active
+        FROM dbo.ApprovalWorkflows
+        WHERE active = 1
+          AND modules LIKE '%' + @WorkflowId + '%'
+        ORDER BY CreatedAt DESC
+      `);
+
+    const wfRow = wfResult.recordset[0];
+    let workflowLevels = [];
+    if (wfRow?.LevelsJson) {
+      try {
+        workflowLevels = JSON.parse(wfRow.LevelsJson);
+      } catch {}
+    }
+
+    // 2. Fetch audit trail for this record (latest entry per level)
+    const auditResult = await pool
+      .request()
+      .input("TableName", sql.NVarChar(100), module)
+      .input("RecordId", sql.Int, recordId).query(`
+        SELECT Level, Role, ApproverEmail, ActionStatus, Note, ActionAt
+        FROM (
+          SELECT *,
+            ROW_NUMBER() OVER (PARTITION BY Level ORDER BY ActionAt DESC) AS rn
+          FROM dbo.ApprovalAuditLog
+          WHERE TableName = @TableName AND RecordId = @RecordId
+        ) t
+        WHERE rn = 1
+        ORDER BY Level ASC
+      `);
+
+    const auditRows = auditResult.recordset;
+
+    // 3. Merge workflow levels with audit entries
+    const steps = workflowLevels.map((lvl, idx) => {
+      const levelNum = idx + 1;
+      const audit = auditRows.find((a) => a.Level === levelNum);
+      return {
+        level: levelNum,
+        label: lvl.label || `Level ${levelNum}`,
+        userIds: lvl.userIds || [],
+        status: audit?.ActionStatus || "Pending",
+        approverEmail: audit?.ApproverEmail || null,
+        role: audit?.Role || null,
+        actionAt: audit?.ActionAt || null,
+        note: audit?.Note || null,
+      };
+    });
+
+    // If no workflow configured, still return any audit rows
+    if (workflowLevels.length === 0 && auditRows.length > 0) {
+      auditRows.forEach((a) => {
+        steps.push({
+          level: a.Level,
+          label: `Level ${a.Level}`,
+          userIds: [],
+          status: a.ActionStatus,
+          approverEmail: a.ApproverEmail,
+          role: a.Role,
+          actionAt: a.ActionAt,
+          note: a.Note,
+        });
+      });
+    }
+
+    const currentLevel =
+      steps.findIndex((s) => s.status !== "Approved") + 1 || steps.length;
+    const fullyApproved =
+      steps.length > 0 && steps.every((s) => s.status === "Approved");
+    const hasRejection = steps.some((s) => s.status === "Rejected");
+
+    res.json({
+      workflowName: wfRow?.Name || null,
+      workflowType: wfRow?.type || "sequential",
+      steps,
+      currentLevel,
+      fullyApproved,
+      hasRejection,
+      totalLevels: steps.length,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});

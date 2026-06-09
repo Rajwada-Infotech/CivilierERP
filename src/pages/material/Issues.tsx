@@ -53,6 +53,7 @@ import {
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { Badge } from "@/components/ui/badge";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -584,7 +585,9 @@ export default function Issues() {
   const createMutation = useMutation({
     mutationFn: issuesApi.createIssue,
     onSuccess: (rec: any) => {
-      toast.success(`Issue ${rec?.DocNo || rec?.IssueNo || ""} created and sent for approval`);
+      toast.success(
+        `Issue ${rec?.DocNo || rec?.IssueNo || ""} created and sent for approval`,
+      );
       queryClient.invalidateQueries({ queryKey: ["issues-list"] });
       queryClient.invalidateQueries({ queryKey: ["issues-items"] });
       goToList();
@@ -788,8 +791,14 @@ export default function Issues() {
     {
       accessorKey: "Status",
       header: "Status",
-      cell: ({ getValue }) => (
-        <StatusBadge status={(getValue() as string) || "Draft"} />
+      cell: ({ getValue, row }) => (
+        <div className="flex flex-col gap-1">
+          <StatusBadge status={(getValue() as string) || "Draft"} />
+          <ApprovalStatusChain
+            table="MaterialIssues"
+            recordId={row.original.IssueId}
+          />
+        </div>
       ),
     },
     {
@@ -1527,7 +1536,9 @@ export default function Issues() {
                         {cart.filter((ci) => ci.ItemId).length}
                       </span>{" "}
                       item
-                      {cart.filter((ci) => ci.ItemId).length !== 1 ? "s" : ""} ·{" "}
+                      {cart.filter((ci) => ci.ItemId).length !== 1
+                        ? "s"
+                        : ""} ·{" "}
                       <span className="font-semibold text-foreground font-mono">
                         {totalCartQty.toFixed(2)}
                       </span>{" "}
