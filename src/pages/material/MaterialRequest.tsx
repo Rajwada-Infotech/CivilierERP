@@ -49,6 +49,7 @@ import {
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { Badge } from "@/components/ui/badge";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -580,8 +581,13 @@ export default function MaterialRequest() {
       id: "Status",
       accessorKey: "Status",
       header: "Status",
-      cell: ({ getValue }) => (
-        <StatusBadge status={(getValue() as string) || "Draft"} />
+      cell: ({ getValue, row }) => (
+        <div>
+          <ApprovalStatusChain
+            table="MaterialRequests"
+            recordId={row.original.MRId}
+          />
+        </div>
       ),
     },
     {

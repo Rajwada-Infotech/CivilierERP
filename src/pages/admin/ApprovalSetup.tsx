@@ -1,651 +1,1350 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import * as z from "zod";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm, type UseFormReturn } from "react-hook-form";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import {
-  CheckCircle,
-  Shield,
-  Users,
-  AlertCircle,
-  Plus,
-  Edit,
-  Trash2,
-  Search,
-} from "lucide-react";
+import { getUsers, type User } from "@/api/userApi";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { PageKey } from "@/contexts/AuthContext";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  Plus,
+  Pencil,
+  Trash2,
+  ChevronUp,
+  ChevronDown,
+  X,
+  Check,
+  Layers,
+  ShieldCheck,
+  Info,
+  Loader2,
+  ArrowDown,
+  Users,
+  GitMerge,
+  GitBranch,
+  CheckCircle2,
+  ToggleLeft,
+  ToggleRight,
+  AlertCircle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-interface Workflow {
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface ApprovalLevel {
   id: number;
-  name: string;
-  module?: string;
-  levels: number;
-  approvers: string[];
-  status: "Active" | "Inactive";
-  description?: string;
-  createdAt: string;
+  label: string;
+  userIds: number[];
 }
 
-// ── API helpers — all use fetchWithAuth so the JWT is always sent ──────────────
-const API = "/api/approval-workflows";
+export interface ApprovalWorkflow {
+  id: number;
+  name: string;
+  type: "sequential" | "any" | "parallel";
+  modules: string[];
+  levels: ApprovalLevel[];
+  active: boolean;
+  description?: string;
+  createdAt?: string;
+}
 
-async function fetchWorkflows(): Promise<Workflow[]> {
-  const res = await fetchWithAuth(API);
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const MODULE_OPTIONS = [
+  {
+    id: "GRN",
+    label: "Goods Receipt (GRN)",
+    icon: "📦",
+    desc: "When goods arrive at site",
+  },
+  {
+    id: "PurchaseOrders",
+    label: "Purchase Order",
+    icon: "🛒",
+    desc: "Before a PO is raised",
+  },
+  {
+    id: "MaterialIssues",
+    label: "Material Issue",
+    icon: "🚚",
+    desc: "When materials leave store",
+  },
+  {
+    id: "Expenses",
+    label: "Expense Booking",
+    icon: "🧾",
+    desc: "Staff expense claims",
+  },
+  {
+    id: "WorkOrderHeader",
+    label: "Work Order",
+    icon: "🔧",
+    desc: "Before work begins",
+  },
+  {
+    id: "NewPayment",
+    label: "Payment",
+    icon: "💳",
+    desc: "Before payments are made",
+  },
+  {
+    id: "StockTransfer",
+    label: "Stock Transfer",
+    icon: "🔄",
+    desc: "Moving stock between sites",
+  },
+] as const;
+
+type ModuleId = (typeof MODULE_OPTIONS)[number]["id"];
+
+const MODULE_GROUPS = [
+  {
+    id: "material",
+    label: "Material",
+    icon: "🏗️",
+    modules: [
+      "GRN",
+      "PurchaseOrders",
+      "MaterialIssues",
+      "Expenses",
+      "StockTransfer",
+    ],
+  },
+  {
+    id: "finance",
+    label: "Finance",
+    icon: "💰",
+    modules: ["NewPayment"],
+  },
+  {
+    id: "engineering",
+    label: "Engineering",
+    icon: "⚙️",
+    modules: ["WorkOrderHeader"],
+  },
+] as const;
+
+const APPROVAL_TYPES = [
+  {
+    id: "sequential" as const,
+    label: "One by one",
+    icon: ArrowDown,
+    desc: "Each person must approve before the next is asked. Like a chain — first Manager, then Director.",
+    example: "Manager → Director → CFO",
+  },
+  {
+    id: "any" as const,
+    label: "Anyone can approve",
+    icon: Users,
+    desc: "Any one person from the list can approve. Useful when multiple people share the same role.",
+    example: "Manager A or Manager B",
+  },
+  {
+    id: "parallel" as const,
+    label: "Everyone at once",
+    icon: GitBranch,
+    desc: "All approvers are asked at the same time. All must approve before it moves forward.",
+    example: "Manager + Director + CFO (simultaneously)",
+  },
+] as const;
+
+const APPROVAL_API = "/api/approval-workflows";
+
+// ─── API helpers ──────────────────────────────────────────────────────────────
+
+async function fetchWorkflows(): Promise<ApprovalWorkflow[]> {
+  const res = await fetchWithAuth(APPROVAL_API);
   if (!res.ok) throw new Error("Failed to fetch workflows");
   return res.json();
 }
 
-async function apiCreate(body: object) {
-  const res = await fetchWithAuth(API, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error((await res.json()).error || "Failed to create");
-}
-
-async function apiUpdate(id: number, body: object) {
-  const res = await fetchWithAuth(`${API}/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error((await res.json()).error || "Failed to update");
+async function apiSave(
+  body: Omit<ApprovalWorkflow, "id" | "createdAt">,
+  id?: number,
+) {
+  const method = id ? "PUT" : "POST";
+  const url = id ? `${APPROVAL_API}/${id}` : APPROVAL_API;
+  const res = await fetchWithAuth(url, { method, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error((await res.json()).error || "Save failed");
+  return res.json();
 }
 
 async function apiToggle(id: number) {
-  const res = await fetchWithAuth(`${API}/${id}/toggle`, { method: "PATCH" });
-  if (!res.ok) throw new Error("Failed to toggle");
+  const res = await fetchWithAuth(`${APPROVAL_API}/${id}/toggle`, {
+    method: "PATCH",
+  });
+  if (!res.ok) throw new Error("Toggle failed");
 }
 
 async function apiDelete(id: number) {
-  const res = await fetchWithAuth(`${API}/${id}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("Failed to delete");
+  const res = await fetchWithAuth(`${APPROVAL_API}/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Delete failed");
 }
 
-// ── Form schema ────────────────────────────────────────────────────────────────
-const formSchema = z.object({
-  name: z.string().min(1, "Name is required"),
-  module: z.string().min(1, "Module is required"),
-  levels: z.number().min(1).max(5),
-  approvers: z.string().min(1, "At least one approver is required"),
-  status: z.enum(["Active", "Inactive"]),
-  description: z.string().optional(),
-});
+// ─── UserMultiSelect ──────────────────────────────────────────────────────────
 
-type FormInput = z.infer<typeof formSchema>;
-// Keep FormData as an alias for submit handlers that need approvers as string[]
-type FormData = Omit<FormInput, "approvers"> & { approvers: string[] };
+function UserMultiSelect({
+  value,
+  onChange,
+  users,
+  placeholder = "Click to choose people…",
+}: {
+  value: number[];
+  onChange: (ids: number[]) => void;
+  users: User[];
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
+  const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
 
-const defaultFormValues: FormInput = {
-  name: "",
-  module: "",
-  levels: 1,
-  approvers: "",
-  status: "Active" as const,
-  description: "",
-};
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
+    }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, []);
 
-const MODULE_OPTIONS = [
-  "AccountHeadMaster",
-  "PurchaseOrders",
-  "WorkOrderHeader",
-  "NewPayment",
-  "ChequeMaster",
-  "Expenses",
-  "Accounts",
-  "Purchases",
-];
+  const updatePosition = useCallback(() => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const DROPDOWN_HEIGHT = 320;
+      const spaceBelow = window.innerHeight - rect.bottom - 8;
+      const spaceAbove = rect.top - 8;
+      const openUpward =
+        spaceBelow < DROPDOWN_HEIGHT && spaceAbove > spaceBelow;
 
-// ── Main component ─────────────────────────────────────────────────────────────
+      if (openUpward) {
+        setDropdownStyle({
+          position: "fixed",
+          bottom: window.innerHeight - rect.top + 4,
+          left: rect.left,
+          width: rect.width,
+          zIndex: 9999,
+          maxHeight: `${Math.min(DROPDOWN_HEIGHT, spaceAbove)}px`,
+        });
+      } else {
+        setDropdownStyle({
+          position: "fixed",
+          top: rect.bottom + 4,
+          left: rect.left,
+          width: rect.width,
+          zIndex: 9999,
+          maxHeight: `${Math.min(DROPDOWN_HEIGHT, spaceBelow)}px`,
+        });
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) updatePosition();
+  }, [open, updatePosition]);
+
+  useEffect(() => {
+    if (!open) return;
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [open, updatePosition]);
+
+  function toggle(id: number) {
+    onChange(
+      value.includes(id) ? value.filter((x) => x !== id) : [...value, id],
+    );
+  }
+
+  function initials(name: string) {
+    return name
+      .split(" ")
+      .slice(0, 2)
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase();
+  }
+
+  const selectedUsers = users.filter((u) => value.includes(u.id));
+
+  return (
+    <div ref={ref} className="relative">
+      <div
+        ref={triggerRef}
+        className={cn(
+          "min-h-10 flex flex-wrap gap-1.5 items-center px-3 py-2 rounded-lg border cursor-pointer transition-all",
+          "bg-muted/30 border-border hover:border-primary/50",
+          open && "border-primary ring-2 ring-primary/20",
+        )}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {selectedUsers.length === 0 ? (
+          <span className="text-sm text-muted-foreground">{placeholder}</span>
+        ) : (
+          selectedUsers.map((u) => (
+            <span
+              key={u.id}
+              className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary border border-primary/20"
+            >
+              <span className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[9px] font-bold">
+                {initials(u.name)}
+              </span>
+              {u.name.split(" ")[0]}
+              <button
+                className="ml-0.5 opacity-60 hover:opacity-100 rounded-full hover:bg-primary/20 p-0.5"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggle(u.id);
+                }}
+              >
+                <X className="w-2.5 h-2.5" />
+              </button>
+            </span>
+          ))
+        )}
+        <span className="ml-auto text-muted-foreground/50 text-xs pl-1">
+          {open ? "▲" : "▼"}
+        </span>
+      </div>
+
+      {open && (
+        <div
+          style={dropdownStyle}
+          className="rounded-xl border border-border bg-popover shadow-xl overflow-hidden"
+        >
+          <div className="px-3 py-2 border-b border-border bg-muted/30">
+            <p className="text-xs text-muted-foreground font-medium">
+              {selectedUsers.length === 0
+                ? "Select who can approve at this level"
+                : `${selectedUsers.length} person${selectedUsers.length > 1 ? "s" : ""} selected — click to add/remove`}
+            </p>
+          </div>
+          <div className="max-h-72 overflow-y-auto">
+            {users.length === 0 ? (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                No users available
+              </div>
+            ) : (
+              users.map((u) => {
+                const sel = value.includes(u.id);
+                return (
+                  <div
+                    key={u.id}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm transition-colors",
+                      "hover:bg-muted/60",
+                      sel && "bg-primary/5",
+                    )}
+                    onClick={() => toggle(u.id)}
+                  >
+                    <span
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
+                      style={{
+                        background: `hsl(${(u.id * 47) % 360} 60% 40% / 0.2)`,
+                        color: `hsl(${(u.id * 47) % 360} 60% 55%)`,
+                      }}
+                    >
+                      {initials(u.name)}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-foreground truncate">
+                        {u.name}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {u.role}
+                      </div>
+                    </div>
+                    <div
+                      className={cn(
+                        "w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all",
+                        sel ? "border-primary bg-primary" : "border-border",
+                      )}
+                    >
+                      {sel && <Check className="w-3 h-3 text-white" />}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── AddLevelRow ──────────────────────────────────────────────────────────────
+
+function AddLevelRow({
+  users,
+  levelNumber,
+  onConfirm,
+  onCancel,
+}: {
+  users: User[];
+  levelNumber: number;
+  onConfirm: (level: Omit<ApprovalLevel, "id">) => void;
+  onCancel: () => void;
+}) {
+  const [label, setLabel] = useState("");
+  const [userIds, setUserIds] = useState<number[]>([]);
+  const labelRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    labelRef.current?.focus();
+  }, []);
+
+  function confirm() {
+    if (!label.trim()) {
+      labelRef.current?.focus();
+      return;
+    }
+    onConfirm({ label: label.trim(), userIds });
+  }
+
+  return (
+    <div className="rounded-xl border-2 border-primary/30 bg-primary/3 p-4 space-y-3">
+      <div className="flex items-center gap-2 mb-1">
+        <div className="w-6 h-6 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center">
+          {levelNumber}
+        </div>
+        <span className="text-sm font-semibold text-foreground">
+          New approval step
+        </span>
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+            What is this step called?{" "}
+            <span className="text-destructive">*</span>
+          </label>
+          <Input
+            ref={labelRef}
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="e.g. Site Manager, Finance Head, Director…"
+            className="h-9 text-sm"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") confirm();
+              if (e.key === "Escape") onCancel();
+            }}
+          />
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+            Who can approve at this step?
+          </label>
+          <UserMultiSelect
+            value={userIds}
+            onChange={setUserIds}
+            users={users}
+          />
+          <p className="text-[11px] text-muted-foreground mt-1">
+            You can assign multiple people — anyone assigned can approve unless
+            you chose "Everyone at once" above.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex gap-2 pt-1">
+        <Button
+          size="sm"
+          className="gap-1.5 bg-primary hover:bg-primary/90 text-white"
+          onClick={confirm}
+        >
+          <Check className="w-3.5 h-3.5" /> Add this step
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onCancel}
+          className="gap-1.5"
+        >
+          <X className="w-3.5 h-3.5" /> Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── LevelCard ────────────────────────────────────────────────────────────────
+
+function LevelCard({
+  level,
+  index,
+  total,
+  users,
+  onMoveUp,
+  onMoveDown,
+  onRemove,
+}: {
+  level: ApprovalLevel;
+  index: number;
+  total: number;
+  users: User[];
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onRemove: () => void;
+}) {
+  function initials(name: string) {
+    return name
+      .split(" ")
+      .slice(0, 2)
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase();
+  }
+
+  const levelUsers = users.filter((u) => level.userIds.includes(u.id));
+
+  return (
+    <div className="flex items-stretch gap-3">
+      {/* Step number + connector */}
+      <div className="flex flex-col items-center flex-shrink-0 w-8">
+        {index > 0 && <div className="w-0.5 h-3 bg-primary/30" />}
+        <div className="w-8 h-8 rounded-full bg-primary text-white text-sm font-bold flex items-center justify-center shadow-sm">
+          {index + 1}
+        </div>
+        {index < total - 1 && (
+          <div className="w-0.5 flex-1 bg-primary/30 mt-1" />
+        )}
+      </div>
+
+      {/* Card */}
+      <div className="flex-1 flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 mb-1 hover:border-primary/30 hover:shadow-sm transition-all">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-foreground">
+            {level.label}
+          </div>
+          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+            {levelUsers.length === 0 ? (
+              <span className="inline-flex items-center gap-1 text-[11px] text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-full px-2 py-0.5">
+                <AlertCircle className="w-3 h-3" /> No one assigned yet
+              </span>
+            ) : (
+              levelUsers.map((u) => (
+                <span
+                  key={u.id}
+                  className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full text-[11px] bg-muted text-muted-foreground border border-border"
+                >
+                  <span
+                    className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
+                    style={{
+                      background: `hsl(${(u.id * 47) % 360} 60% 40% / 0.25)`,
+                      color: `hsl(${(u.id * 47) % 360} 60% 55%)`,
+                    }}
+                  >
+                    {initials(u.name)}
+                  </span>
+                  {u.name}
+                </span>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {total > 1 && (
+            <div className="flex flex-col gap-0.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                disabled={index === 0}
+                onClick={onMoveUp}
+                title="Move up"
+              >
+                <ChevronUp className="w-3.5 h-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                disabled={index === total - 1}
+                onClick={onMoveDown}
+                title="Move down"
+              >
+                <ChevronDown className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10 ml-1"
+            onClick={onRemove}
+            title="Remove this step"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Step wrapper ─────────────────────────────────────────────────────────────
+
+function FormStep({
+  number,
+  title,
+  subtitle,
+  children,
+}: {
+  number: number;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex gap-4">
+      <div className="flex flex-col items-center flex-shrink-0">
+        <div className="w-7 h-7 rounded-full bg-primary/10 border-2 border-primary/30 text-primary text-xs font-bold flex items-center justify-center">
+          {number}
+        </div>
+        <div className="w-0.5 flex-1 bg-border/50 mt-1" />
+      </div>
+      <div className="flex-1 pb-6">
+        <div className="mb-3">
+          <div className="text-sm font-semibold text-foreground">{title}</div>
+          {subtitle && (
+            <div className="text-xs text-muted-foreground mt-0.5">
+              {subtitle}
+            </div>
+          )}
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── ConfigForm ───────────────────────────────────────────────────────────────
+
+function ConfigForm({
+  initial,
+  users,
+  onSave,
+  onCancel,
+  saving,
+}: {
+  initial?: ApprovalWorkflow;
+  users: User[];
+  onSave: (data: Omit<ApprovalWorkflow, "id" | "createdAt">) => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [type, setType] = useState<"sequential" | "any" | "parallel">(
+    initial?.type ?? "sequential",
+  );
+  const [selectedModules, setSelectedModules] = useState<string[]>(
+    initial?.modules ?? [],
+  );
+  const [levels, setLevels] = useState<ApprovalLevel[]>(initial?.levels ?? []);
+  const [addingLevel, setAddingLevel] = useState(false);
+  const nextId = useRef(Date.now());
+
+  function toggleModule(id: string) {
+    setSelectedModules((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
+  function addLevel(lv: Omit<ApprovalLevel, "id">) {
+    setLevels((prev) => [...prev, { ...lv, id: nextId.current++ }]);
+    setAddingLevel(false);
+  }
+
+  function moveUp(idx: number) {
+    setLevels((prev) => {
+      const a = [...prev];
+      [a[idx - 1], a[idx]] = [a[idx], a[idx - 1]];
+      return a;
+    });
+  }
+
+  function moveDown(idx: number) {
+    setLevels((prev) => {
+      const a = [...prev];
+      [a[idx], a[idx + 1]] = [a[idx + 1], a[idx]];
+      return a;
+    });
+  }
+
+  function submit() {
+    if (!name.trim()) {
+      toast.error("Please give this approval rule a name");
+      return;
+    }
+    if (!selectedModules.length) {
+      toast.error("Please select at least one area where this applies");
+      return;
+    }
+    if (!levels.length) {
+      toast.error("Please add at least one approval step");
+      return;
+    }
+    onSave({
+      name: name.trim(),
+      type,
+      modules: selectedModules,
+      levels,
+      active: initial?.active ?? true,
+    });
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20 rounded-t-xl">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">
+            {initial ? "Edit Approval Rule" : "Create a New Approval Rule"}
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Follow the steps below — it only takes a minute
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5 text-xs"
+          onClick={onCancel}
+        >
+          <X className="w-3.5 h-3.5" /> Cancel
+        </Button>
+      </div>
+
+      <div className="p-6">
+        {/* Step 1: Name */}
+        <FormStep
+          number={1}
+          title="Give this rule a name"
+          subtitle="Something clear so your team knows what it's for"
+        >
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Site Manager Approval, Finance Sign-off…"
+            className="h-10 text-sm max-w-md"
+          />
+        </FormStep>
+
+        {/* Step 2: Where it applies */}
+        <FormStep
+          number={2}
+          title="Where does this rule apply?"
+          subtitle="Choose the areas of the system that need this approval before proceeding"
+        >
+          <ModuleGroupSelector
+            selectedModules={selectedModules}
+            toggleModule={toggleModule}
+          />
+          {selectedModules.length > 0 && (
+            <p className="text-xs text-primary mt-2 font-medium">
+              ✓ {selectedModules.length} area
+              {selectedModules.length > 1 ? "s" : ""} selected
+            </p>
+          )}
+        </FormStep>
+
+        {/* Step 3: Approval style */}
+        <FormStep
+          number={3}
+          title="How should approvals work?"
+          subtitle="Choose how approvers respond when a request comes in"
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {APPROVAL_TYPES.map((t) => {
+              const Icon = t.icon;
+              const selected = type === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setType(t.id)}
+                  className={cn(
+                    "text-left p-4 rounded-xl border-2 transition-all",
+                    selected
+                      ? "border-primary bg-primary/5 shadow-sm"
+                      : "border-border bg-muted/20 hover:border-primary/30 hover:bg-muted/40",
+                  )}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <div
+                      className={cn(
+                        "w-7 h-7 rounded-lg flex items-center justify-center",
+                        selected
+                          ? "bg-primary/15 text-primary"
+                          : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      <Icon className="w-4 h-4" />
+                    </div>
+                    <span
+                      className={cn(
+                        "text-sm font-semibold",
+                        selected ? "text-primary" : "text-foreground",
+                      )}
+                    >
+                      {t.label}
+                    </span>
+                    {selected && (
+                      <Check className="w-4 h-4 text-primary ml-auto" />
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {t.desc}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground/60 mt-2 font-mono">
+                    {t.example}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </FormStep>
+
+        {/* Step 4: Approval steps */}
+        <div className="flex gap-4">
+          <div className="flex flex-col items-center flex-shrink-0">
+            <div className="w-7 h-7 rounded-full bg-primary/10 border-2 border-primary/30 text-primary text-xs font-bold flex items-center justify-center">
+              4
+            </div>
+          </div>
+          <div className="flex-1 pb-2">
+            <div className="mb-3">
+              <div className="text-sm font-semibold text-foreground">
+                Who needs to approve, and in what order?
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                Add approval steps — each step is one person or group that must
+                sign off
+              </div>
+            </div>
+
+            {/* Empty state */}
+            {levels.length === 0 && !addingLevel && (
+              <div className="rounded-xl border-2 border-dashed border-border bg-muted/10 px-5 py-8 text-center mb-3">
+                <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-3">
+                  <Users className="w-6 h-6 text-muted-foreground/40" />
+                </div>
+                <p className="text-sm font-medium text-foreground mb-1">
+                  No approval steps yet
+                </p>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Click the button below to add your first approver.
+                  <br />
+                  Example: Step 1 → Site Manager, Step 2 → Finance Head
+                </p>
+              </div>
+            )}
+
+            {/* Level cards */}
+            <div className="space-y-0">
+              {levels.map((lv, idx) => (
+                <LevelCard
+                  key={lv.id}
+                  level={lv}
+                  index={idx}
+                  total={levels.length}
+                  users={users}
+                  onMoveUp={() => moveUp(idx)}
+                  onMoveDown={() => moveDown(idx)}
+                  onRemove={() =>
+                    setLevels((prev) => prev.filter((_, i) => i !== idx))
+                  }
+                />
+              ))}
+
+              {/* Arrow between last card and add row */}
+              {levels.length > 0 && !addingLevel && (
+                <div className="flex items-center gap-3 py-1 pl-3.5">
+                  <div className="w-0.5 h-5 bg-primary/30" />
+                </div>
+              )}
+
+              {addingLevel ? (
+                <AddLevelRow
+                  users={users}
+                  levelNumber={levels.length + 1}
+                  onConfirm={addLevel}
+                  onCancel={() => setAddingLevel(false)}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setAddingLevel(true)}
+                  className={cn(
+                    "inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border-2 border-dashed text-sm transition-all",
+                    "border-border text-muted-foreground hover:border-primary hover:text-primary hover:bg-primary/5",
+                    levels.length > 0 && "ml-11",
+                  )}
+                >
+                  <Plus className="w-4 h-4" />
+                  {levels.length === 0
+                    ? "Add first approval step"
+                    : "Add another step"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-border bg-muted/10 rounded-b-xl">
+        <p className="text-xs text-muted-foreground">
+          {levels.length > 0 && selectedModules.length > 0
+            ? `✓ Ready — ${levels.length} step${levels.length > 1 ? "s" : ""} across ${selectedModules.length} area${selectedModules.length > 1 ? "s" : ""}`
+            : "Fill in all steps above to save"}
+        </p>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={onCancel}>
+            Discard
+          </Button>
+          <Button
+            size="sm"
+            className="gap-1.5 gradient-accent text-white font-semibold px-5"
+            onClick={submit}
+            disabled={saving}
+          >
+            {saving ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <CheckCircle2 className="w-3.5 h-3.5" />
+            )}
+            {initial ? "Save Changes" : "Save Rule"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Module group selector ─────────────────────────────────────────────────────
+
+function ModuleGroupSelector({
+  selectedModules,
+  toggleModule,
+}: {
+  selectedModules: string[];
+  toggleModule: (id: string) => void;
+}) {
+  const [openGroups, setOpenGroups] = React.useState<string[]>(() =>
+    MODULE_GROUPS.filter((g) =>
+      g.modules.some((mid) => selectedModules.includes(mid)),
+    ).map((g) => g.id),
+  );
+
+  const toggleGroup = (gid: string) =>
+    setOpenGroups((prev) =>
+      prev.includes(gid) ? prev.filter((x) => x !== gid) : [...prev, gid],
+    );
+
+  const toggleGroupAll = (g: (typeof MODULE_GROUPS)[number]) => {
+    const allSelected = g.modules.every((mid) => selectedModules.includes(mid));
+    g.modules.forEach((mid) => {
+      const isSelected = selectedModules.includes(mid);
+      if (allSelected && isSelected) toggleModule(mid);
+      else if (!allSelected && !isSelected) toggleModule(mid);
+    });
+  };
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {MODULE_GROUPS.map((group) => {
+        const isOpen = openGroups.includes(group.id);
+        const groupMods = MODULE_OPTIONS.filter((m) =>
+          (group.modules as readonly string[]).includes(m.id),
+        );
+        const selectedCount = groupMods.filter((m) =>
+          selectedModules.includes(m.id),
+        ).length;
+        const allSelected = selectedCount === groupMods.length;
+        const someSelected = selectedCount > 0 && !allSelected;
+
+        return (
+          <div key={group.id} className="relative">
+            <div
+              className={cn(
+                "inline-flex items-center rounded-lg border transition-all overflow-visible",
+                someSelected || allSelected
+                  ? "border-primary bg-primary/10"
+                  : "border-border bg-muted/30",
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => toggleGroupAll(group)}
+                title={allSelected ? "Deselect all" : "Select all"}
+                className={cn(
+                  "flex items-center gap-1.5 pl-3 pr-2 py-2 text-sm transition-colors",
+                  allSelected
+                    ? "text-primary font-medium"
+                    : someSelected
+                      ? "text-primary/70 font-medium"
+                      : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <span className="text-base">{group.icon}</span>
+                <span>{group.label}</span>
+                {selectedCount > 0 && (
+                  <span className="text-[10px] font-bold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full">
+                    {selectedCount}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => toggleGroup(group.id)}
+                className={cn(
+                  "px-2 py-2 border-l transition-colors",
+                  isOpen
+                    ? "border-primary/30 text-primary"
+                    : "border-border text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <ChevronDown
+                  className={cn(
+                    "w-3.5 h-3.5 transition-transform duration-200",
+                    isOpen && "rotate-180",
+                  )}
+                />
+              </button>
+            </div>
+
+            {isOpen && (
+              <div className="absolute top-full left-0 mt-1 z-20 bg-card border border-border rounded-xl shadow-xl py-1 min-w-[200px]">
+                {groupMods.map((m) => {
+                  const active = selectedModules.includes(m.id);
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => toggleModule(m.id)}
+                      title={m.desc}
+                      className={cn(
+                        "w-full flex items-center gap-2.5 px-3 py-2 text-sm transition-colors text-left",
+                        active
+                          ? "text-primary bg-primary/5"
+                          : "text-foreground hover:bg-muted/50",
+                      )}
+                    >
+                      <span className="text-base">{m.icon}</span>
+                      <span className="flex-1">{m.label}</span>
+                      {active && (
+                        <Check className="w-3.5 h-3.5 shrink-0 text-primary" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
 export default function ApprovalSetup() {
-  const queryClient = useQueryClient();
-  const [openCreate, setOpenCreate] = useState(false);
-  const [openEdit, setOpenEdit] = useState(false);
-  const [editingWorkflow, setEditingWorkflow] = useState<Workflow | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<
-    "all" | "Active" | "Inactive"
-  >("all");
+  const qc = useQueryClient();
   const { canDoAction } = useAuth() as any;
 
-  const { data: workflows = [], isLoading } = useQuery<Workflow[]>({
+  const [mode, setMode] = useState<"list" | "new" | "edit">("list");
+  const [editing, setEditing] = useState<ApprovalWorkflow | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const { data: workflows = [], isLoading } = useQuery<ApprovalWorkflow[]>({
     queryKey: ["approval-workflows"],
     queryFn: fetchWorkflows,
-    staleTime: 30_000, // don't refetch for 30s after a successful load
-    refetchOnWindowFocus: false, // stop refetching every tab switch
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    select: (data) => (Array.isArray(data) ? data : []),
   });
 
-  const createForm = useForm<FormInput>({
-    resolver: zodResolver(formSchema),
-    defaultValues: defaultFormValues,
+  const { data: users = [] } = useQuery<User[]>({
+    queryKey: ["users"],
+    queryFn: getUsers,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
-  const editForm = useForm<FormInput>({
-    resolver: zodResolver(formSchema),
-    defaultValues: defaultFormValues,
-  });
-
-  const filteredWorkflows = useMemo(() => {
-    return workflows.filter((w) => {
-      const matchSearch =
-        w.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (w.module || "").toLowerCase().includes(searchTerm.toLowerCase());
-      const matchStatus = statusFilter === "all" || w.status === statusFilter;
-      return matchSearch && matchStatus;
-    });
-  }, [workflows, searchTerm, statusFilter]);
-
-  // ── Handlers ──────────────────────────────────────────────────────────────────
-  const onCreateSubmit = useCallback(
-    async (raw: FormInput) => {
-      const data: FormData = {
-        ...raw,
-        approvers: raw.approvers.split(",").map((s) => s.trim()).filter(Boolean),
-      };
+  const handleSave = useCallback(
+    async (data: Omit<ApprovalWorkflow, "id" | "createdAt">) => {
+      setSaving(true);
       try {
-        await apiCreate(data);
-        toast.success("Workflow created successfully");
-        queryClient.invalidateQueries({ queryKey: ["approval-workflows"] });
-        createForm.reset(defaultFormValues);
-        setOpenCreate(false);
+        await apiSave(data, editing?.id);
+        toast.success(
+          editing ? "Approval rule updated" : "Approval rule created",
+        );
+        qc.invalidateQueries({ queryKey: ["approval-workflows"] });
+        setMode("list");
+        setEditing(null);
       } catch (err: any) {
         toast.error(err.message);
+      } finally {
+        setSaving(false);
       }
     },
-    [createForm, queryClient],
+    [editing, qc],
   );
 
-  const onEditSubmit = useCallback(
-    async (raw: FormInput) => {
-      if (!editingWorkflow) return;
-      const data: FormData = {
-        ...raw,
-        approvers: raw.approvers.split(",").map((s) => s.trim()).filter(Boolean),
-      };
-      try {
-        await apiUpdate(editingWorkflow.id, data);
-        toast.success("Workflow updated successfully");
-        queryClient.invalidateQueries({ queryKey: ["approval-workflows"] });
-        editForm.reset(defaultFormValues);
-        setOpenEdit(false);
-        setEditingWorkflow(null);
-      } catch (err: any) {
-        toast.error(err.message);
-      }
-    },
-    [editingWorkflow, editForm, queryClient],
-  );
-
-  const toggleStatus = useCallback(
+  const handleToggle = useCallback(
     async (id: number) => {
       try {
         await apiToggle(id);
-        toast.success("Workflow status updated");
-        queryClient.invalidateQueries({ queryKey: ["approval-workflows"] });
+        qc.invalidateQueries({ queryKey: ["approval-workflows"] });
       } catch (err: any) {
         toast.error(err.message);
       }
     },
-    [queryClient],
+    [qc],
   );
 
-  const deleteWorkflow = useCallback(
+  const handleDelete = useCallback(
     async (id: number) => {
-      if (!confirm("Delete this workflow?")) return;
+      if (
+        !confirm(
+          "Are you sure you want to delete this approval rule? This cannot be undone.",
+        )
+      )
+        return;
       try {
         await apiDelete(id);
-        toast.success("Workflow deleted");
-        queryClient.invalidateQueries({ queryKey: ["approval-workflows"] });
+        toast.success("Approval rule deleted");
+        qc.invalidateQueries({ queryKey: ["approval-workflows"] });
       } catch (err: any) {
         toast.error(err.message);
       }
     },
-    [queryClient],
+    [qc],
   );
 
-  const openEditDialog = useCallback(
-    (w: Workflow) => {
-      setEditingWorkflow(w);
-      editForm.reset({
-        name: w.name,
-        module: w.module || "",
-        levels: w.levels,
-        approvers: w.approvers.join(", "),
-        status: w.status,
-        description: w.description || "",
-      });
-      setOpenEdit(true);
-    },
-    [editForm],
-  );
-
-  // ── Shared form fields ─────────────────────────────────────────────────────────
-  const renderFormFields = (form: UseFormReturn<FormInput>) => (
-    <>
-      <FormField
-        control={form.control}
-        name="name"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Workflow Name</FormLabel>
-            <FormControl>
-              <Input placeholder="e.g. Purchase Approval" {...field} />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-
-      <FormField
-        control={form.control}
-        name="module"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Module</FormLabel>
-            <Select onValueChange={field.onChange} value={field.value}>
-              <FormControl>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select module" />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                {MODULE_OPTIONS.map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {m}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-
-      <FormField
-        control={form.control}
-        name="levels"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Approval Levels</FormLabel>
-            <FormControl>
-              <Input
-                type="number"
-                min={1}
-                max={5}
-                {...field}
-                onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-
-      <FormField
-        control={form.control}
-        name="approvers"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Approvers (comma-separated roles)</FormLabel>
-            <FormControl>
-              <Input placeholder="e.g. Manager, Director, CFO" {...field} />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-
-      <FormField
-        control={form.control}
-        name="status"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Status</FormLabel>
-            <Select onValueChange={field.onChange} value={field.value}>
-              <FormControl>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <SelectItem value="Active">Active</SelectItem>
-                <SelectItem value="Inactive">Inactive</SelectItem>
-              </SelectContent>
-            </Select>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-
-      <FormField
-        control={form.control}
-        name="description"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Description</FormLabel>
-            <FormControl>
-              <Textarea placeholder="Optional description..." {...field} />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-    </>
-  );
-
-  if (isLoading)
+  if (isLoading) {
     return (
       <div className="p-6 space-y-4 animate-pulse">
         <div className="h-6 w-48 bg-muted rounded" />
-        <div className="grid grid-cols-4 gap-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-24 bg-muted rounded-xl" />
-          ))}
-        </div>
         <div className="h-64 bg-muted rounded-xl" />
       </div>
     );
+  }
+
+  const canCreate = canDoAction("admin_approval_setup" as PageKey, "create");
+  const canEdit = canDoAction("admin_approval_setup" as PageKey, "edit");
+  const canDel = canDoAction("admin_approval_setup" as PageKey, "delete");
 
   return (
     <>
       <Breadcrumbs items={["Admin", "Approval", "Approval Setup"]} />
-      <div className="relative space-y-8 mt-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-            <CheckCircle className="text-primary" /> Approval Setup
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Configure approval workflows and levels
-          </p>
+
+      <div className="relative space-y-6 mt-6">
+        {/* Page header */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+              <ShieldCheck className="text-primary w-5 h-5" />
+              Approval Rules
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1 max-w-lg">
+              Control who needs to approve requests before they go through —
+              like purchase orders, expenses, and more.
+            </p>
+          </div>
+          {mode === "list" && canCreate && (
+            <Button
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+              onClick={() => {
+                setEditing(null);
+                setMode("new");
+              }}
+            >
+              <Plus className="h-4 w-4" /> New Approval Rule
+            </Button>
+          )}
         </div>
-        {canDoAction("admin_approval_setup" as PageKey, "create") && (
-          <Button
-            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-            onClick={() => {
-              createForm.reset(defaultFormValues);
-              setOpenCreate(true);
+
+        {/* Form */}
+        {(mode === "new" || mode === "edit") && (
+          <ConfigForm
+            initial={mode === "edit" ? (editing ?? undefined) : undefined}
+            users={users}
+            onSave={handleSave}
+            onCancel={() => {
+              setMode("list");
+              setEditing(null);
             }}
-          >
-            <Plus className="h-4 w-4" /> New Workflow
-          </Button>
+            saving={saving}
+          />
+        )}
+
+        {/* List */}
+        {mode === "list" && (
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="flex items-center gap-3 px-5 py-4 border-b border-border bg-muted/20">
+              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                <ShieldCheck className="w-4 h-4 text-primary" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-foreground">
+                  Your Approval Rules
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {workflows.length === 0
+                    ? "No rules set up yet"
+                    : `${workflows.length} rule${workflows.length > 1 ? "s" : ""} — toggle to turn them on or off`}
+                </div>
+              </div>
+            </div>
+
+            {workflows.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+                <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
+                  <ShieldCheck className="w-8 h-8 text-muted-foreground/30" />
+                </div>
+                <div className="text-base font-semibold text-foreground mb-1">
+                  No approval rules yet
+                </div>
+                <p className="text-sm text-muted-foreground mb-5 max-w-sm">
+                  Once you create a rule, any matching request will
+                  automatically be sent for approval before it's processed.
+                </p>
+                {canCreate && (
+                  <Button
+                    className="gradient-accent text-white gap-1.5 font-semibold"
+                    onClick={() => {
+                      setEditing(null);
+                      setMode("new");
+                    }}
+                  >
+                    <Plus className="w-4 h-4" /> Create your first rule
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="divide-y divide-border/60">
+                {workflows.map((wf) => {
+                  const typeInfo = APPROVAL_TYPES.find((t) => t.id === wf.type);
+                  const TypeIcon = typeInfo?.icon ?? ArrowDown;
+                  return (
+                    <div
+                      key={wf.id}
+                      className={cn(
+                        "flex items-center gap-4 px-5 py-4 transition-colors",
+                        wf.active
+                          ? "hover:bg-muted/20"
+                          : "opacity-60 hover:bg-muted/10",
+                      )}
+                    >
+                      {/* Active indicator */}
+                      <div
+                        className={cn(
+                          "w-2 h-2 rounded-full flex-shrink-0",
+                          wf.active ? "bg-green-500" : "bg-muted-foreground/30",
+                        )}
+                      />
+
+                      {/* Main info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-semibold text-foreground">
+                            {wf.name}
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full border border-border">
+                            <TypeIcon className="w-3 h-3" />
+                            {typeInfo?.label}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                          {/* Modules */}
+                          <div className="flex flex-wrap gap-1">
+                            {wf.modules.slice(0, 4).map((mid) => {
+                              const m = MODULE_OPTIONS.find(
+                                (x) => x.id === mid,
+                              );
+                              return (
+                                <span
+                                  key={mid}
+                                  className="text-[11px] px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground"
+                                >
+                                  {m?.icon} {m?.label ?? mid}
+                                </span>
+                              );
+                            })}
+                            {wf.modules.length > 4 && (
+                              <span className="text-[11px] px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground">
+                                +{wf.modules.length - 4} more
+                              </span>
+                            )}
+                          </div>
+                          {/* Levels summary */}
+                          <span className="text-[11px] text-muted-foreground">
+                            {wf.levels.length} approval step
+                            {wf.levels.length !== 1 ? "s" : ""}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Toggle + actions */}
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        <div className="flex flex-col items-center gap-0.5">
+                          <Switch
+                            checked={wf.active}
+                            onCheckedChange={() => handleToggle(wf.id)}
+                            disabled={!canEdit}
+                          />
+                          <span className="text-[10px] text-muted-foreground">
+                            {wf.active ? "On" : "Off"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 border-l border-border pl-3">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                            disabled={!canEdit}
+                            title="Edit this rule"
+                            onClick={() => {
+                              setEditing(wf);
+                              setMode("edit");
+                            }}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            disabled={!canDel}
+                            title="Delete this rule"
+                            onClick={() => handleDelete(wf.id)}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
       </div>
-
-      {/* Create Dialog */}
-      <Dialog open={openCreate} onOpenChange={setOpenCreate}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>New Workflow</DialogTitle>
-            <DialogDescription>
-              Create a new approval workflow.
-            </DialogDescription>
-          </DialogHeader>
-          <Form {...createForm}>
-            <form
-              onSubmit={createForm.handleSubmit(onCreateSubmit)}
-              className="space-y-4"
-            >
-              {renderFormFields(createForm)}
-              <Button type="submit" className="w-full gradient-accent gap-2 font-semibold text-white text-sm h-auto py-2">
-                <Plus className="h-4 w-4" /> Create Workflow
-              </Button>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Dialog */}
-      <Dialog
-        open={openEdit}
-        onOpenChange={(open) => {
-          setOpenEdit(open);
-          if (!open) setEditingWorkflow(null);
-        }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Edit Workflow</DialogTitle>
-            <DialogDescription>
-              Update the approval workflow details.
-            </DialogDescription>
-          </DialogHeader>
-          <Form {...editForm}>
-            <form
-              onSubmit={editForm.handleSubmit(onEditSubmit)}
-              className="space-y-4"
-            >
-              {renderFormFields(editForm)}
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={
-                  !canDoAction("admin_approval_setup" as PageKey, "edit")
-                }
-              >
-                Save Changes
-              </Button>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:gap-6 mb-8 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Total Workflows
-            </CardTitle>
-            <CheckCircle className="h-5 w-5 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{workflows.length}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active</CardTitle>
-            <Shield className="h-5 w-5 text-green-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {workflows.filter((w) => w.status === "Active").length}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Avg Levels</CardTitle>
-            <Users className="h-5 w-5 text-blue-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {workflows.length
-                ? Math.round(
-                    workflows.reduce((a, b) => a + b.levels, 0) /
-                      workflows.length,
-                  )
-                : 0}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Needs Review</CardTitle>
-            <AlertCircle className="h-5 w-5 text-orange-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">0</div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Table */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>Approval Workflows</CardTitle>
-            <CardDescription>
-              Define multi-level approval chains
-            </CardDescription>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-            <div className="relative flex-1 min-w-0">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search workflows..."
-                className="pl-10 w-full"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <Select
-              value={statusFilter}
-              onValueChange={(v) => setStatusFilter(v as any)}
-            >
-              <SelectTrigger className="w-full sm:w-32">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="Active">Active</SelectItem>
-                <SelectItem value="Inactive">Inactive</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          {filteredWorkflows.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Search className="h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-semibold mb-1">No workflows found</h3>
-              <p className="text-muted-foreground mb-6">
-                Try adjusting your search or filter.
-              </p>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Workflow</TableHead>
-                  <TableHead>Module</TableHead>
-                  <TableHead>Levels</TableHead>
-                  <TableHead>Approvers</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredWorkflows.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell className="font-medium">{item.name}</TableCell>
-                    <TableCell>
-                      <span className="px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary border border-primary/20">
-                        {item.module}
-                      </span>
-                    </TableCell>
-                    <TableCell>{item.levels}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {item.approvers.join(" → ")}
-                    </TableCell>
-                    <TableCell>
-                      <Switch
-                        checked={item.status === "Active"}
-                        onCheckedChange={() => toggleStatus(item.id)}
-                        disabled={
-                          !canDoAction(
-                            "admin_approval_setup" as PageKey,
-                            "edit",
-                          )
-                        }
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          disabled={
-                            !canDoAction(
-                              "admin_approval_setup" as PageKey,
-                              "edit",
-                            )
-                          }
-                          onClick={() => openEditDialog(item)}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10"
-                          disabled={
-                            !canDoAction(
-                              "admin_approval_setup" as PageKey,
-                              "delete",
-                            )
-                          }
-                          onClick={() => deleteWorkflow(item.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-      </div>{/* end relative space-y-8 mt-6 */}
     </>
   );
 }

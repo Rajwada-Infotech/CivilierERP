@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { motion, useInView, useAnimation } from "framer-motion";
+import { motion, useInView, AnimatePresence } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -10,11 +10,8 @@ import {
   ClipboardList,
   Hammer,
   ArrowRight,
-  Ruler,
-  Cpu,
   ShieldCheck,
   BarChart3,
-  CircleDot,
   RefreshCw,
   AlertCircle,
   IndianRupee,
@@ -23,9 +20,19 @@ import {
   Users,
   Database,
   Ticket,
-  HardHat as EngineerHat,
   TriangleAlert,
   CheckCircle2,
+  TrendingUp,
+  Warehouse,
+  GitMerge,
+  FileText,
+  Banknote,
+  Receipt,
+  CreditCard,
+  ClipboardCheck,
+  Wrench,
+  LineChart,
+  Home,
 } from "lucide-react";
 import { formatINR } from "@/utils/formatCurrency";
 import {
@@ -36,40 +43,32 @@ import {
   type RecentPO,
   type ApprovalInboxItem,
   type TaskSummary,
-  type TicketSummaryData,
-  type EngineeringSummaryData,
-  type FollowupSummaryData,
 } from "@/api/homeDashboardApi";
 
 // ─── Animated Counter ─────────────────────────────────────────────────────────
-
 function AnimatedCounter({
   target,
-  duration = 1.8,
   prefix = "",
   suffix = "",
+  duration = 1.6,
 }: {
   target: number;
-  duration?: number;
   prefix?: string;
   suffix?: string;
+  duration?: number;
 }) {
   const [count, setCount] = useState(0);
   const ref = useRef<HTMLSpanElement>(null);
   const inView = useInView(ref, { once: true });
-  const prevTarget = useRef(0);
 
   useEffect(() => {
     if (!inView) return;
-    const from = prevTarget.current;
-    prevTarget.current = target;
     const start = Date.now();
     const tick = () => {
-      const elapsed = (Date.now() - start) / 1000;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setCount(Math.round(from + eased * (target - from)));
-      if (progress < 1) requestAnimationFrame(tick);
+      const t = Math.min((Date.now() - start) / 1000 / duration, 1);
+      const eased = 1 - Math.pow(1 - t, 4);
+      setCount(Math.round(eased * target));
+      if (t < 1) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
   }, [inView, target, duration]);
@@ -83,693 +82,281 @@ function AnimatedCounter({
   );
 }
 
-// ─── Blueprint Grid Background ────────────────────────────────────────────────
+// ─── Section label ────────────────────────────────────────────────────────────
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2.5 mb-5">
+      <div className="w-1 h-3.5 rounded-full bg-primary/70" />
+      <span className="font-heading text-[10px] font-bold uppercase tracking-[0.22em] text-muted-foreground">
+        {children}
+      </span>
+    </div>
+  );
+}
 
-function BlueprintGrid() {
+// ─── Module Group Card ────────────────────────────────────────────────────────
+// Each module gets a card that shows its key stats in a tight grid,
+// with a clickable header that navigates to the module.
+
+interface StatRow {
+  label: string;
+  value: string | number;
+  accent?: string;
+  icon?: React.ElementType;
+}
+interface ModuleCardProps {
+  title: string;
+  href: string;
+  icon: React.ElementType;
+  accent: string;
+  stats: StatRow[];
+  badge?: number;
+  badgeLabel?: string;
+  delay?: number;
+  loading?: boolean;
+}
+
+function ModuleCard({
+  title,
+  href,
+  icon: Icon,
+  accent,
+  stats,
+  badge,
+  badgeLabel,
+  delay = 0,
+  loading,
+}: ModuleCardProps) {
+  const navigate = useNavigate();
+  const ref = useRef(null);
+  const inView = useInView(ref, { once: true, margin: "-30px" });
+
+  return (
+    <motion.div
+      ref={ref}
+      initial={{ y: 40, opacity: 0 }}
+      animate={inView ? { y: 0, opacity: 1 } : {}}
+      transition={{ duration: 0.7, delay, ease: [0.16, 1, 0.3, 1] }}
+      className="group relative rounded-2xl border border-border/60 bg-card/60 backdrop-blur-sm overflow-hidden"
+    >
+      {/* Hover glow */}
+      <div
+        className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
+        style={{
+          background: `radial-gradient(ellipse at 50% -20%, ${accent}10 0%, transparent 60%)`,
+        }}
+      />
+
+      {/* Top accent line */}
+      <div
+        className="h-[2px] w-full"
+        style={{
+          background: `linear-gradient(90deg, ${accent}60 0%, ${accent}10 100%)`,
+        }}
+      />
+
+      {/* Header — clickable */}
+      <button
+        onClick={() => navigate(href)}
+        className="w-full flex items-center justify-between px-5 pt-4 pb-3 hover:bg-muted/20 transition-colors group/btn"
+      >
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl" style={{ background: `${accent}15` }}>
+            <Icon size={15} style={{ color: accent }} />
+          </div>
+          <span className="font-heading font-bold text-sm text-foreground tracking-tight">
+            {title}
+          </span>
+          {badge != null && badge > 0 && (
+            <span
+              className="px-1.5 py-0.5 text-[9px] font-black rounded-full"
+              style={{ background: `${accent}20`, color: accent }}
+            >
+              {badge} {badgeLabel}
+            </span>
+          )}
+        </div>
+        <ArrowRight
+          size={13}
+          className="text-muted-foreground/25 group-hover/btn:text-muted-foreground/60 group-hover/btn:translate-x-0.5 transition-all"
+        />
+      </button>
+
+      {/* Stats grid */}
+      <div className="px-5 pb-4 grid grid-cols-2 gap-x-4 gap-y-3">
+        {loading
+          ? Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="animate-pulse space-y-1.5">
+                <div className="h-5 w-12 bg-muted rounded" />
+                <div className="h-2.5 w-16 bg-muted rounded" />
+              </div>
+            ))
+          : stats.map((s, i) => (
+              <div key={i} className="flex flex-col">
+                <div className="flex items-baseline gap-1">
+                  <span
+                    className="font-heading font-bold text-xl tracking-tighter tabular-nums"
+                    style={{ color: s.accent ?? "hsl(var(--foreground))" }}
+                  >
+                    {typeof s.value === "number" ? (
+                      <AnimatedCounter target={s.value} />
+                    ) : (
+                      s.value
+                    )}
+                  </span>
+                </div>
+                <span className="text-[10px] font-medium text-muted-foreground/60 leading-tight mt-0.5 flex items-center gap-1">
+                  {s.icon && <s.icon size={9} className="shrink-0" />}
+                  {s.label}
+                </span>
+              </div>
+            ))}
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── Approval & Task Feed ─────────────────────────────────────────────────────
+function FeedItem({
+  item,
+  i,
+  total,
+}: {
+  item: {
+    label: string;
+    sub: string;
+    icon: React.ElementType;
+    color: string;
+    time?: string;
+  };
+  i: number;
+  total: number;
+}) {
+  return (
+    <motion.div
+      initial={{ x: 16, opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      transition={{ duration: 0.45, delay: 0.8 + i * 0.07, ease: "easeOut" }}
+      className="flex items-start gap-3 py-3 border-b border-border/30 last:border-0"
+    >
+      <div className="flex flex-col items-center shrink-0 mt-0.5">
+        <div
+          className="w-[22px] h-[22px] rounded-full flex items-center justify-center"
+          style={{ background: `${item.color}18` }}
+        >
+          <item.icon size={11} style={{ color: item.color }} />
+        </div>
+        {i < total - 1 && (
+          <div className="w-px bg-border/30 flex-1 mt-1 min-h-[10px]" />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-semibold text-foreground leading-snug">
+          {item.label}
+        </p>
+        <p className="text-[10px] text-muted-foreground/50 mt-0.5 truncate">
+          {item.sub}
+        </p>
+      </div>
+      {item.time && (
+        <span className="text-[10px] text-muted-foreground/30 shrink-0 font-mono tabular-nums mt-0.5">
+          {item.time}
+        </span>
+      )}
+    </motion.div>
+  );
+}
+
+// ─── Blueprint background ─────────────────────────────────────────────────────
+function BgGrid() {
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden">
       <svg
-        className="absolute inset-0 w-full h-full opacity-[0.025]"
+        className="absolute inset-0 w-full h-full opacity-[0.02]"
         xmlns="http://www.w3.org/2000/svg"
       >
         <defs>
-          <pattern
-            id="bp-sm"
-            width="40"
-            height="40"
-            patternUnits="userSpaceOnUse"
-          >
+          <pattern id="g1" width="48" height="48" patternUnits="userSpaceOnUse">
             <path
-              d="M 40 0 L 0 0 0 40"
+              d="M 48 0 L 0 0 0 48"
               fill="none"
               stroke="currentColor"
-              strokeWidth="0.6"
+              strokeWidth="0.5"
             />
           </pattern>
           <pattern
-            id="bp-lg"
-            width="200"
-            height="200"
+            id="g2"
+            width="240"
+            height="240"
             patternUnits="userSpaceOnUse"
           >
             <path
-              d="M 200 0 L 0 0 0 200"
+              d="M 240 0 L 0 0 0 240"
               fill="none"
               stroke="currentColor"
-              strokeWidth="1.2"
+              strokeWidth="1"
             />
           </pattern>
         </defs>
         <rect
           width="100%"
           height="100%"
-          fill="url(#bp-sm)"
+          fill="url(#g1)"
           className="text-primary"
         />
         <rect
           width="100%"
           height="100%"
-          fill="url(#bp-lg)"
+          fill="url(#g2)"
           className="text-primary"
         />
       </svg>
-      <div className="absolute top-[-15%] left-[-5%] w-[45%] h-[55%] bg-primary/8 blur-[160px] rounded-full" />
-      <div className="absolute bottom-[-10%] right-[-5%] w-[40%] h-[45%] bg-violet-500/6 blur-[140px] rounded-full" />
-      <div className="absolute top-[40%] left-[30%] w-[30%] h-[35%] bg-emerald-500/4 blur-[130px] rounded-full" />
+      <div className="absolute -top-32 -left-24 w-[50%] h-[50%] bg-primary/6 blur-[180px] rounded-full" />
+      <div className="absolute bottom-0 right-0 w-[35%] h-[40%] bg-violet-500/5 blur-[150px] rounded-full" />
     </div>
   );
 }
 
-// ─── Crane / Building SVG ─────────────────────────────────────────────────────
-
-function StructureSVG() {
-  const controls = useAnimation();
-  useEffect(() => {
-    controls.start({ pathLength: 1, opacity: 1 });
-  }, [controls]);
-
-  const draw = (delay: number, dur = 1.8) => ({
-    initial: { pathLength: 0, opacity: 0 },
-    animate: controls,
-    transition: {
-      pathLength: { delay, duration: dur, ease: "easeInOut" as any },
-      opacity: { delay, duration: 0.3 },
-    },
-  });
-
-  return (
-    <div className="absolute right-0 top-0 w-[42%] h-full pointer-events-none overflow-hidden opacity-[0.055]">
-      <svg
-        viewBox="0 0 500 900"
-        className="absolute right-0 top-0 h-full"
-        fill="none"
-      >
-        <motion.line
-          x1="260"
-          y1="60"
-          x2="460"
-          y2="60"
-          stroke="hsl(var(--primary))"
-          strokeWidth="3"
-          {...draw(0)}
-        />
-        <motion.line
-          x1="260"
-          y1="60"
-          x2="80"
-          y2="60"
-          stroke="hsl(var(--primary))"
-          strokeWidth="2"
-          {...draw(0.3)}
-        />
-        <motion.line
-          x1="260"
-          y1="60"
-          x2="260"
-          y2="820"
-          stroke="hsl(var(--primary))"
-          strokeWidth="3.5"
-          {...draw(0.5, 2.2)}
-        />
-        <motion.line
-          x1="260"
-          y1="60"
-          x2="420"
-          y2="220"
-          stroke="hsl(var(--primary))"
-          strokeWidth="1.5"
-          {...draw(0.9)}
-        />
-        <motion.line
-          x1="260"
-          y1="60"
-          x2="100"
-          y2="220"
-          stroke="hsl(var(--primary))"
-          strokeWidth="1.5"
-          {...draw(1.1)}
-        />
-        <motion.line
-          x1="380"
-          y1="60"
-          x2="380"
-          y2="300"
-          stroke="hsl(var(--primary))"
-          strokeWidth="1"
-          strokeDasharray="4 4"
-          {...draw(1.5)}
-        />
-        <motion.rect
-          x="340"
-          y="420"
-          width="120"
-          height="400"
-          stroke="hsl(var(--primary))"
-          strokeWidth="2"
-          {...draw(1.3, 1.5)}
-        />
-        <motion.rect
-          x="100"
-          y="540"
-          width="100"
-          height="280"
-          stroke="hsl(var(--primary))"
-          strokeWidth="1.5"
-          {...draw(1.5, 1.4)}
-        />
-        <motion.rect
-          x="40"
-          y="620"
-          width="55"
-          height="200"
-          stroke="hsl(var(--primary))"
-          strokeWidth="1"
-          {...draw(1.7, 1.2)}
-        />
-        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-          <motion.line
-            key={i}
-            x1="340"
-            y1={420 + i * 56}
-            x2="460"
-            y2={420 + i * 56}
-            stroke="hsl(var(--primary))"
-            strokeWidth="0.7"
-            {...draw(1.9 + i * 0.07, 0.7)}
-          />
-        ))}
-        {[0, 1, 2, 3].map((i) => (
-          <motion.line
-            key={i}
-            x1="100"
-            y1={540 + i * 68}
-            x2="200"
-            y2={540 + i * 68}
-            stroke="hsl(var(--primary))"
-            strokeWidth="0.6"
-            {...draw(2.0 + i * 0.07, 0.7)}
-          />
-        ))}
-        <motion.line
-          x1="0"
-          y1="820"
-          x2="500"
-          y2="820"
-          stroke="hsl(var(--primary))"
-          strokeWidth="2.5"
-          {...draw(2.2, 1)}
-        />
-      </svg>
-    </div>
-  );
-}
-
-// ─── Stat Card ────────────────────────────────────────────────────────────────
-
-interface StatDef {
-  label: string;
-  numericValue: number;
-  unitSuffix?: string;
-  prefix?: string;
-  icon: React.ElementType;
-  color: string;
-  glow: string;
-  description: string;
-  delay: number;
-  loading?: boolean;
-}
-
-function StatCard({ s }: { s: StatDef }) {
-  const ref = useRef(null);
-  const inView = useInView(ref, { once: true, margin: "-40px" });
-
-  return (
-    <motion.div
-      ref={ref}
-      initial={{ y: 55, opacity: 0, scale: 0.93 }}
-      animate={inView ? { y: 0, opacity: 1, scale: 1 } : {}}
-      transition={{ duration: 0.85, delay: s.delay, ease: [0.16, 1, 0.3, 1] }}
-      whileHover={{ y: -5, scale: 1.025, transition: { duration: 0.25 } }}
-      className="relative group overflow-hidden rounded-2xl border border-border/60 bg-card/60 backdrop-blur-md p-5 cursor-default"
-    >
-      <motion.div
-        className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"
-        style={{
-          background: `radial-gradient(ellipse at 50% 0%, ${s.glow}14 0%, transparent 65%)`,
-        }}
-      />
-
-      <div className="flex items-center justify-between mb-4">
-        <div className="p-2.5 rounded-xl" style={{ background: `${s.glow}18` }}>
-          <s.icon size={18} style={{ color: s.color }} />
-        </div>
-        <div className="flex items-end gap-[2px] opacity-25">
-          {[4, 6, 9, 7, 11].map((h, i) => (
-            <div
-              key={i}
-              className="w-[2px] bg-current rounded-full"
-              style={{ height: `${h}px`, color: s.color }}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="mb-2 min-h-[52px] flex flex-col justify-center">
-        {s.loading ? (
-          <div className="space-y-2 animate-pulse">
-            <div className="h-8 w-20 bg-muted rounded-lg" />
-            <div className="h-2.5 w-28 bg-muted rounded" />
-          </div>
-        ) : (
-          <>
-            <div className="flex items-baseline gap-0.5">
-              <span className="text-3xl font-bold tracking-tighter text-foreground font-mono tabular-nums">
-                <AnimatedCounter
-                  target={s.numericValue}
-                  prefix={s.prefix}
-                  suffix={s.unitSuffix}
-                />
-              </span>
-            </div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground mt-0.5">
-              {s.label}
-            </p>
-          </>
-        )}
-      </div>
-      <p className="text-[11px] text-muted-foreground/60 leading-relaxed">
-        {s.description}
-      </p>
-
-      <div className="absolute -right-2 -bottom-2 opacity-[0.04] group-hover:opacity-[0.07] transition-opacity duration-500">
-        <s.icon size={80} />
-      </div>
-    </motion.div>
-  );
-}
-
-// ─── Module Button ────────────────────────────────────────────────────────────
-
-function ModuleBtn({
-  label,
-  desc,
-  icon: Icon,
-  href,
-  accent,
-  badge,
-  index,
-}: {
-  label: string;
-  desc: string;
-  icon: React.ElementType;
-  href: string;
-  accent: string;
-  badge?: number;
-  index: number;
-}) {
-  const navigate = useNavigate();
-  const ref = useRef(null);
-  const inView = useInView(ref, { once: true, margin: "-20px" });
-
-  return (
-    <motion.button
-      ref={ref}
-      onClick={() => navigate(href)}
-      initial={{ x: -25, opacity: 0 }}
-      animate={inView ? { x: 0, opacity: 1 } : {}}
-      transition={{
-        duration: 0.55,
-        delay: 0.06 * index,
-        ease: [0.16, 1, 0.3, 1],
-      }}
-      whileHover={{ x: 5, transition: { duration: 0.18 } }}
-      className="group flex items-center gap-3.5 w-full p-4 rounded-xl border border-border/50 bg-card/40 hover:bg-card/75 hover:border-border/80 transition-all text-left"
-    >
-      <div
-        className="p-2 rounded-lg shrink-0"
-        style={{ background: `${accent}15` }}
-      >
-        <Icon size={17} style={{ color: accent }} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-foreground flex items-center gap-2">
-          {label}
-          {badge != null && badge > 0 && (
-            <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/15 text-amber-500">
-              {badge}
-            </span>
-          )}
-        </p>
-        <p className="text-[11px] text-muted-foreground/60 truncate">{desc}</p>
-      </div>
-      <ArrowRight
-        size={14}
-        className="shrink-0 text-muted-foreground/25 group-hover:text-muted-foreground/60 transition-colors"
-      />
-    </motion.button>
-  );
-}
-
-// ─── Activity Timeline ────────────────────────────────────────────────────────
-
-interface ActivityItem {
-  time: string;
-  action: string;
-  sub: string;
-  icon: React.ElementType;
-  color: string;
-}
-
-function buildActivityFeed(data: HomeDashboardData): ActivityItem[] {
-  const items: ActivityItem[] = [];
-
-  // Recent GRNs
-  (data.material?.recentGRNs ?? []).slice(0, 2).forEach((g: RecentGRN) => {
-    items.push({
-      time: g.GRNDate
-        ? new Date(g.GRNDate).toLocaleDateString("en-IN", {
-            day: "2-digit",
-            month: "short",
-          })
-        : "—",
-      action: `GRN ${g.GRNNo} — ${g.Status ?? "received"}`,
-      sub: g.SupplierName ?? "Supplier",
-      icon: Package,
-      color: "#10b981",
-    });
-  });
-
-  // Recent Payments
-  (data.finance?.recentPayments ?? [])
-    .slice(0, 2)
-    .forEach((p: RecentPayment) => {
-      items.push({
-        time: p.PDate
-          ? new Date(p.PDate).toLocaleDateString("en-IN", {
-              day: "2-digit",
-              month: "short",
-            })
-          : "—",
-        action: `Payment ${formatINR(Number(p.PAmount ?? 0))} via ${p.PMode ?? "—"}`,
-        sub: p.PProject ?? p.PPaymentName ?? "—",
-        icon: IndianRupee,
-        color: "#f59e0b",
-      });
-    });
-
-  // Pending approvals
-  (data.pendingApprovals ?? []).slice(0, 2).forEach((a: ApprovalInboxItem) => {
-    items.push({
-      time: a.RecordDate
-        ? new Date(a.RecordDate).toLocaleDateString("en-IN", {
-            day: "2-digit",
-            month: "short",
-          })
-        : "—",
-      action: `${a.ModuleLabel} ${a.Reference} pending approval`,
-      sub: a.Module,
-      icon: FileCheck,
-      color: "#ef4444",
-    });
-  });
-
-  // Recent tasks
-  (data.recentTasks ?? []).slice(0, 2).forEach((t: TaskSummary) => {
-    items.push({
-      time: t.dueDate
-        ? new Date(t.dueDate).toLocaleDateString("en-IN", {
-            day: "2-digit",
-            month: "short",
-          })
-        : "—",
-      action: t.title,
-      sub: `Assigned to ${t.assignedToName || "—"} · ${t.priority}`,
-      icon: ClipboardList,
-      color: "#8b5cf6",
-    });
-  });
-
-  // Recent POs
-  (data.finance?.recentPOs ?? []).slice(0, 1).forEach((p: RecentPO) => {
-    items.push({
-      time: p.PODate
-        ? new Date(p.PODate).toLocaleDateString("en-IN", {
-            day: "2-digit",
-            month: "short",
-          })
-        : "—",
-      action: `PO ${p.PurchaseOrderNo} — ${p.Status ?? "open"}`,
-      sub: p.SupplierName ?? "Supplier",
-      icon: Layers,
-      color: "#3b82f6",
-    });
-  });
-
-  return items.slice(0, 6);
-}
-
-// ─── Home Page ────────────────────────────────────────────────────────────────
-
-export default function Home() {
+// ─── Home ─────────────────────────────────────────────────────────────────────
+export default function HomePage() {
   const { currentUser } = useAuth();
-
-  const firstName = currentUser?.name?.split(" ")[0] ?? "User";
+  const navigate = useNavigate();
+  const firstName = currentUser?.name?.split(" ")[0] ?? "there";
   const role = currentUser?.role;
-  if (role === "customer") {
-    return <Navigate to="/customer-portal" replace />;
-  }
+
+  if (role === "customer") return <Navigate to="/customer-portal" replace />;
 
   const isSuperAdmin = role === "super_admin";
   const isDba = role === "dba";
   const isAdmin = role === "admin" || isSuperAdmin || isDba;
-  const roleLabel = isSuperAdmin
-    ? "Super Admin"
-    : isDba
-      ? "DBA"
-      : isAdmin
-        ? "Admin"
-        : "Site Engineer";
-
-  // Customers have their own portal — redirect immediately, don't fetch ERP data
-  if (role === "customer") {
-    return <Navigate to="/ticket/my-tickets" replace />;
-  }
+  const isFinance = [
+    "admin",
+    "super_admin",
+    "dba",
+    "finance_manager",
+    "branch_manager",
+  ].includes(role ?? "");
 
   const hour = new Date().getHours();
   const greeting =
     hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
-  // ── Data fetching ──
   const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } =
     useQuery<HomeDashboardData>({
       queryKey: ["home-dashboard", isAdmin],
       queryFn: () => fetchHomeDashboard(isAdmin, role),
-      staleTime: 2 * 60 * 1000, // 2 min
-      refetchInterval: 5 * 60 * 1000, // auto-refresh every 5 min
+      staleTime: 2 * 60 * 1000,
+      refetchInterval: 5 * 60 * 1000,
       retry: 2,
     });
 
-  // ── Derived stats ──
-  const finance = data?.finance;
-  const material = data?.material;
-  const admin = data?.admin;
-  const tickets = data?.tickets;
-  const engineering = data?.engineering;
-  const followup = data?.followup;
-  const pendingApprovalCount = data?.pendingApprovals?.length ?? 0;
-
-  const stats: StatDef[] = [
-    {
-      label: "Work Orders",
-      numericValue:
-        engineering?.workOrders?.total ?? material?.workOrders?.total ?? 0,
-      icon: Hammer,
-      color: "hsl(var(--primary))",
-      glow: "hsl(var(--primary))",
-      description: `${engineering?.workOrders?.open ?? material?.workOrders?.open ?? 0} open · ${engineering?.workOrders?.thisMonth ?? 0} this month`,
-      delay: 0.08,
-      loading: isLoading,
-    },
-    {
-      label: "Open POs",
-      numericValue:
-        material?.purchaseOrders?.open ??
-        finance?.purchaseOrders?.openCount ??
-        0,
-      icon: Layers,
-      color: "#8b5cf6",
-      glow: "#8b5cf6",
-      description: "Purchase orders awaiting fulfilment",
-      delay: 0.15,
-      loading: isLoading,
-    },
-    {
-      label: "GRNs This Month",
-      numericValue:
-        material?.grns?.thisMonth ?? finance?.grns?.thisMonthCount ?? 0,
-      icon: Package,
-      color: "#06b6d4",
-      glow: "#06b6d4",
-      description: "Goods received notes this month",
-      delay: 0.22,
-      loading: isLoading,
-    },
-    {
-      label: "Pending Approvals",
-      numericValue: pendingApprovalCount,
-      icon: ShieldCheck,
-      color: "#f59e0b",
-      glow: "#f59e0b",
-      description: "Records awaiting approval across all modules",
-      delay: 0.29,
-      loading: isLoading,
-    },
-    {
-      label: "Total Payments (₹)",
-      numericValue: Math.round(
-        (finance?.payments?.totalAmount ?? 0) / 1_00_000,
-      ),
-      unitSuffix: "L",
-      prefix: "₹",
-      icon: IndianRupee,
-      color: "#10b981",
-      glow: "#10b981",
-      description: "Total payments processed (in lakhs)",
-      delay: 0.36,
-      loading: isLoading,
-    },
-    ...(isAdmin
-      ? [
-          {
-            label: "Active Users",
-            numericValue: admin?.stats?.activeUsers ?? 0,
-            icon: Users,
-            color: "#3b82f6",
-            glow: "#3b82f6",
-            description: "Registered active users in the system",
-            delay: 0.43,
-            loading: isLoading,
-          } as StatDef,
-        ]
-      : [
-          {
-            label: "Suppliers",
-            numericValue: finance?.parties?.supplierCount ?? 0,
-            icon: Building2,
-            color: "#3b82f6",
-            glow: "#3b82f6",
-            description: "Total registered suppliers",
-            delay: 0.43,
-            loading: isLoading,
-          } as StatDef,
-        ]),
-    {
-      label: "Open Tickets",
-      numericValue: (tickets?.pending ?? 0) + (tickets?.inProgress ?? 0),
-      icon: Ticket,
-      color: "#f97316",
-      glow: "#f97316",
-      description: `${tickets?.urgent ?? 0} urgent · ${tickets?.resolvedPct ?? 0}% resolved`,
-      delay: 0.5,
-      loading: isLoading,
-    },
-    {
-      label: "Active Projects",
-      numericValue: engineering?.projects?.active ?? 0,
-      icon: EngineerHat,
-      color: "#ec4899",
-      glow: "#ec4899",
-      description: `${engineering?.workOrders?.open ?? 0} open WOs · ${engineering?.workDone?.pending ?? 0} work done pending`,
-      delay: 0.57,
-      loading: isLoading,
-    },
-  ];
-
-  const modules = [
-    {
-      label: "Finance",
-      desc: `${finance?.payments?.totalCount ?? "—"} payments · ${finance?.purchaseOrders?.openCount ?? "—"} open POs`,
-      icon: BarChart3,
-      href: "/finance",
-      accent: "#3b82f6",
-      badge: undefined,
-    },
-    {
-      label: "Material",
-      desc: `${material?.grns?.total ?? "—"} GRNs · ${engineering?.workOrders?.open ?? material?.workOrders?.open ?? "—"} open WOs`,
-      icon: Hammer,
-      href: "/material",
-      accent: "#8b5cf6",
-      badge: undefined,
-    },
-    {
-      label: "Engineering",
-      desc: `${engineering?.projects?.active ?? "—"} active projects · ${engineering?.workOrders?.open ?? "—"} open WOs`,
-      icon: EngineerHat,
-      href: "/engineering",
-      accent: "#ec4899",
-      badge: undefined,
-    },
-    {
-      label: "Followup",
-      desc: `${followup?.applications ?? "—"} applications · ${followup?.confirmedBookings ?? "—"} confirmed bookings`,
-      icon: Users,
-      href: "/followup",
-      accent: "#6366f1",
-      badge:
-        (followup?.pendingNOCs ?? 0) > 0 ? followup!.pendingNOCs : undefined,
-    },
-    {
-      label: "Tickets",
-      desc: `${(tickets?.pending ?? 0) + (tickets?.inProgress ?? 0)} open · ${tickets?.urgent ?? 0} urgent · ${tickets?.resolvedPct ?? 0}% resolved`,
-      icon: Ticket,
-      href: "/ticket",
-      accent: "#f97316",
-      badge: tickets?.urgent ? tickets.urgent : undefined,
-    },
-    {
-      label: "Tasks",
-      desc: `${data?.recentTasks?.length ?? "—"} recent tasks`,
-      icon: Cpu,
-      href: "/tasks",
-      accent: "#f59e0b",
-      badge: undefined,
-    },
-    {
-      label: "Approval Inbox",
-      desc: `${pendingApprovalCount} pending across all modules`,
-      icon: FileCheck,
-      href: "/admin/approval/inbox",
-      accent: "#ef4444",
-      badge: pendingApprovalCount || undefined,
-    },
-    ...(isAdmin
-      ? [
-          {
-            label: "Admin",
-            desc: `${admin?.stats?.totalUsers ?? "—"} users · ${admin?.stats?.totalRoles ?? "—"} roles`,
-            icon: ShieldCheck,
-            href: "/admin",
-            accent: "#a855f7",
-            badge: undefined,
-          },
-        ]
-      : []),
-    ...(isDba
-      ? [
-          {
-            label: "DBA Console",
-            desc: "DB tools, control panel & ads",
-            icon: Database,
-            href: "/dba",
-            accent: "#10b981",
-            badge: undefined,
-          },
-        ]
-      : []),
-  ];
-
-  const activityFeed = data ? buildActivityFeed(data) : [];
+  const fin = data?.finance;
+  const mat = data?.material;
+  const adm = data?.admin;
+  const tick = data?.tickets;
+  const eng = data?.engineering;
+  const fol = data?.followup;
+  const pendingApprovals = data?.pendingApprovals ?? [];
 
   const lastUpdated = dataUpdatedAt
     ? new Date(dataUpdatedAt).toLocaleTimeString("en-IN", {
@@ -778,73 +365,136 @@ export default function Home() {
       })
     : null;
 
+  // ── Activity feed ──
+  const feed: {
+    label: string;
+    sub: string;
+    icon: React.ElementType;
+    color: string;
+    time?: string;
+  }[] = [];
+  (data?.material?.recentGRNs ?? []).slice(0, 2).forEach((g: RecentGRN) => {
+    feed.push({
+      label: `GRN ${g.GRNNo}`,
+      sub: g.SupplierName ?? "—",
+      icon: Package,
+      color: "#10b981",
+      time: g.GRNDate
+        ? new Date(g.GRNDate).toLocaleDateString("en-IN", {
+            day: "2-digit",
+            month: "short",
+          })
+        : undefined,
+    });
+  });
+  (data?.finance?.recentPayments ?? [])
+    .slice(0, 2)
+    .forEach((p: RecentPayment) => {
+      feed.push({
+        label: `₹${Number(p.PAmount ?? 0).toLocaleString("en-IN")} via ${p.PMode ?? "—"}`,
+        sub: p.PProject ?? p.PPaymentName ?? "—",
+        icon: IndianRupee,
+        color: "#f59e0b",
+        time: p.PDate
+          ? new Date(p.PDate).toLocaleDateString("en-IN", {
+              day: "2-digit",
+              month: "short",
+            })
+          : undefined,
+      });
+    });
+  pendingApprovals.slice(0, 2).forEach((a: ApprovalInboxItem) => {
+    feed.push({
+      label: `${a.ModuleLabel} ${a.Reference}`,
+      sub: "Pending approval",
+      icon: FileCheck,
+      color: "#ef4444",
+      time: a.RecordDate
+        ? new Date(a.RecordDate).toLocaleDateString("en-IN", {
+            day: "2-digit",
+            month: "short",
+          })
+        : undefined,
+    });
+  });
+  (data?.recentTasks ?? []).slice(0, 2).forEach((t: TaskSummary) => {
+    feed.push({
+      label: t.title,
+      sub: `${t.priority} · ${t.status}`,
+      icon: ClipboardList,
+      color: "#8b5cf6",
+      time: t.dueDate
+        ? new Date(t.dueDate).toLocaleDateString("en-IN", {
+            day: "2-digit",
+            month: "short",
+          })
+        : undefined,
+    });
+  });
+  const activityFeed = feed.slice(0, 7);
+
   return (
-    <div className="relative min-h-[calc(100vh-3.5rem)] bg-background overflow-hidden">
-      <BlueprintGrid />
-      <StructureSVG />
+    <div className="relative min-h-[calc(100vh-3.5rem)] bg-background overflow-hidden font-body">
+      <BgGrid />
 
       <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {/* ── Hero ── */}
-        <div className="mb-12">
+        <div className="mb-11">
+          {/* Eyebrow */}
           <motion.div
-            initial={{ opacity: 0, y: -10 }}
+            initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
+            transition={{ duration: 0.45 }}
             className="flex items-center gap-3 mb-5"
           >
             <motion.div
-              animate={{ rotate: [0, 10, -5, 0] }}
-              transition={{ duration: 3, repeat: Infinity, repeatDelay: 6 }}
+              animate={{ rotate: [0, 12, -6, 0] }}
+              transition={{ duration: 3.5, repeat: Infinity, repeatDelay: 7 }}
             >
-              <HardHat size={16} className="text-primary" />
+              <HardHat size={14} className="text-primary/70" />
             </motion.div>
-            <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-primary/65">
-              {roleLabel} · CivilierERP
+            <span className="font-heading text-[10px] font-bold uppercase tracking-[0.24em] text-primary/55">
+              CivilierERP
             </span>
             <span className="relative flex h-1.5 w-1.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
             </span>
-
-            {/* Refresh control */}
             <div className="ml-auto flex items-center gap-2">
               {lastUpdated && (
-                <span className="text-[10px] text-muted-foreground/40 font-mono">
-                  Updated {lastUpdated}
+                <span className="text-[10px] text-muted-foreground/35 font-mono tabular-nums">
+                  {lastUpdated}
                 </span>
               )}
               <button
                 onClick={() => refetch()}
                 disabled={isFetching}
-                className="p-1.5 rounded-lg hover:bg-muted/60 transition-colors disabled:opacity-40"
-                title="Refresh dashboard"
+                className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors disabled:opacity-40"
+                title="Refresh"
               >
                 <RefreshCw
-                  size={13}
-                  className={`text-muted-foreground/50 ${isFetching ? "animate-spin" : ""}`}
+                  size={12}
+                  className={`text-muted-foreground/40 ${isFetching ? "animate-spin" : ""}`}
                 />
               </button>
             </div>
           </motion.div>
 
+          {/* Greeting */}
           <motion.h1
-            initial={{ opacity: 0, y: 22 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{
-              duration: 0.95,
-              delay: 0.08,
-              ease: [0.16, 1, 0.3, 1],
-            }}
-            className="text-5xl md:text-[4.25rem] font-heading font-bold tracking-tight leading-[1.07] text-foreground mb-4"
+            transition={{ duration: 0.9, delay: 0.07, ease: [0.16, 1, 0.3, 1] }}
+            className="font-heading font-bold text-5xl md:text-[4rem] tracking-tight leading-[1.06] text-foreground mb-3"
           >
             {greeting},{" "}
             <motion.span
               className="inline-block bg-gradient-to-r from-primary via-violet-400 to-cyan-400 bg-clip-text text-transparent"
-              initial={{ opacity: 0, x: -18 }}
+              initial={{ opacity: 0, x: -14 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{
-                duration: 0.9,
-                delay: 0.22,
+                duration: 0.85,
+                delay: 0.2,
                 ease: [0.16, 1, 0.3, 1],
               }}
             >
@@ -853,168 +503,457 @@ export default function Home() {
           </motion.h1>
 
           <motion.p
-            initial={{ opacity: 0, y: 12 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.35 }}
-            className="text-muted-foreground text-base md:text-lg max-w-lg leading-relaxed"
+            transition={{ duration: 0.6, delay: 0.32 }}
+            className="text-muted-foreground text-base max-w-md leading-relaxed"
           >
-            Your civil operations command centre — site data, procurement,
-            finance and approvals, live and in sync.
+            Everything live across procurement, finance, engineering and sales —
+            in one place.
           </motion.p>
 
-          {/* Error banner */}
-          {isError && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm max-w-md"
-            >
-              <AlertCircle size={14} className="shrink-0" />
-              <span>Could not reach the server. Showing cached data.</span>
-            </motion.div>
-          )}
-
-          {/* Engineering ruler divider */}
+          {/* Divider */}
           <motion.div
             initial={{ scaleX: 0, opacity: 0 }}
             animate={{ scaleX: 1, opacity: 1 }}
-            transition={{ duration: 1.3, delay: 0.5, ease: [0.16, 1, 0.3, 1] }}
+            transition={{ duration: 1.1, delay: 0.5, ease: [0.16, 1, 0.3, 1] }}
             style={{ originX: 0 }}
-            className="mt-8 flex items-center gap-3"
+            className="mt-7 flex items-center gap-3"
           >
-            <div className="flex-1 max-w-xs h-px bg-gradient-to-r from-primary/50 via-primary/20 to-transparent" />
+            <div className="flex-1 max-w-[280px] h-px bg-gradient-to-r from-primary/40 via-primary/15 to-transparent" />
             <div className="flex items-center gap-[3px]">
-              {Array.from({ length: 10 }).map((_, i) => (
+              {Array.from({ length: 12 }).map((_, i) => (
                 <div
                   key={i}
-                  className="w-px bg-primary/35 rounded-full"
+                  className="w-px bg-primary/30 rounded-full"
                   style={{
-                    height: i % 5 === 0 ? "11px" : i % 2 === 0 ? "7px" : "4px",
+                    height: i % 4 === 0 ? "10px" : i % 2 === 0 ? "6px" : "4px",
                   }}
                 />
               ))}
             </div>
-            <Ruler size={13} className="text-primary/35" />
           </motion.div>
+
+          {isError && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm max-w-sm"
+            >
+              <AlertCircle size={13} className="shrink-0" />
+              <span className="text-xs">
+                Could not reach the server — showing cached data.
+              </span>
+            </motion.div>
+          )}
         </div>
 
-        {/* ── Stats Grid ── */}
-        <section className="mb-12">
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.45 }}
-            className="flex items-center gap-2 mb-5"
-          >
-            <CircleDot size={11} className="text-primary/55" />
-            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
-              Operational Metrics
-            </span>
-          </motion.div>
+        {/* ── Module Cards Grid ── */}
+        <section className="mb-10">
+          <SectionLabel>Operations at a glance</SectionLabel>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            {stats.map((s, i) => (
-              <StatCard key={i} s={s} />
-            ))}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {/* Finance */}
+            <ModuleCard
+              title="Finance"
+              href="/finance"
+              icon={BarChart3}
+              accent="#3b82f6"
+              delay={0.05}
+              loading={isLoading}
+              badge={fin?.cheques?.pendingCount}
+              badgeLabel="cheques"
+              stats={[
+                {
+                  label: "Total payments",
+                  value: fin?.payments?.totalCount ?? 0,
+                  accent: "#3b82f6",
+                },
+                {
+                  label: "Paid this month (₹L)",
+                  value: Math.round((fin?.payments?.totalAmount ?? 0) / 100000),
+                  accent: "#10b981",
+                  icon: TrendingUp,
+                },
+                {
+                  label: "Open POs",
+                  value: fin?.purchaseOrders?.openCount ?? 0,
+                  accent: "#f59e0b",
+                },
+                {
+                  label: "Pending cheques",
+                  value: fin?.cheques?.pendingCount ?? 0,
+                  accent: fin?.cheques?.pendingCount ? "#ef4444" : undefined,
+                  icon: CreditCard,
+                },
+              ]}
+            />
+
+            {/* Material */}
+            <ModuleCard
+              title="Material"
+              href="/material"
+              icon={Package}
+              accent="#8b5cf6"
+              delay={0.1}
+              loading={isLoading}
+              stats={[
+                {
+                  label: "GRNs this month",
+                  value: mat?.grns?.thisMonth ?? 0,
+                  accent: "#8b5cf6",
+                },
+                {
+                  label: "Open POs",
+                  value: mat?.purchaseOrders?.open ?? 0,
+                  accent: "#f59e0b",
+                },
+                {
+                  label: "Total items",
+                  value: mat?.items?.count ?? 0,
+                  accent: "#06b6d4",
+                  icon: Warehouse,
+                },
+                {
+                  label: "Today's GRNs",
+                  value: mat?.grns?.today ?? 0,
+                  accent: mat?.grns?.today ? "#10b981" : undefined,
+                },
+              ]}
+            />
+
+            {/* Engineering */}
+            <ModuleCard
+              title="Engineering"
+              href="/engineering"
+              icon={Wrench}
+              accent="#ec4899"
+              delay={0.15}
+              loading={isLoading}
+              stats={[
+                {
+                  label: "Open work orders",
+                  value: eng?.workOrders?.open ?? 0,
+                  accent: "#ec4899",
+                },
+                {
+                  label: "Active projects",
+                  value: eng?.projects?.active ?? 0,
+                  accent: "#10b981",
+                  icon: Building2,
+                },
+                {
+                  label: "Work done pending",
+                  value: eng?.workDone?.pending ?? 0,
+                  accent: eng?.workDone?.pending ? "#f59e0b" : undefined,
+                },
+                {
+                  label: "BOQ approved",
+                  value: eng?.boq?.approved ?? 0,
+                  accent: "#06b6d4",
+                  icon: FileText,
+                },
+              ]}
+            />
+
+            {/* Followup / CRM */}
+            <ModuleCard
+              title="Followup"
+              href="/followup"
+              icon={Users}
+              accent="#6366f1"
+              delay={0.2}
+              loading={isLoading}
+              badge={fol?.pendingNOCs}
+              badgeLabel="NOCs"
+              stats={[
+                {
+                  label: "Applications",
+                  value: fol?.applications ?? 0,
+                  accent: "#6366f1",
+                },
+                {
+                  label: "Confirmed bookings",
+                  value: fol?.confirmedBookings ?? 0,
+                  accent: "#10b981",
+                  icon: CheckCircle2,
+                },
+                {
+                  label: "Active agreements",
+                  value: fol?.activeAgreements ?? 0,
+                  accent: "#f59e0b",
+                },
+                {
+                  label: "Handovers due",
+                  value: fol?.scheduledHandovers ?? 0,
+                  accent: fol?.scheduledHandovers ? "#ef4444" : undefined,
+                },
+              ]}
+            />
+
+            {/* Approvals */}
+            <ModuleCard
+              title="Approval Inbox"
+              href="/admin/approval/inbox"
+              icon={FileCheck}
+              accent="#f59e0b"
+              delay={0.25}
+              loading={isLoading}
+              badge={pendingApprovals.length}
+              badgeLabel="pending"
+              stats={[
+                {
+                  label: "Awaiting action",
+                  value: pendingApprovals.length,
+                  accent: pendingApprovals.length ? "#f59e0b" : undefined,
+                },
+                {
+                  label: "Modules affected",
+                  value: new Set(
+                    pendingApprovals.map((a: ApprovalInboxItem) => a.Module),
+                  ).size,
+                  accent: "#8b5cf6",
+                },
+                {
+                  label: "PO approvals",
+                  value: pendingApprovals.filter(
+                    (a: ApprovalInboxItem) => a.Module === "PurchaseOrders",
+                  ).length,
+                },
+                {
+                  label: "GRN approvals",
+                  value: pendingApprovals.filter(
+                    (a: ApprovalInboxItem) => a.Module === "GoodsReceiptNotes",
+                  ).length,
+                },
+              ]}
+            />
+
+            {/* Tickets */}
+            <ModuleCard
+              title="Tickets"
+              href="/ticket"
+              icon={Ticket}
+              accent="#f97316"
+              delay={0.3}
+              loading={isLoading}
+              badge={tick?.urgent}
+              badgeLabel="urgent"
+              stats={[
+                {
+                  label: "Open",
+                  value: (tick?.pending ?? 0) + (tick?.inProgress ?? 0),
+                  accent: "#f97316",
+                },
+                {
+                  label: "Urgent",
+                  value: tick?.urgent ?? 0,
+                  accent: tick?.urgent ? "#ef4444" : undefined,
+                  icon: TriangleAlert,
+                },
+                {
+                  label: "Resolved",
+                  value: tick?.resolved ?? 0,
+                  accent: "#10b981",
+                  icon: CheckCircle2,
+                },
+                {
+                  label: "Resolution %",
+                  value: `${tick?.resolvedPct ?? 0}%`,
+                  accent: "#06b6d4",
+                },
+              ]}
+            />
+
+            {/* Admin — only for admins */}
+            {isAdmin && (
+              <ModuleCard
+                title="Admin"
+                href="/admin"
+                icon={ShieldCheck}
+                accent="#a855f7"
+                delay={0.35}
+                loading={isLoading}
+                stats={[
+                  {
+                    label: "Total users",
+                    value: adm?.stats?.totalUsers ?? 0,
+                    accent: "#a855f7",
+                  },
+                  {
+                    label: "Active users",
+                    value: adm?.stats?.activeUsers ?? 0,
+                    accent: "#10b981",
+                    icon: Users,
+                  },
+                  {
+                    label: "Roles",
+                    value: adm?.stats?.totalRoles ?? 0,
+                    accent: "#06b6d4",
+                  },
+                  {
+                    label: "Work orders open",
+                    value: eng?.workOrders?.open ?? 0,
+                    accent: "#f59e0b",
+                    icon: Hammer,
+                  },
+                ]}
+              />
+            )}
+
+            {/* DBA */}
+            {isDba && (
+              <ModuleCard
+                title="DBA Console"
+                href="/dba"
+                icon={Database}
+                accent="#10b981"
+                delay={0.4}
+                loading={isLoading}
+                stats={[
+                  {
+                    label: "Total users",
+                    value: adm?.stats?.totalUsers ?? 0,
+                    accent: "#10b981",
+                  },
+                  {
+                    label: "Active users",
+                    value: adm?.stats?.activeUsers ?? 0,
+                    accent: "#3b82f6",
+                  },
+                  { label: "Roles", value: adm?.stats?.totalRoles ?? 0 },
+                  {
+                    label: "Open tickets",
+                    value: (tick?.pending ?? 0) + (tick?.inProgress ?? 0),
+                    accent: "#f97316",
+                    icon: Ticket,
+                  },
+                ]}
+              />
+            )}
           </div>
         </section>
 
-        {/* ── Quick Access + Activity Feed ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          {/* Module shortcuts */}
-          <div className="lg:col-span-3">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.65 }}
-              className="flex items-center gap-2 mb-4"
-            >
-              <CircleDot size={11} className="text-primary/55" />
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
-                Quick Access
-              </span>
-            </motion.div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {modules.map((m, i) => (
-                <ModuleBtn key={m.label} {...m} index={i} />
+        {/* ── Bottom: Hero number + Activity feed ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Big summary numbers */}
+          <div className="lg:col-span-1">
+            <SectionLabel>Key numbers</SectionLabel>
+            <div className="rounded-2xl border border-border/60 bg-card/50 backdrop-blur-sm p-5 space-y-5">
+              {[
+                {
+                  label: "Total payments (₹)",
+                  value: isLoading
+                    ? null
+                    : Math.round((fin?.payments?.totalAmount ?? 0) / 100000),
+                  suffix: "L",
+                  prefix: "₹",
+                  color: "#10b981",
+                  icon: IndianRupee,
+                },
+                {
+                  label: "Open PO value (₹)",
+                  value: isLoading
+                    ? null
+                    : Math.round(
+                        (mat?.purchaseOrders?.openValue ??
+                          fin?.purchaseOrders?.openValue ??
+                          0) / 100000,
+                      ),
+                  suffix: "L",
+                  prefix: "₹",
+                  color: "#f59e0b",
+                  icon: Layers,
+                },
+                {
+                  label: "BOQ certified (₹)",
+                  value: isLoading
+                    ? null
+                    : Math.round(
+                        (eng?.workDone?.certifiedAmount ?? 0) / 100000,
+                      ),
+                  suffix: "L",
+                  prefix: "₹",
+                  color: "#8b5cf6",
+                  icon: LineChart,
+                },
+                {
+                  label: "Supplier count",
+                  value: isLoading ? null : (fin?.parties?.supplierCount ?? 0),
+                  color: "#06b6d4",
+                  icon: Building2,
+                },
+              ].map((item, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, x: -12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{
+                    duration: 0.55,
+                    delay: 0.5 + i * 0.08,
+                    ease: "easeOut",
+                  }}
+                  className="flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className="p-1.5 rounded-lg shrink-0"
+                      style={{ background: `${item.color}15` }}
+                    >
+                      <item.icon size={12} style={{ color: item.color }} />
+                    </div>
+                    <span className="text-[11px] text-muted-foreground/65 font-medium">
+                      {item.label}
+                    </span>
+                  </div>
+                  <span
+                    className="font-heading font-bold text-base tabular-nums"
+                    style={{ color: item.color }}
+                  >
+                    {item.value == null ? (
+                      <span className="animate-pulse inline-block h-4 w-12 bg-muted rounded" />
+                    ) : (
+                      <AnimatedCounter
+                        target={item.value}
+                        prefix={item.prefix ?? ""}
+                        suffix={item.suffix ?? ""}
+                      />
+                    )}
+                  </span>
+                </motion.div>
               ))}
             </div>
           </div>
 
-          {/* Live activity timeline */}
+          {/* Recent activity */}
           <div className="lg:col-span-2">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.75 }}
-              className="flex items-center gap-2 mb-4"
-            >
-              <CircleDot size={11} className="text-primary/55" />
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
-                Recent Activity
-              </span>
-            </motion.div>
-
-            <div className="rounded-2xl border border-border/60 bg-card/50 backdrop-blur-md px-5 py-2">
+            <SectionLabel>Recent activity</SectionLabel>
+            <div className="rounded-2xl border border-border/60 bg-card/50 backdrop-blur-sm px-5 py-1">
               {isLoading ? (
-                // Skeleton feed
                 Array.from({ length: 5 }).map((_, i) => (
                   <div
                     key={i}
-                    className="flex items-start gap-3 py-3.5 border-b border-border/35 last:border-0 animate-pulse"
+                    className="flex items-start gap-3 py-3.5 border-b border-border/30 last:border-0 animate-pulse"
                   >
                     <div className="w-5 h-5 rounded-full bg-muted shrink-0 mt-0.5" />
                     <div className="flex-1 space-y-1.5">
                       <div className="h-3 bg-muted rounded w-3/4" />
                       <div className="h-2.5 bg-muted rounded w-1/2" />
                     </div>
-                    <div className="h-2.5 w-8 bg-muted rounded shrink-0" />
                   </div>
                 ))
               ) : activityFeed.length === 0 ? (
-                <div className="py-8 text-center text-sm text-muted-foreground/50">
-                  No recent activity
+                <div className="py-10 text-center text-sm text-muted-foreground/40">
+                  No recent activity.
                 </div>
               ) : (
                 activityFeed.map((item, i) => (
-                  <motion.div
+                  <FeedItem
                     key={i}
-                    initial={{ x: 18, opacity: 0 }}
-                    animate={{ x: 0, opacity: 1 }}
-                    transition={{
-                      duration: 0.5,
-                      delay: 0.85 + i * 0.09,
-                      ease: "easeOut",
-                    }}
-                    className="flex items-start gap-3 py-3.5 border-b border-border/35 last:border-0"
-                  >
-                    <div className="flex flex-col items-center shrink-0 mt-0.5">
-                      <div
-                        className="w-[22px] h-[22px] rounded-full flex items-center justify-center shrink-0"
-                        style={{ background: `${item.color}18` }}
-                      >
-                        <item.icon size={11} style={{ color: item.color }} />
-                      </div>
-                      {i < activityFeed.length - 1 && (
-                        <div
-                          className="w-px bg-border/40 flex-1 mt-1"
-                          style={{ minHeight: "10px" }}
-                        />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-foreground leading-snug">
-                        {item.action}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground/55 mt-0.5 truncate">
-                        {item.sub}
-                      </p>
-                    </div>
-                    <span className="text-[10px] text-muted-foreground/35 shrink-0 font-mono mt-0.5">
-                      {item.time}
-                    </span>
-                  </motion.div>
+                    item={item}
+                    i={i}
+                    total={activityFeed.length}
+                  />
                 ))
               )}
             </div>
@@ -1025,16 +964,12 @@ export default function Home() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 1.5 }}
-          className="mt-10 flex items-center justify-center gap-3 text-muted-foreground/30 text-xs"
+          transition={{ delay: 1.4 }}
+          className="mt-10 flex items-center justify-center gap-3 text-muted-foreground/25 text-[10px] font-heading tracking-widest uppercase"
         >
-          <div className="w-12 h-px bg-border/50" />
-          <span>
-            {isDba
-              ? "Use DBA Console above or the Module switcher to navigate"
-              : "Use the module switcher to navigate modules"}
-          </span>
-          <div className="w-12 h-px bg-border/50" />
+          <div className="w-10 h-px bg-border/40" />
+          <span>Civilier ERP · {new Date().getFullYear()}</span>
+          <div className="w-10 h-px bg-border/40" />
         </motion.div>
       </div>
     </div>

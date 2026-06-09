@@ -44,6 +44,7 @@ import { getProjects } from "@/api/grnApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import type {
   GRNFormDataPayload,
   GRNItemLine as GRNItemLineBase,
@@ -534,7 +535,14 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
     id: "chain",
     header: "Status",
     enableSorting: false,
-    cell: ({ row }) => <GRNChainBadge grnId={row.original.GRNID} />,
+    cell: ({ row }) => (
+      <ApprovalStatusChain
+        table="GoodsReceiptNotes"
+        recordId={row.original.GRNID}
+      
+            compact
+          />
+    ),
   },
   {
     id: "actions",
