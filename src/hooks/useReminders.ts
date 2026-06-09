@@ -97,22 +97,36 @@ async function fetchEmiReminders(): Promise<ReminderItem[]> {
 
 async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
   try {
-    const res = await fetchWithAuth("/api/material-requests?limit=200");
+    // Use server-side status filter + high limit to avoid the 100-row cap silently dropping records
+    const res = await fetchWithAuth(
+      "/api/material-requests?status=Pending&limit=100&page=1",
+    );
     if (!res.ok) return [];
     const raw = await res.json();
+    // API always returns { data: [], page, limit, total, totalPages }
     const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
 
     return list
-      .filter((r) => r.Status === "Pending" || r.Status === "pending")
-      .map((r) => ({
-        id: `mr-${r.MRId}`,
-        type: "material_request" as ReminderType,
-        title: `MR #${r.DocNo || r.MRId}`,
-        subtitle: `${r.ProjectName || r.CompanyName || "Material Request"} · ${r.Priority || "Normal"} priority`,
-        dueDate: r.RequiredByDate || r.RequestDate,
-        urgency: classifyUrgency(r.RequiredByDate || r.RequestDate),
-        path: "/material/material-request",
-      }));
+      .filter((r) => {
+        // Skip records with no usable date — can't determine urgency
+        const dateStr = r.RequiredByDate || r.RequestDate;
+        if (!dateStr) return false;
+        // Only surface overdue / today / soon (≤7 days) — same rule as all other reminder types
+        const urgency = classifyUrgency(dateStr);
+        return urgency !== "upcoming";
+      })
+      .map((r) => {
+        const dateStr = r.RequiredByDate || r.RequestDate;
+        return {
+          id: `mr-${r.MRId}`,
+          type: "material_request" as ReminderType,
+          title: `MR #${r.DocNo || r.MRId}`,
+          subtitle: `${r.ProjectName || r.CompanyName || "Material Request"} · ${r.Priority || "Normal"} priority`,
+          dueDate: dateStr,
+          urgency: classifyUrgency(dateStr),
+          path: "/material/material-request",
+        };
+      });
   } catch {
     return [];
   }
@@ -124,7 +138,9 @@ export async function fetchCustomerReminders(): Promise<ReminderItem[]> {
   return [];
 }
 
-export async function fetchAllReminders(role?: string): Promise<ReminderItem[]> {
+export async function fetchAllReminders(
+  role?: string,
+): Promise<ReminderItem[]> {
   if (role === "customer") return fetchCustomerReminders();
   const [poRes, grnRes, chequeRes, tdsRes, woRes] = await Promise.allSettled([
     fetchWithAuth("/api/purchase-orders"),
@@ -172,7 +188,13 @@ export async function fetchAllReminders(role?: string): Promise<ReminderItem[]> 
     }
   };
 
-  const FINANCE_ROLES = ["admin", "super_admin", "dba", "finance_manager", "branch_manager"];
+  const FINANCE_ROLES = [
+    "admin",
+    "super_admin",
+    "dba",
+    "finance_manager",
+    "branch_manager",
+  ];
   const hasFinanceAccess = FINANCE_ROLES.includes(role || "");
   const [, emiItems, mrItems] = await Promise.all([
     Promise.all([
