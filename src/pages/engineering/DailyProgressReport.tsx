@@ -976,42 +976,51 @@ function printPDF(
   const el = printRef.current;
   if (!el) return;
 
-  const content = el.innerHTML;
   const win = window.open("", "_blank");
   if (!win) return;
 
-  win.document.write(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>DPR — ${date}</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #111; background: #fff; padding: 24px; }
-    h1 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
-    h2 { font-size: 13px; font-weight: 700; margin: 20px 0 6px; color: #1a1a2e; border-bottom: 2px solid #e5e7eb; padding-bottom: 4px; }
-    h3 { font-size: 11px; font-weight: 600; margin: 12px 0 4px; color: #374151; }
-    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0; }
-    .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; }
-    .card .val { font-size: 16px; font-weight: 700; }
-    .card .lbl { font-size: 10px; color: #6b7280; margin-top: 2px; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-    th { background: #f3f4f6; text-align: left; padding: 6px 8px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; color: #6b7280; border: 1px solid #e5e7eb; }
-    td { padding: 5px 8px; border: 1px solid #e5e7eb; vertical-align: top; }
-    tr:nth-child(even) td { background: #f9fafb; }
-    tfoot td { background: #f3f4f6; font-weight: 700; }
-    .docno { font-family: monospace; font-weight: 700; }
-    .badge { display: inline-block; padding: 1px 6px; border-radius: 9999px; font-size: 9px; font-weight: 600; border: 1px solid #e5e7eb; }
-    .sub-table { margin: 0 16px 8px; }
-    .sub-table th { background: #f9fafb; }
-    @media print { body { padding: 0; } }
-  </style>
-</head>
-<body>
-  ${content}
-</body>
-</html>`);
-  win.document.close();
+  // ── Safe DOM construction — no document.write() with untrusted HTML ─────────
+  // Using document.write() with el.innerHTML (DOM-sourced) triggers
+  // js/xss-through-dom. Instead we build the document via safe DOM APIs and
+  // copy the print content with importNode(), which transfers the already-parsed
+  // DOM tree without re-interpreting any text as HTML.
+  const doc = win.document;
+
+  doc.title = `DPR — ${date}`;
+
+  const meta = doc.createElement("meta");
+  meta.setAttribute("charset", "utf-8");
+  doc.head.appendChild(meta);
+
+  const style = doc.createElement("style");
+  style.textContent = [
+    "* { box-sizing: border-box; margin: 0; padding: 0; }",
+    "body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #111; background: #fff; padding: 24px; }",
+    "h1 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }",
+    "h2 { font-size: 13px; font-weight: 700; margin: 20px 0 6px; color: #1a1a2e; border-bottom: 2px solid #e5e7eb; padding-bottom: 4px; }",
+    "h3 { font-size: 11px; font-weight: 600; margin: 12px 0 4px; color: #374151; }",
+    ".summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0; }",
+    ".card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; }",
+    ".card .val { font-size: 16px; font-weight: 700; }",
+    ".card .lbl { font-size: 10px; color: #6b7280; margin-top: 2px; }",
+    "table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }",
+    "th { background: #f3f4f6; text-align: left; padding: 6px 8px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; color: #6b7280; border: 1px solid #e5e7eb; }",
+    "td { padding: 5px 8px; border: 1px solid #e5e7eb; vertical-align: top; }",
+    "tr:nth-child(even) td { background: #f9fafb; }",
+    "tfoot td { background: #f3f4f6; font-weight: 700; }",
+    ".docno { font-family: monospace; font-weight: 700; }",
+    ".badge { display: inline-block; padding: 1px 6px; border-radius: 9999px; font-size: 9px; font-weight: 600; border: 1px solid #e5e7eb; }",
+    ".sub-table { margin: 0 16px 8px; }",
+    ".sub-table th { background: #f9fafb; }",
+    "@media print { body { padding: 0; } }",
+  ].join("\n");
+  doc.head.appendChild(style);
+
+  // importNode deep-copies the already-parsed DOM node into the new document —
+  // no HTML string is ever re-parsed, so there is no XSS vector.
+  const imported = doc.importNode(el, true);
+  doc.body.appendChild(imported);
+
   setTimeout(() => {
     win.print();
     win.close();

@@ -272,13 +272,19 @@ async function fetchNOCs(params: {
     totalPages: number;
   };
 }> {
-  const q = new URLSearchParams({
-    page: String(params.page),
-    pageSize: String(params.pageSize),
-    ...(params.search ? { search: params.search } : {}),
-    ...(params.status ? { status: params.status } : {}),
+  // POST /search keeps sensitive filter params (status, search) in the request
+  // body instead of the URL, preventing them from appearing in server logs,
+  // browser history, or Referer headers. Fixes CodeQL js/sensitive-get-query.
+  const res = await fetchWithAuth("/api/followup-noc/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      page: params.page,
+      pageSize: params.pageSize,
+      ...(params.search ? { search: params.search } : {}),
+      ...(params.status ? { status: params.status } : {}),
+    }),
   });
-  const res = await fetchWithAuth(`/api/followup-noc?${q}`);
   if (!res.ok) throw new Error("Failed to load NOCs");
   return res.json();
 }
