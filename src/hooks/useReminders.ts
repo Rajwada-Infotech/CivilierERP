@@ -99,8 +99,10 @@ async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
   try {
     let res: Response;
     try {
+      // Fetch without a status filter so both Pending and Approved MRs are
+      // included — Draft/Ordered/Cancelled are excluded below client-side.
       res = await fetchWithAuth(
-        "/api/material-requests?status=Pending&limit=100&page=1",
+        "/api/material-requests?limit=200&page=1",
       );
     } catch {
       // fetchWithAuth throws on 403, network errors, etc. — treat as empty, never propagate
@@ -111,8 +113,14 @@ async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
     // API always returns { data: [], page, limit, total, totalPages }
     const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
 
+    // Statuses that need action / attention — Draft has no due pressure,
+    // Ordered/Cancelled are already resolved.
+    const ACTIONABLE = new Set(["Pending", "Approved", "Partially Ordered"]);
+
     return list
       .filter((r) => {
+        // Only actionable statuses
+        if (!ACTIONABLE.has(r.Status)) return false;
         // Skip records with no usable date — can't determine urgency
         const dateStr = r.RequiredByDate || r.RequestDate;
         if (!dateStr) return false;
@@ -126,7 +134,7 @@ async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
           id: `mr-${r.MRId}`,
           type: "material_request" as ReminderType,
           title: `MR #${r.DocNo || r.MRId}`,
-          subtitle: `${r.ProjectName || r.CompanyName || "Material Request"} · ${r.Priority || "Normal"} priority`,
+          subtitle: `${r.ProjectName || r.CompanyName || "Material Request"} · ${r.Status} · ${r.Priority || "Normal"} priority`,
           dueDate: dateStr,
           urgency: classifyUrgency(dateStr),
           path: "/material/material-request",

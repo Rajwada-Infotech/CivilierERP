@@ -528,10 +528,7 @@ function TransferHistory() {
                     {t.TransferItems.length !== 1 ? "s" : ""}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-col gap-1">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-600 font-medium">
-                        <CheckCircle2 size={9} /> {t.Status}
-                      </span>
+                    <div>
                       <ApprovalStatusChain
                         table="StockTransfers"
                         recordId={t.TransferID}

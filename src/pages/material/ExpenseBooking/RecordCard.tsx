@@ -88,7 +88,9 @@ export function RecordCard({
           </p>
         </div>
         <div className="flex flex-col gap-1.5">
-          <ApprovalStatusChain table="ExpenseBooking" recordId={rec.id} />
+          <ApprovalStatusChain table="ExpenseBooking" recordId={rec.id} 
+            compact
+          />
           <div className="flex gap-1.5 items-center">
             <ApprovalActions
               status={rec.status}

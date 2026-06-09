@@ -280,20 +280,24 @@ router.get("/trail", authMiddleware, async (req, res) => {
       };
     });
 
-    // If no workflow configured, still return any audit rows
+    // If no workflow configured, still return any audit rows.
+    // Level 0 is a submission marker written by approvalService — NOT an approver
+    // step. Filter it out so it never appears as a "Level 0 · Pending" pill.
     if (workflowLevels.length === 0 && auditRows.length > 0) {
-      auditRows.forEach((a) => {
-        steps.push({
-          level: a.Level,
-          label: `Level ${a.Level}`,
-          userIds: [],
-          status: a.ActionStatus,
-          approverEmail: a.ApproverEmail,
-          role: a.Role,
-          actionAt: a.ActionAt,
-          note: a.Note,
+      auditRows
+        .filter((a) => a.Level > 0)
+        .forEach((a) => {
+          steps.push({
+            level: a.Level,
+            label: `Level ${a.Level}`,
+            userIds: [],
+            status: a.ActionStatus,
+            approverEmail: a.ApproverEmail,
+            role: a.Role,
+            actionAt: a.ActionAt,
+            note: a.Note,
+          });
         });
-      });
     }
 
     const currentLevel =

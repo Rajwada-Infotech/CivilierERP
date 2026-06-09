@@ -2584,12 +2584,6 @@ const WorkOrdersList: React.FC<{
                       <span className="text-sm font-mono font-semibold text-primary">
                         {wo.DocumentNumber}
                       </span>
-                      <span
-                        className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${statusCfg.cls}`}
-                      >
-                        {statusCfg.icon}
-                        {wo.Status || "Draft"}
-                      </span>
                       <ApprovalStatusChain
                         table="WorkOrderHeader"
                         recordId={wo.Id}

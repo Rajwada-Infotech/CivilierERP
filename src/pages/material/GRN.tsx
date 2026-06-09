@@ -539,7 +539,9 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
       <ApprovalStatusChain
         table="GoodsReceiptNotes"
         recordId={row.original.GRNID}
-      />
+      
+            compact
+          />
     ),
   },
   {
