@@ -1271,8 +1271,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
       accessorKey: "Status",
       header: "Status",
       cell: ({ getValue, row }) => (
-        <div className="flex flex-col gap-1">
-          <StatusBadge status={getValue() as string} />
+        <div>
           <ApprovalStatusChain table="WorkDone" recordId={row.original.ID} />
         </div>
       ),

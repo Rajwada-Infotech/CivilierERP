@@ -792,8 +792,7 @@ export default function Issues() {
       accessorKey: "Status",
       header: "Status",
       cell: ({ getValue, row }) => (
-        <div className="flex flex-col gap-1">
-          <StatusBadge status={(getValue() as string) || "Draft"} />
+        <div>
           <ApprovalStatusChain
             table="MaterialIssues"
             recordId={row.original.IssueId}

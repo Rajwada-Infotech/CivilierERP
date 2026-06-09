@@ -3716,7 +3716,6 @@ const Payment: React.FC = () => {
                       </div>
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex flex-col gap-1">
-                          <StatusBadge status={rec.status} />
                           <ApprovalStatusChain
                             table="NewPayment"
                             recordId={rec.id}

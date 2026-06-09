@@ -1749,7 +1749,6 @@ const PurchaseOrderMaster: React.FC = () => {
                       </td>
                       <td className="px-4 py-3 text-center">
                         <div className="flex flex-col items-center gap-1">
-                          <StatusChip status={item.status} />
                           <ApprovalStatusChain
                             table="PurchaseOrders"
                             recordId={item._id}

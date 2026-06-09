@@ -1752,7 +1752,6 @@ const DetailModal: React.FC<DetailModalProps> = ({
             >
               {record.BoqNo || record.DocNo}
             </span>
-            <StatusBadge status={record.Status} />
             <ApprovalStatusChain table="BOQ" recordId={record.BoqID} />
           </div>
 
