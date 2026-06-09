@@ -247,6 +247,7 @@ async function queryNOCList({
   status,
   applicantId,
   bankNocStatus,
+  bankNocView,
 }) {
   const offset = (page - 1) * pageSize;
 
@@ -266,6 +267,8 @@ async function queryNOCList({
   if (status) filters.push("fn.Status = @Status");
   if (applicantId) filters.push("fn.ApplicantId = @ApplicantId");
   if (bankNocStatus) filters.push("fn.BankNOCStatus = @BankNOCStatus");
+  if (bankNocView)
+    filters.push("fn.BankName IS NOT NULL AND fn.BankName <> ''");
 
   const whereClause = `WHERE ${filters.join(" AND ")}`;
   const pool = getPool();
@@ -335,6 +338,7 @@ router.get("/", async (req, res) => {
       status: null,
       applicantId: null,
       bankNocStatus: null,
+      bankNocView: false,
     });
     res.json(result);
   } catch (err) {
@@ -348,6 +352,7 @@ router.get("/", async (req, res) => {
 // bankNocStatus) are passed in the request body — never in the URL — to prevent
 // them appearing in server logs, browser history, or Referer headers.
 // Fixes CodeQL js/sensitive-get-query (alert #523).
+// bankNocView is a non-sensitive display hint so it may remain a query param.
 router.post("/search", async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.body.page, 10) || 1);
@@ -359,6 +364,7 @@ router.post("/search", async (req, res) => {
     const status = normalizeText(req.body.status);
     const applicantId = normalizeNumber(req.body.applicantId);
     const bankNocStatus = normalizeText(req.body.bankNocStatus);
+    const bankNocView = req.query.bankNocView === "1";
 
     if (req.body.applicantId !== undefined && Number.isNaN(applicantId)) {
       return res
@@ -373,6 +379,7 @@ router.post("/search", async (req, res) => {
       status,
       applicantId,
       bankNocStatus,
+      bankNocView,
     });
     res.json(result);
   } catch (err) {
@@ -409,10 +416,10 @@ router.post("/", async (req, res) => {
         error: "The selected unit does not belong to the selected applicant.",
       });
 
-    const transaction = new sql.Transaction(getPool());
-    await transaction.begin();
+    const pool = getPool();
 
-    const insertResult = await new sql.Request(transaction)
+    const insertResult = await pool
+      .request()
       .input("ApplicantId", sql.Int, payload.ApplicantId)
       .input("UnitSelectionId", sql.Int, payload.UnitSelectionId)
       .input("AgreementId", sql.Int, payload.AgreementId)
@@ -450,7 +457,6 @@ router.post("/", async (req, res) => {
           BankNOCStatus, BankNOCDate, BankNOCNotes,
           CreatedBy, CreatedAt
         )
-        OUTPUT INSERTED.Id
         VALUES (
           NULL, @ApplicantId, @UnitSelectionId, @AgreementId,
           @ProjectId, @CompanyId,
@@ -460,18 +466,19 @@ router.post("/", async (req, res) => {
           @LoanDisbursementStatus, @LoanDisbursementDate, @LoanAmount,
           @BankNOCStatus, @BankNOCDate, @BankNOCNotes,
           @CreatedBy, SYSDATETIME()
-        )
+        );
+        SELECT SCOPE_IDENTITY() AS Id;
       `);
 
-    const id = insertResult.recordset[0]?.Id;
+    const id = Number(insertResult.recordset[0]?.Id);
     const nocNo = `NOC${String(id).padStart(6, "0")}`;
 
-    await new sql.Request(transaction)
+    await pool
+      .request()
       .input("Id", sql.Int, id)
       .input("NOCNo", sql.NVarChar(50), nocNo)
       .query(`UPDATE dbo.FollowupNOCs SET NOCNo = @NOCNo WHERE Id = @Id`);
 
-    await transaction.commit();
     res.status(201).json({ Id: id, NOCNo: nocNo, Status: payload.Status });
   } catch (err) {
     console.error("followupNoc POST error:", err);
@@ -594,6 +601,21 @@ router.delete("/:id", async (req, res) => {
   if (!userName) return;
 
   try {
+    const existing = await getPool()
+      .request()
+      .input("Id", sql.Int, id)
+      .query(
+        `SELECT Id, Status FROM dbo.FollowupNOCs WHERE Id = @Id AND IsDeleted = 0`,
+      );
+
+    const rec = existing.recordset[0];
+    if (!rec) return res.status(404).json({ error: "NOC not found" });
+    if (rec.Status === "Issued" || rec.Status === "Approved") {
+      return res
+        .status(409)
+        .json({ error: `Cannot delete a NOC with status "${rec.Status}"` });
+    }
+
     await getPool()
       .request()
       .input("Id", sql.Int, id)

@@ -72,6 +72,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getTCRecords } from "@/api/tcMasterApi";
 import { useQuery } from "@tanstack/react-query";
 import { getHsn } from "@/api/hsnApi";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import {
   DocNumberPreview,
   fetchNextDocNumber,
@@ -2583,12 +2584,10 @@ const WorkOrdersList: React.FC<{
                       <span className="text-sm font-mono font-semibold text-primary">
                         {wo.DocumentNumber}
                       </span>
-                      <span
-                        className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${statusCfg.cls}`}
-                      >
-                        {statusCfg.icon}
-                        {wo.Status || "Draft"}
-                      </span>
+                      <ApprovalStatusChain
+                        table="WorkOrderHeader"
+                        recordId={wo.Id}
+                      />
                     </div>
                     <div className="text-xs space-y-1">
                       <div className="flex items-center gap-1.5 text-muted-foreground">

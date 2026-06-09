@@ -33,10 +33,11 @@ function normalizeText(v) {
   const t = String(v).trim();
   return t === "" ? null : t;
 }
+// FIX #11: return null (not NaN) for invalid numbers so mssql doesn't throw
 function normalizeNumber(value) {
   if (value === undefined || value === null || value === "") return null;
   const n = Number(value);
-  return Number.isFinite(n) ? n : Number.NaN;
+  return Number.isFinite(n) ? n : null;
 }
 function normalizeDate(v) {
   if (!v) return null;
@@ -106,7 +107,8 @@ router.get("/", async (req, res) => {
     const overallStatus = normalizeText(req.query.overallStatus);
     const applicantId = normalizeNumber(req.query.applicantId);
 
-    if (Number.isNaN(applicantId))
+    // FIX #11 follow-through: normalizeNumber now returns null not NaN, so this guard still works
+    if (applicantId !== null && !Number.isFinite(applicantId))
       return res.status(400).json({ error: "applicantId must be a valid number" });
 
     const filters = ["lm.IsDeleted = 0"];
@@ -204,6 +206,7 @@ router.post("/", async (req, res) => {
     const transaction = new sql.Transaction(getPool());
     await transaction.begin();
 
+    // FIX #3: include CurrentStep = 1 and OverallStatus = 'In Progress' in INSERT
     const insertResult = await new sql.Request(transaction)
       .input("ApplicantId",      sql.Int,  applicantId)
       .input("UnitSelectionId",  sql.Int,  normalizeNumber(b?.UnitSelectionId))
@@ -226,14 +229,14 @@ router.post("/", async (req, res) => {
           ApplicantId, UnitSelectionId, BookingId, AgreementId, ProjectId, CompanyId,
           DocCollectionDue, LegalReviewDue, DraftingDue, InternalApprovalDue,
           DocSharedDue, MutualAgreementDue, DirectorMeetingDue, FinalExecutionDue,
-          Notes, CreatedBy, CreatedAt
+          Notes, CurrentStep, OverallStatus, CreatedBy, CreatedAt
         )
         OUTPUT INSERTED.Id
         VALUES (
           @ApplicantId, @UnitSelectionId, @BookingId, @AgreementId, @ProjectId, @CompanyId,
           @DocCollectionDue, @LegalReviewDue, @DraftingDue, @InternalApprovalDue,
           @DocSharedDue, @MutualAgreementDue, @DirectorMeetingDue, @FinalExecutionDue,
-          @Notes, @CreatedBy, SYSDATETIME()
+          @Notes, 1, 'In Progress', @CreatedBy, SYSDATETIME()
         )
       `);
 
@@ -277,11 +280,17 @@ router.patch("/:id/step", async (req, res) => {
     const completedStepIndex = STEP_FIELDS.indexOf(stepField) + 1;
     const advanceStep = status === "Completed" ? completedStepIndex + 1 : null;
 
+    // FIX #5: distinguish "notes explicitly sent as empty string" (clear) vs "not sent" (preserve)
+    // Frontend sends notes: undefined when no change intended, notes: "" when user cleared the field.
+    // normalizeText("") returns null. We use a flag to decide between unconditional SET vs COALESCE.
+    const notesExplicitlyProvided = Object.prototype.hasOwnProperty.call(req.body, "notes");
+    const normalizedNotes = normalizeText(notes);
+
     let query = `
       UPDATE dbo.FollowupLegalMilestones
       SET [${statusCol}] = @Status,
           [${doneCol}]   = @DoneDate,
-          [${notesCol}]  = COALESCE(@Notes, [${notesCol}]),
+          [${notesCol}]  = ${notesExplicitlyProvided ? "@Notes" : `COALESCE(@Notes, [${notesCol}])`},
           UpdatedBy = @UpdatedBy,
           UpdatedAt = SYSDATETIME()
     `;
@@ -297,7 +306,7 @@ router.patch("/:id/step", async (req, res) => {
       .input("Id",        sql.Int,              id)
       .input("Status",    sql.NVarChar(30),      status)
       .input("DoneDate",  sql.Date,              normalizeDate(doneDate))
-      .input("Notes",     sql.NVarChar(sql.MAX), normalizeText(notes))
+      .input("Notes",     sql.NVarChar(sql.MAX), normalizedNotes)
       .input("UpdatedBy", sql.NVarChar(100),     userName)
       .query(query);
 

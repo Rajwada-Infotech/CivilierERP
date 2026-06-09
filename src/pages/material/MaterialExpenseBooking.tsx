@@ -71,6 +71,7 @@ import { EmiSection } from "./ExpenseBooking/EmiSection";
 import { ApprovalTrailPanel } from "./ExpenseBooking/ApprovalTrailPanel";
 import { RecordCard } from "./ExpenseBooking/RecordCard";
 import { ExpenseBookingPreviewModal } from "./ExpenseBookingPreviewModal";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import {
   blankForm,
   computeBreakdown,
@@ -3407,9 +3408,11 @@ export default function MaterialExpenseBooking() {
                                       <Package size={10} className="shrink-0" />
                                       Pending Items
                                     </span>
-                                  ) : (
-                                    <StatusBadge status={rec.status} />
                                   )}
+                                  <ApprovalStatusChain
+                                    table="ExpenseBooking"
+                                    recordId={rec.id}
+                                  />
                                 </TableCell>
                                 <TableCell className="py-3">
                                   <div className="flex gap-1 items-center justify-end">

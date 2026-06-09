@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -412,8 +412,10 @@ function FormDialog({
 }) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
 
-  // Sync form when editing changes
-  useState(() => {
+  // Sync form whenever the dialog opens or the editing record changes.
+  // Using useEffect (not useState) so it fires correctly on every change.
+  useEffect(() => {
+    if (!open) return;
     if (editing) {
       setForm({
         ApplicantId: String(editing.ApplicantId ?? ""),
@@ -435,33 +437,7 @@ function FormDialog({
     } else {
       setForm(EMPTY_FORM);
     }
-  });
-
-  // Reset on open
-  const prevOpen = open;
-  if (prevOpen !== open && open) {
-    if (editing) {
-      setForm({
-        ApplicantId: String(editing.ApplicantId ?? ""),
-        ProjectId: String(editing.ProjectId ?? ""),
-        CompanyId: String(editing.CompanyId ?? ""),
-        UnitNo: editing.UnitNo ?? "",
-        BlockName: editing.BlockName ?? "",
-        FloorName: editing.FloorName ?? "",
-        UnitType: editing.UnitType ?? "",
-        AreaSqFt: String(editing.AreaSqFt ?? ""),
-        RatePerSqFt: String(editing.RatePerSqFt ?? ""),
-        TotalValue: String(editing.TotalValue ?? ""),
-        BookingAmount: String(editing.BookingAmount ?? ""),
-        SelectionDate:
-          editing.SelectionDate ?? new Date().toISOString().slice(0, 10),
-        Status: editing.Status ?? "Reserved",
-        Notes: editing.Notes ?? "",
-      });
-    } else {
-      setForm(EMPTY_FORM);
-    }
-  }
+  }, [open, editing]);
 
   const set = (key: keyof FormState, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
