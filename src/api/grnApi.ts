@@ -112,6 +112,8 @@ export interface GRNFormDataPayload {
   rootExBDocNo?: string | null;
   /** Optional project this GRN is associated with. */
   projectId?: number | null;
+  /** Godown where received stock is credited. */
+  godownId?: number | null;
 }
 
 export interface DocNumberPreview {
