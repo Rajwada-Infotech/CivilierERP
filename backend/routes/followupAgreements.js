@@ -324,7 +324,6 @@ router.post("/", async (req, res) => {
       });
     }
 
-  try {
     const pool = getPool();
 
     const projectId =
