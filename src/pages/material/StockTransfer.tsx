@@ -590,6 +590,7 @@ export default function StockTransfer() {
 
   const filteredGodowns = useMemo(() => {
     return allGodowns.filter((g) => {
+      if (g.IsMain) return false; // exclude Main Godown — transfers only between project godowns
       if (filterCompanyId && String(g.EnterpriseID ?? "") !== filterCompanyId)
         return false;
       if (filterProjectId && String(g.ProjectID ?? "") !== filterProjectId)
