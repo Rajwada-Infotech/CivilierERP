@@ -15,21 +15,21 @@ router.get("/", async (req, res) => {
     if (!module || module === "purchase-orders") {
       queries.push(`
         SELECT
-          'purchase-orders'        AS Module,
-          'Purchase Order'         AS ModuleLabel,
-          CAST(PurchaseOrderID AS NVARCHAR) AS RecordId,
-          PurchaseOrderNo          AS Reference,
-          PODate                   AS RecordDate,
+          'purchase-orders'                    AS Module,
+          'Purchase Order'                     AS ModuleLabel,
+          CAST(PurchaseOrderID AS NVARCHAR)    AS RecordId,
+          PurchaseOrderNo                      AS Reference,
+          PODate                               AS RecordDate,
           Status,
-          CAST(NULL AS NVARCHAR)   AS ContractorName,
-          CAST(NULL AS NVARCHAR)   AS SupplierName,
-          TotalAmount              AS Amount,
-          CreatedBy,
-          ISNULL(ApprovedBy, '')   AS ApprovedBy,
-          ISNULL(CAST(ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
-          ISNULL(RejectedBy, '')   AS RejectedBy,
-          ISNULL(RejectionNote, '') AS RejectionNote,
-          UpdatedAt                AS LastModified
+          CAST(NULL AS NVARCHAR)               AS ContractorName,
+          CAST(NULL AS NVARCHAR)               AS SupplierName,
+          TotalAmount                          AS Amount,
+          CAST(CreatedBy AS NVARCHAR(255))     AS CreatedBy,
+          ISNULL(CAST(ApprovedBy AS NVARCHAR(255)), '')  AS ApprovedBy,
+          ISNULL(CAST(ApprovedAt AS NVARCHAR), '')       AS ApprovedAt,
+          ISNULL(CAST(RejectedBy AS NVARCHAR(255)), '')  AS RejectedBy,
+          ISNULL(CAST(RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          UpdatedAt                            AS LastModified
         FROM dbo.PurchaseOrders
         WHERE Status = 'Pending'
       `);
@@ -38,21 +38,21 @@ router.get("/", async (req, res) => {
     if (!module || module === "work-orders") {
       queries.push(`
         SELECT
-          'work-orders'            AS Module,
-          'Work Order'             AS ModuleLabel,
-          CAST(Id AS NVARCHAR)     AS RecordId,
-          DocumentNumber           AS Reference,
-          DocumentDate             AS RecordDate,
+          'work-orders'                        AS Module,
+          'Work Order'                         AS ModuleLabel,
+          CAST(Id AS NVARCHAR)                 AS RecordId,
+          DocumentNumber                       AS Reference,
+          DocumentDate                         AS RecordDate,
           Status,
-          CAST(NULL AS NVARCHAR)   AS ContractorName,
-          CAST(NULL AS NVARCHAR)   AS SupplierName,
-          TotalAmount              AS Amount,
-          CreatedBy,
-          ISNULL(ApprovedBy, '')   AS ApprovedBy,
-          ISNULL(CAST(ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
-          ISNULL(RejectedBy, '')   AS RejectedBy,
-          ISNULL(RejectionNote, '') AS RejectionNote,
-          UpdatedAt                AS LastModified
+          CAST(NULL AS NVARCHAR)               AS ContractorName,
+          CAST(NULL AS NVARCHAR)               AS SupplierName,
+          TotalAmount                          AS Amount,
+          CAST(CreatedBy AS NVARCHAR(255))     AS CreatedBy,
+          ISNULL(CAST(ApprovedBy AS NVARCHAR(255)), '')  AS ApprovedBy,
+          ISNULL(CAST(ApprovedAt AS NVARCHAR), '')       AS ApprovedAt,
+          ISNULL(CAST(RejectedBy AS NVARCHAR(255)), '')  AS RejectedBy,
+          ISNULL(CAST(RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          UpdatedAt                            AS LastModified
         FROM dbo.WorkOrderHeader
         WHERE Status = 'Pending'
       `);
@@ -61,21 +61,21 @@ router.get("/", async (req, res) => {
     if (!module || module === "payments") {
       queries.push(`
         SELECT
-          'payments'               AS Module,
-          'Payment'                AS ModuleLabel,
-          CAST(PPaymentID AS NVARCHAR) AS RecordId,
-          PPaymentName             AS Reference,
-          PDate                    AS RecordDate,
-          ISNULL(Status, 'Draft')  AS Status,
-          CAST(NULL AS NVARCHAR)   AS ContractorName,
-          CAST(NULL AS NVARCHAR)   AS SupplierName,
-          PAmount                  AS Amount,
-          PCreatedBy               AS CreatedBy,
-          ISNULL(PApprovedBy, '')  AS ApprovedBy,
-          ''                       AS ApprovedAt,
-          ''                       AS RejectedBy,
-          ''                       AS RejectionNote,
-          CAST(NULL AS DATETIME2)  AS LastModified
+          'payments'                           AS Module,
+          'Payment'                            AS ModuleLabel,
+          CAST(PPaymentID AS NVARCHAR)         AS RecordId,
+          PPaymentName                         AS Reference,
+          PDate                                AS RecordDate,
+          ISNULL(Status, 'Draft')              AS Status,
+          CAST(NULL AS NVARCHAR)               AS ContractorName,
+          CAST(NULL AS NVARCHAR)               AS SupplierName,
+          PAmount                              AS Amount,
+          CAST(PCreatedBy AS NVARCHAR(255))    AS CreatedBy,
+          ISNULL(CAST(PApprovedBy AS NVARCHAR(255)), '') AS ApprovedBy,
+          ''                                   AS ApprovedAt,
+          ''                                   AS RejectedBy,
+          ''                                   AS RejectionNote,
+          CAST(NULL AS DATETIME2)              AS LastModified
         FROM dbo.NewPayment
         WHERE Status = 'Pending'
       `);
@@ -84,29 +84,26 @@ router.get("/", async (req, res) => {
     if (!module || module === "received-payment") {
       queries.push(`
         SELECT
-          'received-payment'                    AS Module,
-          'Received Payment'                    AS ModuleLabel,
-          CAST(RPPaymentID AS NVARCHAR)         AS RecordId,
+          'received-payment'                              AS Module,
+          'Received Payment'                              AS ModuleLabel,
+          CAST(RPPaymentID AS NVARCHAR)                   AS RecordId,
           ISNULL(RPDocNo, CONCAT('REC/', CAST(RPPaymentID AS NVARCHAR))) AS Reference,
-          RPDocDate                             AS RecordDate,
-          ISNULL(RPStatus, 'Draft')             AS Status,
-          CAST(NULL AS NVARCHAR)                 AS ContractorName,
-          ISNULL(RPCustomerName, RPReceivedFrom) AS SupplierName,
-          RPAmount                              AS Amount,
-          RPCreatedBy                           AS CreatedBy,
-          ISNULL(RPApprovedBy, '')              AS ApprovedBy,
-          ISNULL(CAST(RPApprovedAt AS NVARCHAR), '') AS ApprovedAt,
-          ISNULL(RPRejectedBy, '')              AS RejectedBy,
-          ISNULL(RPRejectionNote, '')           AS RejectionNote,
-          RPUpdatedAt                           AS LastModified
+          RPDocDate                                       AS RecordDate,
+          ISNULL(RPStatus, 'Draft')                       AS Status,
+          CAST(NULL AS NVARCHAR)                           AS ContractorName,
+          ISNULL(RPCustomerName, RPReceivedFrom)           AS SupplierName,
+          RPAmount                                        AS Amount,
+          CAST(RPCreatedBy AS NVARCHAR(255))              AS CreatedBy,
+          ISNULL(CAST(RPApprovedBy AS NVARCHAR(255)), '') AS ApprovedBy,
+          ISNULL(CAST(RPApprovedAt AS NVARCHAR), '')      AS ApprovedAt,
+          ISNULL(CAST(RPRejectedBy AS NVARCHAR(255)), '') AS RejectedBy,
+          ISNULL(CAST(RPRejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          RPUpdatedAt                                     AS LastModified
         FROM dbo.ReceivedPayment
         WHERE RPStatus = 'Pending'
       `);
     }
 
-    // KEY FIX: module key is 'goods-receipt' (matches approvalService TABLE_REGISTRY)
-    // ApprovalActions will call /api/grns/:id/approve|reject which is correct
-    // But the Module field sent to frontend must match what ApprovalActions uses as endpoint prefix
     if (!module || module === "goods-receipt") {
       queries.push(`
         SELECT
@@ -119,7 +116,7 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)                     AS ContractorName,
           s.LHeadName                               AS SupplierName,
           grn.TotalAmount                           AS Amount,
-          ISNULL(po.PurchaseOrderNo, '')            AS CreatedBy,
+          CAST(ISNULL(po.PurchaseOrderNo, '') AS NVARCHAR(255)) AS CreatedBy,
           ISNULL((
             SELECT TOP 1 ApproverEmail
             FROM dbo.ApprovalAuditLog
@@ -152,7 +149,7 @@ router.get("/", async (req, res) => {
               AND ActionStatus = 'Rejected'
             ORDER BY ActionAt DESC
           ), '')                                    AS RejectionNote,
-          grn.UpdatedAt                           AS LastModified
+          grn.UpdatedAt                             AS LastModified
         FROM dbo.GoodsReceiptNotes grn
         LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId = grn.SupplierID
         LEFT JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
@@ -175,8 +172,8 @@ router.get("/", async (req, res) => {
             ELSE eb.EName
           END                      AS SupplierName,
           ISNULL(eb.ENetAmount, eb.EAmount) AS Amount,
-          CAST(eb.ECreatedBy AS NVARCHAR) AS CreatedBy,
-          ISNULL(CAST(eb.EApprovedBy AS NVARCHAR), '') AS ApprovedBy,
+          CAST(ISNULL(u_created.name, CAST(eb.ECreatedBy AS NVARCHAR(255))) AS NVARCHAR(255))  AS CreatedBy,
+          CAST(ISNULL(u_approved.name, '') AS NVARCHAR(255))                                    AS ApprovedBy,
           ''                       AS ApprovedAt,
           ''                       AS RejectedBy,
           ''                       AS RejectionNote,
@@ -186,6 +183,8 @@ router.get("/", async (req, res) => {
           ON eb.ESourceType = 'GRN' AND grn_eb.GRNID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.AccountHeadMaster ahm_eb
           ON ahm_eb.LHeadId = grn_eb.SupplierID
+        LEFT JOIN dbo.users u_created  ON u_created.id = eb.ECreatedBy
+        LEFT JOIN dbo.users u_approved ON u_approved.id = eb.EApprovedBy
         WHERE eb.EStatus = 'Pending'
           AND NOT (
             ISNULL(eb.ESourceType, '') = 'GRN'
@@ -194,26 +193,24 @@ router.get("/", async (req, res) => {
       `);
     }
 
-    // Engineering → Work Done approval
-    // Matches backend/services/approvalService.js MODULE_MAP: "work-done"
     if (!module || module === "work-done") {
       queries.push(`
         SELECT
-          'work-done'                AS Module,
-          'Work Done'               AS ModuleLabel,
-          CAST(wd.ID AS NVARCHAR)   AS RecordId,
-          wd.DocNo                   AS Reference,
-          wd.DocDate                 AS RecordDate,
-          ISNULL(wd.Status, 'Draft') AS Status,
-          CAST(NULL AS NVARCHAR)     AS ContractorName,
-          CAST(NULL AS NVARCHAR)     AS SupplierName,
-          CAST(NULL AS DECIMAL(18,2)) AS Amount,
-          wd.CreatedBy               AS CreatedBy,
-          ''                         AS ApprovedBy,
-          ''                         AS ApprovedAt,
-          ''                         AS RejectedBy,
-          ISNULL(wd.Remarks, '')    AS RejectionNote,
-          wd.UpdatedAt               AS LastModified
+          'work-done'                          AS Module,
+          'Work Done'                          AS ModuleLabel,
+          CAST(wd.ID AS NVARCHAR)              AS RecordId,
+          wd.DocNo                             AS Reference,
+          wd.DocDate                           AS RecordDate,
+          ISNULL(wd.Status, 'Draft')           AS Status,
+          CAST(NULL AS NVARCHAR)               AS ContractorName,
+          CAST(NULL AS NVARCHAR)               AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))          AS Amount,
+          CAST(wd.CreatedBy AS NVARCHAR(255))  AS CreatedBy,
+          ''                                   AS ApprovedBy,
+          ''                                   AS ApprovedAt,
+          ''                                   AS RejectedBy,
+          ISNULL(CAST(wd.Remarks AS NVARCHAR(MAX)), '') AS RejectionNote,
+          wd.UpdatedAt                         AS LastModified
         FROM dbo.WorkDone wd
         WHERE ISNULL(wd.Status, 'Draft') = 'Pending'
       `);
@@ -222,25 +219,25 @@ router.get("/", async (req, res) => {
     if (!module || module === "boq") {
       queries.push(`
         SELECT
-          'boq'                       AS Module,
-          'BOQ'                       AS ModuleLabel,
-          CAST(b.BoqID AS NVARCHAR)   AS RecordId,
-          COALESCE(b.DocNo, b.BoqNo)  AS Reference,
-          b.BoqDate                   AS RecordDate,
-          ISNULL(b.Status, 'Draft')   AS Status,
-          pr.name                     AS ContractorName,
-          CONCAT(
+          'boq'                                AS Module,
+          'BOQ'                                AS ModuleLabel,
+          CAST(b.BoqID AS NVARCHAR)            AS RecordId,
+          COALESCE(b.DocNo, b.BoqNo)           AS Reference,
+          b.BoqDate                            AS RecordDate,
+          ISNULL(b.Status, 'Draft')            AS Status,
+          CAST(pr.name AS NVARCHAR(255))       AS ContractorName,
+          CAST(CONCAT(
             COALESCE(pr.name, ''),
             CASE WHEN pr.name IS NOT NULL AND co.name IS NOT NULL THEN ' / ' ELSE '' END,
             COALESCE(co.name, '')
-          )                           AS SupplierName,
-          b.TotalAmount               AS Amount,
-          b.CreatedBy                 AS CreatedBy,
-          ''                          AS ApprovedBy,
-          ''                          AS ApprovedAt,
-          ''                          AS RejectedBy,
-          ISNULL(b.Remarks, '')       AS RejectionNote,
-          ISNULL(b.UpdatedAt, b.CreatedAt) AS LastModified
+          ) AS NVARCHAR(512))                  AS SupplierName,
+          b.TotalAmount                        AS Amount,
+          CAST(b.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
+          ''                                   AS ApprovedBy,
+          ''                                   AS ApprovedAt,
+          ''                                   AS RejectedBy,
+          ISNULL(CAST(b.Remarks AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(b.UpdatedAt, b.CreatedAt)     AS LastModified
         FROM dbo.BOQ b
         LEFT JOIN dbo.enterprise co ON co.id = b.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
@@ -251,21 +248,21 @@ router.get("/", async (req, res) => {
     if (!module || module === "material-requests") {
       queries.push(`
         SELECT
-          'material-requests'      AS Module,
-          'Material Request'       AS ModuleLabel,
-          CAST(MRId AS NVARCHAR)   AS RecordId,
+          'material-requests'                  AS Module,
+          'Material Request'                   AS ModuleLabel,
+          CAST(MRId AS NVARCHAR)               AS RecordId,
           ISNULL(DocNo, CONCAT('MR#', CAST(MRId AS NVARCHAR))) AS Reference,
-          RequestDate              AS RecordDate,
+          RequestDate                          AS RecordDate,
           Status,
-          CAST(NULL AS NVARCHAR)   AS ContractorName,
-          CAST(NULL AS NVARCHAR)   AS SupplierName,
-          CAST(NULL AS DECIMAL(18,2)) AS Amount,
-          CreatedBy,
-          ''                       AS ApprovedBy,
-          ''                       AS ApprovedAt,
-          ''                       AS RejectedBy,
-          ''                       AS RejectionNote,
-          UpdatedAt                AS LastModified
+          CAST(NULL AS NVARCHAR)               AS ContractorName,
+          CAST(NULL AS NVARCHAR)               AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))          AS Amount,
+          CAST(CreatedBy AS NVARCHAR(255))     AS CreatedBy,
+          ''                                   AS ApprovedBy,
+          ''                                   AS ApprovedAt,
+          ''                                   AS RejectedBy,
+          ''                                   AS RejectionNote,
+          UpdatedAt                            AS LastModified
         FROM dbo.MaterialRequests
         WHERE Status = 'Pending'
       `);
@@ -283,7 +280,7 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)                                         AS ContractorName,
           ISNULL(mi.IssuedTo, ISNULL(p.name, mi.Reason))                AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))                                    AS Amount,
-          mi.CreatedBy                                                   AS CreatedBy,
+          CAST(mi.CreatedBy AS NVARCHAR(255))                            AS CreatedBy,
           ''                                                             AS ApprovedBy,
           ''                                                             AS ApprovedAt,
           ''                                                             AS RejectedBy,
