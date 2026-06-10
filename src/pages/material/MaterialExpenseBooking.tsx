@@ -3408,7 +3408,7 @@ export default function MaterialExpenseBooking() {
                                       <Package size={10} className="shrink-0" />
                                       Pending Items
                                     </span>
-                                  )}
+                                  ) : null}
                                   <ApprovalStatusChain
                                     table="ExpenseBooking"
                                     recordId={rec.id}

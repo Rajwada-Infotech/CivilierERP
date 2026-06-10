@@ -294,10 +294,33 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
 
+    // Check for optional columns that may not be migrated yet
+    const colCheckReq = pool.request();
+    const colCheck = await colCheckReq.query(`
+      SELECT name FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.MaterialIssues')
+        AND name IN ('IssuedTo','CostCenter','Purpose')
+    `);
+    const extraCols = colCheck.recordset.map((r) => r.name);
+    const issuedToCol   = extraCols.includes("IssuedTo")   ? "mi.IssuedTo,"   : "NULL AS IssuedTo,";
+    const costCenterCol = extraCols.includes("CostCenter")  ? "mi.CostCenter," : "NULL AS CostCenter,";
+    const purposeCol    = extraCols.includes("Purpose")     ? "mi.Purpose,"    : "NULL AS Purpose,";
+
     const headerResult = await pool.request().input("id", sql.Int, id).query(`
-      SELECT mi.*, c.name AS CompanyName, p.name AS ProjectName, fy.FName AS FinYearName,
-             mi.GodownId, g.GodownName, g.GodownCode,
-             mi.IssuedTo, mi.CostCenter, mi.Purpose
+      SELECT
+        mi.IssueId, mi.IssueNo, mi.DocNo, mi.DocTypeId, mi.DocYear, mi.DocSerial,
+        mi.ParentDocNo, mi.RootExBDocNo,
+        mi.CompanyId, mi.ProjectId, mi.FinYearId,
+        mi.Date, mi.Reason, mi.Remarks, mi.Status,
+        mi.GodownId, mi.CreatedBy, mi.CreatedAt, mi.UpdatedAt,
+        mi.ItemId, mi.Quantity,
+        ${issuedToCol}
+        ${costCenterCol}
+        ${purposeCol}
+        c.name   AS CompanyName,
+        p.name   AS ProjectName,
+        fy.FName AS FinYearName,
+        g.GodownName, g.GodownCode
       FROM dbo.MaterialIssues mi
       LEFT JOIN dbo.enterprise c  ON mi.CompanyId = c.id
       LEFT JOIN dbo.enterprise p  ON mi.ProjectId = p.id
