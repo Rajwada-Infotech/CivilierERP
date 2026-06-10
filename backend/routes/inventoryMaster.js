@@ -28,21 +28,20 @@ let _schemaCache = null;
 
 async function getSchema(pool) {
   if (_schemaCache) return _schemaCache;
-  const [hasCreatedDate, hasEntryDate, hasUomCol, hasUomOnItem, hasGodownCol] =
-    await Promise.all([
-      hasColumn(pool, "dbo.StockLedger", "CreatedDate"),
-      hasColumn(pool, "dbo.StockLedger", "EntryDate"),
-      hasColumn(pool, "dbo.StockLedger", "UOM"),
-      hasColumn(pool, "dbo.Item_Master_Group", "M_UOM"),
-      hasColumn(pool, "dbo.StockLedger", "GodownID"),
-    ]);
-  _schemaCache = {
+  const [
     hasCreatedDate,
     hasEntryDate,
     hasUomCol,
     hasUomOnItem,
     hasGodownCol,
-  };
+  ] = await Promise.all([
+    hasColumn(pool, "dbo.StockLedger", "CreatedDate"),
+    hasColumn(pool, "dbo.StockLedger", "EntryDate"),
+    hasColumn(pool, "dbo.StockLedger", "UOM"),
+    hasColumn(pool, "dbo.Item_Master_Group", "M_UOM"),
+    hasColumn(pool, "dbo.StockLedger", "GodownID"),
+  ]);
+  _schemaCache = { hasCreatedDate, hasEntryDate, hasUomCol, hasUomOnItem, hasGodownCol };
   return _schemaCache;
 }
 

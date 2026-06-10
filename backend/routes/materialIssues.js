@@ -302,15 +302,9 @@ router.get("/:id", authenticateToken, async (req, res) => {
         AND name IN ('IssuedTo','CostCenter','Purpose')
     `);
     const extraCols = colCheck.recordset.map((r) => r.name);
-    const issuedToCol = extraCols.includes("IssuedTo")
-      ? "mi.IssuedTo,"
-      : "NULL AS IssuedTo,";
-    const costCenterCol = extraCols.includes("CostCenter")
-      ? "mi.CostCenter,"
-      : "NULL AS CostCenter,";
-    const purposeCol = extraCols.includes("Purpose")
-      ? "mi.Purpose,"
-      : "NULL AS Purpose,";
+    const issuedToCol   = extraCols.includes("IssuedTo")   ? "mi.IssuedTo,"   : "NULL AS IssuedTo,";
+    const costCenterCol = extraCols.includes("CostCenter")  ? "mi.CostCenter," : "NULL AS CostCenter,";
+    const purposeCol    = extraCols.includes("Purpose")     ? "mi.Purpose,"    : "NULL AS Purpose,";
 
     const headerResult = await pool.request().input("id", sql.Int, id).query(`
       SELECT
