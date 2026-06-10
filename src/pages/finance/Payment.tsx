@@ -1420,9 +1420,21 @@ function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps) {
     }
   };
 
+  // When the user picks a different lot from the dropdown, update all lot-derived fields
+  const handleLotSelect = (lotIdStr: string) => {
+    const lotId = Number(lotIdStr);
+    const lot = lots.find((l) => l.CId === lotId);
+    if (!lot) return;
+    set("chequeLotId", lot.CId);
+    set("chequeLotNumber", lot.ChequeLotNumber);
+    set("chequeAccountNumber", lot.AccountNumber || "");
+    set("chequeIfsc", lot.IFSCCode || "");
+    set("chequeNo", ""); // reset cheque number when lot changes
+  };
+
   return (
     <div className="space-y-4">
-      {/* Lot info — static display, not a dropdown */}
+      {/* Lot selector — dropdown when multiple lots exist, static chip when only one */}
       {!bankId ? null : loadingLots ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -1433,9 +1445,9 @@ function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps) {
           <AlertTriangle size={12} />
           No active cheque lots found for this bank.
         </div>
-      ) : (
+      ) : lots.length === 1 ? (
         <>
-          {/* Lot number shown as a static info chip */}
+          {/* Single lot — show as a static info chip (original behaviour) */}
           <div className="space-y-1.5">
             <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
               Lot Number
@@ -1454,6 +1466,76 @@ function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps) {
           </div>
 
           {/* Lot detail panel */}
+          {activeLot && (
+            <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                  Cheque Range
+                </p>
+                <p className="font-mono text-xs font-semibold text-foreground mt-0.5">
+                  {activeLot.ChequeStartNumber} – {activeLot.ChequeEndNumber}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                  Account No.
+                </p>
+                <p className="font-mono text-xs text-foreground mt-0.5">
+                  {activeLot.AccountNumber || "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                  IFSC
+                </p>
+                <p className="font-mono text-xs text-foreground mt-0.5">
+                  {activeLot.IFSCCode || "—"}
+                </p>
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {/* Multiple lots — show a selectable dropdown */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+              Lot Number
+            </label>
+            <div className="relative">
+              <BookOpen
+                size={13}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <select
+                value={form.chequeLotId ? String(form.chequeLotId) : ""}
+                onChange={(e) => handleLotSelect(e.target.value)}
+                className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary font-mono"
+              >
+                <option value="">— Select lot —</option>
+                {lots.map((lot) => (
+                  <option key={lot.CId} value={String(lot.CId)}>
+                    {lot.ChequeLotNumber}
+                    {lot.RemainingCheques != null
+                      ? `  (${lot.RemainingCheques} remaining)`
+                      : ""}
+                    {lot.AccountNumber ? `  · ${lot.AccountNumber}` : ""}
+                  </option>
+                ))}
+              </select>
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
+                <ChevronDown size={14} />
+              </div>
+            </div>
+            {lots.length > 1 && (
+              <p className="text-[11px] text-muted-foreground">
+                {lots.length} lots available for this bank — select one to load
+                its cheques.
+              </p>
+            )}
+          </div>
+
+          {/* Lot detail panel — shown once a lot is selected */}
           {activeLot && (
             <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div>
