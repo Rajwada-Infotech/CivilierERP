@@ -107,5 +107,9 @@
   },
   "overrides": {
     "ws": ">=8.20.1"
-  }
+  },
+  "trustedDependencies": [
+    "unrs-resolver",
+    "@vitejs/plugin-react-swc"
+  ]
 }
