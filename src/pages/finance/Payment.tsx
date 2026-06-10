@@ -66,6 +66,7 @@ interface DbPayment {
   PBankID: number | null;
   PBankName: string | null;
   PProject: string | null;
+  PProjectName?: string | null;
   PCompany: string | null;
   PExpenseRef: string | null;
   DocNo?: string | null;
@@ -139,6 +140,7 @@ interface ExpenseDetail {
   ParentDocNo?: string | null;
   RootExBDocNo?: string | null;
   EProjectName: string | null;
+  EProjectDisplayName?: string | null;
   ECompanyId: number | null;
   EAmount: number | null;
   ENetAmount: number | null;
@@ -422,7 +424,12 @@ const fetchCompanyOptions = async (): Promise<
 };
 
 const fetchProjectOptions = async (): Promise<
-  { id: number; label: string }[]
+  {
+    id: number;
+    label: string;
+    belongs_to?: number | null;
+    company_id?: number | null;
+  }[]
 > => {
   const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
   if (!res.ok) return [];
@@ -498,8 +505,8 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     date: item.PDate?.slice(0, 10) || "",
     bankId: item.PBankID ?? null,
     bankName: item.PBankName || "",
-    project: item.PProject || "",
-    projectSite: item.PProject || "",
+    project: item.PProjectName || item.PProject || "",
+    projectSite: item.PProjectName || item.PProject || "",
     company: item.PCompany || "",
     expenseRef: item.PExpenseRef || "",
     expenseId: "",
@@ -870,16 +877,32 @@ function FilterBar({
   finYearOptions,
   filters,
   onChange,
+  selectedCompanyId,
 }: {
   companyOptions: { id: number; label: string }[];
-  projectOptions: { id: number; label: string }[];
+  projectOptions: {
+    id: number;
+    label: string;
+    belongs_to?: number | null;
+    company_id?: number | null;
+  }[];
   supplierOptions: { id: number; label: string }[];
   finYearOptions: { id: number; label: string }[];
   filters: BookingFilters;
   onChange: (key: keyof BookingFilters, value: string) => void;
+  selectedCompanyId?: number | null;
 }) {
   const companies = companyOptions.map((o) => o.label);
-  const projects = projectOptions.map((o) => o.label);
+
+  // Filter projects to only those belonging to the selected company
+  const filteredProjectOptions = selectedCompanyId
+    ? projectOptions.filter(
+        (p) =>
+          p.belongs_to === selectedCompanyId ||
+          p.company_id === selectedCompanyId,
+      )
+    : projectOptions;
+  const projects = filteredProjectOptions.map((o) => o.label);
   const finYears = finYearOptions.map((o) => o.label);
   const suppliers = supplierOptions.map((o) => o.label);
 
@@ -1397,9 +1420,21 @@ function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps) {
     }
   };
 
+  // When the user picks a different lot from the dropdown, update all lot-derived fields
+  const handleLotSelect = (lotIdStr: string) => {
+    const lotId = Number(lotIdStr);
+    const lot = lots.find((l) => l.CId === lotId);
+    if (!lot) return;
+    set("chequeLotId", lot.CId);
+    set("chequeLotNumber", lot.ChequeLotNumber);
+    set("chequeAccountNumber", lot.AccountNumber || "");
+    set("chequeIfsc", lot.IFSCCode || "");
+    set("chequeNo", ""); // reset cheque number when lot changes
+  };
+
   return (
     <div className="space-y-4">
-      {/* Lot info — static display, not a dropdown */}
+      {/* Lot selector — dropdown when multiple lots exist, static chip when only one */}
       {!bankId ? null : loadingLots ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -1410,9 +1445,9 @@ function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps) {
           <AlertTriangle size={12} />
           No active cheque lots found for this bank.
         </div>
-      ) : (
+      ) : lots.length === 1 ? (
         <>
-          {/* Lot number shown as a static info chip */}
+          {/* Single lot — show as a static info chip (original behaviour) */}
           <div className="space-y-1.5">
             <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
               Lot Number
@@ -1431,6 +1466,76 @@ function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps) {
           </div>
 
           {/* Lot detail panel */}
+          {activeLot && (
+            <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                  Cheque Range
+                </p>
+                <p className="font-mono text-xs font-semibold text-foreground mt-0.5">
+                  {activeLot.ChequeStartNumber} – {activeLot.ChequeEndNumber}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                  Account No.
+                </p>
+                <p className="font-mono text-xs text-foreground mt-0.5">
+                  {activeLot.AccountNumber || "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                  IFSC
+                </p>
+                <p className="font-mono text-xs text-foreground mt-0.5">
+                  {activeLot.IFSCCode || "—"}
+                </p>
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {/* Multiple lots — show a selectable dropdown */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+              Lot Number
+            </label>
+            <div className="relative">
+              <BookOpen
+                size={13}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <select
+                value={form.chequeLotId ? String(form.chequeLotId) : ""}
+                onChange={(e) => handleLotSelect(e.target.value)}
+                className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary font-mono"
+              >
+                <option value="">— Select lot —</option>
+                {lots.map((lot) => (
+                  <option key={lot.CId} value={String(lot.CId)}>
+                    {lot.ChequeLotNumber}
+                    {lot.RemainingCheques != null
+                      ? `  (${lot.RemainingCheques} remaining)`
+                      : ""}
+                    {lot.AccountNumber ? `  · ${lot.AccountNumber}` : ""}
+                  </option>
+                ))}
+              </select>
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
+                <ChevronDown size={14} />
+              </div>
+            </div>
+            {lots.length > 1 && (
+              <p className="text-[11px] text-muted-foreground">
+                {lots.length} lots available for this bank — select one to load
+                its cheques.
+              </p>
+            )}
+          </div>
+
+          {/* Lot detail panel — shown once a lot is selected */}
           {activeLot && (
             <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div>
@@ -1881,7 +1986,12 @@ const Payment: React.FC = () => {
   const companyOptions = enterprises;
 
   const { data: projectOptions = [] } = useQuery<
-    { id: number; label: string }[]
+    {
+      id: number;
+      label: string;
+      belongs_to?: number | null;
+      company_id?: number | null;
+    }[]
   >({
     queryKey: ["project-options-payment-filter"],
     queryFn: fetchProjectOptions,
@@ -2083,7 +2193,7 @@ const Payment: React.FC = () => {
           expenseRef: detail.EDocNo || "",
           parentDocNo,
           rootExBDocNo,
-          project: detail.EProjectName || "",
+          project: detail.EProjectDisplayName || detail.EProjectName || "",
           company: (() => {
             const name = (detail as any).ECompanyName;
             if (name && name.trim()) return name.trim();
@@ -2115,6 +2225,12 @@ const Payment: React.FC = () => {
         setLinkedGRNs(grns);
         if (grns.length > 0 && grns[0].ProjectName) {
           setForm((prev) => ({ ...prev, projectSite: grns[0].ProjectName! }));
+        } else if (detail.EProjectDisplayName || detail.EProjectName) {
+          setForm((prev) => ({
+            ...prev,
+            projectSite:
+              detail.EProjectDisplayName || detail.EProjectName || "",
+          }));
         }
 
         // If this expense is linked to a GRN, fetch the per-item GST breakdown
@@ -2512,12 +2628,37 @@ const Payment: React.FC = () => {
                           supplierOptions={supplierOptions}
                           finYearOptions={finYearOptions}
                           filters={bookingFilters}
-                          onChange={(key, val) =>
-                            setBookingFilters((prev) => ({
-                              ...prev,
-                              [key]: val,
-                            }))
+                          selectedCompanyId={
+                            bookingFilters.company
+                              ? (companyOptions.find(
+                                  (c) => c.label === bookingFilters.company,
+                                )?.id ?? null)
+                              : null
                           }
+                          onChange={(key, val) => {
+                            setBookingFilters((prev) => {
+                              const next = { ...prev, [key]: val };
+                              // When company changes, clear project if it no longer belongs to the new company
+                              if (key === "company") {
+                                const newCompanyId = val
+                                  ? (companyOptions.find((c) => c.label === val)
+                                      ?.id ?? null)
+                                  : null;
+                                if (prev.project) {
+                                  const projStillValid = newCompanyId
+                                    ? projectOptions.some(
+                                        (p) =>
+                                          p.label === prev.project &&
+                                          (p.belongs_to === newCompanyId ||
+                                            p.company_id === newCompanyId),
+                                      )
+                                    : true;
+                                  if (!projStillValid) next.project = "";
+                                }
+                              }
+                              return next;
+                            });
+                          }}
                         />
                         <ExpenseBookingPicker
                           options={filteredOptions}
@@ -3387,6 +3528,16 @@ const Payment: React.FC = () => {
                                     )?.label ?? val)
                                   : "";
                                 setCompanyNameFilter(label);
+                                // Clear project filter if it doesn't belong to new company
+                                if (projectFilter && val) {
+                                  const stillValid = projectOptions.some(
+                                    (p) =>
+                                      p.label === projectFilter &&
+                                      (p.belongs_to === Number(val) ||
+                                        p.company_id === Number(val)),
+                                  );
+                                  if (!stillValid) setProjectFilter("");
+                                }
                                 setPage(1);
                               }}
                               className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
@@ -3420,7 +3571,14 @@ const Payment: React.FC = () => {
                               className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                             >
                               <option value="">All Projects</option>
-                              {projectOptions.map((p) => (
+                              {(companyFilter
+                                ? projectOptions.filter(
+                                    (p) =>
+                                      p.belongs_to === Number(companyFilter) ||
+                                      p.company_id === Number(companyFilter),
+                                  )
+                                : projectOptions
+                              ).map((p) => (
                                 <option key={p.id} value={p.label}>
                                   {p.label}
                                 </option>
