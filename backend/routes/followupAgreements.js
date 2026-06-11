@@ -356,7 +356,8 @@ router.post("/", async (req, res) => {
       applicant.CompanyId ||
       null;
 
-    const insertResult = await pool.request()
+    const insertResult = await pool
+      .request()
       .input("ApplicantId", sql.Int, payload.ApplicantId)
       .input("UnitSelectionId", sql.Int, payload.UnitSelectionId)
       .input("BookingId", sql.Int, payload.BookingId)
@@ -389,7 +390,8 @@ router.post("/", async (req, res) => {
     if (!id) throw new Error("Insert returned no Id");
     const agreementNo = `AGR${String(id).padStart(6, "0")}`;
 
-    await pool.request()
+    await pool
+      .request()
       .input("Id", sql.Int, id)
       .input("AgreementNo", sql.NVarChar(50), agreementNo).query(`
         UPDATE dbo.FollowupAgreements
@@ -397,7 +399,9 @@ router.post("/", async (req, res) => {
         WHERE Id = @Id
       `);
 
-    res.status(201).json({ Id: id, AgreementNo: agreementNo, Status: payload.Status });
+    res
+      .status(201)
+      .json({ Id: id, AgreementNo: agreementNo, Status: payload.Status });
   } catch (err) {
     console.error("followupAgreements POST error:", err);
     res.status(500).json({ error: "Failed to create agreement" });
@@ -522,9 +526,12 @@ router.delete("/:id", async (req, res) => {
       SELECT Status FROM dbo.FollowupAgreements WHERE Id = @Id AND IsDeleted = 0
     `);
     const existing = checkResult.recordset[0];
-    if (!existing) return res.status(404).json({ error: "Agreement not found" });
+    if (!existing)
+      return res.status(404).json({ error: "Agreement not found" });
     if (existing.Status === "Signed") {
-      return res.status(409).json({ error: "Signed agreements cannot be deleted." });
+      return res
+        .status(409)
+        .json({ error: "Signed agreements cannot be deleted." });
     }
 
     await pool

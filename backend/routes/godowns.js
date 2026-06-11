@@ -18,9 +18,10 @@ router.get("/", cache("godowns", 120), async (req, res) => {
         g.EnterpriseID, g.ProjectID, g.Location,
         g.IsActive, g.IsDeleted, g.CreatedAt, g.UpdatedAt,
         e.name AS EnterpriseName,
-        NULL AS ProjectName
+        p.name AS ProjectName
       FROM dbo.Godowns g
       LEFT JOIN dbo.enterprise e ON e.id = g.EnterpriseID
+      LEFT JOIN dbo.enterprise p ON p.id = g.ProjectID AND p.business_type = 'P'
       WHERE g.IsDeleted = 0
       ORDER BY g.IsMain DESC, g.GodownName
     `);
@@ -39,13 +40,11 @@ router.get("/:id", async (req, res) => {
     const id = requireValidId(req, res);
     if (!id) return;
     const pool = getPool();
-    const result = await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query(`
-        SELECT g.*, e.name AS EnterpriseName, NULL AS ProjectName
+    const result = await pool.request().input("id", sql.Int, id).query(`
+        SELECT g.*, e.name AS EnterpriseName, p.name AS ProjectName
         FROM dbo.Godowns g
         LEFT JOIN dbo.enterprise e ON e.id = g.EnterpriseID
+        LEFT JOIN dbo.enterprise p ON p.id = g.ProjectID AND p.business_type = 'P'
         WHERE g.GodownID = @id AND g.IsDeleted = 0
       `);
     if (!result.recordset.length)
@@ -209,6 +208,3 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
-
-
-

@@ -36,5 +36,3 @@ dist-ssr
 yarn.lock
 pnpm-lock.yaml
 bun.lock
-
-backend/uploads/vault/

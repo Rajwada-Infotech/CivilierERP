@@ -74,7 +74,7 @@ router.get("/projects", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT id, name, short_name
+      SELECT id, name, short_name, company_id, belongs_to
       FROM   dbo.enterprise
       WHERE  business_type = 'P' AND (discontinue = 0 OR discontinue IS NULL)
       ORDER  BY name
@@ -144,7 +144,21 @@ router.get("/item-options", authenticateToken, async (req, res) => {
              ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END), 0)
            - ISNULL(SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END), 0)
              AS AvailableStock,
-             COALESCE(MAX(sl.UOM), ${hasUOM ? "img.M_UOM" : "NULL"}) AS DefaultUOM
+             -- Resolve DefaultUOM to a valid UOMCode.
+             -- StockLedger.UOM can be a display name (e.g. "Bag") not a code.
+             -- Try: 1) exact UOMCode match, 2) UOMName match, 3) item master M_UOM
+             COALESCE(
+               (SELECT TOP 1 u.UOMCode FROM dbo.UOMMaster u
+                WHERE u.UOMCode = MAX(sl.UOM) AND MAX(sl.UOM) IS NOT NULL AND MAX(sl.UOM) <> ''),
+               (SELECT TOP 1 u.UOMCode FROM dbo.UOMMaster u
+                WHERE u.UOMName = MAX(sl.UOM) AND MAX(sl.UOM) IS NOT NULL AND MAX(sl.UOM) <> ''),
+               ${
+                 hasUOM
+                   ? `(SELECT TOP 1 u.UOMCode FROM dbo.UOMMaster u
+                WHERE u.UOMCode = img.M_UOM OR u.UOMName = img.M_UOM)`
+                   : "NULL"
+               }
+             ) AS DefaultUOM
       FROM   dbo.Item_Master_Group img
       LEFT JOIN dbo.StockLedger sl
         ON  CONVERT(NVARCHAR(50), sl.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
@@ -161,18 +175,26 @@ router.get("/item-options", authenticateToken, async (req, res) => {
 });
 
 // ── GET /stock/:itemId ────────────────────────────────────────────────────────
+// Optional ?godownId=N scopes the balance to a specific godown.
 router.get("/stock/:itemId", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool
+    const godownId = req.query.godownId
+      ? parseInt(req.query.godownId, 10)
+      : null;
+    const stockReq = pool
       .request()
-      .input("ItemID", sql.NVarChar(100), req.params.itemId).query(`
+      .input("ItemID", sql.NVarChar(100), req.params.itemId);
+    if (godownId) stockReq.input("GodownID", sql.Int, godownId);
+    const godownFilter = godownId ? "AND GodownID = @GodownID" : "";
+    const result = await stockReq.query(`
         SELECT
           ISNULL(SUM(CASE WHEN Type='IN'  THEN Qty ELSE 0 END), 0) AS stockIn,
           ISNULL(SUM(CASE WHEN Type='OUT' THEN Qty ELSE 0 END), 0) AS stockOut,
           ISNULL(SUM(CASE WHEN Type='IN'  THEN Qty ELSE -Qty END), 0) AS balance
         FROM dbo.StockLedger
         WHERE CONVERT(NVARCHAR(100), ItemID) = @ItemID
+        ${godownFilter}
       `);
     res.json(result.recordset[0] || { stockIn: 0, stockOut: 0, balance: 0 });
   } catch (err) {
@@ -272,10 +294,33 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
 
+    // Check for optional columns that may not be migrated yet
+    const colCheckReq = pool.request();
+    const colCheck = await colCheckReq.query(`
+      SELECT name FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.MaterialIssues')
+        AND name IN ('IssuedTo','CostCenter','Purpose')
+    `);
+    const extraCols = colCheck.recordset.map((r) => r.name);
+    const issuedToCol   = extraCols.includes("IssuedTo")   ? "mi.IssuedTo,"   : "NULL AS IssuedTo,";
+    const costCenterCol = extraCols.includes("CostCenter")  ? "mi.CostCenter," : "NULL AS CostCenter,";
+    const purposeCol    = extraCols.includes("Purpose")     ? "mi.Purpose,"    : "NULL AS Purpose,";
+
     const headerResult = await pool.request().input("id", sql.Int, id).query(`
-      SELECT mi.*, c.name AS CompanyName, p.name AS ProjectName, fy.FName AS FinYearName,
-             mi.GodownId, g.GodownName, g.GodownCode,
-             mi.IssuedTo, mi.CostCenter, mi.Purpose
+      SELECT
+        mi.IssueId, mi.IssueNo, mi.DocNo, mi.DocTypeId, mi.DocYear, mi.DocSerial,
+        mi.ParentDocNo, mi.RootExBDocNo,
+        mi.CompanyId, mi.ProjectId, mi.FinYearId,
+        mi.Date, mi.Reason, mi.Remarks, mi.Status,
+        mi.GodownId, mi.CreatedBy, mi.CreatedAt, mi.UpdatedAt,
+        mi.ItemId, mi.Quantity,
+        ${issuedToCol}
+        ${costCenterCol}
+        ${purposeCol}
+        c.name   AS CompanyName,
+        p.name   AS ProjectName,
+        fy.FName AS FinYearName,
+        g.GodownName, g.GodownCode
       FROM dbo.MaterialIssues mi
       LEFT JOIN dbo.enterprise c  ON mi.CompanyId = c.id
       LEFT JOIN dbo.enterprise p  ON mi.ProjectId = p.id
@@ -287,7 +332,14 @@ router.get("/:id", authenticateToken, async (req, res) => {
     if (headerResult.recordset.length === 0)
       return res.status(404).json({ error: "Issue not found" });
 
-    const itemsResult = await pool.request().input("id", sql.Int, id).query(`
+    // Scope CurrentBalance to the godown this issue was raised against.
+    // Without the GodownID filter we'd sum across all godowns and show the
+    // wrong balance in the detail view.
+    const issueGodownId = headerResult.recordset[0]?.GodownId ?? null;
+    const itemsReq = pool.request().input("id", sql.Int, id);
+    if (issueGodownId) itemsReq.input("GodownID", sql.Int, issueGodownId);
+    const godownJoin = issueGodownId ? "AND sl.GodownID = @GodownID" : "";
+    const itemsResult = await itemsReq.query(`
       SELECT
         mii.IssueItemId, mii.ItemId, mii.UOMCode, mii.Quantity, mii.Remarks,
         img.M_Name AS ItemName, img.M_Group AS ItemGroup,
@@ -301,6 +353,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
       LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = mii.UOMCode
       LEFT JOIN dbo.StockLedger sl
         ON CONVERT(NVARCHAR(100), sl.ItemID) = mii.ItemId
+        ${godownJoin}
       WHERE mii.IssueId = @id
       GROUP BY mii.IssueItemId, mii.ItemId, mii.UOMCode, mii.Quantity, mii.Remarks,
                img.M_Name, img.M_Group, uom.UOMName, uom.Symbol
@@ -389,6 +442,13 @@ router.post("/", authenticateToken, async (req, res) => {
     headerReq.input("IssuedTo", sql.NVarChar(200), IssuedTo || null);
     headerReq.input("CostCenter", sql.NVarChar(200), CostCenter || null);
     headerReq.input("Purpose", sql.NVarChar(500), Purpose || null);
+    // Legacy NOT NULL columns — populate from first item
+    headerReq.input("ItemId", sql.NVarChar(100), String(items[0].ItemId));
+    headerReq.input(
+      "Quantity",
+      sql.Decimal(18, 2),
+      parseFloat(items[0].Quantity) || 0,
+    );
 
     const headerResult = await headerReq.query(`
       INSERT INTO dbo.MaterialIssues
@@ -396,14 +456,14 @@ router.post("/", authenticateToken, async (req, res) => {
          ParentDocNo, RootExBDocNo,
          CompanyId, ProjectId, FinYearId, Date,
          Reason, Remarks, CreatedBy,
-         GodownId, IssuedTo, CostCenter, Purpose)
+         GodownId, IssuedTo, CostCenter, Purpose, ItemId, Quantity)
       OUTPUT INSERTED.*
       VALUES
         (@IssueNo, @DocNo, @DocTypeId, @DocYear, @DocSerial,
          @ParentDocNo, @RootExBDocNo,
          @CompanyId, @ProjectId, @FinYearId, @Date,
          @Reason, @Remarks, @CreatedBy,
-         @GodownId, @IssuedTo, @CostCenter, @Purpose)
+         @GodownId, @IssuedTo, @CostCenter, @Purpose, @ItemId, @Quantity)
     `);
 
     const newRecord = headerResult.recordset[0];

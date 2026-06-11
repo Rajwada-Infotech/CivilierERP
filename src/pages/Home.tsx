@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { motion, useInView, AnimatePresence } from "framer-motion";
+import { motion, useInView } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -24,26 +24,94 @@ import {
   CheckCircle2,
   TrendingUp,
   Warehouse,
-  GitMerge,
   FileText,
-  Banknote,
-  Receipt,
   CreditCard,
-  ClipboardCheck,
   Wrench,
   LineChart,
-  Home,
 } from "lucide-react";
-import { formatINR } from "@/utils/formatCurrency";
 import {
   fetchHomeDashboard,
   type HomeDashboardData,
   type RecentPayment,
   type RecentGRN,
-  type RecentPO,
   type ApprovalInboxItem,
   type TaskSummary,
 } from "@/api/homeDashboardApi";
+
+// ─── Role helpers ─────────────────────────────────────────────────────────────
+// These mirror the logic in TopNavbar / auth.utils so the home page
+// shows exactly the same modules a user can actually navigate to.
+
+type UserRoleStr = string;
+
+function isPrivileged(role: UserRoleStr) {
+  return ["super_admin", "admin", "dba"].includes(role);
+}
+
+// Module-level access matrix (mirrors engineerModules in TopNavbar)
+function getAccessibleModules(role: UserRoleStr) {
+  if (isPrivileged(role)) {
+    return {
+      finance: true,
+      material: true,
+      engineering: true,
+      followup: true,
+      ticket: true,
+      approvals: true,
+      admin: true,
+      dba: role === "dba",
+    };
+  }
+  if (role === "engineer") {
+    return {
+      finance: false,
+      material: false, // engineers don't get material in TopNavbar
+      engineering: true,
+      followup: true,
+      ticket: true,
+      approvals: false, // approval inbox is admin-gated
+      admin: false,
+      dba: false,
+    };
+  }
+  // role === "user" — per-page pagePermissions from DB
+  // Map page keys that relate to modules:
+  //   "payments" / "transactions" → finance
+  //   "master_items" → material
+  //   "tasks" → general (show if they have tasks)
+  // Tickets are always accessible (any logged-in user can submit tickets)
+  return {
+    finance: false, // computed per-user below using pagePermissions
+    material: false,
+    engineering: false,
+    followup: false,
+    ticket: true, // ticket module is open to all non-customer roles
+    approvals: false,
+    admin: false,
+    dba: false,
+  };
+}
+
+// For "user" role, derive module access from pagePermissions
+function deriveUserModuleAccess(
+  pagePermissions: { page: string; actions: string[] }[],
+) {
+  const pages = new Set(
+    pagePermissions
+      .filter((p) => p.actions.includes("view"))
+      .map((p) => p.page),
+  );
+  return {
+    finance: pages.has("payments") || pages.has("transactions"),
+    material: pages.has("master_items") || pages.has("master_suppliers"),
+    engineering: false, // engineering module is not in PAGE_DEFINITIONS — role-gated only
+    followup: pages.has("master_customers"),
+    ticket: true, // always
+    approvals: false,
+    admin: false,
+    dba: false,
+  };
+}
 
 // ─── Animated Counter ─────────────────────────────────────────────────────────
 function AnimatedCounter({
@@ -94,10 +162,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ─── Module Group Card ────────────────────────────────────────────────────────
-// Each module gets a card that shows its key stats in a tight grid,
-// with a clickable header that navigates to the module.
-
+// ─── Module Card ──────────────────────────────────────────────────────────────
 interface StatRow {
   label: string;
   value: string | number;
@@ -139,15 +204,12 @@ function ModuleCard({
       transition={{ duration: 0.7, delay, ease: [0.16, 1, 0.3, 1] }}
       className="group relative rounded-2xl border border-border/60 bg-card/60 backdrop-blur-sm overflow-hidden"
     >
-      {/* Hover glow */}
       <div
         className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
         style={{
           background: `radial-gradient(ellipse at 50% -20%, ${accent}10 0%, transparent 60%)`,
         }}
       />
-
-      {/* Top accent line */}
       <div
         className="h-[2px] w-full"
         style={{
@@ -155,7 +217,6 @@ function ModuleCard({
         }}
       />
 
-      {/* Header — clickable */}
       <button
         onClick={() => navigate(href)}
         className="w-full flex items-center justify-between px-5 pt-4 pb-3 hover:bg-muted/20 transition-colors group/btn"
@@ -182,7 +243,6 @@ function ModuleCard({
         />
       </button>
 
-      {/* Stats grid */}
       <div className="px-5 pb-4 grid grid-cols-2 gap-x-4 gap-y-3">
         {loading
           ? Array.from({ length: 4 }).map((_, i) => (
@@ -193,18 +253,16 @@ function ModuleCard({
             ))
           : stats.map((s, i) => (
               <div key={i} className="flex flex-col">
-                <div className="flex items-baseline gap-1">
-                  <span
-                    className="font-heading font-bold text-xl tracking-tighter tabular-nums"
-                    style={{ color: s.accent ?? "hsl(var(--foreground))" }}
-                  >
-                    {typeof s.value === "number" ? (
-                      <AnimatedCounter target={s.value} />
-                    ) : (
-                      s.value
-                    )}
-                  </span>
-                </div>
+                <span
+                  className="font-heading font-bold text-xl tracking-tighter tabular-nums"
+                  style={{ color: s.accent ?? "hsl(var(--foreground))" }}
+                >
+                  {typeof s.value === "number" ? (
+                    <AnimatedCounter target={s.value} />
+                  ) : (
+                    s.value
+                  )}
+                </span>
                 <span className="text-[10px] font-medium text-muted-foreground/60 leading-tight mt-0.5 flex items-center gap-1">
                   {s.icon && <s.icon size={9} className="shrink-0" />}
                   {s.label}
@@ -216,7 +274,7 @@ function ModuleCard({
   );
 }
 
-// ─── Approval & Task Feed ─────────────────────────────────────────────────────
+// ─── Feed item ────────────────────────────────────────────────────────────────
 function FeedItem({
   item,
   i,
@@ -267,7 +325,7 @@ function FeedItem({
   );
 }
 
-// ─── Blueprint background ─────────────────────────────────────────────────────
+// ─── Blueprint BG ─────────────────────────────────────────────────────────────
 function BgGrid() {
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden">
@@ -317,25 +375,56 @@ function BgGrid() {
   );
 }
 
-// ─── Home ─────────────────────────────────────────────────────────────────────
+// ─── Restricted tile (locked module placeholder) ──────────────────────────────
+function LockedCard({ title, delay = 0 }: { title: string; delay?: number }) {
+  const ref = useRef(null);
+  const inView = useInView(ref, { once: true, margin: "-30px" });
+  return (
+    <motion.div
+      ref={ref}
+      initial={{ y: 40, opacity: 0 }}
+      animate={inView ? { y: 0, opacity: 1 } : {}}
+      transition={{ duration: 0.7, delay, ease: [0.16, 1, 0.3, 1] }}
+      className="relative rounded-2xl border border-border/30 bg-muted/10 backdrop-blur-sm overflow-hidden opacity-40 cursor-not-allowed select-none"
+    >
+      <div className="h-[2px] w-full bg-border/30" />
+      <div className="px-5 pt-4 pb-5 flex flex-col gap-2">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-muted/40">
+            <ShieldCheck size={15} className="text-muted-foreground/40" />
+          </div>
+          <span className="font-heading font-bold text-sm text-muted-foreground/50 tracking-tight">
+            {title}
+          </span>
+        </div>
+        <p className="text-[10px] text-muted-foreground/30 font-medium">
+          Access restricted
+        </p>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── HomePage ─────────────────────────────────────────────────────────────────
 export default function HomePage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
-  const firstName = currentUser?.name?.split(" ")[0] ?? "there";
-  const role = currentUser?.role;
 
+  const role: UserRoleStr = currentUser?.role ?? "";
+  const firstName = currentUser?.name?.split(" ")[0] ?? "there";
+
+  // Customer portal redirect
   if (role === "customer") return <Navigate to="/customer-portal" replace />;
 
-  const isSuperAdmin = role === "super_admin";
+  const privileged = isPrivileged(role);
   const isDba = role === "dba";
-  const isAdmin = role === "admin" || isSuperAdmin || isDba;
-  const isFinance = [
-    "admin",
-    "super_admin",
-    "dba",
-    "finance_manager",
-    "branch_manager",
-  ].includes(role ?? "");
+  const isAdmin = privileged;
+
+  // Compute which modules this user can see
+  const access =
+    role === "user"
+      ? deriveUserModuleAccess(currentUser?.pagePermissions ?? [])
+      : getAccessibleModules(role);
 
   const hour = new Date().getHours();
   const greeting =
@@ -343,7 +432,7 @@ export default function HomePage() {
 
   const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } =
     useQuery<HomeDashboardData>({
-      queryKey: ["home-dashboard", isAdmin],
+      queryKey: ["home-dashboard", role],
       queryFn: () => fetchHomeDashboard(isAdmin, role),
       staleTime: 2 * 60 * 1000,
       refetchInterval: 5 * 60 * 1000,
@@ -365,7 +454,7 @@ export default function HomePage() {
       })
     : null;
 
-  // ── Activity feed ──
+  // ── Activity feed — only show items for modules the user can access ──
   const feed: {
     label: string;
     sub: string;
@@ -373,50 +462,60 @@ export default function HomePage() {
     color: string;
     time?: string;
   }[] = [];
-  (data?.material?.recentGRNs ?? []).slice(0, 2).forEach((g: RecentGRN) => {
-    feed.push({
-      label: `GRN ${g.GRNNo}`,
-      sub: g.SupplierName ?? "—",
-      icon: Package,
-      color: "#10b981",
-      time: g.GRNDate
-        ? new Date(g.GRNDate).toLocaleDateString("en-IN", {
-            day: "2-digit",
-            month: "short",
-          })
-        : undefined,
-    });
-  });
-  (data?.finance?.recentPayments ?? [])
-    .slice(0, 2)
-    .forEach((p: RecentPayment) => {
+
+  if (access.material) {
+    (data?.material?.recentGRNs ?? []).slice(0, 2).forEach((g: RecentGRN) => {
       feed.push({
-        label: `₹${Number(p.PAmount ?? 0).toLocaleString("en-IN")} via ${p.PMode ?? "—"}`,
-        sub: p.PProject ?? p.PPaymentName ?? "—",
-        icon: IndianRupee,
-        color: "#f59e0b",
-        time: p.PDate
-          ? new Date(p.PDate).toLocaleDateString("en-IN", {
+        label: `GRN ${g.GRNNo}`,
+        sub: g.SupplierName ?? "—",
+        icon: Package,
+        color: "#10b981",
+        time: g.GRNDate
+          ? new Date(g.GRNDate).toLocaleDateString("en-IN", {
               day: "2-digit",
               month: "short",
             })
           : undefined,
       });
     });
-  pendingApprovals.slice(0, 2).forEach((a: ApprovalInboxItem) => {
-    feed.push({
-      label: `${a.ModuleLabel} ${a.Reference}`,
-      sub: "Pending approval",
-      icon: FileCheck,
-      color: "#ef4444",
-      time: a.RecordDate
-        ? new Date(a.RecordDate).toLocaleDateString("en-IN", {
-            day: "2-digit",
-            month: "short",
-          })
-        : undefined,
+  }
+
+  if (access.finance) {
+    (data?.finance?.recentPayments ?? [])
+      .slice(0, 2)
+      .forEach((p: RecentPayment) => {
+        feed.push({
+          label: `₹${Number(p.PAmount ?? 0).toLocaleString("en-IN")} via ${p.PMode ?? "—"}`,
+          sub: p.PProject ?? p.PPaymentName ?? "—",
+          icon: IndianRupee,
+          color: "#f59e0b",
+          time: p.PDate
+            ? new Date(p.PDate).toLocaleDateString("en-IN", {
+                day: "2-digit",
+                month: "short",
+              })
+            : undefined,
+        });
+      });
+  }
+
+  if (access.approvals) {
+    pendingApprovals.slice(0, 2).forEach((a: ApprovalInboxItem) => {
+      feed.push({
+        label: `${a.ModuleLabel} ${a.Reference}`,
+        sub: "Pending approval",
+        icon: FileCheck,
+        color: "#ef4444",
+        time: a.RecordDate
+          ? new Date(a.RecordDate).toLocaleDateString("en-IN", {
+              day: "2-digit",
+              month: "short",
+            })
+          : undefined,
+      });
     });
-  });
+  }
+
   (data?.recentTasks ?? []).slice(0, 2).forEach((t: TaskSummary) => {
     feed.push({
       label: t.title,
@@ -431,7 +530,87 @@ export default function HomePage() {
         : undefined,
     });
   });
+
   const activityFeed = feed.slice(0, 7);
+
+  // ── How many visible module cards exist (for staggered delay calculation) ──
+  let cardIdx = 0;
+  const nextDelay = () => {
+    const d = cardIdx * 0.05 + 0.05;
+    cardIdx++;
+    return d;
+  };
+
+  // ── Determine which "key numbers" to show based on access ──
+  const keyNumbers = [
+    access.finance && {
+      label: "Total payments (₹)",
+      value: isLoading
+        ? null
+        : Math.round((fin?.payments?.totalAmount ?? 0) / 100000),
+      suffix: "L",
+      prefix: "₹",
+      color: "#10b981",
+      icon: IndianRupee,
+    },
+    (access.material || access.finance) && {
+      label: "Open PO value (₹)",
+      value: isLoading
+        ? null
+        : Math.round(
+            (mat?.purchaseOrders?.openValue ??
+              fin?.purchaseOrders?.openValue ??
+              0) / 100000,
+          ),
+      suffix: "L",
+      prefix: "₹",
+      color: "#f59e0b",
+      icon: Layers,
+    },
+    access.engineering && {
+      label: "BOQ certified (₹)",
+      value: isLoading
+        ? null
+        : Math.round((eng?.workDone?.certifiedAmount ?? 0) / 100000),
+      suffix: "L",
+      prefix: "₹",
+      color: "#8b5cf6",
+      icon: LineChart,
+    },
+    access.finance && {
+      label: "Supplier count",
+      value: isLoading ? null : (fin?.parties?.supplierCount ?? 0),
+      color: "#06b6d4",
+      icon: Building2,
+    },
+    access.ticket &&
+      !access.finance &&
+      !access.material && {
+        label: "Open tickets",
+        value: isLoading
+          ? null
+          : (tick?.pending ?? 0) + (tick?.inProgress ?? 0),
+        color: "#f97316",
+        icon: Ticket,
+      },
+    access.engineering &&
+      !access.finance && {
+        label: "Active projects",
+        value: isLoading ? null : (eng?.projects?.active ?? 0),
+        color: "#10b981",
+        icon: Building2,
+      },
+  ].filter(Boolean) as Array<{
+    label: string;
+    value: number | null;
+    suffix?: string;
+    prefix?: string;
+    color: string;
+    icon: React.ElementType;
+  }>;
+
+  // Always show at least something
+  const hasAnyAccess = Object.values(access).some(Boolean);
 
   return (
     <div className="relative min-h-[calc(100vh-3.5rem)] bg-background overflow-hidden font-body">
@@ -440,7 +619,6 @@ export default function HomePage() {
       <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {/* ── Hero ── */}
         <div className="mb-11">
-          {/* Eyebrow */}
           <motion.div
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -480,7 +658,6 @@ export default function HomePage() {
             </div>
           </motion.div>
 
-          {/* Greeting */}
           <motion.h1
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -508,11 +685,39 @@ export default function HomePage() {
             transition={{ duration: 0.6, delay: 0.32 }}
             className="text-muted-foreground text-base max-w-md leading-relaxed"
           >
-            Everything live across procurement, finance, engineering and sales —
-            in one place.
+            {privileged
+              ? "Everything live across procurement, finance, engineering and sales — in one place."
+              : role === "engineer"
+                ? "Your engineering, follow-up and ticket workspace — live and in one place."
+                : "Your workspace overview — all your accessible modules in one place."}
           </motion.p>
 
-          {/* Divider */}
+          {/* Role badge */}
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.4 }}
+            className="mt-3"
+          >
+            <span
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-heading font-semibold uppercase tracking-wider border"
+              style={{
+                background: privileged
+                  ? "hsl(var(--primary)/0.08)"
+                  : "hsl(var(--muted)/0.5)",
+                borderColor: privileged
+                  ? "hsl(var(--primary)/0.25)"
+                  : "hsl(var(--border))",
+                color: privileged
+                  ? "hsl(var(--primary))"
+                  : "hsl(var(--muted-foreground))",
+              }}
+            >
+              {privileged ? <ShieldCheck size={10} /> : <Users size={10} />}
+              {role.replace(/_/g, " ")}
+            </span>
+          </motion.div>
+
           <motion.div
             initial={{ scaleX: 0, opacity: 0 }}
             animate={{ scaleX: 1, opacity: 1 }}
@@ -538,7 +743,7 @@ export default function HomePage() {
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm max-w-sm"
+              className="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive max-w-sm"
             >
               <AlertCircle size={13} className="shrink-0" />
               <span className="text-xs">
@@ -548,231 +753,248 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* ── Module Cards Grid ── */}
+        {/* ── Module Cards ── */}
         <section className="mb-10">
-          <SectionLabel>Operations at a glance</SectionLabel>
+          <SectionLabel>
+            {hasAnyAccess ? "Operations at a glance" : "Your workspace"}
+          </SectionLabel>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {/* Finance */}
-            <ModuleCard
-              title="Finance"
-              href="/finance"
-              icon={BarChart3}
-              accent="#3b82f6"
-              delay={0.05}
-              loading={isLoading}
-              badge={fin?.cheques?.pendingCount}
-              badgeLabel="cheques"
-              stats={[
-                {
-                  label: "Total payments",
-                  value: fin?.payments?.totalCount ?? 0,
-                  accent: "#3b82f6",
-                },
-                {
-                  label: "Paid this month (₹L)",
-                  value: Math.round((fin?.payments?.totalAmount ?? 0) / 100000),
-                  accent: "#10b981",
-                  icon: TrendingUp,
-                },
-                {
-                  label: "Open POs",
-                  value: fin?.purchaseOrders?.openCount ?? 0,
-                  accent: "#f59e0b",
-                },
-                {
-                  label: "Pending cheques",
-                  value: fin?.cheques?.pendingCount ?? 0,
-                  accent: fin?.cheques?.pendingCount ? "#ef4444" : undefined,
-                  icon: CreditCard,
-                },
-              ]}
-            />
+            {access.finance && (
+              <ModuleCard
+                title="Finance"
+                href="/finance"
+                icon={BarChart3}
+                accent="#3b82f6"
+                delay={nextDelay()}
+                loading={isLoading}
+                badge={fin?.cheques?.pendingCount}
+                badgeLabel="cheques"
+                stats={[
+                  {
+                    label: "Total payments",
+                    value: fin?.payments?.totalCount ?? 0,
+                    accent: "#3b82f6",
+                  },
+                  {
+                    label: "Paid this month (₹L)",
+                    value: Math.round(
+                      (fin?.payments?.totalAmount ?? 0) / 100000,
+                    ),
+                    accent: "#10b981",
+                    icon: TrendingUp,
+                  },
+                  {
+                    label: "Open POs",
+                    value: fin?.purchaseOrders?.openCount ?? 0,
+                    accent: "#f59e0b",
+                  },
+                  {
+                    label: "Pending cheques",
+                    value: fin?.cheques?.pendingCount ?? 0,
+                    accent: fin?.cheques?.pendingCount ? "#ef4444" : undefined,
+                    icon: CreditCard,
+                  },
+                ]}
+              />
+            )}
 
             {/* Material */}
-            <ModuleCard
-              title="Material"
-              href="/material"
-              icon={Package}
-              accent="#8b5cf6"
-              delay={0.1}
-              loading={isLoading}
-              stats={[
-                {
-                  label: "GRNs this month",
-                  value: mat?.grns?.thisMonth ?? 0,
-                  accent: "#8b5cf6",
-                },
-                {
-                  label: "Open POs",
-                  value: mat?.purchaseOrders?.open ?? 0,
-                  accent: "#f59e0b",
-                },
-                {
-                  label: "Total items",
-                  value: mat?.items?.count ?? 0,
-                  accent: "#06b6d4",
-                  icon: Warehouse,
-                },
-                {
-                  label: "Today's GRNs",
-                  value: mat?.grns?.today ?? 0,
-                  accent: mat?.grns?.today ? "#10b981" : undefined,
-                },
-              ]}
-            />
+            {access.material && (
+              <ModuleCard
+                title="Material"
+                href="/material"
+                icon={Package}
+                accent="#8b5cf6"
+                delay={nextDelay()}
+                loading={isLoading}
+                stats={[
+                  {
+                    label: "GRNs this month",
+                    value: mat?.grns?.thisMonth ?? 0,
+                    accent: "#8b5cf6",
+                  },
+                  {
+                    label: "Open POs",
+                    value: mat?.purchaseOrders?.open ?? 0,
+                    accent: "#f59e0b",
+                  },
+                  {
+                    label: "Total items",
+                    value: mat?.items?.count ?? 0,
+                    accent: "#06b6d4",
+                    icon: Warehouse,
+                  },
+                  {
+                    label: "Today's GRNs",
+                    value: mat?.grns?.today ?? 0,
+                    accent: mat?.grns?.today ? "#10b981" : undefined,
+                  },
+                ]}
+              />
+            )}
 
             {/* Engineering */}
-            <ModuleCard
-              title="Engineering"
-              href="/engineering"
-              icon={Wrench}
-              accent="#ec4899"
-              delay={0.15}
-              loading={isLoading}
-              stats={[
-                {
-                  label: "Open work orders",
-                  value: eng?.workOrders?.open ?? 0,
-                  accent: "#ec4899",
-                },
-                {
-                  label: "Active projects",
-                  value: eng?.projects?.active ?? 0,
-                  accent: "#10b981",
-                  icon: Building2,
-                },
-                {
-                  label: "Work done pending",
-                  value: eng?.workDone?.pending ?? 0,
-                  accent: eng?.workDone?.pending ? "#f59e0b" : undefined,
-                },
-                {
-                  label: "BOQ approved",
-                  value: eng?.boq?.approved ?? 0,
-                  accent: "#06b6d4",
-                  icon: FileText,
-                },
-              ]}
-            />
+            {access.engineering && (
+              <ModuleCard
+                title="Engineering"
+                href="/engineering"
+                icon={Wrench}
+                accent="#ec4899"
+                delay={nextDelay()}
+                loading={isLoading}
+                stats={[
+                  {
+                    label: "Open work orders",
+                    value: eng?.workOrders?.open ?? 0,
+                    accent: "#ec4899",
+                  },
+                  {
+                    label: "Active projects",
+                    value: eng?.projects?.active ?? 0,
+                    accent: "#10b981",
+                    icon: Building2,
+                  },
+                  {
+                    label: "Work done pending",
+                    value: eng?.workDone?.pending ?? 0,
+                    accent: eng?.workDone?.pending ? "#f59e0b" : undefined,
+                  },
+                  {
+                    label: "BOQ approved",
+                    value: eng?.boq?.approved ?? 0,
+                    accent: "#06b6d4",
+                    icon: FileText,
+                  },
+                ]}
+              />
+            )}
 
-            {/* Followup / CRM */}
-            <ModuleCard
-              title="Followup"
-              href="/followup"
-              icon={Users}
-              accent="#6366f1"
-              delay={0.2}
-              loading={isLoading}
-              badge={fol?.pendingNOCs}
-              badgeLabel="NOCs"
-              stats={[
-                {
-                  label: "Applications",
-                  value: fol?.applications ?? 0,
-                  accent: "#6366f1",
-                },
-                {
-                  label: "Confirmed bookings",
-                  value: fol?.confirmedBookings ?? 0,
-                  accent: "#10b981",
-                  icon: CheckCircle2,
-                },
-                {
-                  label: "Active agreements",
-                  value: fol?.activeAgreements ?? 0,
-                  accent: "#f59e0b",
-                },
-                {
-                  label: "Handovers due",
-                  value: fol?.scheduledHandovers ?? 0,
-                  accent: fol?.scheduledHandovers ? "#ef4444" : undefined,
-                },
-              ]}
-            />
+            {/* Followup */}
+            {access.followup && (
+              <ModuleCard
+                title="Followup"
+                href="/followup"
+                icon={Users}
+                accent="#6366f1"
+                delay={nextDelay()}
+                loading={isLoading}
+                badge={fol?.pendingNOCs}
+                badgeLabel="NOCs"
+                stats={[
+                  {
+                    label: "Applications",
+                    value: fol?.applications ?? 0,
+                    accent: "#6366f1",
+                  },
+                  {
+                    label: "Confirmed bookings",
+                    value: fol?.confirmedBookings ?? 0,
+                    accent: "#10b981",
+                    icon: CheckCircle2,
+                  },
+                  {
+                    label: "Active agreements",
+                    value: fol?.activeAgreements ?? 0,
+                    accent: "#f59e0b",
+                  },
+                  {
+                    label: "Handovers due",
+                    value: fol?.scheduledHandovers ?? 0,
+                    accent: fol?.scheduledHandovers ? "#ef4444" : undefined,
+                  },
+                ]}
+              />
+            )}
 
-            {/* Approvals */}
-            <ModuleCard
-              title="Approval Inbox"
-              href="/admin/approval/inbox"
-              icon={FileCheck}
-              accent="#f59e0b"
-              delay={0.25}
-              loading={isLoading}
-              badge={pendingApprovals.length}
-              badgeLabel="pending"
-              stats={[
-                {
-                  label: "Awaiting action",
-                  value: pendingApprovals.length,
-                  accent: pendingApprovals.length ? "#f59e0b" : undefined,
-                },
-                {
-                  label: "Modules affected",
-                  value: new Set(
-                    pendingApprovals.map((a: ApprovalInboxItem) => a.Module),
-                  ).size,
-                  accent: "#8b5cf6",
-                },
-                {
-                  label: "PO approvals",
-                  value: pendingApprovals.filter(
-                    (a: ApprovalInboxItem) => a.Module === "PurchaseOrders",
-                  ).length,
-                },
-                {
-                  label: "GRN approvals",
-                  value: pendingApprovals.filter(
-                    (a: ApprovalInboxItem) => a.Module === "GoodsReceiptNotes",
-                  ).length,
-                },
-              ]}
-            />
+            {/* Approvals — only privileged */}
+            {access.approvals && (
+              <ModuleCard
+                title="Approval Inbox"
+                href="/admin/approval/inbox"
+                icon={FileCheck}
+                accent="#f59e0b"
+                delay={nextDelay()}
+                loading={isLoading}
+                badge={pendingApprovals.length}
+                badgeLabel="pending"
+                stats={[
+                  {
+                    label: "Awaiting action",
+                    value: pendingApprovals.length,
+                    accent: pendingApprovals.length ? "#f59e0b" : undefined,
+                  },
+                  {
+                    label: "Modules affected",
+                    value: new Set(
+                      pendingApprovals.map((a: ApprovalInboxItem) => a.Module),
+                    ).size,
+                    accent: "#8b5cf6",
+                  },
+                  {
+                    label: "PO approvals",
+                    value: pendingApprovals.filter(
+                      (a: ApprovalInboxItem) => a.Module === "PurchaseOrders",
+                    ).length,
+                  },
+                  {
+                    label: "GRN approvals",
+                    value: pendingApprovals.filter(
+                      (a: ApprovalInboxItem) =>
+                        a.Module === "GoodsReceiptNotes",
+                    ).length,
+                  },
+                ]}
+              />
+            )}
 
             {/* Tickets */}
-            <ModuleCard
-              title="Tickets"
-              href="/ticket"
-              icon={Ticket}
-              accent="#f97316"
-              delay={0.3}
-              loading={isLoading}
-              badge={tick?.urgent}
-              badgeLabel="urgent"
-              stats={[
-                {
-                  label: "Open",
-                  value: (tick?.pending ?? 0) + (tick?.inProgress ?? 0),
-                  accent: "#f97316",
-                },
-                {
-                  label: "Urgent",
-                  value: tick?.urgent ?? 0,
-                  accent: tick?.urgent ? "#ef4444" : undefined,
-                  icon: TriangleAlert,
-                },
-                {
-                  label: "Resolved",
-                  value: tick?.resolved ?? 0,
-                  accent: "#10b981",
-                  icon: CheckCircle2,
-                },
-                {
-                  label: "Resolution %",
-                  value: `${tick?.resolvedPct ?? 0}%`,
-                  accent: "#06b6d4",
-                },
-              ]}
-            />
+            {access.ticket && (
+              <ModuleCard
+                title="Tickets"
+                href="/ticket"
+                icon={Ticket}
+                accent="#f97316"
+                delay={nextDelay()}
+                loading={isLoading}
+                badge={tick?.urgent}
+                badgeLabel="urgent"
+                stats={[
+                  {
+                    label: "Open",
+                    value: (tick?.pending ?? 0) + (tick?.inProgress ?? 0),
+                    accent: "#f97316",
+                  },
+                  {
+                    label: "Urgent",
+                    value: tick?.urgent ?? 0,
+                    accent: tick?.urgent ? "#ef4444" : undefined,
+                    icon: TriangleAlert,
+                  },
+                  {
+                    label: "Resolved",
+                    value: tick?.resolved ?? 0,
+                    accent: "#10b981",
+                    icon: CheckCircle2,
+                  },
+                  {
+                    label: "Resolution %",
+                    value: `${tick?.resolvedPct ?? 0}%`,
+                    accent: "#06b6d4",
+                  },
+                ]}
+              />
+            )}
 
-            {/* Admin — only for admins */}
-            {isAdmin && (
+            {/* Admin — privileged only */}
+            {access.admin && !isDba && (
               <ModuleCard
                 title="Admin"
                 href="/admin"
                 icon={ShieldCheck}
                 accent="#a855f7"
-                delay={0.35}
+                delay={nextDelay()}
                 loading={isLoading}
                 stats={[
                   {
@@ -801,14 +1023,14 @@ export default function HomePage() {
               />
             )}
 
-            {/* DBA */}
-            {isDba && (
+            {/* DBA console */}
+            {access.dba && (
               <ModuleCard
                 title="DBA Console"
                 href="/dba"
                 icon={Database}
                 accent="#10b981"
-                delay={0.4}
+                delay={nextDelay()}
                 loading={isLoading}
                 stats={[
                   {
@@ -831,136 +1053,124 @@ export default function HomePage() {
                 ]}
               />
             )}
+
+            {/* No-access fallback for "user" role with extremely minimal permissions */}
+            {!hasAnyAccess && (
+              <div className="sm:col-span-2 lg:col-span-3 xl:col-span-4">
+                <motion.div
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6 }}
+                  className="rounded-2xl border border-border/40 bg-card/40 p-8 text-center"
+                >
+                  <ShieldCheck
+                    size={28}
+                    className="text-muted-foreground/30 mx-auto mb-3"
+                  />
+                  <p className="text-sm font-medium text-muted-foreground/60">
+                    No module access assigned.
+                  </p>
+                  <p className="text-xs text-muted-foreground/40 mt-1">
+                    Contact your administrator to get module permissions.
+                  </p>
+                </motion.div>
+              </div>
+            )}
           </div>
         </section>
 
-        {/* ── Bottom: Hero number + Activity feed ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Big summary numbers */}
-          <div className="lg:col-span-1">
-            <SectionLabel>Key numbers</SectionLabel>
-            <div className="rounded-2xl border border-border/60 bg-card/50 backdrop-blur-sm p-5 space-y-5">
-              {[
-                {
-                  label: "Total payments (₹)",
-                  value: isLoading
-                    ? null
-                    : Math.round((fin?.payments?.totalAmount ?? 0) / 100000),
-                  suffix: "L",
-                  prefix: "₹",
-                  color: "#10b981",
-                  icon: IndianRupee,
-                },
-                {
-                  label: "Open PO value (₹)",
-                  value: isLoading
-                    ? null
-                    : Math.round(
-                        (mat?.purchaseOrders?.openValue ??
-                          fin?.purchaseOrders?.openValue ??
-                          0) / 100000,
-                      ),
-                  suffix: "L",
-                  prefix: "₹",
-                  color: "#f59e0b",
-                  icon: Layers,
-                },
-                {
-                  label: "BOQ certified (₹)",
-                  value: isLoading
-                    ? null
-                    : Math.round(
-                        (eng?.workDone?.certifiedAmount ?? 0) / 100000,
-                      ),
-                  suffix: "L",
-                  prefix: "₹",
-                  color: "#8b5cf6",
-                  icon: LineChart,
-                },
-                {
-                  label: "Supplier count",
-                  value: isLoading ? null : (fin?.parties?.supplierCount ?? 0),
-                  color: "#06b6d4",
-                  icon: Building2,
-                },
-              ].map((item, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, x: -12 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{
-                    duration: 0.55,
-                    delay: 0.5 + i * 0.08,
-                    ease: "easeOut",
-                  }}
-                  className="flex items-center justify-between gap-3"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div
-                      className="p-1.5 rounded-lg shrink-0"
-                      style={{ background: `${item.color}15` }}
+        {/* ── Bottom: Key numbers + Activity ── */}
+        {hasAnyAccess && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Key numbers — only shown when user has at least one financial/ops module */}
+            {keyNumbers.length > 0 && (
+              <div className="lg:col-span-1">
+                <SectionLabel>Key numbers</SectionLabel>
+                <div className="rounded-2xl border border-border/60 bg-card/50 backdrop-blur-sm p-5 space-y-5">
+                  {keyNumbers.map((item, i) => (
+                    <motion.div
+                      key={i}
+                      initial={{ opacity: 0, x: -12 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{
+                        duration: 0.55,
+                        delay: 0.5 + i * 0.08,
+                        ease: "easeOut",
+                      }}
+                      className="flex items-center justify-between gap-3"
                     >
-                      <item.icon size={12} style={{ color: item.color }} />
-                    </div>
-                    <span className="text-[11px] text-muted-foreground/65 font-medium">
-                      {item.label}
-                    </span>
-                  </div>
-                  <span
-                    className="font-heading font-bold text-base tabular-nums"
-                    style={{ color: item.color }}
-                  >
-                    {item.value == null ? (
-                      <span className="animate-pulse inline-block h-4 w-12 bg-muted rounded" />
-                    ) : (
-                      <AnimatedCounter
-                        target={item.value}
-                        prefix={item.prefix ?? ""}
-                        suffix={item.suffix ?? ""}
-                      />
-                    )}
-                  </span>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-
-          {/* Recent activity */}
-          <div className="lg:col-span-2">
-            <SectionLabel>Recent activity</SectionLabel>
-            <div className="rounded-2xl border border-border/60 bg-card/50 backdrop-blur-sm px-5 py-1">
-              {isLoading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="flex items-start gap-3 py-3.5 border-b border-border/30 last:border-0 animate-pulse"
-                  >
-                    <div className="w-5 h-5 rounded-full bg-muted shrink-0 mt-0.5" />
-                    <div className="flex-1 space-y-1.5">
-                      <div className="h-3 bg-muted rounded w-3/4" />
-                      <div className="h-2.5 bg-muted rounded w-1/2" />
-                    </div>
-                  </div>
-                ))
-              ) : activityFeed.length === 0 ? (
-                <div className="py-10 text-center text-sm text-muted-foreground/40">
-                  No recent activity.
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className="p-1.5 rounded-lg shrink-0"
+                          style={{ background: `${item.color}15` }}
+                        >
+                          <item.icon size={12} style={{ color: item.color }} />
+                        </div>
+                        <span className="text-[11px] text-muted-foreground/65 font-medium">
+                          {item.label}
+                        </span>
+                      </div>
+                      <span
+                        className="font-heading font-bold text-base tabular-nums"
+                        style={{ color: item.color }}
+                      >
+                        {item.value == null ? (
+                          <span className="animate-pulse inline-block h-4 w-12 bg-muted rounded" />
+                        ) : (
+                          <AnimatedCounter
+                            target={item.value}
+                            prefix={item.prefix ?? ""}
+                            suffix={item.suffix ?? ""}
+                          />
+                        )}
+                      </span>
+                    </motion.div>
+                  ))}
                 </div>
-              ) : (
-                activityFeed.map((item, i) => (
-                  <FeedItem
-                    key={i}
-                    item={item}
-                    i={i}
-                    total={activityFeed.length}
-                  />
-                ))
-              )}
+              </div>
+            )}
+
+            {/* Recent activity */}
+            <div
+              className={
+                keyNumbers.length > 0 ? "lg:col-span-2" : "lg:col-span-3"
+              }
+            >
+              <SectionLabel>Recent activity</SectionLabel>
+              <div className="rounded-2xl border border-border/60 bg-card/50 backdrop-blur-sm px-5 py-1">
+                {isLoading ? (
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className="flex items-start gap-3 py-3.5 border-b border-border/30 last:border-0 animate-pulse"
+                    >
+                      <div className="w-5 h-5 rounded-full bg-muted shrink-0 mt-0.5" />
+                      <div className="flex-1 space-y-1.5">
+                        <div className="h-3 bg-muted rounded w-3/4" />
+                        <div className="h-2.5 bg-muted rounded w-1/2" />
+                      </div>
+                    </div>
+                  ))
+                ) : activityFeed.length === 0 ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground/40">
+                    No recent activity.
+                  </div>
+                ) : (
+                  activityFeed.map((item, i) => (
+                    <FeedItem
+                      key={i}
+                      item={item}
+                      i={i}
+                      total={activityFeed.length}
+                    />
+                  ))
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
-        {/* ── Footer ── */}
+        {/* Footer */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

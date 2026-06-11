@@ -1,4 +1,6 @@
 // src/api/grnApi.ts
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+
 const BASE = "/api/grns";
 
 const getAuthHeaders = () => ({
@@ -112,6 +114,8 @@ export interface GRNFormDataPayload {
   rootExBDocNo?: string | null;
   /** Optional project this GRN is associated with. */
   projectId?: number | null;
+  /** Godown where received stock is credited. */
+  godownId?: number | null;
 }
 
 export interface DocNumberPreview {
@@ -285,12 +289,15 @@ export const getUoms = async (): Promise<UOM[]> => {
 };
 
 export const getProjects = async (): Promise<
-  { id: number; name: string; short_name: string }[]
+  { id: number; name: string; short_name: string | null }[]
 > => {
-  const res = await fetch("/api/material-issues/projects", {
-    headers: getAuthHeaders(),
-  });
+  const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
   if (!res.ok) throw new Error("Failed to fetch projects");
   const data = await res.json();
-  return Array.isArray(data) ? data : [];
+  // /enterprises/options returns { id, label, belongs_to } — normalise to { id, name }
+  return Array.isArray(data)
+    ? (data as { id: number; label: string; short_name?: string | null }[]).map(
+        (p) => ({ id: p.id, name: p.label, short_name: p.short_name ?? null }),
+      )
+    : [];
 };

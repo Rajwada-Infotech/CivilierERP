@@ -478,8 +478,8 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
         No godowns yet
       </p>
       <p className="text-xs text-muted-foreground max-w-xs mb-6">
-        Create your first warehouse or storage location to start tracking
-        inventory across sites.
+        Create your first project godown or storage location to start tracking
+        inventory across sites. Seeded godowns are assigned per project.
       </p>
       <button
         onClick={onAdd}
@@ -504,7 +504,7 @@ export default function InventoryMaster() {
     staleTime: 60_000,
   });
 
-  const godowns: Godown[] = data?.data ?? [];
+  const godowns: Godown[] = (data?.data ?? []).filter((g) => !g.IsMain);
 
   const filtered = search.trim()
     ? godowns.filter(
@@ -515,10 +515,8 @@ export default function InventoryMaster() {
       )
     : godowns;
 
-  // Sort: main first, then alphabetical
+  // Sort: project godowns first (exclude Main), then alphabetical
   const sorted = [...filtered].sort((a, b) => {
-    if (a.IsMain && !b.IsMain) return -1;
-    if (!a.IsMain && b.IsMain) return 1;
     return a.GodownName.localeCompare(b.GodownName);
   });
 
@@ -564,7 +562,7 @@ export default function InventoryMaster() {
               Inventory Master
             </h1>
             <p className="text-xs text-muted-foreground mt-1 ml-[2.6rem]">
-              Manage godowns and storage locations across all sites
+              Manage project godowns and storage locations across all sites
             </p>
           </div>
 
@@ -598,7 +596,7 @@ export default function InventoryMaster() {
                 {godowns.length}
               </span>
               <span className="text-muted-foreground text-xs">
-                Total Godowns
+                Project Godowns
               </span>
             </div>
             <div className="flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-card text-sm">

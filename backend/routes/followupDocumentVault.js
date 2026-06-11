@@ -211,7 +211,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         normalizeText(DocName) || req.file.originalname,
       )
       .input("FileName", sql.NVarChar(255), req.file.filename)
-      .input("FilePath", sql.NVarChar(500), req.file.filename) // Store filename only — full path rebuilt at serve-time from UPLOAD_DIR
+      .input("FilePath", sql.NVarChar(500), req.file.path)
       .input("FileSize", sql.BigInt, req.file.size)
       .input("MimeType", sql.NVarChar(100), req.file.mimetype)
       .input("Notes", sql.NVarChar(sql.MAX), normalizeText(Notes))
@@ -228,8 +228,14 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 
     res.status(201).json({ id: result.recordset[0].Id, docNo });
   } catch (err) {
-    // Clean up uploaded file on DB error
-    fs.unlink(req.file.path, () => {});
+    // Clean up uploaded file on DB error — path comes from multer (trusted),
+    // but guard anyway for consistency
+    if (req.file?.path) {
+      const resolvedPath = path.resolve(req.file.path);
+      if (resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) {
+        fs.unlink(resolvedPath, () => {});
+      }
+    }
     console.error("DocumentVault POST error:", err.message);
     res.status(500).json({ error: "Failed to save document" });
   }
@@ -253,35 +259,20 @@ router.get("/file/:id", async (req, res) => {
 
     const doc = result.recordset[0];
 
-    // Resolve full path from UPLOAD_DIR + stored value.
-    // FilePath is stored as just the filename for new records.
-    // For legacy records that stored an absolute path (Windows C:\ or Unix /Users/...),
-    // fall back to path.basename() so they work without a data migration.
-    // path.isAbsolute() only catches the current OS style, so we check both explicitly.
-    const storedValue = doc.FilePath || doc.FileName;
-    const isAbsolutePath = path.isAbsolute(storedValue)   // Windows: C:\... or Unix: /...
-      || /^[a-zA-Z]:[\\/]/.test(storedValue)            // Windows path on a Linux server
-      || storedValue.startsWith("/");                      // Unix path on a Windows server
-    const filename = isAbsolutePath
-      ? path.basename(storedValue)
-      : storedValue;
-    const fullPath = path.join(UPLOAD_DIR, filename);
-
-    // Security: ensure resolved path stays inside UPLOAD_DIR (path traversal guard)
-    const resolvedPath = path.resolve(fullPath);
-    const resolvedUploadDir = path.resolve(UPLOAD_DIR);
-    if (!resolvedPath.startsWith(resolvedUploadDir + path.sep) &&
-        resolvedPath !== resolvedUploadDir) {
+    // ── Path-traversal guard ──────────────────────────────────────────────────
+    // Resolve the stored path and confirm it lives inside UPLOAD_DIR.
+    // This prevents an attacker (or corrupted DB value) from reading arbitrary
+    // files on the server (e.g. ../../etc/passwd).
+    const resolvedPath = path.resolve(doc.FilePath);
+    if (!resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) {
       return res.status(403).json({ error: "Access denied" });
     }
 
     if (!fs.existsSync(resolvedPath))
       return res.status(404).json({ error: "File not found on disk" });
 
-    const safeMime = doc.MimeType || "application/octet-stream";
-    const safeFileName = path.basename(doc.FileName).replace(/[^\w.\-]/g, "_");
-    res.setHeader("Content-Type", safeMime);
-    res.setHeader("Content-Disposition", `inline; filename="${safeFileName}"`);
+    res.setHeader("Content-Type", doc.MimeType);
+    res.setHeader("Content-Disposition", `inline; filename="${doc.FileName}"`);
     fs.createReadStream(resolvedPath).pipe(res);
   } catch (err) {
     console.error("DocumentVault file GET error:", err.message);
@@ -361,16 +352,17 @@ router.delete("/:id", async (req, res) => {
     if (!result.rowsAffected[0])
       return res.status(404).json({ error: "Not found" });
 
-    // Best-effort physical cleanup — rebuild full path same way as serve route
-    const storedValue = fileRes.recordset[0].FilePath || "";
-    const isAbsolutePath = path.isAbsolute(storedValue)
-      || /^[a-zA-Z]:[\\/]/.test(storedValue)
-      || storedValue.startsWith("/");
-    const filename = isAbsolutePath
-      ? path.basename(storedValue)
-      : storedValue;
-    const fullPath = filename ? path.join(UPLOAD_DIR, filename) : null;
-    if (fullPath && fs.existsSync(fullPath)) fs.unlink(fullPath, () => {});
+    // Best-effort physical cleanup — guard against path traversal
+    const filePath = fileRes.recordset[0].FilePath;
+    if (filePath) {
+      const resolvedPath = path.resolve(filePath);
+      if (
+        resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep) &&
+        fs.existsSync(resolvedPath)
+      ) {
+        fs.unlink(resolvedPath, () => {});
+      }
+    }
 
     res.json({ success: true });
   } catch (err) {

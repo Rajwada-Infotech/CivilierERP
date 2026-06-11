@@ -161,9 +161,22 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
       dataRequest.input("remarks", sql.NVarChar(200), `%${remarks}%`);
 
     const result = await dataRequest.query(`
-      SELECT * FROM dbo.NewPayment
+      SELECT
+        np.*,
+        COALESCE(
+          ep.name,
+          po_proj.name
+        ) AS PProjectName
+      FROM dbo.NewPayment np
+      LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      LEFT JOIN dbo.enterprise ep
+        ON ep.id = TRY_CAST(eb.EProjectName AS INT) AND ep.business_type = 'P'
+      LEFT JOIN dbo.PurchaseOrders po
+        ON eb.ESourceType = 'PO' AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+      LEFT JOIN dbo.enterprise po_proj
+        ON po_proj.id = po.ProjectId AND po_proj.business_type = 'P'
       ${whereClause}
-      ORDER BY PPaymentID DESC
+      ORDER BY np.PPaymentID DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
@@ -748,7 +761,3 @@ router.put("/:id/reject", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
