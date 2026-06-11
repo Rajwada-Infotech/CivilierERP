@@ -1,5 +1,4 @@
 import { useMemo, useState, useRef, useEffect } from "react";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -406,7 +405,7 @@ export function PrePossessionClearancePage() {
   }, [meta, form.ApplicantId]);
 
   const projectItems: ComboItem[] = useMemo(() =>
-    filterProjectsByCompany((meta?.projects ?? []) as any[], form.CompanyId).map((p: any) => ({ value: String(p.Id), label: p.Name })), [meta]);
+    (meta?.projects ?? []).map((p) => ({ value: String(p.Id), label: p.Name })), [meta]);
 
   const companyItems: ComboItem[] = useMemo(() =>
     (meta?.companies ?? []).map((c) => ({ value: String(c.Id), label: c.Name })), [meta]);
@@ -886,7 +885,7 @@ export function PrePossessionClearancePage() {
               </div>
               <div className="space-y-2">
                 <Label>Company</Label>
-                <Combobox value={form.CompanyId} onChange={(v) => { set("CompanyId", v); set("ProjectId", ""); }} items={companyItems} placeholder="Select company…" />
+                <Combobox value={form.CompanyId} onChange={(v) => set("CompanyId", v)} items={companyItems} placeholder="Select company…" />
               </div>
             </div>
 

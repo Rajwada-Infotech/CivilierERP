@@ -9,8 +9,6 @@ import {
   type Godown,
   type CreateGodownPayload,
 } from "@/api/godownsApi";
-import { getEnterpriseOptions } from "@/api/enterpriseApi";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -54,57 +52,7 @@ import {
   Warehouse,
   Star,
   MapPin,
-  Building2,
-  FolderKanban,
-  ChevronDown,
 } from "lucide-react";
-
-// ─── Cascade select ───────────────────────────────────────────────────────────
-function CascadeSelect({
-  label,
-  value,
-  onChange,
-  options,
-  placeholder,
-  disabled = false,
-  required = false,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-  placeholder: string;
-  disabled?: boolean;
-  required?: boolean;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label>
-        {label}
-        {required && <span className="text-destructive ml-0.5">*</span>}
-      </Label>
-      <div className="relative">
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={disabled}
-          className="w-full pl-3 pr-8 py-2 rounded-md border border-input bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-ring appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <option value="">{placeholder}</option>
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <ChevronDown
-          size={13}
-          className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground"
-        />
-      </div>
-    </div>
-  );
-}
 
 // ─── Form state ───────────────────────────────────────────────────────────────
 interface FormState {
@@ -115,10 +63,6 @@ interface FormState {
   Remarks: string;
   Location: string;
   IsActive: boolean;
-  // Project linkage — drives Company → Project → Godown cascade
-  companyId: string; // UI-only: which company is selected (to filter projects)
-  ProjectID: string; // saved to DB: the project this godown belongs to
-  EnterpriseID: string; // saved to DB: the company (auto-filled from project)
 }
 
 const EMPTY_FORM: FormState = {
@@ -129,9 +73,6 @@ const EMPTY_FORM: FormState = {
   Remarks: "",
   Location: "",
   IsActive: true,
-  companyId: "",
-  ProjectID: "",
-  EnterpriseID: "",
 };
 
 function godownToForm(g: Godown): FormState {
@@ -143,9 +84,6 @@ function godownToForm(g: Godown): FormState {
     Remarks: g.Remarks ?? "",
     Location: g.Location ?? "",
     IsActive: g.IsActive,
-    companyId: g.CompanyID != null ? String(g.CompanyID) : "",
-    ProjectID: g.ProjectID != null ? String(g.ProjectID) : "",
-    EnterpriseID: g.EnterpriseID != null ? String(g.EnterpriseID) : "",
   };
 }
 
@@ -161,7 +99,7 @@ export default function GodownAdmin() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // ── Queries ────────────────────────────────────────────────────────────────
+  // ── Query ──────────────────────────────────────────────────────────────────
   const {
     data: raw,
     isLoading,
@@ -170,27 +108,8 @@ export default function GodownAdmin() {
     queryKey: ["godowns"],
     queryFn: getGodowns,
   });
+
   const godowns: Godown[] = raw?.data ?? [];
-
-  const { data: companiesData } = useQuery({
-    queryKey: ["enterprise-options", "C"],
-    queryFn: () => getEnterpriseOptions(undefined, "C"),
-    staleTime: 300_000,
-  });
-  const companies = companiesData ?? [];
-
-  const { data: projectsData } = useQuery({
-    queryKey: ["enterprise-options", "P"],
-    queryFn: () => getEnterpriseOptions(undefined, "P"),
-    staleTime: 300_000,
-  });
-  const allProjects = projectsData ?? [];
-
-  // Projects filtered by the company selected in the form
-  const filteredProjects = useMemo(
-    () => filterProjectsByCompany(allProjects, form.companyId || null),
-    [allProjects, form.companyId],
-  );
 
   // ── Filtered list ──────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -200,8 +119,7 @@ export default function GodownAdmin() {
       (g) =>
         g.GodownName.toLowerCase().includes(q) ||
         (g.GodownCode ?? "").toLowerCase().includes(q) ||
-        (g.Location ?? "").toLowerCase().includes(q) ||
-        (g.ProjectName ?? "").toLowerCase().includes(q),
+        (g.Location ?? "").toLowerCase().includes(q),
     );
   }, [godowns, search]);
 
@@ -286,10 +204,6 @@ export default function GodownAdmin() {
   function handleSubmit() {
     const name = form.GodownName.trim();
     if (!name) return setFormError("Godown name is required");
-    if (!form.ProjectID)
-      return setFormError(
-        "Project is required — godowns must be linked to a project",
-      );
     setFormError(null);
 
     const payload: CreateGodownPayload = {
@@ -299,9 +213,6 @@ export default function GodownAdmin() {
       Description: form.Description.trim() || undefined,
       Remarks: form.Remarks.trim() || undefined,
       IsActive: form.IsActive,
-      ProjectID: parseInt(form.ProjectID) || null,
-      // EnterpriseID = the company, derived from companyId selection
-      EnterpriseID: form.companyId ? parseInt(form.companyId) : null,
     };
 
     if (editing) {
@@ -315,230 +226,202 @@ export default function GodownAdmin() {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
-  // When company changes, reset project
-  function handleCompanyChange(v: string) {
-    setForm((f) => ({ ...f, companyId: v, ProjectID: "", EnterpriseID: v }));
-  }
-
-  // When project changes, also persist the company as EnterpriseID
-  function handleProjectChange(v: string) {
-    setForm((f) => ({ ...f, ProjectID: v }));
-  }
-
   const isSaving = createMutation.isPending || updateMutation.isPending;
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
-      <Breadcrumbs
-        items={[{ label: "Admin" }, { label: "Masters" }, { label: "Godowns" }]}
-      />
+      <Breadcrumbs items={[
+        { label: "Admin" },
+        { label: "Masters" },
+        { label: "Godowns" },
+      ]} />
 
-      <div className="relative space-y-6 mt-6">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <Warehouse className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <h1 className="text-xl font-heading font-bold text-foreground leading-none">
-                Godowns
-              </h1>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Manage warehouse and storage locations · each godown must be
-                linked to a project
-              </p>
+    <div className="relative space-y-6 mt-6">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-primary/10">
+            <Warehouse className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground leading-none">Godowns</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Manage warehouse and storage locations
+            </p>
+          </div>
+        </div>
+        <button onClick={openAdd} className="gradient-accent inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition">
+          <Plus className="h-4 w-4" />
+          Add Godown
+        </button>
+      </div>
+
+      {/* Stats strip */}
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: "Total", value: godowns.length },
+          { label: "Active", value: activeCount },
+          {
+            label: "Main Godown",
+            value: godowns.filter((g) => g.IsMain).length,
+          },
+        ].map((s) => (
+          <Card key={s.label} className="py-3">
+            <CardContent className="p-0 px-4 flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">{s.label}</span>
+              <span className="text-2xl font-bold">{s.value}</span>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Table card */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-base">All Godowns</CardTitle>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search name, code or location…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-8 h-9 w-64"
+                />
+              </div>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9"
+                onClick={() => refetch()}
+                title="Refresh"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
             </div>
           </div>
-          <button
-            onClick={openAdd}
-            className="gradient-accent inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition"
-          >
-            <Plus className="h-4 w-4" />
-            Add Godown
-          </button>
-        </div>
-
-        {/* Stats strip */}
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: "Total", value: godowns.length },
-            { label: "Active", value: activeCount },
-            {
-              label: "Main Godown",
-              value: godowns.filter((g) => g.IsMain).length,
-            },
-          ].map((s) => (
-            <Card key={s.label} className="py-3">
-              <CardContent className="p-0 px-4 flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">{s.label}</span>
-                <span className="text-2xl font-bold">{s.value}</span>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        {/* Table card */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle className="text-base">All Godowns</CardTitle>
-              <div className="flex items-center gap-2">
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search name, code, project or location…"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="pl-8 h-9 w-72"
-                  />
-                </div>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-9 w-9"
-                  onClick={() => refetch()}
-                  title="Refresh"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                </Button>
-              </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-16 text-muted-foreground text-sm">
+              Loading godowns…
             </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            {isLoading ? (
-              <div className="flex items-center justify-center py-16 text-muted-foreground text-sm">
-                Loading godowns…
-              </div>
-            ) : filtered.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
-                <Warehouse className="h-8 w-8 opacity-30" />
-                <span className="text-sm">
-                  {search
-                    ? "No godowns match your search"
-                    : "No godowns configured yet"}
-                </span>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-28">Code</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Project</TableHead>
-                    <TableHead>Location</TableHead>
-                    <TableHead className="w-24 text-center">Type</TableHead>
-                    <TableHead className="w-20 text-center">Active</TableHead>
-                    <TableHead className="w-20 text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filtered.map((g) => (
-                    <TableRow key={g.GodownID}>
-                      <TableCell className="font-mono text-xs font-medium">
-                        {g.GodownCode ?? "—"}
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-1.5">
-                          {g.IsMain && (
-                            <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-500 shrink-0" />
-                          )}
-                          {g.GodownName}
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
+              <Warehouse className="h-8 w-8 opacity-30" />
+              <span className="text-sm">
+                {search
+                  ? "No godowns match your search"
+                  : "No godowns configured yet"}
+              </span>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-28">Code</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Location</TableHead>
+                  <TableHead className="w-24 text-center">Type</TableHead>
+                  <TableHead className="w-24 text-center">Status</TableHead>
+                  <TableHead className="w-20 text-center">Active</TableHead>
+                  <TableHead className="w-20 text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((g) => (
+                  <TableRow key={g.GodownID}>
+                    <TableCell className="font-mono text-xs font-medium">
+                      {g.GodownCode ?? "—"}
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-1.5">
+                        {g.IsMain && (
+                          <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-500 shrink-0" />
+                        )}
+                        {g.GodownName}
+                      </div>
+                      {g.ShortDesc && (
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {g.ShortDesc}
+                        </p>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {g.Location ? (
+                        <div className="flex items-center gap-1 text-sm">
+                          <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
+                          {g.Location}
                         </div>
-                        {g.ShortDesc && (
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {g.ShortDesc}
-                          </p>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {g.ProjectName ? (
-                          <div className="flex flex-col gap-0.5">
-                            <span className="flex items-center gap-1 text-xs font-medium text-foreground">
-                              <FolderKanban className="h-3 w-3 text-violet-500 shrink-0" />
-                              {g.ProjectName}
-                            </span>
-                            {g.EnterpriseName && (
-                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                                <Building2 className="h-2.5 w-2.5 shrink-0" />
-                                {g.EnterpriseName}
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-amber-600 font-medium">
-                            ⚠ Not linked
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {g.Location ? (
-                          <div className="flex items-center gap-1 text-sm">
-                            <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
-                            {g.Location}
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground text-sm">
-                            —
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {g.IsMain ? (
-                          <Badge variant="default" className="text-xs">
-                            Main
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-xs">
-                            Branch
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Switch
-                          checked={g.IsActive}
-                          onCheckedChange={(val) =>
-                            toggleMutation.mutate({ g, active: val })
-                          }
-                          disabled={g.IsMain || toggleMutation.isPending}
-                          title={
-                            g.IsMain ? "Main godown cannot be deactivated" : ""
-                          }
-                        />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
+                      ) : (
+                        <span className="text-muted-foreground text-sm">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {g.IsMain ? (
+                        <Badge variant="default" className="text-xs">
+                          Main
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-xs">
+                          Branch
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Badge
+                        variant={g.IsActive ? "default" : "secondary"}
+                        className="text-xs"
+                      >
+                        {g.IsActive ? "Active" : "Inactive"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Switch
+                        checked={g.IsActive}
+                        onCheckedChange={(val) =>
+                          toggleMutation.mutate({ g, active: val })
+                        }
+                        disabled={g.IsMain || toggleMutation.isPending}
+                        title={
+                          g.IsMain ? "Main godown cannot be deactivated" : ""
+                        }
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => openEdit(g)}
+                          title="Edit"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        {!g.IsMain && (
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8"
-                            onClick={() => openEdit(g)}
-                            title="Edit"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => setDeleteTarget(g)}
+                            title="Delete"
                           >
-                            <Pencil className="h-3.5 w-3.5" />
+                            <Trash2 className="h-3.5 w-3.5" />
                           </Button>
-                          {!g.IsMain && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              onClick={() => setDeleteTarget(g)}
-                              title="Delete"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>{/* end space-y-6 wrapper */}
 
       {/* Add / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(o) => !o && closeDialog()}>
@@ -553,49 +436,6 @@ export default function GodownAdmin() {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            {/* ── Project linkage (required) ── */}
-            <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                <FolderKanban size={11} className="text-violet-500" />
-                Project Linkage
-              </p>
-              <div className="grid grid-cols-1 gap-3">
-                <CascadeSelect
-                  label="Company"
-                  value={form.companyId}
-                  onChange={handleCompanyChange}
-                  options={companies.map((c) => ({
-                    value: String(c.id),
-                    label: c.label,
-                  }))}
-                  placeholder="Select company…"
-                />
-                <CascadeSelect
-                  label="Project"
-                  value={form.ProjectID}
-                  onChange={handleProjectChange}
-                  options={filteredProjects.map((p) => ({
-                    value: String(p.id),
-                    label: p.label,
-                  }))}
-                  placeholder={
-                    form.companyId
-                      ? filteredProjects.length === 0
-                        ? "No projects for this company"
-                        : "Select project…"
-                      : "Select a company first…"
-                  }
-                  disabled={!form.companyId || filteredProjects.length === 0}
-                  required
-                />
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Linking a godown to a project enables the Company → Project →
-                Godown filter on the Stock and Stock Transfer pages.
-              </p>
-            </div>
-
-            {/* ── Godown details ── */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="gd-code">Code</Label>
@@ -614,7 +454,7 @@ export default function GodownAdmin() {
                 </Label>
                 <Input
                   id="gd-name"
-                  placeholder="e.g. Site Warehouse"
+                  placeholder="e.g. Main Warehouse"
                   value={form.GodownName}
                   onChange={(e) => setField("GodownName", e.target.value)}
                   maxLength={255}
@@ -687,11 +527,7 @@ export default function GodownAdmin() {
             <Button variant="outline" onClick={closeDialog} disabled={isSaving}>
               Cancel
             </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={isSaving}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-            >
+            <Button onClick={handleSubmit} disabled={isSaving} className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto">
               {isSaving ? "Saving…" : editing ? "Update" : "Create"}
             </Button>
           </DialogFooter>

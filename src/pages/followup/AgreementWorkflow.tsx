@@ -5,7 +5,6 @@
  */
 
 import { useState } from "react";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -1122,7 +1121,7 @@ export default function AgreementWorkflowPage() {
                   <SelectValue placeholder="Select…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {filterProjectsByCompany((meta?.projects ?? []) as any[], form.CompanyId).map((p: any) => (
+                  {(meta?.projects ?? []).map((p: OptionItem) => (
                     <SelectItem key={p.Id} value={String(p.Id)}>
                       {p.Name}
                     </SelectItem>
@@ -1136,7 +1135,7 @@ export default function AgreementWorkflowPage() {
               <Label className="text-xs">Company</Label>
               <Select
                 value={form.CompanyId || ""}
-                onValueChange={(v) => setForm((f) => ({ ...f, CompanyId: v, ProjectId: "" }))}
+                onValueChange={(v) => setForm((f) => ({ ...f, CompanyId: v }))}
               >
                 <SelectTrigger className="rounded-[9px]">
                   <SelectValue placeholder="Select…" />

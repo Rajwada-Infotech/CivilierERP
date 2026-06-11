@@ -42,9 +42,7 @@ interface Project {
   enterpriseId: string; // id stored, name resolved via JOIN for display
   enterpriseName: string; // display-only, from GET join
   companyId: string;
-  companyIds: string[];
   companyName: string; // display-only, from GET join
-  companyNames: string;
   // address
   addressLine1: string;
   addressLine2: string;
@@ -110,9 +108,7 @@ const emptyProject: Project = {
   enterpriseId: "",
   enterpriseName: "",
   companyId: "",
-  companyIds: [],
   companyName: "",
-  companyNames: "",
   addressLine1: "",
   addressLine2: "",
   addressLine3: "",
@@ -148,12 +144,7 @@ function rowToForm(row: any): Project {
     enterpriseId: row.EnterpriseId != null ? String(row.EnterpriseId) : "",
     enterpriseName: row.EnterpriseName ?? "",
     companyId: row.CompanyId != null ? String(row.CompanyId) : "",
-    companyIds: String(row.CompanyIds ?? row.CompanyId ?? "")
-      .split(",")
-      .map((id) => id.trim())
-      .filter(Boolean),
     companyName: row.CompanyName ?? "",
-    companyNames: row.CompanyNames ?? row.CompanyName ?? "",
     addressLine1: row.AddressLine1 ?? "",
     addressLine2: row.AddressLine2 ?? "",
     addressLine3: row.AddressLine3 ?? "",
@@ -251,7 +242,7 @@ function ProjectViewModal({
             { label: "Short Name", value: project.shortName },
             { label: "Type", value: project.type },
             { label: "Enterprise", value: project.enterpriseName },
-            { label: "Companies", value: project.companyNames || project.companyName },
+            { label: "Company", value: project.companyName },
             { label: "Status", value: project.status },
             { label: "Priority", value: project.priority },
             { label: "Active", value: project.isActive },
@@ -363,7 +354,7 @@ function ProjectViewModal({
             <Row label="Short Name" value={project.shortName} />
             <Row label="Type" value={project.type} />
             <Row label="Enterprise" value={project.enterpriseName} />
-            <Row label="Companies" value={project.companyNames || project.companyName} />
+            <Row label="Company" value={project.companyName} />
             <Row label="Description" value={project.description} />
             <Row label="Remarks" value={project.remarks} />
 
@@ -454,7 +445,7 @@ function buildProjectColumns(
       header: "Enterprise / Company",
       cell: ({ row }) => {
         const enterprise = row.original.EnterpriseName || "";
-        const company = row.original.CompanyNames || row.original.CompanyName || "";
+        const company = row.original.CompanyName || "";
         const display =
           [enterprise, company].filter(Boolean).join(" / ") || "—";
         return (
@@ -595,13 +586,6 @@ export default function ProjectMaster() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const filteredCompanies = useMemo(() => {
-    if (!form.enterpriseId) return companies;
-    return companies.filter(
-      (c: any) => String(c.EnterpriseId ?? c.enterprise_id ?? "") === form.enterpriseId,
-    );
-  }, [companies, form.enterpriseId]);
-
   // Auto-fetch compliance fields when company selection changes
   const handleCompanyChange = async (
     companyId: string,
@@ -641,34 +625,6 @@ export default function ProjectMaster() {
     }
   };
 
-  const setProjectCompanies = async (companyIds: string[]) => {
-    const selectedCompanies = companies.filter((c: any) =>
-      companyIds.includes(String(c.Id ?? c.id ?? "")),
-    );
-    const primary = selectedCompanies[0];
-    const primaryId = primary ? String(primary.Id ?? primary.id ?? "") : "";
-    const primaryName = primary ? (primary.Name ?? primary.name ?? "") : "";
-    setForm((p) => ({
-      ...p,
-      companyIds,
-      companyId: primaryId,
-      companyName: primaryName,
-      companyNames: selectedCompanies
-        .map((c: any) => c.Name ?? c.name ?? "")
-        .filter(Boolean)
-        .join(", "),
-    }));
-    await handleCompanyChange(primaryId, primaryName);
-    setForm((p) => ({
-      ...p,
-      companyIds,
-      companyNames: selectedCompanies
-        .map((c: any) => c.Name ?? c.name ?? "")
-        .filter(Boolean)
-        .join(", "),
-    }));
-  };
-
   const saveMutation = useMutation({
     mutationFn: async () => {
       const payload: Record<string, any> = {
@@ -678,7 +634,6 @@ export default function ProjectMaster() {
         type: form.type,
         enterpriseId: form.enterpriseId ? parseInt(form.enterpriseId) : null,
         companyId: form.companyId ? parseInt(form.companyId) : null,
-        companyIds: form.companyIds.map((id) => parseInt(id, 10)),
         // address
         addressLine1: form.addressLine1 || null,
         addressLine2: form.addressLine2 || null,
@@ -1073,15 +1028,6 @@ export default function ProjectMaster() {
                             enterpriseName: selected
                               ? (selected.name ?? selected.Name ?? "")
                               : "",
-                            companyId: "",
-                            companyIds: [],
-                            companyName: "",
-                            companyNames: "",
-                            gst: "",
-                            gstDate: "",
-                            pan: "",
-                            tan: "",
-                            tradeLicenseNo: "",
                           }));
                         }}
                         className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
@@ -1119,18 +1065,11 @@ export default function ProjectMaster() {
                               ? (selected.Name ?? selected.name ?? "")
                               : "",
                           );
-                          setForm((p) => ({
-                            ...p,
-                            companyIds: e.target.value ? [e.target.value] : [],
-                            companyNames: selected
-                              ? (selected.Name ?? selected.name ?? "")
-                              : "",
-                          }));
                         }}
                         className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
                       >
                         <option value="">— Select Company —</option>
-                        {filteredCompanies.map((c: any) => {
+                        {companies.map((c: any) => {
                           const name = c.Name ?? c.name ?? "";
                           const id = String(c.Id ?? c.id ?? "");
                           return (
@@ -1142,39 +1081,6 @@ export default function ProjectMaster() {
                       </select>
                       <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                     </div>
-                    {filteredCompanies.length > 0 && (
-                      <div className="mt-2 rounded-lg border border-border bg-background p-2 max-h-28 overflow-y-auto">
-                        <p className="mb-1 px-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-                          Additional companies
-                        </p>
-                        <div className="grid grid-cols-1 gap-1">
-                          {filteredCompanies.map((c: any) => {
-                            const name = c.Name ?? c.name ?? "";
-                            const id = String(c.Id ?? c.id ?? "");
-                            const checked = form.companyIds.includes(id);
-                            return (
-                              <label
-                                key={id}
-                                className="flex items-center gap-2 rounded-md px-2 py-1 text-xs hover:bg-muted cursor-pointer"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={(e) => {
-                                    const next = e.target.checked
-                                      ? [...form.companyIds, id]
-                                      : form.companyIds.filter((x) => x !== id);
-                                    void setProjectCompanies(next);
-                                  }}
-                                  className="h-3.5 w-3.5 accent-primary"
-                                />
-                                <span className="truncate">{name}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
                     {complianceLoading && (
                       <p className="text-[10px] text-primary mt-1 flex items-center gap-1">
                         <Loader2 size={10} className="animate-spin" />
