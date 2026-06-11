@@ -926,9 +926,9 @@ function FollowupPipelinePage({ entity }: { entity: Entity }) {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsOpen(false)}>
+            <button type="button" className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={() => setIsOpen(false)}>
               Cancel
-            </Button>
+            </button>
             <Button
               onClick={() => saveMutation.mutate()}
               disabled={saveMutation.isPending}

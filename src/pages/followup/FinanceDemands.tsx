@@ -1,8 +1,6 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft,
   Bell,
   CheckCircle2,
   ChevronLeft,
@@ -15,6 +13,7 @@ import {
   X,
   Filter,
   Inbox,
+  CalendarDays,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -268,7 +267,6 @@ function SummaryCard({
 const PAGE_SIZE = 50;
 
 export function FinanceDemandsPage() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const [page, setPage] = useState(1);
@@ -286,7 +284,7 @@ export function FinanceDemandsPage() {
 
   const queryKey = ["followup-demands", page, search, projectId, status];
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey,
     queryFn: () =>
       fetchDemands({ page, pageSize: PAGE_SIZE, search, projectId, status }),
@@ -345,43 +343,32 @@ export function FinanceDemandsPage() {
   const hasFilters = search || projectId || status;
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-[1400px] mx-auto px-6 py-6 space-y-5">
+    <>
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Finance" },
+          { label: "Demands" },
+        ]}
+      />
+      <div className="space-y-6 mt-6">
         {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <Breadcrumbs
-              items={[
-                { label: "Follow-Up", href: "/followup" },
-                { label: "Finance" },
-                { label: "Demands" },
-              ]}
-            />
-            <h1 className="text-2xl font-heading font-bold tracking-tight text-foreground mt-1">
+            <h1 className="text-xl font-heading font-bold text-foreground">
               Payment Demands
             </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
+            <p className="text-xs text-muted-foreground mt-0.5">
               Raise and track milestone payment demand letters for all bookings.
             </p>
           </div>
-          <div className="flex gap-2 shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate("/followup")}
-              className="gap-1.5"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" /> Dashboard
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => refetch()}
-              className="gap-1.5"
-            >
-              <RefreshCw className="w-3.5 h-3.5" /> Refresh
-            </Button>
-          </div>
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors disabled:opacity-50 shrink-0"
+          >
+            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /> Refresh
+          </button>
         </div>
 
         {/* ── Summary cards ────────────────────────────────────────────────── */}
@@ -786,13 +773,15 @@ export function FinanceDemandsPage() {
 
               <div className="space-y-1.5">
                 <Label className="text-sm">Due Date</Label>
-                <Input
-                  type="date"
-                  value={raiseForm.dueDate}
-                  onChange={(e) =>
-                    setRaiseForm((f) => ({ ...f, dueDate: e.target.value }))
-                  }
-                />
+                <div className="relative">
+                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                  <input
+                    type="date"
+                    value={raiseForm.dueDate}
+                    onChange={(e) => setRaiseForm((f) => ({ ...f, dueDate: e.target.value }))}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
                 <p className="text-xs text-muted-foreground">
                   Leave blank to keep the existing due date.
                 </p>
@@ -819,9 +808,9 @@ export function FinanceDemandsPage() {
           )}
 
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setRaiseRow(null)}>
+            <button type="button" className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={() => setRaiseRow(null)}>
               Cancel
-            </Button>
+            </button>
             <Button
               disabled={raiseMutation.isPending}
               onClick={() => {
@@ -868,7 +857,7 @@ export function FinanceDemandsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }
 

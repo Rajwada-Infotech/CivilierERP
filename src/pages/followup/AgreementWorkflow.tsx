@@ -23,6 +23,7 @@ import {
   Search,
   X,
   Clock,
+  CalendarDays,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
@@ -353,14 +354,15 @@ function WorkflowStepper({
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Completion Date</Label>
-                        <Input
-                          type="date"
-                          className="rounded-[9px]"
-                          value={form.doneDate}
-                          onChange={(e) =>
-                            setForm((f) => ({ ...f, doneDate: e.target.value }))
-                          }
-                        />
+                        <div className="relative">
+                          <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                          <input
+                            type="date"
+                            className="w-full pl-8 pr-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                            value={form.doneDate}
+                            onChange={(e) => setForm((f) => ({ ...f, doneDate: e.target.value }))}
+                          />
+                        </div>
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Notes</Label>
@@ -387,14 +389,13 @@ function WorkflowStepper({
                       )}
                     </div>
                     <DialogFooter>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="rounded-[9px]"
+                      <button
+                        type="button"
+                        className="px-3 py-1.5 rounded-[9px] border border-border bg-background text-foreground text-xs font-medium hover:bg-muted transition-colors"
                         onClick={() => setEditingStep(null)}
                       >
                         Cancel
-                      </Button>
+                      </button>
                       <Button
                         size="sm"
                         className="gradient-accent text-white rounded-[9px]"
@@ -593,19 +594,44 @@ export default function AgreementWorkflowPage() {
     <>
       <Breadcrumbs
         items={[
-          { label: "Followup" },
+          { label: "Follow-Up", path: "/followup" },
           { label: "Agreement" },
-          { label: "Workflow Tracker" },
+          { label: "Agreement Workflow" },
         ]}
       />
 
+      <div className="relative space-y-6 mt-6">
+
+      {/* ── Page heading ── */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-heading font-bold text-foreground">Agreement Workflow</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">Track agreement execution steps for each applicant</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /> Refresh
+          </button>
+          <Button
+            onClick={() => setDialogOpen(true)}
+            className="gradient-accent text-white rounded-[9px] gap-1.5 font-semibold text-sm px-4 h-9"
+          >
+            <Plus size={15} /> <span className="hidden sm:inline">New Workflow</span><span className="sm:hidden">New</span>
+          </Button>
+        </div>
+      </div>
+
       {/* ── Toolbar ── */}
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap">
         {/* Search */}
         <div className="relative flex-1 min-w-[180px] max-w-xs">
           <Search
             size={14}
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
           />
           <input
             value={searchInput}
@@ -634,41 +660,25 @@ export default function AgreementWorkflowPage() {
         </div>
 
         {/* Status filter */}
-        <select
-          value={filterStatus}
-          onChange={(e) => {
-            setFilterStatus(e.target.value);
-            setPage(1);
-          }}
-          className="h-[34px] px-2.5 rounded-[9px] border border-border bg-background text-foreground text-[13px] outline-none"
-        >
-          <option value="">All statuses</option>
-          {OVERALL_STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
+        <div className="relative">
+          <select
+            value={filterStatus}
+            onChange={(e) => {
+              setFilterStatus(e.target.value);
+              setPage(1);
+            }}
+            className="appearance-none h-[34px] pl-2.5 pr-8 rounded-[9px] border border-border bg-background text-foreground text-[13px] outline-none cursor-pointer"
+          >
+            <option value="">All statuses</option>
+            {OVERALL_STATUS_OPTIONS.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+        </div>
 
-        <button
-          onClick={() => refetch()}
-          title="Refresh"
-          className="h-[34px] px-2.5 rounded-[9px] border border-border bg-background flex items-center hover:bg-accent transition-colors"
-        >
-          <RefreshCw
-            size={14}
-            className={`text-muted-foreground${isFetching ? " animate-spin" : ""}`}
-          />
-        </button>
-
-        <Button
-          onClick={() => setDialogOpen(true)}
-          className="gradient-accent text-white rounded-[9px] gap-1.5 font-semibold text-sm px-4 h-[34px] ml-auto"
-        >
-          <Plus size={15} />{" "}
-          <span className="hidden sm:inline">New Workflow</span>
-          <span className="sm:hidden">New</span>
-        </Button>
       </div>
 
       {/* ── Mobile card list (hidden on md+) ── */}
@@ -1149,17 +1159,15 @@ export default function AgreementWorkflowPage() {
             {STEPS.map((s) => (
               <div key={s.field} className="space-y-1">
                 <Label className="text-xs">{s.label}</Label>
-                <Input
-                  type="date"
-                  className="rounded-[9px]"
-                  value={form[`${s.field}Due`] || ""}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      [`${s.field}Due`]: e.target.value,
-                    }))
-                  }
-                />
+                <div className="relative">
+                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                  <input
+                    type="date"
+                    className="w-full pl-8 pr-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                    value={form[`${s.field}Due`] || ""}
+                    onChange={(e) => setForm((f) => ({ ...f, [`${s.field}Due`]: e.target.value }))}
+                  />
+                </div>
               </div>
             ))}
 
@@ -1179,16 +1187,13 @@ export default function AgreementWorkflowPage() {
           </div>
 
           <DialogFooter className="mt-2">
-            <Button
-              variant="outline"
-              className="rounded-[9px]"
-              onClick={() => {
-                setDialogOpen(false);
-                setForm({});
-              }}
+            <button
+              type="button"
+              className="px-4 py-2 rounded-[9px] border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors"
+              onClick={() => { setDialogOpen(false); setForm({}); }}
             >
               Cancel
-            </Button>
+            </button>
             <Button
               disabled={!form.ApplicantId || createMutation.isPending}
               className="gradient-accent text-white rounded-[9px]"
@@ -1245,14 +1250,13 @@ export default function AgreementWorkflowPage() {
             ? This cannot be undone.
           </p>
           <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              className="rounded-[9px]"
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-[9px] border border-border bg-background text-foreground text-xs font-medium hover:bg-muted transition-colors"
               onClick={() => setDeleteTarget(null)}
             >
               Cancel
-            </Button>
+            </button>
             <Button
               size="sm"
               variant="destructive"
@@ -1275,6 +1279,8 @@ export default function AgreementWorkflowPage() {
         recordId={auditTarget?.id ?? null}
         recordNo={auditTarget?.no}
       />
+
+      </div>{/* end space-y-6 wrapper */}
     </>
   );
 }

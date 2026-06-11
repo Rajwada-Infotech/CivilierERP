@@ -12,6 +12,7 @@ import {
   IndianRupee,
   Plus,
   Users,
+  CalendarDays,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -415,16 +416,15 @@ function ScopedLogPage({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Date</Label>
-                <Input
-                  type="date"
-                  value={form.date}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      date: event.target.value,
-                    }))
-                  }
-                />
+                <div className="relative">
+                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                  <input
+                    type="date"
+                    value={form.date}
+                    onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Type</Label>
@@ -495,9 +495,9 @@ function ScopedLogPage({
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+            <button type="button" className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={() => setIsDialogOpen(false)}>
               Cancel
-            </Button>
+            </button>
             <Button
               onClick={() =>
                 createMutation.mutate({

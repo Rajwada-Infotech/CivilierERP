@@ -563,7 +563,7 @@ function FormDialog({
               <div className="relative">
                 <CalendarDays
                   size={14}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
                 />
                 <input
                   type="date"
@@ -666,9 +666,9 @@ function FormDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <button type="button" className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={onClose}>
             Cancel
-          </Button>
+          </button>
           <Button
             onClick={() => onSave(form)}
             disabled={!form.ApplicantId || !form.UnitNo.trim() || isSaving}
@@ -822,7 +822,7 @@ export function UnitSelectionPage() {
           <div className="relative flex-1 min-w-[220px]">
             <Search
               size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
             />
             <input
               className="w-full pl-9 pr-9 py-[9px] border border-border rounded-lg text-sm bg-card text-foreground outline-none focus:border-primary/60 transition-colors"
@@ -984,9 +984,9 @@ export function UnitSelectionPage() {
             is already linked.
           </p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+            <button type="button" className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={() => setDeleteTarget(null)}>
               Cancel
-            </Button>
+            </button>
             <Button
               variant="destructive"
               disabled={deleteMutation.isPending}

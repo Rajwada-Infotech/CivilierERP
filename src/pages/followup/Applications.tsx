@@ -807,9 +807,9 @@ function ApplicationDrawer({
         </div>
 
         <div className="flex justify-end gap-2 border-t border-border px-6 py-4 shrink-0">
-          <Button variant="outline" onClick={onClose} className="h-9">
+          <button type="button" className="h-9 px-4 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={onClose}>
             Cancel
-          </Button>
+          </button>
           <Button
             onClick={onSubmit}
             disabled={saving}

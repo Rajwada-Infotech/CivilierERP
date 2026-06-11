@@ -82,9 +82,9 @@ router.get("/meta/options", async (req, res) => {
     const [applicantsR, unitSelectionsR, handoversR, projectsR, companiesR] =
       await Promise.all([
         pool.request().query(`
-          SELECT LHeadId AS Id, ISNULL(DisplayName, LHeadName) AS ApplicantName, LHeadCode AS ApplicantNo
-          FROM dbo.AccountHeadMaster WHERE LHeadType = 'A' AND LHeadStatus = 1
-          ORDER BY ISNULL(DisplayName, LHeadName)
+          SELECT Id, ApplicantNo, ApplicantName, ProjectId, CompanyId
+          FROM dbo.FollowupApplications WHERE IsDeleted = 0
+          ORDER BY ApplicantName
         `),
         pool.request().query(`
           SELECT Id, SelectionNo, UnitNo, ApplicantId
@@ -134,7 +134,7 @@ router.get("/", async (req, res) => {
       return res.status(400).json({ error: "applicantId must be a valid number" });
 
     const filters = ["pp.IsDeleted = 0"];
-    if (search) filters.push(`(pp.ClearanceNo LIKE @Search OR ISNULL(ahm.DisplayName, ahm.LHeadName) LIKE @Search OR ahm.LHeadCode LIKE @Search)`);
+    if (search) filters.push(`(pp.ClearanceNo LIKE @Search OR COALESCE(fa.ApplicantName, ISNULL(ahm.DisplayName, ahm.LHeadName)) LIKE @Search OR COALESCE(fa.ApplicantNo, ahm.LHeadCode) LIKE @Search)`);
     if (status) filters.push("pp.Status = @Status");
     if (applicantId) filters.push("pp.ApplicantId = @ApplicantId");
 
@@ -143,7 +143,8 @@ router.get("/", async (req, res) => {
 
     const BASE_JOINS = `
       FROM dbo.FollowupPrePossession pp
-      INNER JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = pp.ApplicantId AND ahm.LHeadType = 'A'
+      LEFT JOIN dbo.AccountHeadMaster ahm    ON ahm.LHeadId = pp.ApplicantId AND ahm.LHeadType = 'A'
+      LEFT JOIN dbo.FollowupApplications fa  ON fa.Id = pp.ApplicantId AND fa.IsDeleted = 0 AND ahm.LHeadId IS NULL
       LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = pp.UnitSelectionId
       LEFT JOIN dbo.FollowupHandovers fho      ON fho.Id = pp.HandoverId
       LEFT JOIN dbo.enterprise ep ON ep.id = pp.ProjectId AND ep.business_type = 'P'
@@ -166,8 +167,8 @@ router.get("/", async (req, res) => {
       .input("PageSize", sql.Int, pageSize).query(`
         SELECT
           pp.Id, pp.ClearanceNo, pp.ApplicantId,
-          ISNULL(ahm.DisplayName, ahm.LHeadName) AS ApplicantName,
-          ahm.LHeadCode AS ApplicantNo,
+          COALESCE(fa.ApplicantName, ISNULL(ahm.DisplayName, ahm.LHeadName)) AS ApplicantName,
+          COALESCE(fa.ApplicantNo,   ahm.LHeadCode)                         AS ApplicantNo,
           pp.UnitSelectionId, fus.UnitNo, fus.SelectionNo,
           pp.HandoverId, fho.HandoverNo,
           pp.ProjectId, ep.name AS ProjectName,
