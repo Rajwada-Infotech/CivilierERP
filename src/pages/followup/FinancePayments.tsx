@@ -1,5 +1,4 @@
-import { useState, useMemo } from "react";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -389,7 +388,6 @@ export function FinancePaymentsPage() {
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [projectId, setProjectId] = useState("");
-  const [companyId, setCompanyId] = useState("");
   const [status, setStatus] = useState("");
   const [recordRow, setRecordRow] = useState<PaymentRow | null>(null);
   const [recordForm, setRecordForm] = useState<RecordForm>(EMPTY_FORM);
@@ -409,20 +407,6 @@ export function FinancePaymentsPage() {
     queryKey: ["followup-payment-projects"],
     queryFn: fetchProjects,
   });
-
-  const { data: companiesRaw = [] } = useQuery<{ id: number; label: string }[]>({
-    queryKey: ["companies-options"],
-    queryFn: async () => {
-      const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
-      if (!res.ok) throw new Error("Failed to load companies");
-      return res.json();
-    },
-  });
-
-  const filteredProjects = useMemo(
-    () => filterProjectsByCompany(projects as any[], companyId),
-    [projects, companyId],
-  );
 
   const { data: receipts = [], isLoading: receiptsLoading } = useQuery({
     queryKey: ["followup-payment-receipts", historyRow?.TermId],
@@ -463,7 +447,7 @@ export function FinancePaymentsPage() {
   const summary = data?.summary;
   const total = data?.pagination.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const hasFilters = search || projectId || companyId || status;
+  const hasFilters = search || projectId || status;
 
   function applySearch() {
     setSearch(searchInput.trim());
@@ -473,7 +457,6 @@ export function FinancePaymentsPage() {
     setSearch("");
     setSearchInput("");
     setProjectId("");
-    setCompanyId("");
     setStatus("");
     setPage(1);
   }

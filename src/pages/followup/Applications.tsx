@@ -32,7 +32,6 @@ import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 
 const API = "/api/followup-applications";
 
@@ -899,7 +898,6 @@ export default function ApplicationsPage() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [status, setStatus] = useState("");
-  const [companyId, setCompanyId] = useState("");
   const [projectId, setProjectId] = useState("");
   const [page, setPage] = useState(1);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -976,11 +974,6 @@ export default function ApplicationsPage() {
       isPageScoped: (pagination?.totalPages ?? 1) > 1,
     }),
     [applications, pagination],
-  );
-
-  const filteredProjects = useMemo(
-    () => filterProjectsByCompany(options?.projects as any[] ?? [], companyId),
-    [options?.projects, companyId],
   );
 
   function resetAndOpen() {
@@ -1084,7 +1077,7 @@ export default function ApplicationsPage() {
     }
   }
 
-  const hasFilters = !!(search || status || companyId || projectId);
+  const hasFilters = !!(search || status || projectId);
 
   return (
     <>
@@ -1188,28 +1181,6 @@ export default function ApplicationsPage() {
               <div className="relative">
                 <select
                   className="h-9 appearance-none rounded-lg border border-border bg-muted/30 px-3 pr-7 text-sm text-foreground outline-none focus:border-primary/60 min-w-[150px] cursor-pointer"
-                  value={companyId}
-                  onChange={(e) => {
-                    setCompanyId(e.target.value);
-                    setProjectId("");
-                    setPage(1);
-                  }}
-                >
-                  <option value="">All Companies</option>
-                  {options?.companies.map((c) => (
-                    <option key={c.Id} value={c.Id}>
-                      {c.Name}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown
-                  size={11}
-                  className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60"
-                />
-              </div>
-              <div className="relative">
-                <select
-                  className="h-9 appearance-none rounded-lg border border-border bg-muted/30 px-3 pr-7 text-sm text-foreground outline-none focus:border-primary/60 min-w-[150px] cursor-pointer"
                   value={projectId}
                   onChange={(e) => {
                     setProjectId(e.target.value);
@@ -1217,7 +1188,7 @@ export default function ApplicationsPage() {
                   }}
                 >
                   <option value="">All Projects</option>
-                  {filteredProjects.map((p: any) => (
+                  {options?.projects.map((p) => (
                     <option key={p.Id} value={p.Id}>
                       {p.Name}
                     </option>
@@ -1233,7 +1204,6 @@ export default function ApplicationsPage() {
                   onClick={() => {
                     setSearch("");
                     setStatus("");
-                    setCompanyId("");
                     setProjectId("");
                     setPage(1);
                   }}
@@ -1305,7 +1275,6 @@ export default function ApplicationsPage() {
                             onClick={() => {
                               setSearch("");
                               setStatus("");
-                              setCompanyId("");
                               setProjectId("");
                             }}
                             className="mt-1 text-xs text-primary hover:underline"

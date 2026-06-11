@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -42,7 +41,6 @@ import { useFinYear } from "@/contexts/FinYearContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -113,8 +111,6 @@ interface Project {
   label?: string;
   name?: string;
   companyId?: number | null;
-  belongs_to?: string | number | null;
-  company_ids?: string | null;
 }
 interface DocType {
   id: number;
@@ -1250,10 +1246,13 @@ const FormModal: React.FC<FormModalProps> = ({
 
   // Filter projects to only those belonging to the selected company.
   // If no company selected, show all projects.
-  const filteredProjects = useMemo(
-    () => filterProjectsByCompany(projects, form.CompanyId),
-    [projects, form.CompanyId],
-  );
+  const filteredProjects = form.CompanyId
+    ? projects.filter(
+        (p) =>
+          p.companyId == null || // show projects with no company link always
+          String(p.companyId) === form.CompanyId,
+      )
+    : projects;
 
   const refreshBoqNo = async (docTypeId: string, finYear: string) => {
     if (!docTypeId) {
@@ -1801,7 +1800,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
                   disabled={acting}
                   onClick={onEdit}
                 >
-                  <Edit3 size={13} className="mr-1.5" /> Amend
+                  <Edit3 size={13} className="mr-1.5" /> Edit
                 </Button>
                 <Button
                   size="sm"
@@ -1939,17 +1938,19 @@ const DetailModal: React.FC<DetailModalProps> = ({
             <Button variant="outline" onClick={onClose}>
               Close
             </Button>
-            <Button variant="secondary" disabled={acting} onClick={onEdit}>
-              <Edit3 size={14} className="mr-1.5" /> Amend
-            </Button>
             {canEditBoq(record.Status) && (
-              <ApprovalActions
-                status={record.Status}
-                recordId={record.BoqID}
-                endpoint="/api/boq"
-                onSuccess={() => onRefresh()}
-                submitOnly
-              />
+              <>
+                <Button variant="secondary" disabled={acting} onClick={onEdit}>
+                  <Edit3 size={14} className="mr-1.5" /> Edit
+                </Button>
+                <ApprovalActions
+                  status={record.Status}
+                  recordId={record.BoqID}
+                  endpoint="/api/boq"
+                  onSuccess={() => onRefresh()}
+                  submitOnly
+                />
+              </>
             )}
           </div>
         </div>
@@ -2018,7 +2019,6 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
 export default function BOQ() {
   const { finYears } = useFinYear();
   const { currentUser } = useAuth();
-  const navigate = useNavigate();
   const canDeleteRecords = currentUser?.role !== "engineer";
   const [page, setPage] = useState(1);
   const PAGE_LIMIT = 10;
@@ -2140,8 +2140,6 @@ export default function BOQ() {
               : item.belongs_to != null
                 ? Number(item.belongs_to)
                 : null,
-          belongs_to: item.belongs_to ?? null,
-          company_ids: item.company_ids ?? null,
         })),
       );
 
@@ -2254,18 +2252,13 @@ export default function BOQ() {
   };
 
   const openEdit = (r: BoqRecord) => {
-    navigate("/engineering/amendment-menu", {
-      state: {
-        prefill: {
-          tab: "BOQ",
-          docId: r.BoqID,
-          docNo: r.BoqNo || r.DocNo,
-          companyName: r.CompanyName,
-          projectName: r.ProjectName,
-          totalAmount: r.TotalAmount,
-        },
-      },
-    });
+    if (!canEditBoq(r.Status)) {
+      toast.error("Only Draft or Rejected BOQs can be edited.");
+      return;
+    }
+    setViewRecord(null);
+    setEditRecord(r);
+    setShowForm(true);
   };
 
   const statuses = ["All", "Draft", "Pending", "Approved", "Rejected"];
@@ -2408,15 +2401,25 @@ export default function BOQ() {
           >
             <Printer size={14} />
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0 text-primary"
-            title="Raise Amendment"
-            onClick={() => openEdit(row.original)}
-          >
-            <Edit3 size={14} />
-          </Button>
+          {canEditBoq(row.original.Status) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 text-primary"
+              onClick={async () => {
+                const full = await apiFetch(`/boq/${row.original.BoqID}`).catch(
+                  () => row.original,
+                );
+                openEdit({
+                  ...full,
+                  BoqItems: full.BoqItems ?? [],
+                  BoqActivities: full.BoqActivities ?? [],
+                });
+              }}
+            >
+              <Edit3 size={14} />
+            </Button>
+          )}
           <ApprovalActions
             status={row.original.Status}
             recordId={row.original.BoqID}

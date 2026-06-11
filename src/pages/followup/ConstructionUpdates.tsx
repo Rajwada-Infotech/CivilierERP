@@ -1,6 +1,5 @@
 import { useMemo, useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -487,7 +486,7 @@ export function ConstructionUpdatesPage() {
 
   const projectItems: ComboItem[] = useMemo(
     () =>
-      filterProjectsByCompany((meta?.projects ?? []) as any[], form.CompanyId).map((p: any) => ({
+      (meta?.projects ?? []).map((p) => ({
         value: String(p.Id),
         label: p.Name,
       })),
@@ -1368,7 +1367,7 @@ export function ConstructionUpdatesPage() {
               <Label>Company</Label>
               <Combobox
                 value={form.CompanyId}
-                onChange={(v) => { set("CompanyId", v); set("ProjectId", ""); }}
+                onChange={(v) => set("CompanyId", v)}
                 items={companyItems}
                 placeholder="Select company…"
               />

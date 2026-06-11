@@ -28,7 +28,6 @@ import {
 } from "@/api/stockTransferApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(n ?? 0);
@@ -587,15 +586,12 @@ export default function StockTransfer() {
     id: number;
     label: string;
     belongs_to: string | null;
-    company_id?: number | null;
-    company_ids?: string | null;
   }[] = projectsData ?? [];
 
   const filteredGodowns = useMemo(() => {
     return allGodowns.filter((g) => {
       if (g.IsMain) return false; // exclude Main Godown — transfers only between project godowns
-      // Use derived CompanyID (backend resolves it from project's company linkage)
-      if (filterCompanyId && String(g.CompanyID ?? "") !== filterCompanyId)
+      if (filterCompanyId && String(g.EnterpriseID ?? "") !== filterCompanyId)
         return false;
       if (filterProjectId && String(g.ProjectID ?? "") !== filterProjectId)
         return false;
@@ -604,7 +600,8 @@ export default function StockTransfer() {
   }, [allGodowns, filterCompanyId, filterProjectId]);
 
   const projectOptions = useMemo(() => {
-    return filterProjectsByCompany(allProjects, filterCompanyId);
+    if (!filterCompanyId) return allProjects;
+    return allProjects.filter((p) => String(p.belongs_to) === filterCompanyId);
   }, [allProjects, filterCompanyId]);
 
   const { data: fromStockData, isLoading: isLoadingStock } = useQuery({
@@ -800,7 +797,7 @@ export default function StockTransfer() {
                   value={filterCompanyId}
                   onChange={(v) => {
                     setFilterCompanyId(v);
-                    setFilterProjectId(""); // reset project cascade when company changes
+                    setFilterProjectId("");
                     setFromGodownId(null);
                     setToGodownId(null);
                     setItems([emptyItem()]);
@@ -835,11 +832,7 @@ export default function StockTransfer() {
                   godowns={filteredGodowns}
                   exclude={toGodownId}
                   variant="from"
-                  placeholder={
-                    filteredGodowns.length === 0
-                      ? "No godowns available"
-                      : "Select source godown…"
-                  }
+                  placeholder="Select source godown…"
                 />
                 <GodownSelect
                   label="To"
@@ -848,11 +841,7 @@ export default function StockTransfer() {
                   godowns={filteredGodowns}
                   exclude={fromGodownId}
                   variant="to"
-                  placeholder={
-                    filteredGodowns.length === 0
-                      ? "No godowns available"
-                      : "Select destination godown…"
-                  }
+                  placeholder="Select destination godown…"
                 />
               </div>
 

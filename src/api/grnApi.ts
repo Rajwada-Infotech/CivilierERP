@@ -289,37 +289,15 @@ export const getUoms = async (): Promise<UOM[]> => {
 };
 
 export const getProjects = async (): Promise<
-  {
-    id: number;
-    name: string;
-    short_name: string | null;
-    company_id?: string | number | null;
-    company_ids?: string | null;
-    belongs_to?: string | null;
-  }[]
+  { id: number; name: string; short_name: string | null }[]
 > => {
   const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
   if (!res.ok) throw new Error("Failed to fetch projects");
   const data = await res.json();
-  // /enterprises/options returns { id, label, belongs_to, company_id, company_ids }
-  // Preserve company linkage fields so filterProjectsByCompany works correctly.
+  // /enterprises/options returns { id, label, belongs_to } — normalise to { id, name }
   return Array.isArray(data)
-    ? (
-        data as {
-          id: number;
-          label: string;
-          short_name?: string | null;
-          company_id?: string | number | null;
-          company_ids?: string | null;
-          belongs_to?: string | null;
-        }[]
-      ).map((p) => ({
-        id: p.id,
-        name: p.label,
-        short_name: p.short_name ?? null,
-        company_id: p.company_id ?? null,
-        company_ids: p.company_ids ?? null,
-        belongs_to: p.belongs_to ?? null,
-      }))
+    ? (data as { id: number; label: string; short_name?: string | null }[]).map(
+        (p) => ({ id: p.id, name: p.label, short_name: p.short_name ?? null }),
+      )
     : [];
 };
