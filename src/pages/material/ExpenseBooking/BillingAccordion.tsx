@@ -392,9 +392,13 @@ export function BillingAccordion({
     if (!isMulti || !onChangeBillingTerms) return;
     if (mountSyncDone.current) return;
     mountSyncDone.current = true;
-    // Only write back if the parent has no terms — don't clobber a loaded record
+    // Only write back if the parent has no terms — don't clobber a loaded record.
+    // And only if there is a real term to persist (not a blank unapplicable stub).
     if (!billingTerms || billingTerms.length === 0) {
-      onChangeBillingTerms(terms);
+      const hasRealTerm = terms.some(
+        (t) => t.applicable && (t.masterTermName || t.value > 0),
+      );
+      if (hasRealTerm) onChangeBillingTerms(terms);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
