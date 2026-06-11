@@ -77,6 +77,7 @@ import {
   DocNumberPreview,
   fetchNextDocNumber,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 
 // ─── WO Chain Status Hook ─────────────────────────────────────────────────────
 interface WOChainStatus {
@@ -189,6 +190,9 @@ interface WorkOrderForm {
 interface DropdownOption {
   id: number;
   name: string;
+  belongs_to?: string | number | null;
+  company_id?: number | null;
+  company_ids?: string | null;
 }
 
 interface TCRecord {
@@ -2810,6 +2814,10 @@ const WorkOrderEditPanel: React.FC<{
 
   const [companies, setCompanies] = useState<DropdownOption[]>([]);
   const [projects, setProjects] = useState<DropdownOption[]>([]);
+  const filteredProjects = useMemo(
+    () => filterProjectsByCompany(projects, form.companyId),
+    [projects, form.companyId],
+  );
   const [contractors, setContractors] = useState<DropdownOption[]>([]);
   const [suppliers, setSuppliers] = useState<DropdownOption[]>([]);
   const [approvedBoqs, setApprovedBoqs] = useState<
@@ -3041,7 +3049,11 @@ const WorkOrderEditPanel: React.FC<{
     }, [groups]);
 
   const setField = (key: keyof WorkOrderForm, value: string) => {
-    setFormState((p) => ({ ...p, [key]: value }));
+    setFormState((p) => ({
+      ...p,
+      [key]: value,
+      ...(key === "companyId" ? { projectId: "" } : {}),
+    }));
     setErrors((p) => ({ ...p, [key]: false }));
   };
 
@@ -3437,7 +3449,7 @@ const WorkOrderEditPanel: React.FC<{
                   "projectId",
                   form.projectId,
                   (v) => setField("projectId", v),
-                  projects,
+                  filteredProjects,
                   "Select project",
                   errors.projectId ?? false,
                 )}
@@ -3924,6 +3936,10 @@ const WorkOrderMaster: React.FC = () => {
   // ── Dropdown states ───────────────────────────────────────────────────────
   const [companies, setCompanies] = useState<DropdownOption[]>([]);
   const [projects, setProjects] = useState<DropdownOption[]>([]);
+  const filteredProjects = useMemo(
+    () => filterProjectsByCompany(projects, form.companyId),
+    [projects, form.companyId],
+  );
   const [contractors, setContractors] = useState<DropdownOption[]>([]);
   const [suppliers, setSuppliers] = useState<DropdownOption[]>([]);
   const [approvedBoqs, setApprovedBoqs] = useState<
@@ -4066,7 +4082,11 @@ const WorkOrderMaster: React.FC = () => {
     }, [groups]);
 
   const setField = (key: keyof WorkOrderForm, value: string) => {
-    setForm((p) => ({ ...p, [key]: value }));
+    setForm((p) => ({
+      ...p,
+      [key]: value,
+      ...(key === "companyId" ? { projectId: "" } : {}),
+    }));
     setErrors((p) => ({ ...p, [key]: false }));
   };
 
@@ -4590,7 +4610,7 @@ const WorkOrderMaster: React.FC = () => {
                         "projectId",
                         form.projectId,
                         (v) => setField("projectId", v),
-                        projects,
+                        filteredProjects,
                         "Select project",
                         errors.projectId ?? false,
                       )}

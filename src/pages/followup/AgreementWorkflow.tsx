@@ -1057,7 +1057,7 @@ export default function AgreementWorkflowPage() {
                   <SelectValue placeholder="Select…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(meta?.projects ?? []).map((p: OptionItem) => (
+                  {filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map((p: any) => (
                     <SelectItem key={p.Id} value={String(p.Id)}>
                       {p.Name}
                     </SelectItem>
@@ -1071,7 +1071,7 @@ export default function AgreementWorkflowPage() {
               <Label className="text-xs">Company</Label>
               <Select
                 value={form.CompanyId || ""}
-                onValueChange={(v) => setForm((f) => ({ ...f, CompanyId: v }))}
+                onValueChange={(v) => setForm((f) => ({ ...f, CompanyId: v, ProjectId: "" }))}
               >
                 <SelectTrigger className="rounded-[9px]">
                   <SelectValue placeholder="Select…" />

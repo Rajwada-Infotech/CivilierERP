@@ -8,6 +8,83 @@ const { bumpCacheVersion } = require("../redis");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
+function normalizeIdList(value) {
+  const raw = Array.isArray(value)
+    ? value
+    : value == null || value === ""
+      ? []
+      : String(value).split(",");
+  const seen = new Set();
+  const ids = [];
+  for (const item of raw) {
+    const id = parseInt(item, 10);
+    if (Number.isInteger(id) && id > 0 && !seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
+function getProjectCompanyIds(f) {
+  const ids = normalizeIdList(f.companyIds);
+  const primaryId = parseInt(f.companyId, 10);
+  if (Number.isInteger(primaryId) && primaryId > 0 && !ids.includes(primaryId)) {
+    ids.unshift(primaryId);
+  }
+  return ids;
+}
+
+async function validateProjectCompanies(pool, enterpriseId, companyIds) {
+  if (!companyIds.length) return null;
+
+  const request = pool.request();
+  companyIds.forEach((id, index) => {
+    request.input(`CompanyId${index}`, sql.Int, id);
+  });
+  const companyIdParams = companyIds.map((_, index) => `@CompanyId${index}`).join(",");
+
+  const existing = await request.query(`
+    SELECT id, name, enterprise_id
+    FROM dbo.enterprise
+    WHERE business_type = 'C'
+      AND (discontinue IS NULL OR discontinue = 0)
+      AND id IN (${companyIdParams})
+  `);
+
+  if (existing.recordset.length !== companyIds.length) {
+    return "One or more selected companies are inactive or do not exist.";
+  }
+
+  const selectedEnterpriseId = parseInt(enterpriseId, 10);
+  if (Number.isInteger(selectedEnterpriseId) && selectedEnterpriseId > 0) {
+    const mismatch = existing.recordset.find(
+      (row) => Number(row.enterprise_id) !== selectedEnterpriseId,
+    );
+    if (mismatch) {
+      return `${mismatch.name} does not belong to the selected enterprise.`;
+    }
+  }
+
+  return null;
+}
+
+async function replaceProjectCompanies(requestFactory, projectId, companyIds) {
+  await requestFactory()
+    .input("ProjectId", sql.Int, projectId)
+    .query("DELETE FROM dbo.ProjectCompanies WHERE ProjectId = @ProjectId");
+
+  for (const companyId of companyIds) {
+    await requestFactory()
+      .input("ProjectId", sql.Int, projectId)
+      .input("CompanyId", sql.Int, companyId)
+      .query(`
+        INSERT INTO dbo.ProjectCompanies (ProjectId, CompanyId)
+        VALUES (@ProjectId, @CompanyId)
+      `);
+  }
+}
+
 // ── GET all projects ──────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
@@ -39,8 +116,10 @@ router.get("/", async (req, res) => {
         p.enterprise_id         AS EnterpriseId,
         e.name                  AS EnterpriseName,
         -- company FK
-        p.company_id            AS CompanyId,
+        COALESCE(p.company_id, pc.PrimaryCompanyId) AS CompanyId,
+        pc.CompanyIds           AS CompanyIds,
         c.name                  AS CompanyName,
+        pc.CompanyNames         AS CompanyNames,
         c.b_sub_identity_type   AS CompanyGST,
         c.gst_issue_date        AS CompanyGSTDate,
         c.pan                   AS CompanyPAN,
@@ -51,8 +130,20 @@ router.get("/", async (req, res) => {
         p.jv_company_name       AS JvCompanyName,
         p.date_of_entry         AS CreatedAt
       FROM dbo.enterprise p
+      OUTER APPLY (
+        SELECT
+          MIN(x.CompanyId) AS PrimaryCompanyId,
+          STRING_AGG(CAST(x.CompanyId AS NVARCHAR(20)), ',') WITHIN GROUP (ORDER BY x.CompanyId) AS CompanyIds,
+          STRING_AGG(co.name, ', ') WITHIN GROUP (ORDER BY co.name) AS CompanyNames
+        FROM (
+          SELECT p.company_id AS CompanyId WHERE p.company_id IS NOT NULL
+          UNION
+          SELECT pc.CompanyId FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = p.id
+        ) x
+        INNER JOIN dbo.enterprise co ON co.id = x.CompanyId AND co.business_type = 'C'
+      ) pc
       LEFT JOIN dbo.enterprise e ON e.id = p.enterprise_id
-      LEFT JOIN dbo.enterprise c ON c.id = p.company_id
+      LEFT JOIN dbo.enterprise c ON c.id = COALESCE(p.company_id, pc.PrimaryCompanyId)
       WHERE p.business_type = 'P'
       ORDER BY p.name
     `);
@@ -91,10 +182,21 @@ router.get("/company/:id", async (req, res) => {
 // ── POST — create project ─────────────────────────────────────────────────────
 router.post("/", adminOnly, async (req, res) => {
   const f = req.body;
+  let tx;
   try {
     const pool = getPool();
-    await pool
-      .request()
+    const companyIds = getProjectCompanyIds(f);
+    const companyError = await validateProjectCompanies(
+      pool,
+      f.enterpriseId,
+      companyIds,
+    );
+    if (companyError) return res.status(400).json({ error: companyError });
+
+    tx = new sql.Transaction(pool);
+    await tx.begin();
+    const txRequest = () => new sql.Request(tx);
+    const insertResult = await txRequest()
       .input("name", sql.NVarChar(255), f.name || null)
       .input("short_name", sql.NVarChar(100), f.shortName || null)
       .input("business_identity", sql.NVarChar(100), f.code || null)
@@ -129,7 +231,7 @@ router.post("/", adminOnly, async (req, res) => {
         sql.Int,
         f.enterpriseId ? parseInt(f.enterpriseId) : null,
       )
-      .input("company_id", sql.Int, f.companyId ? parseInt(f.companyId) : null)
+      .input("company_id", sql.Int, companyIds[0] || null)
       .input("jv_enabled", sql.Bit, f.jvEnabled ? 1 : 0)
       .input(
         "jv_company_name",
@@ -150,21 +252,18 @@ router.post("/", adminOnly, async (req, res) => {
           @currency, @status, @rera_no, @start_date, @end_date, @team_size, @pan,
           @logo, @enterprise_id, @company_id,
           @jv_enabled, @jv_company_name, @discontinue, @date_of_entry
-        )
+        );
+        SELECT SCOPE_IDENTITY() AS id;
       `);
+    const newProjectId = Number(insertResult.recordset[0]?.id);
+    await replaceProjectCompanies(txRequest, newProjectId, companyIds);
+    await tx.commit();
+    tx = null;
     await bumpCacheVersion("enterprises");
     await bumpCacheVersion("project-master");
 
     // Auto-create a dedicated godown for this project
     try {
-      const projectRow = await pool
-        .request()
-        .input("name", sql.NVarChar(255), f.name || null)
-        .input("btype", sql.NVarChar(10), "P")
-        .query(
-          "SELECT TOP 1 id FROM dbo.enterprise WHERE name=@name AND business_type=@btype ORDER BY id DESC",
-        );
-      const newProjectId = projectRow.recordset[0]?.id;
       if (newProjectId) {
         const code = (f.code || f.name || "PRJ")
           .replace(/\s+/g, "_")
@@ -206,6 +305,11 @@ router.post("/", adminOnly, async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
+    if (tx) {
+      try {
+        await tx.rollback();
+      } catch {}
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -213,11 +317,23 @@ router.post("/", adminOnly, async (req, res) => {
 // ── PUT — update project ──────────────────────────────────────────────────────
 router.put("/:id", adminOnly, async (req, res) => {
   const f = req.body;
+  let tx;
   try {
     const pool = getPool();
-    await pool
-      .request()
-      .input("id", sql.Int, parseInt(req.params.id))
+    const projectId = parseInt(req.params.id, 10);
+    const companyIds = getProjectCompanyIds(f);
+    const companyError = await validateProjectCompanies(
+      pool,
+      f.enterpriseId,
+      companyIds,
+    );
+    if (companyError) return res.status(400).json({ error: companyError });
+
+    tx = new sql.Transaction(pool);
+    await tx.begin();
+    const txRequest = () => new sql.Request(tx);
+    await txRequest()
+      .input("id", sql.Int, projectId)
       .input("name", sql.NVarChar(255), f.name || null)
       .input("short_name", sql.NVarChar(100), f.shortName || null)
       .input("business_identity", sql.NVarChar(100), f.code || null)
@@ -251,7 +367,7 @@ router.put("/:id", adminOnly, async (req, res) => {
         sql.Int,
         f.enterpriseId ? parseInt(f.enterpriseId) : null,
       )
-      .input("company_id", sql.Int, f.companyId ? parseInt(f.companyId) : null)
+      .input("company_id", sql.Int, companyIds[0] || null)
       .input("jv_enabled", sql.Bit, f.jvEnabled ? 1 : 0)
       .input(
         "jv_company_name",
@@ -271,10 +387,18 @@ router.put("/:id", adminOnly, async (req, res) => {
           discontinue=@discontinue
         WHERE id=@id AND business_type='P'
       `);
+    await replaceProjectCompanies(txRequest, projectId, companyIds);
+    await tx.commit();
+    tx = null;
     await bumpCacheVersion("enterprises");
     await bumpCacheVersion("project-master");
     res.json({ success: true });
   } catch (err) {
+    if (tx) {
+      try {
+        await tx.rollback();
+      } catch {}
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -338,7 +462,15 @@ router.delete("/:id", adminOnly, async (req, res) => {
       });
     }
 
-    // 3. Safe to delete
+    // 3. Safe to delete — remove ProjectCompanies links first (no CASCADE on FK)
+    try {
+      await pool
+        .request()
+        .input("id", sql.Int, id)
+        .query("DELETE FROM dbo.ProjectCompanies WHERE ProjectId = @id");
+    } catch {
+      // Table may not exist yet (migration 103 not run) — safe to ignore
+    }
     await pool
       .request()
       .input("id", sql.Int, id)

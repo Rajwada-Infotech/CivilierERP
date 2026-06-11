@@ -50,6 +50,7 @@ import {
 import { useFinYear } from "@/contexts/FinYearContext";
 import { Badge } from "@/components/ui/badge";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -192,9 +193,9 @@ export default function MaterialRequest() {
     staleTime: 5 * 60_000,
   });
 
-  const filteredProjects = (projects as any[]).filter(
-    (p) =>
-      !header.companyId || String(p.company_id) === String(header.companyId),
+  const filteredProjects = useMemo(
+    () => filterProjectsByCompany(projects as any[], header.companyId),
+    [projects, header.companyId],
   );
 
   const { data: finYears = [] } = useQuery({

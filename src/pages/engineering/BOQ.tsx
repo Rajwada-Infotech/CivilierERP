@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -41,6 +41,7 @@ import { useFinYear } from "@/contexts/FinYearContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -111,6 +112,8 @@ interface Project {
   label?: string;
   name?: string;
   companyId?: number | null;
+  belongs_to?: string | number | null;
+  company_ids?: string | null;
 }
 interface DocType {
   id: number;
@@ -1246,13 +1249,10 @@ const FormModal: React.FC<FormModalProps> = ({
 
   // Filter projects to only those belonging to the selected company.
   // If no company selected, show all projects.
-  const filteredProjects = form.CompanyId
-    ? projects.filter(
-        (p) =>
-          p.companyId == null || // show projects with no company link always
-          String(p.companyId) === form.CompanyId,
-      )
-    : projects;
+  const filteredProjects = useMemo(
+    () => filterProjectsByCompany(projects, form.CompanyId),
+    [projects, form.CompanyId],
+  );
 
   const refreshBoqNo = async (docTypeId: string, finYear: string) => {
     if (!docTypeId) {
@@ -2140,6 +2140,8 @@ export default function BOQ() {
               : item.belongs_to != null
                 ? Number(item.belongs_to)
                 : null,
+          belongs_to: item.belongs_to ?? null,
+          company_ids: item.company_ids ?? null,
         })),
       );
 
