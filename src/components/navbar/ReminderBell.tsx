@@ -11,6 +11,7 @@ import {
   Package,
   Lock,
   ClipboardList,
+  Receipt,
 } from "lucide-react";
 import { useReminders, formatRelative, formatDate } from "@/hooks/useReminders";
 
@@ -31,6 +32,11 @@ const TYPE_META: Record<string, ReminderMeta> = {
     icon: ClipboardList,
     label: "MR",
     color: "text-blue-500",
+  },
+  expense_booking: {
+    icon: Receipt,
+    label: "EB",
+    color: "text-amber-600",
   },
 };
 
@@ -162,6 +168,7 @@ export const ReminderBell = () => {
               "tds",
               "emi_installment",
               "material_request",
+              "expense_booking",
             ].map((t) => (
               <button
                 key={t}

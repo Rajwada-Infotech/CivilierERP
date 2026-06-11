@@ -9,9 +9,13 @@ export const getCompanies = async () => {
 };
 
 export const getProjects = async () => {
-  const res = await fetchWithAuth(`${BASE}/projects`);
+  const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
   if (!res.ok) throw new Error("Failed to fetch projects");
-  return res.json();
+  const data = await res.json();
+  return (Array.isArray(data) ? data : []).map((p: any) => ({
+    ...p,
+    name: p.name ?? p.label ?? "",
+  }));
 };
 
 export const getFinYears = async () => {

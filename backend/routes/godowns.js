@@ -17,8 +17,18 @@ router.get("/", cache("godowns", 120), async (req, res) => {
         g.Description, g.Remarks, g.IsMain,
         g.EnterpriseID, g.ProjectID, g.Location,
         g.IsActive, g.IsDeleted, g.CreatedAt, g.UpdatedAt,
-        e.name AS EnterpriseName,
-        p.name AS ProjectName
+        e.name  AS EnterpriseName,
+        p.name  AS ProjectName,
+        -- CompanyID: the company that owns this godown for cascade filtering.
+        -- Priority: project's company_id first (authoritative FK to companies),
+        -- then project's belongs_to, then the godown's own EnterpriseID.
+        -- This handles the case where EnterpriseID stores the parent Enterprise
+        -- rather than the Company-level entity.
+        COALESCE(
+          p.company_id,
+          TRY_CAST(p.belongs_to AS INT),
+          g.EnterpriseID
+        ) AS CompanyID
       FROM dbo.Godowns g
       LEFT JOIN dbo.enterprise e ON e.id = g.EnterpriseID
       LEFT JOIN dbo.enterprise p ON p.id = g.ProjectID AND p.business_type = 'P'
@@ -41,7 +51,15 @@ router.get("/:id", async (req, res) => {
     if (!id) return;
     const pool = getPool();
     const result = await pool.request().input("id", sql.Int, id).query(`
-        SELECT g.*, e.name AS EnterpriseName, p.name AS ProjectName
+        SELECT
+          g.*,
+          e.name AS EnterpriseName,
+          p.name AS ProjectName,
+          COALESCE(
+            p.company_id,
+            TRY_CAST(p.belongs_to AS INT),
+            g.EnterpriseID
+          ) AS CompanyID
         FROM dbo.Godowns g
         LEFT JOIN dbo.enterprise e ON e.id = g.EnterpriseID
         LEFT JOIN dbo.enterprise p ON p.id = g.ProjectID AND p.business_type = 'P'
@@ -126,7 +144,6 @@ router.put("/:id", async (req, res) => {
 
     const pool = getPool();
 
-    // Disallow editing IsMain flag
     const check = await pool
       .request()
       .input("id", sql.Int, id)

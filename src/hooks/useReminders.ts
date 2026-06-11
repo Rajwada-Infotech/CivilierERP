@@ -9,7 +9,8 @@ export type ReminderType =
   | "tds"
   | "grn"
   | "emi_installment"
-  | "material_request";
+  | "material_request"
+  | "expense_booking";
 
 export interface ReminderItem {
   id: string | number;
@@ -94,15 +95,43 @@ async function fetchEmiReminders(): Promise<ReminderItem[]> {
   }
 }
 
+async function fetchExpenseBookingReminders(): Promise<ReminderItem[]> {
+  try {
+    const res = await fetchWithAuth("/api/expense-booking?limit=500&page=1");
+    if (!res.ok) return [];
+    const raw = await res.json();
+    const rows: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
+
+    return rows
+      .filter((row) => {
+        // Only rows with a reminder date set and not pure EMI schedules
+        // (EMI installments are handled separately by fetchEmiReminders)
+        if (!row.EReminder) return false;
+        const urgency = classifyUrgency(row.EReminder);
+        return true;
+      })
+      .map((row) => ({
+        id: `eb-${row.Eid ?? row.id}`,
+        type: "expense_booking" as ReminderType,
+        title: `Expense Booking — ${row.EDocNo || row.docNo || "Draft"}`,
+        subtitle: `${row.EProjectName || row.projectName || "Expense Booking"} · ${row.EName || row.supplierName || row.partyName || "—"}`,
+        dueDate: row.EReminder,
+        urgency: classifyUrgency(row.EReminder),
+        amount: row.ENetAmount || row.EAmount || row.amount || undefined,
+        path: "/material/expense-booking",
+      }));
+  } catch {
+    return [];
+  }
+}
+
 async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
   try {
     let res: Response;
     try {
       // Fetch without a status filter so both Pending and Approved MRs are
       // included — Draft/Ordered/Cancelled are excluded below client-side.
-      res = await fetchWithAuth(
-        "/api/material-requests?limit=200&page=1",
-      );
+      res = await fetchWithAuth("/api/material-requests?limit=200&page=1");
     } catch {
       // fetchWithAuth throws on 403, network errors, etc. — treat as empty, never propagate
       return [];
@@ -206,7 +235,7 @@ export async function fetchAllReminders(
     "branch_manager",
   ];
   const hasFinanceAccess = FINANCE_ROLES.includes(role || "");
-  const [, emiItems, mrItems] = await Promise.all([
+  const [, emiItems, mrItems, ebItems] = await Promise.all([
     Promise.all([
       process(
         poRes,
@@ -225,10 +254,15 @@ export async function fetchAllReminders(
       : Promise.resolve([] as ReminderItem[])
     ).catch(() => [] as ReminderItem[]),
     fetchMaterialRequestReminders().catch(() => [] as ReminderItem[]),
+    (hasFinanceAccess
+      ? fetchExpenseBookingReminders()
+      : Promise.resolve([] as ReminderItem[])
+    ).catch(() => [] as ReminderItem[]),
   ]);
 
   items.push(...emiItems);
   items.push(...mrItems);
+  items.push(...ebItems);
 
   return items.sort((a, b) => {
     const order = { overdue: 0, today: 1, soon: 2, upcoming: 3 };

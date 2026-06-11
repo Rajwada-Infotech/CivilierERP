@@ -45,6 +45,7 @@ import {
   Check,
 } from "lucide-react";
 import { useLookup } from "@/hooks/useLookup";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface PaymentTerm {
@@ -1668,6 +1669,9 @@ export default function BookingsPage() {
   const [statusFilter, setStatusFilter] = useState<string | undefined>(
     undefined,
   );
+  const [companyFilter, setCompanyFilter] = useState<string | undefined>(
+    undefined,
+  );
   const [projectFilter, setProjectFilter] = useState<string | undefined>(
     undefined,
   );
@@ -1692,7 +1696,7 @@ export default function BookingsPage() {
   }, [search]);
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, projectFilter]);
+  }, [statusFilter, companyFilter, projectFilter]);
 
   const {
     data: bookingData,
@@ -1743,10 +1747,27 @@ export default function BookingsPage() {
     staleTime: 600_000,
   });
 
+  const { data: companiesRaw = [] } = useQuery({
+    queryKey: ["followup-booking-companies"],
+    queryFn: () =>
+      fetchWithAuth("/api/enterprises/options?business_type=C").then((r) =>
+        r.json(),
+      ),
+    staleTime: 600_000,
+  });
+  const companies: { id: number; label: string }[] = Array.isArray(companiesRaw)
+    ? companiesRaw.map((c: any) => ({ id: c.id, label: c.label ?? c.name ?? "" }))
+    : [];
+
+  const filteredProjects = useMemo(
+    () => filterProjectsByCompany(projects as any[], companyFilter),
+    [projects, companyFilter],
+  );
+
   const bookings = bookingData?.data ?? [];
   const totalPages = bookingData?.pagination?.totalPages ?? 1;
   const total = bookingData?.pagination?.total ?? 0;
-  const hasFilters = !!(search || statusFilter || projectFilter);
+  const hasFilters = !!(search || statusFilter || companyFilter || projectFilter);
   const confirmed = bookings.filter((b) => b.Status === "Confirmed").length;
   const pending = bookings.filter((b) => b.Status === "Pending").length;
   // Note: confirmed/pending/totalValue are page-scoped (current page only)
@@ -2034,11 +2055,33 @@ export default function BookingsPage() {
             <div className="relative">
               <select
                 className="appearance-none px-3 py-2 pr-9 border border-border rounded-xl text-sm bg-card text-muted-foreground outline-none cursor-pointer focus:border-primary/60 min-w-[130px]"
+                value={companyFilter ?? ""}
+                onChange={(e) => {
+                  setCompanyFilter(e.target.value || undefined);
+                  setProjectFilter(undefined);
+                  setPage(1);
+                }}
+              >
+                <option value="">All Companies</option>
+                {companies.map((c) => (
+                  <option key={c.id} value={String(c.id)}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={13}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+            </div>
+            <div className="relative">
+              <select
+                className="appearance-none px-3 py-2 pr-9 border border-border rounded-xl text-sm bg-card text-muted-foreground outline-none cursor-pointer focus:border-primary/60 min-w-[130px]"
                 value={projectFilter ?? ""}
                 onChange={(e) => setProjectFilter(e.target.value || undefined)}
               >
                 <option value="">All Projects</option>
-                {projects.map((p) => (
+                {filteredProjects.map((p: any) => (
                   <option key={p.Id} value={p.Id}>
                     {p.Name}
                   </option>
@@ -2054,6 +2097,7 @@ export default function BookingsPage() {
                 onClick={() => {
                   setSearch("");
                   setStatusFilter(undefined);
+                  setCompanyFilter(undefined);
                   setProjectFilter(undefined);
                   setPage(1);
                 }}
