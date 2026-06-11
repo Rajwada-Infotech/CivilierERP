@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -425,6 +426,7 @@ export function AgreementsPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
 
   // computed balance
   const balanceAmount = useMemo(() => {
@@ -492,7 +494,7 @@ export function AgreementsPage() {
 
   const projectItems: ComboItem[] = useMemo(
     () =>
-      filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map((p) => ({
+      filterProjectsByCompany((meta?.projects ?? []) as any[], form.CompanyId).map((p: any) => ({
         value: String(p.Id),
         label: p.Name,
       })),
@@ -800,10 +802,9 @@ export function AgreementsPage() {
         }
         .ag-menu-btn:hover { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
         .ag-menu {
-          position: absolute; right: 0; top: 100%; margin-top: 4px;
           background: hsl(var(--card)); border: 1px solid hsl(var(--border));
-          border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.10);
-          z-index: 50; min-width: 140px; overflow: hidden;
+          border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+          z-index: 9999; min-width: 140px; overflow: hidden;
           animation: ag-menu-in 0.1s ease;
         }
         @keyframes ag-menu-in { from { opacity:0; transform: translateY(-4px); } to { opacity:1; transform: translateY(0); } }
@@ -934,7 +935,7 @@ export function AgreementsPage() {
           { label: "Agreements", path: "/followup/agreement/agreements" },
         ]}
       />
-      <div className="ag-page relative space-y-8 mt-6" onClick={() => setOpenMenuId(null)}>
+      <div className="ag-page relative space-y-8 mt-6" onClick={() => { setOpenMenuId(null); setMenuPos(null); }}>
         {/* ── Header ── */}
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -1223,38 +1224,24 @@ export function AgreementsPage() {
                           >
                             <button
                               className="ag-menu-btn"
-                              onClick={() =>
-                                setOpenMenuId(
-                                  openMenuId === ag.Id ? null : ag.Id,
-                                )
-                              }
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (openMenuId === ag.Id) {
+                                  setOpenMenuId(null);
+                                  setMenuPos(null);
+                                } else {
+                                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                  const flip = window.innerHeight - rect.bottom < 120;
+                                  setMenuPos(flip
+                                    ? { bottom: window.innerHeight - rect.top + 4, right: window.innerWidth - rect.right }
+                                    : { top: rect.bottom + 4, right: window.innerWidth - rect.right }
+                                  );
+                                  setOpenMenuId(ag.Id);
+                                }
+                              }}
                             >
                               <MoreHorizontal size={15} />
                             </button>
-                            {openMenuId === ag.Id && (
-                              <div className="ag-menu">
-                                <button
-                                  className="ag-menu-item"
-                                  onClick={() => {
-                                    openEdit(ag);
-                                    setOpenMenuId(null);
-                                  }}
-                                >
-                                  <Pencil size={13} /> Edit
-                                </button>
-                                {canDeleteRecords && (
-                                  <button
-                                    className="ag-menu-item danger"
-                                    onClick={() => {
-                                      setDeleteId(ag.Id);
-                                      setOpenMenuId(null);
-                                    }}
-                                  >
-                                    <Trash2 size={13} /> Delete
-                                  </button>
-                                )}
-                              </div>
-                            )}
                           </div>
                         </td>
                       </tr>
@@ -1335,6 +1322,29 @@ export function AgreementsPage() {
           )}
         </div>
       </div>
+
+      {/* ── Row action portal menu ── */}
+      {openMenuId !== null && menuPos && (() => {
+        const ag = agreements.find((a) => a.Id === openMenuId);
+        if (!ag) return null;
+        return createPortal(
+          <div
+            className="ag-menu"
+            style={{ position: "fixed", top: menuPos.top, bottom: menuPos.bottom, right: menuPos.right }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button className="ag-menu-item" onClick={() => { openEdit(ag); setOpenMenuId(null); setMenuPos(null); }}>
+              <Pencil size={13} /> Edit
+            </button>
+            {canDeleteRecords && (
+              <button className="ag-menu-item danger" onClick={() => { setDeleteId(ag.Id); setOpenMenuId(null); setMenuPos(null); }}>
+                <Trash2 size={13} /> Delete
+              </button>
+            )}
+          </div>,
+          document.body
+        );
+      })()}
 
       {/* ── Create / Edit Dialog ── */}
       <Dialog
@@ -1489,7 +1499,7 @@ export function AgreementsPage() {
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
                   />
                   <input
                     type="date"
@@ -1504,7 +1514,7 @@ export function AgreementsPage() {
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
                   />
                   <input
                     type="date"
@@ -1557,9 +1567,9 @@ export function AgreementsPage() {
           </div>
 
           <DialogFooter style={{ marginTop: 8 }}>
-            <Button variant="outline" onClick={() => { setDialogOpen(false); setEditId(null); setForm(EMPTY_FORM); }}>
+            <button type="button" className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={() => { setDialogOpen(false); setEditId(null); setForm(EMPTY_FORM); }}>
               Cancel
-            </Button>
+            </button>
             <Button
               disabled={
                 !form.ApplicantId || createMut.isPending || updateMut.isPending

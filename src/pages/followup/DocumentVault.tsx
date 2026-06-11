@@ -369,7 +369,7 @@ export default function DocumentVaultPage() {
       {/* ── Scoped styles ── */}
       <style>{`
         .dv-page { display: flex; flex-direction: column; height: 100%; padding: 0; }
-        .dv-header { padding: 1.25rem 1.5rem 0; }
+        .dv-header { padding: 0; }
         .dv-toolbar {
           display: flex; align-items: center; gap: .75rem;
           padding: .75rem 1.5rem; flex-wrap: wrap;
@@ -381,7 +381,7 @@ export default function DocumentVaultPage() {
         .dv-search-wrap svg { position: absolute; left: .625rem; top: 50%; transform: translateY(-50%); opacity: .4; pointer-events: none; }
         .dv-search { height: 2.25rem; padding: 0 .75rem 0 2rem; border-radius: 9px; font-size: .8125rem; width: 220px; background: hsl(var(--background)); border: 1px solid hsl(var(--border)); color: hsl(var(--foreground)); }
         .dv-search:focus { outline: none; box-shadow: 0 0 0 2px hsl(var(--primary)/.25); }
-        .dv-select { height: 2.25rem; padding: 0 .75rem; border-radius: 9px; font-size: .8125rem; background: hsl(var(--background)); border: 1px solid hsl(var(--border)); color: hsl(var(--foreground)); cursor: pointer; }
+        .dv-select { height: 2.25rem; padding: 0 2rem 0 .75rem; border-radius: 9px; font-size: .8125rem; background: hsl(var(--background)); border: 1px solid hsl(var(--border)); color: hsl(var(--foreground)); cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
         .dv-select:focus { outline: none; }
 
         .dv-table-wrap { flex: 1; overflow: auto; padding: 0 1.5rem 1.5rem; margin-top: .75rem; }
@@ -434,33 +434,43 @@ export default function DocumentVaultPage() {
         .dv-preview-frame { width: 100%; height: 60vh; border: none; border-radius: 8px; background: hsl(var(--muted)); }
       `}</style>
 
-      <div className="dv-page">
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Document Vault" },
+        ]}
+      />
+
+      <div className="dv-page mt-6">
         {/* Header */}
         <div className="dv-header">
-          <Breadcrumbs
-            items={[
-              { label: "Followup", href: "/followup" },
-              { label: "Document Vault" },
-            ]}
-          />
-          <div className="flex items-center justify-between mt-2 mb-3">
+          <div className="flex items-start justify-between gap-4 mb-6">
             <div>
-              <h1 className="text-xl font-semibold tracking-tight">
+              <h1 className="text-xl font-heading font-bold text-foreground">
                 Document Vault
               </h1>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Centralized document storage per applicant
               </p>
             </div>
-            <Button
-              onClick={() => {
-                setForm(EMPTY_UPLOAD);
-                setUploadOpen(true);
-              }}
-              className="gradient-accent gap-1.5 font-semibold text-white text-sm px-4 py-2 h-auto"
-            >
-              <Upload className="w-4 h-4" /> Upload Document
-            </Button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => refetch()}
+                disabled={isFetching}
+                className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /> Refresh
+              </button>
+              <Button
+                onClick={() => {
+                  setForm(EMPTY_UPLOAD);
+                  setUploadOpen(true);
+                }}
+                className="gradient-accent gap-1.5 font-semibold text-white text-sm px-4 py-2 h-auto"
+              >
+                <Upload className="w-4 h-4" /> Upload Document
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -539,15 +549,6 @@ export default function DocumentVaultPage() {
                 ? `${pagination.total} doc${pagination.total !== 1 ? "s" : ""}`
                 : ""}
             </span>
-            <button
-              onClick={() => refetch()}
-              className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground transition-colors"
-            >
-              <RefreshCw
-                style={{ width: 14, height: 14 }}
-                className={isFetching ? "animate-spin" : ""}
-              />
-            </button>
           </div>
         </div>
 

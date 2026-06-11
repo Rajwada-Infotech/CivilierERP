@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -343,6 +343,7 @@ function Combobox({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
   const selected = items.find((i) => i.value === value);
   const filtered = useMemo(() => {
     if (!q) return items;
@@ -354,8 +355,17 @@ function Combobox({
     );
   }, [items, q]);
 
+  useEffect(() => {
+    if (!open) return;
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [open]);
+
   return (
-    <div className="ho-combo">
+    <div className="ho-combo" ref={ref}>
       <button
         type="button"
         className={`ho-combo-trigger${open ? " open" : ""}${!value ? " empty" : ""}${disabled ? " disabled" : ""}`}
@@ -550,7 +560,7 @@ export function HandoverPage() {
 
   const projectItems: ComboItem[] = useMemo(
     () =>
-      filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map((p) => ({
+      filterProjectsByCompany((meta?.projects ?? []) as any[], form.CompanyId).map((p: any) => ({
         value: String(p.Id),
         label: p.Name,
       })),
@@ -1504,7 +1514,7 @@ export function HandoverPage() {
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
                   />
                   <input
                     type="date"
@@ -1523,7 +1533,7 @@ export function HandoverPage() {
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
                   />
                   <input
                     type="date"
@@ -1542,7 +1552,7 @@ export function HandoverPage() {
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
                   />
                   <input
                     type="date"
@@ -1597,7 +1607,7 @@ export function HandoverPage() {
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
                   />
                   <input
                     type="date"
@@ -1794,14 +1804,10 @@ export function HandoverPage() {
 
           <DialogFooter>
             <button
-              className="ho-add-btn"
-              style={{
-                background: "hsl(var(--muted))",
-                color: "hsl(var(--foreground))",
-                boxShadow: "none",
-              }}
+              type="button"
               onClick={() => setDialogOpen(false)}
               disabled={isSaving}
+              className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
