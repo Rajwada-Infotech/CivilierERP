@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -387,6 +388,7 @@ export function FinancePaymentsPage() {
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [projectId, setProjectId] = useState("");
+  const [companyId, setCompanyId] = useState("");
   const [status, setStatus] = useState("");
   const [recordRow, setRecordRow] = useState<PaymentRow | null>(null);
   const [recordForm, setRecordForm] = useState<RecordForm>(EMPTY_FORM);
@@ -406,6 +408,20 @@ export function FinancePaymentsPage() {
     queryKey: ["followup-payment-projects"],
     queryFn: fetchProjects,
   });
+
+  const { data: companiesRaw = [] } = useQuery<{ id: number; label: string }[]>({
+    queryKey: ["companies-options"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
+      if (!res.ok) throw new Error("Failed to load companies");
+      return res.json();
+    },
+  });
+
+  const filteredProjects = useMemo(
+    () => filterProjectsByCompany(projects as any[], companyId),
+    [projects, companyId],
+  );
 
   const { data: receipts = [], isLoading: receiptsLoading } = useQuery({
     queryKey: ["followup-payment-receipts", historyRow?.TermId],
@@ -446,7 +462,7 @@ export function FinancePaymentsPage() {
   const summary = data?.summary;
   const total = data?.pagination.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const hasFilters = search || projectId || status;
+  const hasFilters = search || projectId || companyId || status;
 
   function applySearch() {
     setSearch(searchInput.trim());
@@ -456,6 +472,7 @@ export function FinancePaymentsPage() {
     setSearch("");
     setSearchInput("");
     setProjectId("");
+    setCompanyId("");
     setStatus("");
     setPage(1);
   }
@@ -567,6 +584,27 @@ export function FinancePaymentsPage() {
           </div>
 
           <Select
+            value={companyId || "all"}
+            onValueChange={(v) => {
+              setCompanyId(v === "all" ? "" : v);
+              setProjectId("");
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-9 w-44 text-sm">
+              <SelectValue placeholder="All Companies" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Companies</SelectItem>
+              {companiesRaw.map((c) => (
+                <SelectItem key={c.id} value={String(c.id)}>
+                  {c.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
             value={projectId || "all"}
             onValueChange={(v) => {
               setProjectId(v === "all" ? "" : v);
@@ -578,7 +616,7 @@ export function FinancePaymentsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Projects</SelectItem>
-              {projects.map((p) => (
+              {filteredProjects.map((p: any) => (
                 <SelectItem key={p.ProjectId} value={String(p.ProjectId)}>
                   {p.ProjectName}
                 </SelectItem>

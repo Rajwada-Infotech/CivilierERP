@@ -175,10 +175,25 @@ router.get(
     try {
       const pool = getPool();
       const result = await pool.request().query(`
-        SELECT id AS ProjectId, name AS ProjectName
-        FROM dbo.enterprise
-        WHERE business_type = 'P'
-        ORDER BY name
+        SELECT
+          p.id   AS ProjectId,
+          p.name AS ProjectName,
+          COALESCE(p.company_id, pc.PrimaryCompanyId) AS company_id,
+          pc.CompanyIds AS company_ids
+        FROM dbo.enterprise p
+        OUTER APPLY (
+          SELECT
+            MIN(x.cid) AS PrimaryCompanyId,
+            STRING_AGG(CAST(x.cid AS NVARCHAR(20)), ',')
+              WITHIN GROUP (ORDER BY x.cid) AS CompanyIds
+          FROM (
+            SELECT p.company_id AS cid WHERE p.company_id IS NOT NULL
+            UNION
+            SELECT pc2.CompanyId FROM dbo.ProjectCompanies pc2 WHERE pc2.ProjectId = p.id
+          ) x
+        ) pc
+        WHERE p.business_type = 'P'
+        ORDER BY p.name
       `);
       res.json(result.recordset);
     } catch (err) {
