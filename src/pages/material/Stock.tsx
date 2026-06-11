@@ -425,16 +425,18 @@ export default function Stock() {
   });
   const godowns: Godown[] = godownsData?.data ?? [];
 
-  // Auto-select main godown on first load
+  // Auto-select first project godown on load (skip Main Godown)
   React.useEffect(() => {
     if (
       !autoSelected.current &&
       godowns.length > 0 &&
       selectedGodownId === null
     ) {
-      const main = godowns.find((g) => g.IsMain) ?? godowns[0];
-      setSelectedGodownId(main.GodownID);
-      autoSelected.current = true;
+      const firstProject = godowns.find((g) => !g.IsMain) ?? null;
+      if (firstProject) {
+        setSelectedGodownId(firstProject.GodownID);
+        autoSelected.current = true;
+      }
     }
   }, [godowns]);
 
@@ -458,9 +460,10 @@ export default function Stock() {
   });
   const projects = Array.isArray(projectsData) ? projectsData : [];
 
-  // Filter godowns by both company AND project simultaneously (additive, not exclusive)
+  // Filter godowns: exclude Main Godown, then apply company/project filters
   const filteredGodowns = useMemo(() => {
     return godowns.filter((g) => {
+      if (g.IsMain) return false; // project godowns only
       const companyMatch = selectedCompany
         ? g.EnterpriseID === selectedCompany
         : true;
@@ -471,16 +474,14 @@ export default function Stock() {
     });
   }, [godowns, selectedCompany, selectedProject]);
 
-  // If current selected godown is no longer in filtered list, reset to main within filtered
+  // If current selected godown is no longer in filtered list, reset to first project godown within filtered
   React.useEffect(() => {
     if (selectedGodownId !== null && filteredGodowns.length > 0) {
       const stillVisible = filteredGodowns.some(
         (g) => g.GodownID === selectedGodownId,
       );
       if (!stillVisible) {
-        const main =
-          filteredGodowns.find((g) => g.IsMain) ?? filteredGodowns[0];
-        setSelectedGodownId(main?.GodownID ?? null);
+        setSelectedGodownId(filteredGodowns[0]?.GodownID ?? null);
       }
     }
   }, [filteredGodowns]);
@@ -553,9 +554,11 @@ export default function Stock() {
               options={filteredGodowns.map((g) => ({
                 value: g.GodownID,
                 label: g.GodownName,
-                badge: g.IsMain ? "Main" : undefined,
+                badge: g.ProjectName ?? undefined,
               }))}
-              placeholder={godownsLoading ? "Loading…" : "Select Godown"}
+              placeholder={
+                godownsLoading ? "Loading…" : "Select Project Godown"
+              }
               icon={Warehouse}
               disabled={godownsLoading}
             />
@@ -575,10 +578,10 @@ export default function Stock() {
               className="text-muted-foreground/30 mx-auto mb-3"
             />
             <p className="text-sm text-muted-foreground">
-              Select a godown above to view its stock details
+              Select a project godown above to view its stock details
             </p>
             <p className="text-xs text-muted-foreground/60 mt-1">
-              Filter by company or project to narrow down the godown list
+              Filter by company or project to find the right godown
             </p>
           </div>
         )}

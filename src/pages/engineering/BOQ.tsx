@@ -110,6 +110,7 @@ interface Project {
   id: number;
   label?: string;
   name?: string;
+  companyId?: number | null;
 }
 interface DocType {
   id: number;
@@ -1237,6 +1238,22 @@ const FormModal: React.FC<FormModalProps> = ({
     setErrors((p) => ({ ...p, [k]: "" }));
   };
 
+  // When company changes, reset the project selection
+  const handleCompanyChange = (v: string) => {
+    set("CompanyId", v);
+    set("ProjectId", "");
+  };
+
+  // Filter projects to only those belonging to the selected company.
+  // If no company selected, show all projects.
+  const filteredProjects = form.CompanyId
+    ? projects.filter(
+        (p) =>
+          p.companyId == null || // show projects with no company link always
+          String(p.companyId) === form.CompanyId,
+      )
+    : projects;
+
   const refreshBoqNo = async (docTypeId: string, finYear: string) => {
     if (!docTypeId) {
       set("BoqNo", "");
@@ -1487,7 +1504,8 @@ const FormModal: React.FC<FormModalProps> = ({
                   <SelectContent className="z-[300]">
                     {docTypes.map((dt) => (
                       <SelectItem key={String(dt.id)} value={String(dt.id)}>
-                        {dt.code} — {dt.name || dt.description}
+                        {dt.code}
+                        {dt.description ? ` — ${dt.description}` : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1523,7 +1541,7 @@ const FormModal: React.FC<FormModalProps> = ({
               <Field label="Company" required error={errors.CompanyId}>
                 <Select
                   value={form.CompanyId}
-                  onValueChange={(v) => set("CompanyId", v)}
+                  onValueChange={handleCompanyChange}
                 >
                   <SelectTrigger
                     className={`h-10 ${errors.CompanyId ? "border-destructive" : ""}`}
@@ -1548,10 +1566,16 @@ const FormModal: React.FC<FormModalProps> = ({
                   <SelectTrigger
                     className={`h-10 ${errors.ProjectId ? "border-destructive" : ""}`}
                   >
-                    <SelectValue placeholder="— Select project —" />
+                    <SelectValue
+                      placeholder={
+                        form.CompanyId
+                          ? "— Select project —"
+                          : "— Select company first —"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent className="z-[300]">
-                    {projects.map((p) => (
+                    {filteredProjects.map((p) => (
                       <SelectItem key={String(p.id)} value={String(p.id)}>
                         {p.label}
                       </SelectItem>
@@ -1705,11 +1729,11 @@ const DetailModal: React.FC<DetailModalProps> = ({
   };
 
   const itemsTotal = (record.BoqItems ?? []).reduce(
-    (s, r) => s + (parseFloat(String(r.amount ?? 0)) || 0),
+    (s, r) => s + (parseFloat(String(r.LineAmount ?? r.amount ?? 0)) || 0),
     0,
   );
   const activitiesTotal = (record.BoqActivities ?? []).reduce(
-    (s, r) => s + (parseFloat(String(r.amount ?? 0)) || 0),
+    (s, r) => s + (parseFloat(String(r.LineAmount ?? r.amount ?? 0)) || 0),
     0,
   );
 
@@ -2109,6 +2133,13 @@ export default function BOQ() {
             item.ProjectName ??
             item.EName ??
             "Unknown",
+          // belongs_to or company_id links a project to its parent company
+          companyId:
+            item.company_id != null
+              ? Number(item.company_id)
+              : item.belongs_to != null
+                ? Number(item.belongs_to)
+                : null,
         })),
       );
 
@@ -2118,12 +2149,35 @@ export default function BOQ() {
           ? dts
           : [];
       setDocTypes(
-        docData.map((item: any, idx: number) => ({
-          id: Number(item.id ?? item.TypeOfDocId ?? idx + 1),
-          code: String(item.code ?? item.Prefix ?? item.FullPrefix ?? ""),
-          name: String(item.name ?? item.EntryType ?? ""),
-          description: String(item.description ?? item.Description ?? ""),
-        })),
+        docData
+          .filter((item: any) => {
+            // Only keep doc types whose prefix/code actually starts with "BOQ"
+            // This excludes cross-linked types like "Received Payment" that
+            // happen to have BOQ in their links_to field.
+            const prefix = String(
+              item.code ??
+                item.Prefix ??
+                item.FullPrefix ??
+                item.DocNoPrefix ??
+                "",
+            ).toUpperCase();
+            return prefix.startsWith("BOQ");
+          })
+          .map((item: any, idx: number) => ({
+            id: Number(item.id ?? item.TypeOfDocId ?? idx + 1),
+            // Use Prefix/FullPrefix as the code shown left of the dash
+            code: String(
+              item.DocNoPrefix ??
+                item.FullPrefix ??
+                item.Prefix ??
+                item.code ??
+                "",
+            ),
+            // Description is the meaningful doc-type label (e.g. "Bill of Quantities")
+            // EntryType is the accounting entry category — don't show it as the name
+            name: String(item.Description ?? item.description ?? ""),
+            description: String(item.Description ?? item.description ?? ""),
+          })),
       );
 
       const uomData = Array.isArray(uomRes?.data)

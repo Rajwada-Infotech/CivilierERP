@@ -811,7 +811,7 @@ router.get("/:id", async (req, res) => {
             ELSE NULL
           END AS DocTypeName,
           ec.name AS ECompanyName,
-               ISNULL(ep.name, epo_proj2.name) AS EProjectDisplayName,
+               COALESCE(ep.name, epo_proj2.name, epo_direct.name) AS EProjectDisplayName,
                CASE
                  WHEN eb.ESourceType = 'GRN' AND grn_det.GRNNo IS NOT NULL THEN grn_det.GRNNo
                  ELSE NULL
@@ -829,6 +829,9 @@ router.get("/:id", async (req, res) => {
           ON eb.ESourceType = 'GRN' AND grn_det.GRNID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.PurchaseOrders po_det ON grn_det.POID = po_det.PurchaseOrderID
         LEFT JOIN dbo.enterprise epo_proj2 ON epo_proj2.id = po_det.ProjectId
+        LEFT JOIN dbo.PurchaseOrders po_direct
+          ON eb.ESourceType = 'PO' AND po_direct.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.enterprise epo_direct ON epo_direct.id = po_direct.ProjectId
         LEFT JOIN dbo.AccountHeadMaster grn_supp_det ON grn_supp_det.LHeadId = grn_det.SupplierID
         WHERE eb.Eid = @Eid
       `);

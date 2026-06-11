@@ -30,6 +30,7 @@ import {
   AlertTriangle,
   Printer,
   CopyPlus,
+  Warehouse,
 } from "lucide-react";
 import {
   Dialog,
@@ -41,6 +42,7 @@ import {
 import { Button } from "@/components/ui/button";
 import * as grnApi from "@/api/grnApi";
 import { getProjects } from "@/api/grnApi";
+import { getGodowns } from "@/api/godownsApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -539,9 +541,8 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
       <ApprovalStatusChain
         table="GoodsReceiptNotes"
         recordId={row.original.GRNID}
-      
-            compact
-          />
+        compact
+      />
     ),
   },
   {
@@ -707,6 +708,7 @@ export default function GRN() {
     rootExBDocNo: "",
     finYear: activeFinYear || "",
     projectId: "" as string,
+    godownId: "" as string,
   });
 
   const [formData, setFormData] = useState(buildEmptyForm());
@@ -763,8 +765,15 @@ export default function GRN() {
     staleTime: 15_000,
   });
 
+  const { data: godownsData } = useQuery({
+    queryKey: ["godowns"],
+    queryFn: getGodowns,
+    staleTime: 120_000,
+  });
+  const godowns = (godownsData as any)?.data ?? [];
+
   const { data: projectsData = [] } = useQuery({
-    queryKey: ["projects"],
+    queryKey: ["grn-projects"],
     queryFn: getProjects,
   });
 
@@ -1109,6 +1118,7 @@ export default function GRN() {
       parentDocNo: formData.parentDocNo || null,
       rootExBDocNo: formData.rootExBDocNo || null,
       projectId: formData.projectId ? Number(formData.projectId) : null,
+      godownId: formData.godownId ? Number(formData.godownId) : null,
     };
     if (editingId) updateMutation.mutate(payload);
     else createMutation.mutate(payload);
@@ -1197,6 +1207,7 @@ export default function GRN() {
       rootExBDocNo: fullGrn.RootExBDocNo || "",
       finYear: fullGrn.FinYear || "",
       projectId: String(fullGrn.ProjectId || ""),
+      godownId: fullGrn.GodownID ? String(fullGrn.GodownID) : "",
     });
     setEditingId(String(fullGrn.GRNID));
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1361,6 +1372,41 @@ export default function GRN() {
                           {p.name}
                         </option>
                       ))}
+                    </select>
+                    <ChevronDown
+                      size={12}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Godown */}
+                <div>
+                  <FieldLabel>
+                    <span className="inline-flex items-center gap-1">
+                      <Warehouse size={9} />
+                      Godown
+                    </span>
+                  </FieldLabel>
+                  <div className="relative">
+                    <select
+                      value={formData.godownId}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          godownId: e.target.value,
+                        }))
+                      }
+                      className={inpSel}
+                    >
+                      <option value="">Main Godown</option>
+                      {godowns
+                        .filter((g: any) => !g.IsMain)
+                        .map((g: any) => (
+                          <option key={g.GodownID} value={String(g.GodownID)}>
+                            {g.GodownName}
+                          </option>
+                        ))}
                     </select>
                     <ChevronDown
                       size={12}
