@@ -157,15 +157,10 @@ async function buildOptions() {
     companiesResult,
   ] = await Promise.all([
     pool.request().query(`
-        SELECT
-          LHeadId                                                                AS Id,
-          LHeadCode                                                              AS ApplicantNo,
-          ISNULL(DisplayName, LHeadName)                                        AS ApplicantName,
-          NULL                                                                   AS ProjectId,
-          NULL                                                                   AS CompanyId
-        FROM dbo.AccountHeadMaster
-        WHERE LHeadType = 'A' AND ISNULL(LHeadStatus, 1) = 1
-        ORDER BY LHeadName
+        SELECT Id, ApplicantNo, ApplicantName, ProjectId, CompanyId
+        FROM dbo.FollowupApplications
+        WHERE IsDeleted = 0
+        ORDER BY ApplicantName
       `),
     pool.request().query(`
         SELECT

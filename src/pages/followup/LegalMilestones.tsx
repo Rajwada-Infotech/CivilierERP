@@ -20,6 +20,7 @@ import {
   Scale,
   Trash2,
   Clock,
+  CalendarDays,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
@@ -218,14 +219,15 @@ function MilestoneStepper({
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Completion Date</Label>
-                        <Input
-                          type="date"
-                          value={form.doneDate}
-                          onChange={(e) =>
-                            setForm((f) => ({ ...f, doneDate: e.target.value }))
-                          }
-                          className="rounded-[9px]"
-                        />
+                        <div className="relative">
+                          <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                          <input
+                            type="date"
+                            value={form.doneDate}
+                            onChange={(e) => setForm((f) => ({ ...f, doneDate: e.target.value }))}
+                            className="w-full pl-8 pr-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                          />
+                        </div>
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Notes</Label>
@@ -240,14 +242,13 @@ function MilestoneStepper({
                       </div>
                     </div>
                     <DialogFooter>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="rounded-[9px]"
+                      <button
+                        type="button"
+                        className="px-3 py-1.5 rounded-[9px] border border-border bg-background text-foreground text-xs font-medium hover:bg-muted transition-colors"
                         onClick={() => setEditingStep(null)}
                       >
                         Cancel
-                      </Button>
+                      </button>
                       <Button
                         size="sm"
                         className="gradient-accent text-white rounded-[9px]"
@@ -518,14 +519,12 @@ export function LegalMilestonesPage() {
 
       {/* ── Create Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg" aria-describedby={undefined}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle className="text-base font-bold">
               New Legal Milestone
             </DialogTitle>
           </DialogHeader>
-          {/* Scroll wrapper separate from grid so overflow-y-auto doesn't clip focus rings */}
-          <div className="max-h-[65vh] overflow-y-auto pr-1">
           <div className="grid grid-cols-2 gap-4 py-2 px-0.5">
             {/* Applicant */}
             <div className="col-span-2 space-y-1">
@@ -561,12 +560,12 @@ export function LegalMilestonesPage() {
                   <Select
                     value={form.UnitSelectionId || ""}
                     onValueChange={(v) => setForm((f) => ({ ...f, UnitSelectionId: v }))}
-                    disabled={noUnits}
+                    disabled={!form.ApplicantId || noUnits}
                   >
-                    <SelectTrigger className={`rounded-[9px] ${noUnits ? "opacity-50 cursor-not-allowed" : ""}`}>
+                    <SelectTrigger className={`rounded-[9px] ${!form.ApplicantId || noUnits ? "opacity-50 cursor-not-allowed" : ""}`}>
                       <SelectValue
                         placeholder={
-                          !form.ApplicantId ? "Select…"
+                          !form.ApplicantId ? "Select applicant first"
                           : noUnits ? "No unit selections found"
                           : "Select…"
                         }
@@ -601,12 +600,12 @@ export function LegalMilestonesPage() {
                   <Select
                     value={form.BookingId || ""}
                     onValueChange={(v) => setForm((f) => ({ ...f, BookingId: v }))}
-                    disabled={noBookings}
+                    disabled={!form.ApplicantId || noBookings}
                   >
-                    <SelectTrigger className={`rounded-[9px] ${noBookings ? "opacity-50 cursor-not-allowed" : ""}`}>
+                    <SelectTrigger className={`rounded-[9px] ${!form.ApplicantId || noBookings ? "opacity-50 cursor-not-allowed" : ""}`}>
                       <SelectValue
                         placeholder={
-                          !form.ApplicantId ? "Select…"
+                          !form.ApplicantId ? "Select applicant first"
                           : noBookings ? "No bookings found"
                           : "Select…"
                         }
@@ -682,31 +681,25 @@ export function LegalMilestonesPage() {
             {STEPS.map((s) => (
               <div key={s.field} className="space-y-1">
                 <Label className="text-xs">{s.label}</Label>
-                <Input
-                  type="date"
-                  className="rounded-[9px]"
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      [`${s.field}Due`]: e.target.value,
-                    }))
-                  }
-                />
+                <div className="relative">
+                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                  <input
+                    type="date"
+                    className="w-full pl-8 pr-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                    onChange={(e) => setForm((f) => ({ ...f, [`${s.field}Due`]: e.target.value }))}
+                  />
+                </div>
               </div>
             ))}
           </div>
-          </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              className="rounded-[9px]"
-              onClick={() => {
-                setDialogOpen(false);
-                setForm({});
-              }}
+            <button
+              type="button"
+              className="px-4 py-2 rounded-[9px] border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors"
+              onClick={() => { setDialogOpen(false); setForm({}); }}
             >
               Cancel
-            </Button>
+            </button>
             <Button
               disabled={!form.ApplicantId || createMutation.isPending}
               className="gradient-accent text-white rounded-[9px]"
@@ -759,14 +752,13 @@ export function LegalMilestonesPage() {
             ? This cannot be undone.
           </p>
           <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              className="rounded-[9px]"
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-[9px] border border-border bg-background text-foreground text-xs font-medium hover:bg-muted transition-colors"
               onClick={() => setDeleteTarget(null)}
             >
               Cancel
-            </Button>
+            </button>
             <Button
               size="sm"
               variant="destructive"
