@@ -1690,5 +1690,3 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
     </>
   );
 }
-
-
