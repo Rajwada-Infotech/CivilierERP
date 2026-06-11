@@ -11,17 +11,15 @@ const LIST_COLUMNS = `
   fag.Id,
   fag.AgreementNo,
   fag.ApplicantId,
-  ISNULL(ahm.LHeadCode, 'APP' + RIGHT('000000' + CAST(fa.Id AS VARCHAR(10)), 6))   AS ApplicantNo,
-  ISNULL(ISNULL(ahm.DisplayName, ahm.LHeadName), fa.ApplicantName)                 AS ApplicantName,
+  fa.ApplicantNo,
+  fa.ApplicantName,
   fag.UnitSelectionId,
   fus.SelectionNo,
   fus.UnitNo,
   fag.BookingId,
   fb.BookingNo,
   fag.ProjectId,
-  ep.name AS ProjectName,
   fag.CompanyId,
-  ec.name AS CompanyName,
   CONVERT(VARCHAR(10), fag.AgreementDate, 23) AS AgreementDate,
   fag.AgreementValue,
   fag.AdvanceAmount,
@@ -71,10 +69,6 @@ async function getApplicantSnapshot(applicantId) {
   const result = await getPool()
     .request()
     .input("ApplicantId", sql.Int, applicantId).query(`
-      SELECT TOP 1 LHeadId AS Id, NULL AS ProjectId, NULL AS CompanyId
-      FROM dbo.AccountHeadMaster
-      WHERE LHeadId = @ApplicantId AND LHeadType = 'A' AND ISNULL(LHeadStatus, 1) = 1
-      UNION ALL
       SELECT TOP 1 Id, ProjectId, CompanyId
       FROM dbo.FollowupApplications
       WHERE Id = @ApplicantId AND IsDeleted = 0
@@ -257,8 +251,6 @@ router.get("/", async (req, res) => {
       filters.push(`
         (
           fag.AgreementNo LIKE @Search
-          OR ahm.LHeadCode LIKE @Search
-          OR ISNULL(ahm.DisplayName, ahm.LHeadName) LIKE @Search
           OR fa.ApplicantNo LIKE @Search
           OR fa.ApplicantName LIKE @Search
           OR fus.SelectionNo LIKE @Search
@@ -282,12 +274,9 @@ router.get("/", async (req, res) => {
     const countResult = await buildRequest().query(`
       SELECT COUNT(*) AS Total
       FROM dbo.FollowupAgreements fag
-      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = fag.ApplicantId AND ahm.LHeadType = 'A'
-      LEFT JOIN dbo.FollowupApplications fa ON fa.Id = fag.ApplicantId AND fa.IsDeleted = 0 AND ahm.LHeadId IS NULL
-      LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = fag.UnitSelectionId AND fus.IsDeleted = 0
-      LEFT JOIN dbo.FollowupBookings fb ON fb.Id = fag.BookingId AND fb.IsDeleted = 0
-      LEFT JOIN dbo.enterprise ep ON ep.id = fag.ProjectId AND ep.business_type = 'P'
-      LEFT JOIN dbo.enterprise ec ON ec.id = fag.CompanyId AND ec.business_type = 'C'
+      LEFT JOIN dbo.FollowupApplications fa ON fa.Id = fag.ApplicantId
+      LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = fag.UnitSelectionId
+      LEFT JOIN dbo.FollowupBookings fb ON fb.Id = fag.BookingId
       ${whereClause}
     `);
 
@@ -296,13 +285,10 @@ router.get("/", async (req, res) => {
       .input("PageSize", sql.Int, pageSize).query(`
         SELECT ${LIST_COLUMNS}
         FROM dbo.FollowupAgreements fag
-        LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = fag.ApplicantId AND ahm.LHeadType = 'A'
-        LEFT JOIN dbo.FollowupApplications fa ON fa.Id = fag.ApplicantId AND fa.IsDeleted = 0 AND ahm.LHeadId IS NULL
-        LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = fag.UnitSelectionId AND fus.IsDeleted = 0
-        LEFT JOIN dbo.FollowupBookings fb ON fb.Id = fag.BookingId AND fb.IsDeleted = 0
-        LEFT JOIN dbo.enterprise ep ON ep.id = fag.ProjectId AND ep.business_type = 'P'
-        LEFT JOIN dbo.enterprise ec ON ec.id = fag.CompanyId AND ec.business_type = 'C'
-        ${whereClause}
+        LEFT JOIN dbo.FollowupApplications fa ON fa.Id = fag.ApplicantId
+        LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = fag.UnitSelectionId
+        LEFT JOIN dbo.FollowupBookings fb ON fb.Id = fag.BookingId
+          ${whereClause}
         ORDER BY fag.CreatedAt DESC, fag.Id DESC
         OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
       `);

@@ -7,7 +7,6 @@ import {
   Bell,
   Building2,
   Calendar,
-  CalendarDays,
   CheckCircle2,
   FileText,
   Home,
@@ -676,15 +675,16 @@ export default function ApplicantTimeline() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label>Date</Label>
-                          <div className="relative">
-                            <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
-                            <input
-                              type="date"
-                              value={logForm.date}
-                              onChange={(event) => setLogForm((current) => ({ ...current, date: event.target.value }))}
-                              className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                            />
-                          </div>
+                          <Input
+                            type="date"
+                            value={logForm.date}
+                            onChange={(event) =>
+                              setLogForm((current) => ({
+                                ...current,
+                                date: event.target.value,
+                              }))
+                            }
+                          />
                         </div>
                         <div className="space-y-2">
                           <Label>Type</Label>

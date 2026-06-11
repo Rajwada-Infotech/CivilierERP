@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
+  ArrowLeft,
   Bell,
   BellRing,
   CheckCircle,
@@ -11,11 +13,10 @@ import {
   Search,
   Inbox,
   CalendarClock,
-  CalendarDays,
   Zap,
+  ChevronRight,
   RefreshCw,
 } from "lucide-react";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { toast } from "sonner";
 
 import { useAuth } from "@/contexts/AuthContext";
@@ -149,21 +150,16 @@ function StatCard({
   value,
   icon: Icon,
   iconClass,
-  accent,
   sublabel,
 }: {
   label: string;
   value: number;
   icon: React.ElementType;
   iconClass: string;
-  accent: string;
   sublabel?: string;
 }) {
   return (
     <div className="relative bg-card rounded-2xl border border-border p-5 overflow-hidden hover:border-border/80 hover:shadow-md transition-all duration-200">
-      <div
-        className={`absolute top-0 right-0 w-24 h-24 rounded-full opacity-10 -translate-y-6 translate-x-6 ${accent}`}
-      />
       <div
         className={`inline-flex items-center justify-center w-10 h-10 rounded-xl mb-3 ${iconClass}`}
       >
@@ -354,6 +350,7 @@ function ReminderRow({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function FollowupReminders() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { currentUser } = useAuth();
 
@@ -427,16 +424,26 @@ export default function FollowupReminders() {
   ];
 
   return (
-    <>
-      <Breadcrumbs items={[{label: "Follow-Up", path: "/followup"}, {label: "Reminders"}]} />
-      <div className="space-y-6 mt-6">
+    <div className="min-h-screen bg-background">
+      <div className="max-w-[1280px] mx-auto px-6 py-8 space-y-6">
         {/* ── Header ── */}
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Reminders
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2 font-medium tracking-wide uppercase">
+              <button
+                onClick={() => navigate("/followup")}
+                className="hover:text-primary transition-colors flex items-center gap-1"
+              >
+                <ArrowLeft className="w-3 h-3" />
+                Follow-Up
+              </button>
+              <ChevronRight className="w-3 h-3" />
+              <span className="text-foreground">Reminders</span>
+            </div>
+            <h1 className="text-2xl font-bold text-foreground tracking-tight">
+              Reminders Management
             </h1>
-            <p className="text-muted-foreground text-xs mt-0.5">
+            <p className="text-muted-foreground text-sm mt-1">
               Track and dispatch follow-up reminders across all tenants and
               modules.
             </p>
@@ -445,13 +452,14 @@ export default function FollowupReminders() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => refetch()}
-              className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors"
+              className="p-2 rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground hover:border-border/60 transition-all"
+              title="Refresh"
             >
-              <RefreshCw className="w-3.5 h-3.5" /> Refresh
+              <RefreshCw className="w-4 h-4" />
             </button>
             <Button
               onClick={() => setIsDialogOpen(true)}
-              className="gap-2 gradient-accent text-white font-semibold rounded-xl h-10 px-4"
+              className="gap-2 rounded-xl h-10 px-4"
             >
               <Plus className="w-4 h-4" />
               New Reminder
@@ -465,7 +473,6 @@ export default function FollowupReminders() {
             label="Total"
             value={counts.total}
             icon={Bell}
-            accent="bg-primary"
             iconClass="bg-primary/10 text-primary"
             sublabel="All reminders"
           />
@@ -473,7 +480,6 @@ export default function FollowupReminders() {
             label="Overdue"
             value={counts.overdue}
             icon={AlertCircle}
-            accent="bg-red-500"
             iconClass="bg-red-500/10 text-red-500"
             sublabel="Needs attention"
           />
@@ -481,7 +487,6 @@ export default function FollowupReminders() {
             label="Scheduled"
             value={counts.scheduled}
             icon={Clock}
-            accent="bg-amber-500"
             iconClass="bg-amber-500/10 text-amber-500"
             sublabel="Upcoming"
           />
@@ -489,7 +494,6 @@ export default function FollowupReminders() {
             label="Sent"
             value={counts.sent}
             icon={CheckCircle}
-            accent="bg-emerald-500"
             iconClass="bg-emerald-500/10 text-emerald-500"
             sublabel="Completed"
           />
@@ -692,15 +696,14 @@ export default function FollowupReminders() {
                 <label className="text-sm font-medium text-foreground">
                   Due Date
                 </label>
-                <div className="relative">
-                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
-                  <input
-                    type="date"
-                    value={form.dueDate}
-                    onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
-                    className="w-full pl-8 pr-3 py-2 rounded-xl text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                  />
-                </div>
+                <Input
+                  type="date"
+                  value={form.dueDate}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, dueDate: e.target.value }))
+                  }
+                  className="rounded-xl"
+                />
               </div>
             </div>
 
@@ -720,13 +723,13 @@ export default function FollowupReminders() {
           </div>
 
           <DialogFooter className="mt-2 gap-2">
-            <button
-              type="button"
+            <Button
+              variant="outline"
               onClick={() => setIsDialogOpen(false)}
-              className="flex-1 px-4 py-2 rounded-xl border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors"
+              className="rounded-xl flex-1"
             >
               Cancel
-            </button>
+            </Button>
             <Button
               onClick={() =>
                 createMutation.mutate({
@@ -746,6 +749,6 @@ export default function FollowupReminders() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 }

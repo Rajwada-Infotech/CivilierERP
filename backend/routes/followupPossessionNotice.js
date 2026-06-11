@@ -77,9 +77,9 @@ router.get("/meta/options", async (req, res) => {
     const [applicantsR, unitSelectionsR, handoversR, prePossessionsR, projectsR, companiesR] =
       await Promise.all([
         pool.request().query(`
-          SELECT Id, ApplicantNo, ApplicantName, ProjectId, CompanyId
-          FROM dbo.FollowupApplications WHERE IsDeleted = 0
-          ORDER BY ApplicantName
+          SELECT LHeadId AS Id, ISNULL(DisplayName, LHeadName) AS ApplicantName, LHeadCode AS ApplicantNo
+          FROM dbo.AccountHeadMaster WHERE LHeadType = 'A' AND LHeadStatus = 1
+          ORDER BY ISNULL(DisplayName, LHeadName)
         `),
         pool.request().query(`
           SELECT Id, SelectionNo, UnitNo, ApplicantId
@@ -154,7 +154,7 @@ router.get("/", async (req, res) => {
       return res.status(400).json({ error: "applicantId must be a valid number" });
 
     const filters = ["pn.IsDeleted = 0"];
-    if (search) filters.push(`(pn.NoticeNo LIKE @Search OR COALESCE(fa.ApplicantName, ISNULL(ahm.DisplayName, ahm.LHeadName)) LIKE @Search OR COALESCE(fa.ApplicantNo, ahm.LHeadCode) LIKE @Search)`);
+    if (search) filters.push(`(pn.NoticeNo LIKE @Search OR ISNULL(ahm.DisplayName, ahm.LHeadName) LIKE @Search OR ahm.LHeadCode LIKE @Search)`);
     if (status) filters.push("pn.Status = @Status");
     if (noticeType) filters.push("pn.NoticeType = @NoticeType");
     if (applicantId) filters.push("pn.ApplicantId = @ApplicantId");
@@ -164,8 +164,7 @@ router.get("/", async (req, res) => {
 
     const BASE_JOINS = `
       FROM dbo.FollowupPossessionNotices pn
-      LEFT JOIN dbo.AccountHeadMaster ahm    ON ahm.LHeadId = pn.ApplicantId AND ahm.LHeadType = 'A'
-      LEFT JOIN dbo.FollowupApplications fa  ON fa.Id = pn.ApplicantId AND fa.IsDeleted = 0 AND ahm.LHeadId IS NULL
+      INNER JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = pn.ApplicantId AND ahm.LHeadType = 'A'
       LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = pn.UnitSelectionId
       LEFT JOIN dbo.FollowupHandovers fho      ON fho.Id = pn.HandoverId
       LEFT JOIN dbo.FollowupPrePossession fpp  ON fpp.Id = pn.PrePossessionId
@@ -190,8 +189,8 @@ router.get("/", async (req, res) => {
       .input("PageSize", sql.Int, pageSize).query(`
         SELECT
           pn.Id, pn.NoticeNo, pn.ApplicantId,
-          COALESCE(fa.ApplicantName, ISNULL(ahm.DisplayName, ahm.LHeadName)) AS ApplicantName,
-          COALESCE(fa.ApplicantNo,   ahm.LHeadCode)                         AS ApplicantNo,
+          ISNULL(ahm.DisplayName, ahm.LHeadName) AS ApplicantName,
+          ahm.LHeadCode AS ApplicantNo,
           pn.UnitSelectionId, fus.UnitNo, fus.SelectionNo,
           pn.HandoverId,      fho.HandoverNo,
           pn.PrePossessionId, fpp.ClearanceNo,

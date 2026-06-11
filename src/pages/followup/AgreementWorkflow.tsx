@@ -5,7 +5,6 @@
  */
 
 import { useState } from "react";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -24,7 +23,6 @@ import {
   Search,
   X,
   Clock,
-  CalendarDays,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
@@ -52,7 +50,6 @@ import {
   createAgreementWorkflow,
   updateWorkflowStep,
   deleteAgreementWorkflow,
-  type AgreementWorkflowStep,
 } from "@/api/agreementWorkflowApi";
 import { SignaturePicker } from "@/components/SignaturePicker";
 import { AuditLogDrawer } from "@/components/AuditLogDrawer";
@@ -222,7 +219,7 @@ function WorkflowStepper({
   onStepUpdate,
 }: {
   record: WorkflowRecord;
-  onStepUpdate: (id: number, step: AgreementWorkflowStep) => void;
+  onStepUpdate: (id: number, step: unknown) => void;
 }) {
   const [editingStep, setEditingStep] = useState<string | null>(null);
   const [form, setForm] = useState({ status: "", doneDate: "", notes: "" });
@@ -355,15 +352,14 @@ function WorkflowStepper({
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Completion Date</Label>
-                        <div className="relative">
-                          <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
-                          <input
-                            type="date"
-                            className="w-full pl-8 pr-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                            value={form.doneDate}
-                            onChange={(e) => setForm((f) => ({ ...f, doneDate: e.target.value }))}
-                          />
-                        </div>
+                        <Input
+                          type="date"
+                          className="rounded-[9px]"
+                          value={form.doneDate}
+                          onChange={(e) =>
+                            setForm((f) => ({ ...f, doneDate: e.target.value }))
+                          }
+                        />
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Notes</Label>
@@ -390,13 +386,14 @@ function WorkflowStepper({
                       )}
                     </div>
                     <DialogFooter>
-                      <button
-                        type="button"
-                        className="px-3 py-1.5 rounded-[9px] border border-border bg-background text-foreground text-xs font-medium hover:bg-muted transition-colors"
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-[9px]"
                         onClick={() => setEditingStep(null)}
                       >
                         Cancel
-                      </button>
+                      </Button>
                       <Button
                         size="sm"
                         className="gradient-accent text-white rounded-[9px]"
@@ -444,7 +441,7 @@ function MobileCard({
   onToggle: () => void;
   onDelete: () => void;
   onAudit: () => void;
-  onStepUpdate: (id: number, step: AgreementWorkflowStep) => void;
+  onStepUpdate: (id: number, step: unknown) => void;
 }) {
   return (
     <div className="border border-border rounded-xl overflow-hidden bg-card mb-2">
@@ -563,7 +560,7 @@ export default function AgreementWorkflowPage() {
   });
 
   const stepMutation = useMutation({
-    mutationFn: ({ id, step }: { id: number; step: AgreementWorkflowStep }) =>
+    mutationFn: ({ id, step }: { id: number; step: unknown }) =>
       updateWorkflowStep(id, step),
     onSuccess: () => {
       toast.success("Step updated");
@@ -595,44 +592,19 @@ export default function AgreementWorkflowPage() {
     <>
       <Breadcrumbs
         items={[
-          { label: "Follow-Up", path: "/followup" },
+          { label: "Followup" },
           { label: "Agreement" },
-          { label: "Agreement Workflow" },
+          { label: "Workflow Tracker" },
         ]}
       />
 
-      <div className="relative space-y-6 mt-6">
-
-      {/* ── Page heading ── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">Agreement Workflow</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Track agreement execution steps for each applicant</p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors disabled:opacity-50"
-          >
-            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /> Refresh
-          </button>
-          <Button
-            onClick={() => setDialogOpen(true)}
-            className="gradient-accent text-white rounded-[9px] gap-1.5 font-semibold text-sm px-4 h-9"
-          >
-            <Plus size={15} /> <span className="hidden sm:inline">New Workflow</span><span className="sm:hidden">New</span>
-          </Button>
-        </div>
-      </div>
-
       {/* ── Toolbar ── */}
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
         {/* Search */}
         <div className="relative flex-1 min-w-[180px] max-w-xs">
           <Search
             size={14}
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
           />
           <input
             value={searchInput}
@@ -661,25 +633,41 @@ export default function AgreementWorkflowPage() {
         </div>
 
         {/* Status filter */}
-        <div className="relative">
-          <select
-            value={filterStatus}
-            onChange={(e) => {
-              setFilterStatus(e.target.value);
-              setPage(1);
-            }}
-            className="appearance-none h-[34px] pl-2.5 pr-8 rounded-[9px] border border-border bg-background text-foreground text-[13px] outline-none cursor-pointer"
-          >
-            <option value="">All statuses</option>
-            {OVERALL_STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-        </div>
+        <select
+          value={filterStatus}
+          onChange={(e) => {
+            setFilterStatus(e.target.value);
+            setPage(1);
+          }}
+          className="h-[34px] px-2.5 rounded-[9px] border border-border bg-background text-foreground text-[13px] outline-none"
+        >
+          <option value="">All statuses</option>
+          {OVERALL_STATUS_OPTIONS.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
 
+        <button
+          onClick={() => refetch()}
+          title="Refresh"
+          className="h-[34px] px-2.5 rounded-[9px] border border-border bg-background flex items-center hover:bg-accent transition-colors"
+        >
+          <RefreshCw
+            size={14}
+            className={`text-muted-foreground${isFetching ? " animate-spin" : ""}`}
+          />
+        </button>
+
+        <Button
+          onClick={() => setDialogOpen(true)}
+          className="gradient-accent text-white rounded-[9px] gap-1.5 font-semibold text-sm px-4 h-[34px] ml-auto"
+        >
+          <Plus size={15} />{" "}
+          <span className="hidden sm:inline">New Workflow</span>
+          <span className="sm:hidden">New</span>
+        </Button>
       </div>
 
       {/* ── Mobile card list (hidden on md+) ── */}
@@ -968,148 +956,95 @@ export default function AgreementWorkflowPage() {
             </div>
 
             {/* Agreement */}
-            {(() => {
-              const filteredAgreements = (meta?.agreements ?? []).filter(
-                (ag: OptionItem) =>
-                  !form.ApplicantId ||
-                  String(ag.ApplicantId) === form.ApplicantId,
-              );
-              const noAgreements = !!form.ApplicantId && filteredAgreements.length === 0;
-              return (
-                <div className="col-span-full space-y-1">
-                  <Label className="text-xs">Agreement</Label>
-                  <Select
-                    value={form.AgreementId || ""}
-                    onValueChange={(v) =>
-                      setForm((f) => ({ ...f, AgreementId: v }))
+            <div className="col-span-full space-y-1">
+              <Label className="text-xs">Agreement</Label>
+              <Select
+                value={form.AgreementId || ""}
+                onValueChange={(v) =>
+                  setForm((f) => ({ ...f, AgreementId: v }))
+                }
+                disabled={!form.ApplicantId}
+              >
+                <SelectTrigger className="rounded-[9px]">
+                  <SelectValue
+                    placeholder={
+                      form.ApplicantId
+                        ? "Select agreement…"
+                        : "Select applicant first"
                     }
-                    disabled={!form.ApplicantId || noAgreements}
-                  >
-                    <SelectTrigger
-                      className={`rounded-[9px] ${noAgreements ? "opacity-50 cursor-not-allowed" : ""}`}
-                    >
-                      <SelectValue
-                        placeholder={
-                          !form.ApplicantId
-                            ? "Select applicant first"
-                            : noAgreements
-                              ? "No agreements found"
-                              : "Select agreement…"
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {filteredAgreements.map((ag: OptionItem) => (
-                        <SelectItem key={ag.Id} value={String(ag.Id)}>
-                          {ag.AgreementNo}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {noAgreements && (
-                    <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
-                      <span>⚠</span> No agreements exist for this applicant yet.
-                    </p>
-                  )}
-                </div>
-              );
-            })()}
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {(meta?.agreements ?? [])
+                    .filter(
+                      (ag: OptionItem) =>
+                        !form.ApplicantId ||
+                        String(ag.ApplicantId) === form.ApplicantId,
+                    )
+                    .map((ag: OptionItem) => (
+                      <SelectItem key={ag.Id} value={String(ag.Id)}>
+                        {ag.AgreementNo}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
 
             {/* Booking */}
-            {(() => {
-              const filteredBookings = (meta?.bookings ?? []).filter(
-                (b: OptionItem) =>
-                  !form.ApplicantId ||
-                  String(b.ApplicantId) === form.ApplicantId,
-              );
-              const noBookings = !!form.ApplicantId && filteredBookings.length === 0;
-              return (
-                <div className="space-y-1">
-                  <Label className="text-xs">Booking</Label>
-                  <Select
-                    value={form.BookingId || ""}
-                    onValueChange={(v) =>
-                      setForm((f) => ({ ...f, BookingId: v }))
-                    }
-                    disabled={!form.ApplicantId || noBookings}
-                  >
-                    <SelectTrigger
-                      className={`rounded-[9px] ${noBookings ? "opacity-50 cursor-not-allowed" : ""}`}
-                    >
-                      <SelectValue
-                        placeholder={
-                          !form.ApplicantId
-                            ? "Select applicant first"
-                            : noBookings
-                              ? "No bookings found"
-                              : "Select booking…"
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {filteredBookings.map((b: OptionItem) => (
-                        <SelectItem key={b.Id} value={String(b.Id)}>
-                          {b.BookingNo}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {noBookings && (
-                    <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
-                      <span>⚠</span> No bookings exist for this applicant yet.
-                    </p>
-                  )}
-                </div>
-              );
-            })()}
+            <div className="space-y-1">
+              <Label className="text-xs">Booking</Label>
+              <Select
+                value={form.BookingId || ""}
+                onValueChange={(v) => setForm((f) => ({ ...f, BookingId: v }))}
+                disabled={!form.ApplicantId}
+              >
+                <SelectTrigger className="rounded-[9px]">
+                  <SelectValue placeholder="Select…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(meta?.bookings ?? [])
+                    .filter(
+                      (b: OptionItem) =>
+                        !form.ApplicantId ||
+                        String(b.ApplicantId) === form.ApplicantId,
+                    )
+                    .map((b: OptionItem) => (
+                      <SelectItem key={b.Id} value={String(b.Id)}>
+                        {b.BookingNo}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
 
             {/* Unit Selection */}
-            {(() => {
-              const filteredUnitSelections = (meta?.unitSelections ?? []).filter(
-                (u: OptionItem) =>
-                  !form.ApplicantId ||
-                  String(u.ApplicantId) === form.ApplicantId,
-              );
-              const noUnitSelections = !!form.ApplicantId && filteredUnitSelections.length === 0;
-              return (
-                <div className="space-y-1">
-                  <Label className="text-xs">Unit Selection</Label>
-                  <Select
-                    value={form.UnitSelectionId || ""}
-                    onValueChange={(v) =>
-                      setForm((f) => ({ ...f, UnitSelectionId: v }))
-                    }
-                    disabled={!form.ApplicantId || noUnitSelections}
-                  >
-                    <SelectTrigger
-                      className={`rounded-[9px] ${noUnitSelections ? "opacity-50 cursor-not-allowed" : ""}`}
-                    >
-                      <SelectValue
-                        placeholder={
-                          !form.ApplicantId
-                            ? "Select applicant first"
-                            : noUnitSelections
-                              ? "No unit selections found"
-                              : "Select unit selection…"
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {filteredUnitSelections.map((u: OptionItem) => (
-                        <SelectItem key={u.Id} value={String(u.Id)}>
-                          {u.SelectionNo} — {u.UnitNo}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {noUnitSelections && (
-                    <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
-                      <span>⚠</span> No unit selections exist for this applicant yet.
-                    </p>
-                  )}
-                </div>
-              );
-            })()}
+            <div className="space-y-1">
+              <Label className="text-xs">Unit Selection</Label>
+              <Select
+                value={form.UnitSelectionId || ""}
+                onValueChange={(v) =>
+                  setForm((f) => ({ ...f, UnitSelectionId: v }))
+                }
+                disabled={!form.ApplicantId}
+              >
+                <SelectTrigger className="rounded-[9px]">
+                  <SelectValue placeholder="Select…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(meta?.unitSelections ?? [])
+                    .filter(
+                      (u: OptionItem) =>
+                        !form.ApplicantId ||
+                        String(u.ApplicantId) === form.ApplicantId,
+                    )
+                    .map((u: OptionItem) => (
+                      <SelectItem key={u.Id} value={String(u.Id)}>
+                        {u.SelectionNo} — {u.UnitNo}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
 
             {/* Project */}
             <div className="space-y-1">
@@ -1122,7 +1057,7 @@ export default function AgreementWorkflowPage() {
                   <SelectValue placeholder="Select…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {filterProjectsByCompany((meta?.projects ?? []) as any[], form.CompanyId).map((p: any) => (
+                  {filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map((p: any) => (
                     <SelectItem key={p.Id} value={String(p.Id)}>
                       {p.Name}
                     </SelectItem>
@@ -1160,15 +1095,17 @@ export default function AgreementWorkflowPage() {
             {STEPS.map((s) => (
               <div key={s.field} className="space-y-1">
                 <Label className="text-xs">{s.label}</Label>
-                <div className="relative">
-                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
-                  <input
-                    type="date"
-                    className="w-full pl-8 pr-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                    value={form[`${s.field}Due`] || ""}
-                    onChange={(e) => setForm((f) => ({ ...f, [`${s.field}Due`]: e.target.value }))}
-                  />
-                </div>
+                <Input
+                  type="date"
+                  className="rounded-[9px]"
+                  value={form[`${s.field}Due`] || ""}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      [`${s.field}Due`]: e.target.value,
+                    }))
+                  }
+                />
               </div>
             ))}
 
@@ -1188,13 +1125,16 @@ export default function AgreementWorkflowPage() {
           </div>
 
           <DialogFooter className="mt-2">
-            <button
-              type="button"
-              className="px-4 py-2 rounded-[9px] border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors"
-              onClick={() => { setDialogOpen(false); setForm({}); }}
+            <Button
+              variant="outline"
+              className="rounded-[9px]"
+              onClick={() => {
+                setDialogOpen(false);
+                setForm({});
+              }}
             >
               Cancel
-            </button>
+            </Button>
             <Button
               disabled={!form.ApplicantId || createMutation.isPending}
               className="gradient-accent text-white rounded-[9px]"
@@ -1251,13 +1191,14 @@ export default function AgreementWorkflowPage() {
             ? This cannot be undone.
           </p>
           <DialogFooter>
-            <button
-              type="button"
-              className="px-3 py-1.5 rounded-[9px] border border-border bg-background text-foreground text-xs font-medium hover:bg-muted transition-colors"
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-[9px]"
               onClick={() => setDeleteTarget(null)}
             >
               Cancel
-            </button>
+            </Button>
             <Button
               size="sm"
               variant="destructive"
@@ -1280,8 +1221,6 @@ export default function AgreementWorkflowPage() {
         recordId={auditTarget?.id ?? null}
         recordNo={auditTarget?.no}
       />
-
-      </div>{/* end space-y-6 wrapper */}
     </>
   );
 }
