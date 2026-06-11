@@ -774,6 +774,18 @@ export default function GRN() {
   });
   const godowns = (godownsData as any)?.data ?? [];
 
+  const filteredGodowns = useMemo(
+    () =>
+      (godowns as any[]).filter(
+        (g) =>
+          !g.IsMain &&
+          (formData.projectId === "" ||
+            g.ProjectID === null ||
+            String(g.ProjectID) === String(formData.projectId)),
+      ),
+    [godowns, formData.projectId],
+  );
+
   const { data: projectsData = [] } = useQuery({
     queryKey: ["grn-projects"],
     queryFn: getProjects,
@@ -1415,6 +1427,7 @@ export default function GRN() {
                         setFormData((prev) => ({
                           ...prev,
                           projectId: e.target.value,
+                          godownId: "",
                           poId: "",
                           poNumber: "",
                           supplierId: "",
@@ -1460,13 +1473,11 @@ export default function GRN() {
                       className={inpSel}
                     >
                       <option value="">Main Godown</option>
-                      {godowns
-                        .filter((g: any) => !g.IsMain)
-                        .map((g: any) => (
-                          <option key={g.GodownID} value={String(g.GodownID)}>
-                            {g.GodownName}
-                          </option>
-                        ))}
+                      {filteredGodowns.map((g: any) => (
+                        <option key={g.GodownID} value={String(g.GodownID)}>
+                          {g.GodownName}
+                        </option>
+                      ))}
                     </select>
                     <ChevronDown
                       size={12}
