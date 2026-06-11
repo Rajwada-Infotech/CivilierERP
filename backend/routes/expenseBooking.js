@@ -1197,7 +1197,7 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
       .input(
         "EBillingTermsData",
         sql.NVarChar(sql.MAX),
-        EBillingTermsData ? JSON.stringify(EBillingTermsData) : null,
+        EBillingTermsData || null,
       )
       .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
       .input("ETCName", sql.NVarChar(200), ETCName || null)
@@ -1820,7 +1820,7 @@ router.put(
         .input(
           "EBillingTermsData",
           sql.NVarChar(sql.MAX),
-          EBillingTermsData ? JSON.stringify(EBillingTermsData) : null,
+          EBillingTermsData || null,
         )
         .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
         .input("ETCName", sql.NVarChar(200), ETCName || null)

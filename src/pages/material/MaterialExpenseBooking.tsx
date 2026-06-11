@@ -2161,7 +2161,11 @@ export default function MaterialExpenseBooking() {
     statusFilter && statusFilter !== "All"
       ? records.filter((r) => r.status === statusFilter)
       : records;
-  const totalNet = totalBookedAmount;
+  // Sum net amounts from visible filtered records so stat card always matches screen
+  const totalNet = filteredRecords.reduce(
+    (sum, r) => sum + (r.netAmount ?? r.basicAmount ?? 0),
+    0,
+  );
   const approvedCount =
     statusCounts["Approved"] ??
     records.filter((r) => r.status === "Approved").length;

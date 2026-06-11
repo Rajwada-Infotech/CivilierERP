@@ -922,53 +922,92 @@ export function ExpenseBookingPreviewModal({
           </div>
 
           {/* ── Section 8: Billing Terms ── */}
-          {billingTerms.length > 0 && (
-            <div className="border-t border-border/60 pt-4">
-              <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                <Receipt size={10} className="text-primary" /> Billing Terms
-              </p>
-              <div className="bg-muted/20 border border-border rounded-xl px-4 py-3 text-sm text-foreground">
-                {billingTerms.length > 0 ? (
-                  <div className="space-y-2">
-                    {billingTerms.map((t: any, idx: number) => (
-                      <div
-                        key={t?._key ?? t?.masterTermId ?? idx}
-                        className="flex items-center justify-between gap-4"
-                      >
-                        <span className="font-medium text-sm">
-                          {t?.masterTermName ||
-                            t?.TermName ||
-                            t?.Name ||
-                            `Term ${idx + 1}`}
-                        </span>
-                        <span className="text-xs font-mono text-muted-foreground shrink-0">
-                          {t?.deductionType === "Addition"
-                            ? "+"
-                            : t?.deductionType === "Deduction"
-                              ? "−"
-                              : ""}
-                          {t?.type === "percentage"
-                            ? `${t?.value ?? 0}%`
-                            : `₹${fmt(t?.value ?? 0)}`}
-                          {t?.appliedOn === "pre-gst" ? (
-                            <span className="ml-1 text-[10px] text-muted-foreground/60">
-                              (pre-GST)
+          {billingTerms.length > 0 &&
+            (() => {
+              // Compute running base amounts so we can show the ₹ impact of each term
+              const grossForPostGst =
+                rbd.taxableAmount + rbd.cgstAmount + rbd.sgstAmount;
+              let rb = previewRecord.basicAmount;
+              let pgRb = grossForPostGst;
+              const computedAmounts: number[] = billingTerms.map((t: any) => {
+                const base = t?.appliedOn === "post-gst" ? pgRb : rb;
+                const amt =
+                  t?.applicable !== false
+                    ? t?.type === "percentage"
+                      ? (base * (t?.value ?? 0)) / 100
+                      : (t?.value ?? 0)
+                    : 0;
+                if (t?.applicable !== false) {
+                  if (t?.appliedOn === "post-gst") {
+                    pgRb =
+                      t?.deductionType === "Addition"
+                        ? pgRb + amt
+                        : Math.max(0, pgRb - amt);
+                  } else {
+                    rb =
+                      t?.deductionType === "Addition"
+                        ? rb + amt
+                        : Math.max(0, rb - amt);
+                  }
+                }
+                return amt;
+              });
+
+              return (
+                <div className="border-t border-border/60 pt-4">
+                  <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+                    <Receipt size={10} className="text-primary" /> Billing Terms
+                  </p>
+                  <div className="bg-muted/20 border border-border rounded-xl overflow-hidden text-sm text-foreground divide-y divide-border/50">
+                    {billingTerms.map((t: any, idx: number) => {
+                      const isAddition = t?.deductionType === "Addition";
+                      const rupeeAmt = computedAmounts[idx] ?? 0;
+                      const isApplied = t?.applicable !== false;
+                      return (
+                        <div
+                          key={t?._key ?? t?.masterTermId ?? idx}
+                          className="flex items-center justify-between gap-4 px-4 py-2.5"
+                        >
+                          <div className="min-w-0">
+                            <span className="font-medium text-sm block truncate">
+                              {t?.masterTermName ||
+                                t?.TermName ||
+                                t?.Name ||
+                                `Term ${idx + 1}`}
                             </span>
-                          ) : t?.appliedOn === "post-gst" ? (
-                            <span className="ml-1 text-[10px] text-muted-foreground/60">
-                              (post-GST)
+                            <span className="text-[10px] text-muted-foreground/70">
+                              {t?.appliedOn === "post-gst"
+                                ? "After GST"
+                                : "Before GST"}
+                              {!isApplied && " · Not applied"}
                             </span>
-                          ) : null}
-                        </span>
-                      </div>
-                    ))}
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span
+                              className={`text-sm font-semibold tabular-nums ${
+                                !isApplied
+                                  ? "text-muted-foreground"
+                                  : isAddition
+                                    ? "text-green-600 dark:text-green-400"
+                                    : "text-destructive"
+                              }`}
+                            >
+                              {isApplied ? (isAddition ? "+" : "−") : ""}₹
+                              {fmt(rupeeAmt)}
+                            </span>
+                            {isApplied && t?.type === "percentage" && (
+                              <span className="block text-[10px] text-muted-foreground/60">
+                                {t?.value ?? 0}%
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                ) : (
-                  <span className="text-muted-foreground">—</span>
-                )}
-              </div>
-            </div>
-          )}
+                </div>
+              );
+            })()}
 
           {/* ── Section 9: Remarks ── */}
           {previewRecord.remarks && (
