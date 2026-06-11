@@ -99,7 +99,9 @@ export function ExpenseBookingPreviewModal({
 
   // Normalise billingTerms — the API may return null/undefined when no terms are saved,
   // so always coerce to an array before any checks.
-  const billingTerms = parseJsonArray(previewRecord.billingTerms ?? []);
+  const billingTerms = parseJsonArray(previewRecord.billingTerms ?? []).filter(
+    (t: any) => t?.applicable === true && (t?.masterTermName || t?.value > 0),
+  );
 
   // Use billingTerms array (multi-term) when available, otherwise fall back to
   // the legacy single discount — ensures the total correctly reflects all applied terms.
@@ -176,6 +178,13 @@ export function ExpenseBookingPreviewModal({
                 <p className="text-sm font-medium">
                   {previewRecord.dueDate || "—"}
                 </p>
+                {previewRecord.dueDate &&
+                  previewRecord.bookingDate &&
+                  previewRecord.dueDate < previewRecord.bookingDate && (
+                    <p className="mt-1 text-[10px] font-medium text-destructive flex items-center gap-1">
+                      ⚠ Before booking date
+                    </p>
+                  )}
               </div>
               <div className="space-y-0.5">
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider">

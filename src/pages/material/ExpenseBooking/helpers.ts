@@ -168,7 +168,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     bookingName: "",
     bookingReference: "",
     docTypeName: "",
-    bookingDate: "",
+    bookingDate: new Date().toISOString().slice(0, 10),
     dueDate: "",
     financialYear: "",
     companyId: null,
