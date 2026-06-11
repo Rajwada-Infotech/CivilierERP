@@ -50,6 +50,7 @@ import {
   createAgreementWorkflow,
   updateWorkflowStep,
   deleteAgreementWorkflow,
+  type AgreementWorkflowStep,
 } from "@/api/agreementWorkflowApi";
 import { SignaturePicker } from "@/components/SignaturePicker";
 import { AuditLogDrawer } from "@/components/AuditLogDrawer";
@@ -219,7 +220,7 @@ function WorkflowStepper({
   onStepUpdate,
 }: {
   record: WorkflowRecord;
-  onStepUpdate: (id: number, step: unknown) => void;
+  onStepUpdate: (id: number, step: AgreementWorkflowStep) => void;
 }) {
   const [editingStep, setEditingStep] = useState<string | null>(null);
   const [form, setForm] = useState({ status: "", doneDate: "", notes: "" });
@@ -441,7 +442,7 @@ function MobileCard({
   onToggle: () => void;
   onDelete: () => void;
   onAudit: () => void;
-  onStepUpdate: (id: number, step: unknown) => void;
+  onStepUpdate: (id: number, step: AgreementWorkflowStep) => void;
 }) {
   return (
     <div className="border border-border rounded-xl overflow-hidden bg-card mb-2">
@@ -560,7 +561,7 @@ export default function AgreementWorkflowPage() {
   });
 
   const stepMutation = useMutation({
-    mutationFn: ({ id, step }: { id: number; step: unknown }) =>
+    mutationFn: ({ id, step }: { id: number; step: AgreementWorkflowStep }) =>
       updateWorkflowStep(id, step),
     onSuccess: () => {
       toast.success("Step updated");
@@ -956,95 +957,148 @@ export default function AgreementWorkflowPage() {
             </div>
 
             {/* Agreement */}
-            <div className="col-span-full space-y-1">
-              <Label className="text-xs">Agreement</Label>
-              <Select
-                value={form.AgreementId || ""}
-                onValueChange={(v) =>
-                  setForm((f) => ({ ...f, AgreementId: v }))
-                }
-                disabled={!form.ApplicantId}
-              >
-                <SelectTrigger className="rounded-[9px]">
-                  <SelectValue
-                    placeholder={
-                      form.ApplicantId
-                        ? "Select agreement…"
-                        : "Select applicant first"
+            {(() => {
+              const filteredAgreements = (meta?.agreements ?? []).filter(
+                (ag: OptionItem) =>
+                  !form.ApplicantId ||
+                  String(ag.ApplicantId) === form.ApplicantId,
+              );
+              const noAgreements = !!form.ApplicantId && filteredAgreements.length === 0;
+              return (
+                <div className="col-span-full space-y-1">
+                  <Label className="text-xs">Agreement</Label>
+                  <Select
+                    value={form.AgreementId || ""}
+                    onValueChange={(v) =>
+                      setForm((f) => ({ ...f, AgreementId: v }))
                     }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {(meta?.agreements ?? [])
-                    .filter(
-                      (ag: OptionItem) =>
-                        !form.ApplicantId ||
-                        String(ag.ApplicantId) === form.ApplicantId,
-                    )
-                    .map((ag: OptionItem) => (
-                      <SelectItem key={ag.Id} value={String(ag.Id)}>
-                        {ag.AgreementNo}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
+                    disabled={!form.ApplicantId || noAgreements}
+                  >
+                    <SelectTrigger
+                      className={`rounded-[9px] ${noAgreements ? "opacity-50 cursor-not-allowed" : ""}`}
+                    >
+                      <SelectValue
+                        placeholder={
+                          !form.ApplicantId
+                            ? "Select applicant first"
+                            : noAgreements
+                              ? "No agreements found"
+                              : "Select agreement…"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredAgreements.map((ag: OptionItem) => (
+                        <SelectItem key={ag.Id} value={String(ag.Id)}>
+                          {ag.AgreementNo}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {noAgreements && (
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                      <span>⚠</span> No agreements exist for this applicant yet.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Booking */}
-            <div className="space-y-1">
-              <Label className="text-xs">Booking</Label>
-              <Select
-                value={form.BookingId || ""}
-                onValueChange={(v) => setForm((f) => ({ ...f, BookingId: v }))}
-                disabled={!form.ApplicantId}
-              >
-                <SelectTrigger className="rounded-[9px]">
-                  <SelectValue placeholder="Select…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(meta?.bookings ?? [])
-                    .filter(
-                      (b: OptionItem) =>
-                        !form.ApplicantId ||
-                        String(b.ApplicantId) === form.ApplicantId,
-                    )
-                    .map((b: OptionItem) => (
-                      <SelectItem key={b.Id} value={String(b.Id)}>
-                        {b.BookingNo}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {(() => {
+              const filteredBookings = (meta?.bookings ?? []).filter(
+                (b: OptionItem) =>
+                  !form.ApplicantId ||
+                  String(b.ApplicantId) === form.ApplicantId,
+              );
+              const noBookings = !!form.ApplicantId && filteredBookings.length === 0;
+              return (
+                <div className="space-y-1">
+                  <Label className="text-xs">Booking</Label>
+                  <Select
+                    value={form.BookingId || ""}
+                    onValueChange={(v) =>
+                      setForm((f) => ({ ...f, BookingId: v }))
+                    }
+                    disabled={!form.ApplicantId || noBookings}
+                  >
+                    <SelectTrigger
+                      className={`rounded-[9px] ${noBookings ? "opacity-50 cursor-not-allowed" : ""}`}
+                    >
+                      <SelectValue
+                        placeholder={
+                          !form.ApplicantId
+                            ? "Select applicant first"
+                            : noBookings
+                              ? "No bookings found"
+                              : "Select booking…"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredBookings.map((b: OptionItem) => (
+                        <SelectItem key={b.Id} value={String(b.Id)}>
+                          {b.BookingNo}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {noBookings && (
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                      <span>⚠</span> No bookings exist for this applicant yet.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Unit Selection */}
-            <div className="space-y-1">
-              <Label className="text-xs">Unit Selection</Label>
-              <Select
-                value={form.UnitSelectionId || ""}
-                onValueChange={(v) =>
-                  setForm((f) => ({ ...f, UnitSelectionId: v }))
-                }
-                disabled={!form.ApplicantId}
-              >
-                <SelectTrigger className="rounded-[9px]">
-                  <SelectValue placeholder="Select…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(meta?.unitSelections ?? [])
-                    .filter(
-                      (u: OptionItem) =>
-                        !form.ApplicantId ||
-                        String(u.ApplicantId) === form.ApplicantId,
-                    )
-                    .map((u: OptionItem) => (
-                      <SelectItem key={u.Id} value={String(u.Id)}>
-                        {u.SelectionNo} — {u.UnitNo}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {(() => {
+              const filteredUnitSelections = (meta?.unitSelections ?? []).filter(
+                (u: OptionItem) =>
+                  !form.ApplicantId ||
+                  String(u.ApplicantId) === form.ApplicantId,
+              );
+              const noUnitSelections = !!form.ApplicantId && filteredUnitSelections.length === 0;
+              return (
+                <div className="space-y-1">
+                  <Label className="text-xs">Unit Selection</Label>
+                  <Select
+                    value={form.UnitSelectionId || ""}
+                    onValueChange={(v) =>
+                      setForm((f) => ({ ...f, UnitSelectionId: v }))
+                    }
+                    disabled={!form.ApplicantId || noUnitSelections}
+                  >
+                    <SelectTrigger
+                      className={`rounded-[9px] ${noUnitSelections ? "opacity-50 cursor-not-allowed" : ""}`}
+                    >
+                      <SelectValue
+                        placeholder={
+                          !form.ApplicantId
+                            ? "Select applicant first"
+                            : noUnitSelections
+                              ? "No unit selections found"
+                              : "Select unit selection…"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredUnitSelections.map((u: OptionItem) => (
+                        <SelectItem key={u.Id} value={String(u.Id)}>
+                          {u.SelectionNo} — {u.UnitNo}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {noUnitSelections && (
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                      <span>⚠</span> No unit selections exist for this applicant yet.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Project */}
             <div className="space-y-1">

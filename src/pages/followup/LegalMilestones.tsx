@@ -524,13 +524,14 @@ export function LegalMilestonesPage() {
               New Legal Milestone
             </DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-4 py-2 max-h-[65vh] overflow-y-auto pr-1">
+          {/* Scroll wrapper separate from grid so overflow-y-auto doesn't clip focus rings */}
+          <div className="max-h-[65vh] overflow-y-auto pr-1">
+          <div className="grid grid-cols-2 gap-4 py-2 px-0.5">
             {/* Applicant */}
             <div className="col-span-2 space-y-1">
               <Label className="text-xs">Applicant *</Label>
               <Select
                 value={form.ApplicantId || ""}
-                // FIX #9: reset dependent fields when applicant changes
                 onValueChange={(v) =>
                   setForm((f) => ({ ...f, ApplicantId: v, UnitSelectionId: "", BookingId: "" }))
                 }
@@ -541,7 +542,7 @@ export function LegalMilestonesPage() {
                 <SelectContent>
                   {(meta?.applicants ?? []).map((a: any) => (
                     <SelectItem key={a.Id} value={String(a.Id)}>
-                      {a.ApplicantName} ({a.ApplicantNo})
+                      {a.ApplicantName}{a.ApplicantNo ? ` (${a.ApplicantNo})` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -549,60 +550,84 @@ export function LegalMilestonesPage() {
             </div>
 
             {/* Unit Selection */}
-            <div className="space-y-1">
-              <Label className="text-xs">Unit Selection</Label>
-              <Select
-                value={form.UnitSelectionId || ""}
-                onValueChange={(v) =>
-                  setForm((f) => ({ ...f, UnitSelectionId: v }))
-                }
-              >
-                <SelectTrigger className="rounded-[9px]">
-                  <SelectValue placeholder="Select…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(meta?.unitSelections ?? [])
-                    .filter(
-                      (u: any) =>
-                        !form.ApplicantId ||
-                        String(u.ApplicantId) === form.ApplicantId
-                    )
-                    .map((u: any) => (
-                      <SelectItem key={u.Id} value={String(u.Id)}>
-                        {u.SelectionNo} — {u.UnitNo}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {(() => {
+              const filteredUnits = (meta?.unitSelections ?? []).filter(
+                (u: any) => !form.ApplicantId || String(u.ApplicantId) === form.ApplicantId
+              );
+              const noUnits = !!form.ApplicantId && filteredUnits.length === 0;
+              return (
+                <div className="space-y-1">
+                  <Label className="text-xs">Unit Selection</Label>
+                  <Select
+                    value={form.UnitSelectionId || ""}
+                    onValueChange={(v) => setForm((f) => ({ ...f, UnitSelectionId: v }))}
+                    disabled={noUnits}
+                  >
+                    <SelectTrigger className={`rounded-[9px] ${noUnits ? "opacity-50 cursor-not-allowed" : ""}`}>
+                      <SelectValue
+                        placeholder={
+                          !form.ApplicantId ? "Select…"
+                          : noUnits ? "No unit selections found"
+                          : "Select…"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredUnits.map((u: any) => (
+                        <SelectItem key={u.Id} value={String(u.Id)}>
+                          {u.SelectionNo} — {u.UnitNo}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {noUnits && (
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                      <span>⚠</span> No unit selections for this applicant yet.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Booking */}
-            <div className="space-y-1">
-              <Label className="text-xs">Booking</Label>
-              <Select
-                value={form.BookingId || ""}
-                onValueChange={(v) =>
-                  setForm((f) => ({ ...f, BookingId: v }))
-                }
-              >
-                <SelectTrigger className="rounded-[9px]">
-                  <SelectValue placeholder="Select…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(meta?.bookings ?? [])
-                    .filter(
-                      (b: any) =>
-                        !form.ApplicantId ||
-                        String(b.ApplicantId) === form.ApplicantId
-                    )
-                    .map((b: any) => (
-                      <SelectItem key={b.Id} value={String(b.Id)}>
-                        {b.BookingNo}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {(() => {
+              const filteredBookings = (meta?.bookings ?? []).filter(
+                (b: any) => !form.ApplicantId || String(b.ApplicantId) === form.ApplicantId
+              );
+              const noBookings = !!form.ApplicantId && filteredBookings.length === 0;
+              return (
+                <div className="space-y-1">
+                  <Label className="text-xs">Booking</Label>
+                  <Select
+                    value={form.BookingId || ""}
+                    onValueChange={(v) => setForm((f) => ({ ...f, BookingId: v }))}
+                    disabled={noBookings}
+                  >
+                    <SelectTrigger className={`rounded-[9px] ${noBookings ? "opacity-50 cursor-not-allowed" : ""}`}>
+                      <SelectValue
+                        placeholder={
+                          !form.ApplicantId ? "Select…"
+                          : noBookings ? "No bookings found"
+                          : "Select…"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredBookings.map((b: any) => (
+                        <SelectItem key={b.Id} value={String(b.Id)}>
+                          {b.BookingNo}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {noBookings && (
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                      <span>⚠</span> No bookings for this applicant yet.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Project */}
             <div className="space-y-1">
@@ -669,6 +694,7 @@ export function LegalMilestonesPage() {
                 />
               </div>
             ))}
+          </div>
           </div>
           <DialogFooter>
             <Button
