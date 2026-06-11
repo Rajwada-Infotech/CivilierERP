@@ -23,62 +23,206 @@ const NotFound = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center overflow-hidden relative">
-      {/* Subtle grid background */}
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#27272a_1px,transparent_1px),linear-gradient(to_bottom,#27272a_1px,transparent_1px)] bg-[size:40px_40px] opacity-20" />
+    <div className="min-h-screen bg-background flex items-center justify-center overflow-hidden relative font-sans select-none">
+      {/* Blueprint grid — tight engineering paper */}
+      <svg
+        className="absolute inset-0 w-full h-full opacity-[0.07] pointer-events-none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <defs>
+          <pattern
+            id="smallGrid"
+            width="20"
+            height="20"
+            patternUnits="userSpaceOnUse"
+          >
+            <path
+              d="M 20 0 L 0 0 0 20"
+              fill="none"
+              stroke="hsl(239,84%,67%)"
+              strokeWidth="0.4"
+            />
+          </pattern>
+          <pattern
+            id="bigGrid"
+            width="100"
+            height="100"
+            patternUnits="userSpaceOnUse"
+          >
+            <rect width="100" height="100" fill="url(#smallGrid)" />
+            <path
+              d="M 100 0 L 0 0 0 100"
+              fill="none"
+              stroke="hsl(239,84%,67%)"
+              strokeWidth="0.8"
+            />
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#bigGrid)" />
+      </svg>
 
-      <div className="relative z-10 text-center px-6 max-w-md">
-        {/* Floating 404 */}
-        <div className="relative mb-8">
+      {/* Faint radial glow behind center */}
+      <div
+        className="absolute pointer-events-none"
+        style={{
+          width: 600,
+          height: 600,
+          left: "50%",
+          top: "50%",
+          transform: "translate(-50%, -50%)",
+          background:
+            "radial-gradient(ellipse at center, hsl(239 84% 67% / 0.08) 0%, transparent 70%)",
+          borderRadius: "50%",
+        }}
+      />
+
+      <div className="relative z-10 flex flex-col items-center gap-10 px-6 max-w-xl w-full">
+        {/* Drawing sheet header strip */}
+        <div className="w-full flex items-center justify-between border border-border/50 px-4 py-2 rounded-md bg-card/40 backdrop-blur-sm">
+          <span className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">
+            Civilier ERP
+          </span>
+          <span className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">
+            DWG-000 · REV 0
+          </span>
+          <span className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">
+            Error Sheet
+          </span>
+        </div>
+
+        {/* 404 with dimension lines */}
+        <div
+          className="relative flex items-center justify-center w-full"
+          style={{ height: 180 }}
+        >
+          {/* Left dimension line */}
+          <div
+            className="absolute flex flex-col items-center"
+            style={{ left: "8%", top: 0, bottom: 0 }}
+          >
+            <div
+              className="w-px flex-1 bg-primary/40"
+              style={{ animationDelay: "0s" }}
+            />
+            <div className="w-3 h-px bg-primary/60" />
+            <div
+              className="font-mono text-[9px] text-primary/60 my-1 tracking-widest"
+              style={{ writingMode: "vertical-rl" }}
+            >
+              HEIGHT: ??
+            </div>
+            <div className="w-3 h-px bg-primary/60" />
+            <div className="w-px flex-1 bg-primary/40" />
+          </div>
+
+          {/* Right dimension line */}
+          <div
+            className="absolute flex flex-col items-center"
+            style={{ right: "8%", top: 0, bottom: 0 }}
+          >
+            <div className="w-px flex-1 bg-primary/40" />
+            <div className="w-3 h-px bg-primary/60" />
+            <div
+              className="font-mono text-[9px] text-primary/60 my-1 tracking-widest"
+              style={{ writingMode: "vertical-rl" }}
+            >
+              ROUTE: NULL
+            </div>
+            <div className="w-3 h-px bg-primary/60" />
+            <div className="w-px flex-1 bg-primary/40" />
+          </div>
+
+          {/* Top dimension line */}
+          <div
+            className="absolute flex items-center"
+            style={{ top: 10, left: "16%", right: "16%" }}
+          >
+            <div className="h-px flex-1 bg-primary/40" />
+            <span className="font-mono text-[9px] text-primary/60 mx-2 tracking-widest whitespace-nowrap">
+              404.00mm
+            </span>
+            <div className="h-px flex-1 bg-primary/40" />
+          </div>
+
+          {/* The 404 itself */}
           <h1
-            className="text-[160px] md:text-[200px] font-black tracking-[-0.05em] text-foreground leading-none animate-float select-none"
-            style={{ textShadow: "0 0 60px hsl(var(--primary) / 0.4)" }}
+            className="text-[120px] md:text-[150px] font-black tracking-[-0.04em] leading-none"
+            style={{
+              fontFamily: "'Sora', sans-serif",
+              color: "hsl(var(--foreground))",
+              textShadow: "0 0 80px hsl(239 84% 67% / 0.25)",
+              letterSpacing: "-0.05em",
+            }}
           >
             404
           </h1>
-          <div className="absolute inset-0 bg-primary/10 blur-3xl rounded-full animate-glow-pulse" />
-        </div>
 
-        <div className="space-y-4 animate-slide-up">
-          <p className="text-3xl font-medium text-foreground">
-            Lost in the void?
-          </p>
-          <p className="text-muted-foreground text-lg">
-            The page you're looking for has been abducted by aliens.
-          </p>
-        </div>
-
-        {/* Cool Button */}
-        <div className="mt-12">
-          <button
-            onClick={handleGoBack}
-            className="group inline-flex items-center gap-3 px-8 py-3.5 bg-primary text-primary-foreground font-semibold rounded-2xl text-lg transition-all duration-300 hover:scale-105 active:scale-95 shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30"
-          >
-            {currentUser ? "Take me back" : "Beam me back home"}
-            <span className="group-hover:rotate-45 transition-transform duration-300">
-              →
-            </span>
-          </button>
-        </div>
-
-        <p className="mt-16 text-xs text-muted-foreground tracking-widest font-mono">
-          ERROR • NOT_FOUND
-        </p>
-      </div>
-
-      {/* Twinkling stars */}
-      <div className="absolute inset-0 pointer-events-none">
-        {Array.from({ length: 8 }).map((_, i) => (
+          {/* Bottom dimension arrow line */}
           <div
-            key={i}
-            className="absolute w-0.5 h-0.5 bg-foreground rounded-full animate-twinkle"
-            style={{
-              left: `${12 + i * 10}%`,
-              top: `${15 + (i % 4) * 18}%`,
-              animationDelay: `${i * 0.3}s`,
-            }}
-          />
-        ))}
+            className="absolute flex items-center"
+            style={{ bottom: 10, left: "16%", right: "16%" }}
+          >
+            <div className="h-px flex-1 bg-primary/40" />
+            <span className="font-mono text-[9px] text-primary/60 mx-2 tracking-widest whitespace-nowrap">
+              NOT FOUND
+            </span>
+            <div className="h-px flex-1 bg-primary/40" />
+          </div>
+        </div>
+
+        {/* Message block — styled like a drawing note box */}
+        <div className="w-full border border-border/60 rounded-md bg-card/50 backdrop-blur-sm p-5 space-y-2">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-primary" />
+            <span className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">
+              Navigation Error · Site Notice
+            </span>
+          </div>
+          <p className="text-foreground font-semibold text-xl leading-snug">
+            This page doesn't exist in the project.
+          </p>
+          <p className="text-muted-foreground text-sm leading-relaxed">
+            The route{" "}
+            <code className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded text-primary">
+              {location.pathname}
+            </code>{" "}
+            wasn't found. It may have been removed, renamed, or you may not have
+            access.
+          </p>
+        </div>
+
+        {/* Action */}
+        <button
+          onClick={handleGoBack}
+          className="group inline-flex items-center gap-3 px-7 py-3 font-semibold rounded-xl text-base transition-all duration-200 hover:scale-[1.03] active:scale-[0.97]"
+          style={{
+            background: "hsl(239 84% 67%)",
+            color: "#fff",
+            boxShadow: "0 4px 24px hsl(239 84% 67% / 0.28)",
+            fontFamily: "'DM Sans', sans-serif",
+          }}
+        >
+          <span
+            className="text-white/70 group-hover:text-white transition-colors duration-200"
+            style={{ fontSize: 18, lineHeight: 1 }}
+          >
+            ←
+          </span>
+          {currentUser ? "Back to Dashboard" : "Go to Login"}
+        </button>
+
+        {/* Drawing sheet footer */}
+        <div className="w-full flex items-center justify-between border-t border-border/30 pt-3">
+          <span className="font-mono text-[9px] text-muted-foreground/50 tracking-widest uppercase">
+            Scale: N/A
+          </span>
+          <span className="font-mono text-[9px] text-muted-foreground/50 tracking-widest uppercase">
+            Checked: System
+          </span>
+          <span className="font-mono text-[9px] text-muted-foreground/50 tracking-widest uppercase">
+            Status: Error
+          </span>
+        </div>
       </div>
     </div>
   );
