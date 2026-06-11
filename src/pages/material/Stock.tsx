@@ -17,6 +17,7 @@ import {
 import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getInventoryMaster } from "@/api/inventoryMasterApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtNum = (n: number) =>
@@ -459,6 +460,10 @@ export default function Stock() {
     staleTime: 300_000,
   });
   const projects = Array.isArray(projectsData) ? projectsData : [];
+  const filteredProjects = useMemo(
+    () => filterProjectsByCompany(projects, selectedCompany),
+    [projects, selectedCompany],
+  );
 
   // Filter godowns: exclude Main Godown, then apply company/project filters
   const filteredGodowns = useMemo(() => {
@@ -490,6 +495,7 @@ export default function Stock() {
 
   const handleCompanyChange = (v: number | null) => {
     setSelectedCompany(v);
+    setSelectedProject(null);
     // Do NOT clear project — both filters are independent
   };
 
@@ -540,7 +546,7 @@ export default function Stock() {
               label="Project"
               value={selectedProject}
               onChange={(v) => handleProjectChange(v as number | null)}
-              options={projects.map((p: any) => ({
+              options={filteredProjects.map((p: any) => ({
                 value: p.id,
                 label: p.label,
               }))}

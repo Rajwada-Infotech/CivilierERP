@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -16,6 +16,7 @@ import {
 import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { Button } from "@/components/ui/button";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import {
   Hammer,
   Plus,
@@ -93,7 +94,9 @@ interface WorkDoneEntry {
 interface DropdownOption {
   id: number;
   name: string;
+  belongs_to?: string | number | null;
   company_id?: number | null;
+  company_ids?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -290,8 +293,17 @@ function WorkDoneForm({
 
   const setField = useCallback(
     <K extends keyof FormState>(k: K, v: FormState[K]) =>
-      setForm((prev) => ({ ...prev, [k]: v })),
+      setForm((prev) => ({
+        ...prev,
+        [k]: v,
+        ...(k === "companyId" ? { projectId: "" } : {}),
+      })),
     [],
+  );
+
+  const filteredProjects = useMemo(
+    () => filterProjectsByCompany(projects, form.companyId),
+    [projects, form.companyId],
   );
 
   const gross =
@@ -429,33 +441,12 @@ function WorkDoneForm({
                   Project
                 </span>
               </FieldLabel>
-              {loadingDropdowns ? (
-                <SelectSkeleton />
-              ) : (
-                <select
-                  value={form.projectId}
-                  onChange={(e) => setField("projectId", e.target.value)}
-                  disabled={!form.companyId}
-                  className={`${selectCls} ${errors.projectId ? "border-red-400" : ""} ${!form.companyId ? "opacity-50 cursor-not-allowed" : ""}`}
-                >
-                  <option value="">
-                    {!form.companyId
-                      ? "Select a company first"
-                      : "Select project…"}
-                  </option>
-                  {(form.companyId
-                    ? projects.filter(
-                        (p) =>
-                          !p.company_id ||
-                          p.company_id === parseInt(form.companyId),
-                      )
-                    : projects
-                  ).map((o) => (
-                    <option key={o.id} value={String(o.id)}>
-                      {o.name}
-                    </option>
-                  ))}
-                </select>
+              {renderSelect(
+                form.projectId,
+                (v) => setField("projectId", v),
+                filteredProjects,
+                "Select project…",
+                errors.projectId,
               )}
               {errors.projectId && (
                 <p className="text-xs text-red-500 mt-1">Required</p>

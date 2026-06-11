@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import {
   MasterPage,
   FieldDef,
@@ -328,6 +329,7 @@ const DebitNoteMaster: React.FC = () => {
     unknown
   > | null>(null);
   const [autoFillPatchKey, setAutoFillPatchKey] = useState(0);
+  const [selectedCompanyLabel, setSelectedCompanyLabel] = useState<string>("");
 
   // Only auto-set once on first load, never override user's explicit selection
   useEffect(() => {
@@ -408,13 +410,20 @@ const DebitNoteMaster: React.FC = () => {
         .filter((o) => o.label)
     : [];
 
-  const PROJECT_OPTIONS: { id: number; label: string }[] = Array.isArray(
-    projectData,
-  )
-    ? projectData
-        .map((o: any) => ({ id: o.id, label: o.label ?? o.name ?? "" }))
-        .filter((o) => o.label)
-    : [];
+  // Derive the selected company's id from its label so we can filter projects
+  const selectedCompanyId = useMemo(() => {
+    if (!selectedCompanyLabel) return "";
+    const match = COMPANY_OPTIONS.find((c) => c.label === selectedCompanyLabel);
+    return match ? String(match.id) : "";
+  }, [selectedCompanyLabel, COMPANY_OPTIONS]);
+
+  const PROJECT_OPTIONS: { id: number; label: string }[] = useMemo(() => {
+    const raw = Array.isArray(projectData) ? projectData : [];
+    const filtered = filterProjectsByCompany(raw, selectedCompanyId);
+    return filtered
+      .map((o: any) => ({ id: o.id, label: o.label ?? o.name ?? "" }))
+      .filter((o: any) => o.label);
+  }, [projectData, selectedCompanyId]);
 
   const SUPPLIER_OPTIONS: { id: number; label: string }[] = Array.isArray(
     accountHeadData,
@@ -483,6 +492,19 @@ const DebitNoteMaster: React.FC = () => {
       is_active: formData.status !== false,
       finYear: selectedFinYear || null,
     };
+  };
+
+  // When company changes in the form: track the new label so we can filter
+  // PROJECT_OPTIONS, and reset the project field to blank.
+  const handleFieldChange = (
+    form: Record<string, unknown>,
+    fieldName: string,
+  ): Record<string, unknown> => {
+    if (fieldName === "company") {
+      setSelectedCompanyLabel((form.company as string) ?? "");
+      return { project: "" };
+    }
+    return {};
   };
 
   const handleCustomSave = (formData: Record<string, unknown>) => {
@@ -752,6 +774,7 @@ const DebitNoteMaster: React.FC = () => {
         initialData={mappedData}
         onCustomSave={handleCustomSave}
         onDataEvent={handleDataEvent}
+        onFieldChange={handleFieldChange}
         externalFormPatch={autoFillPatch}
         externalFormPatchKey={autoFillPatchKey}
         exportConfig={{

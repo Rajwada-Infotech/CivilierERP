@@ -1,4 +1,5 @@
 import { useMemo, useRef, useEffect, useState } from "react";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -531,7 +532,7 @@ export function NOCPage() {
 
   const projectItems: ComboItem[] = useMemo(
     () =>
-      (meta?.projects ?? []).map((p) => ({
+      filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map((p) => ({
         value: String(p.Id),
         label: p.Name,
       })),
@@ -1493,7 +1494,7 @@ export function NOCPage() {
                 <Label>Company</Label>
                 <Combobox
                   value={form.CompanyId}
-                  onChange={(v) => set("CompanyId", v)}
+                  onChange={(v) => { set("CompanyId", v); set("ProjectId", ""); }}
                   items={companyItems}
                   placeholder="Select company…"
                 />

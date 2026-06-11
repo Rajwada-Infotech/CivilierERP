@@ -296,7 +296,16 @@ router.delete("/:id", adminOnly, async (req, res) => {
     const usageCheck = await pool.request().input("CompanyId", sql.Int, id)
       .query(`
       SELECT
-        (SELECT COUNT(*) FROM dbo.enterprise      WHERE company_id   = @CompanyId AND business_type = 'P') AS ProjectCount,
+        (SELECT COUNT(*)
+         FROM (
+           SELECT id AS ProjectId
+           FROM dbo.enterprise
+           WHERE company_id = @CompanyId AND business_type = 'P'
+           UNION
+           SELECT ProjectId
+           FROM dbo.ProjectCompanies
+           WHERE CompanyId = @CompanyId
+         ) linkedProjects) AS ProjectCount,
         (SELECT COUNT(*) FROM dbo.PurchaseOrders  WHERE CompanyId    = @CompanyId) AS POCount,
         (SELECT COUNT(*) FROM dbo.WorkOrderHeader      WHERE CompanyId    = @CompanyId) AS WOCount
     `);
