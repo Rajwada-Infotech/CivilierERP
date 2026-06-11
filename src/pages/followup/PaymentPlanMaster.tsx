@@ -276,19 +276,21 @@ const PaymentPlanMaster: React.FC = () => {
     <>
       <Breadcrumbs
         items={[
-          { label: "Follow-Up", path: "/followup" },
+          { label: "Dashboard" },
+          { label: "Follow-Up" },
           { label: "Setup" },
           { label: "Payment Plan Master" },
         ]}
       />
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-6 mb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
         <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
+          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+            <Landmark className="w-5 h-5 text-primary" />
             Payment Plan Master
           </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
+          <p className="text-sm text-muted-foreground mt-0.5">
             Define reusable payment milestone terms for bookings &amp; units
           </p>
         </div>
@@ -297,7 +299,7 @@ const PaymentPlanMaster: React.FC = () => {
             setShowAddRow(true);
             setEditId(null);
           }}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg gradient-accent text-white text-sm font-semibold transition-all shadow-sm self-start sm:self-auto"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-all shadow-sm self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
           Add Milestone

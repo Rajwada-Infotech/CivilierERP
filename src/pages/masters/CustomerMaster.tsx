@@ -207,13 +207,10 @@ const CustomerMaster: React.FC = () => {
   /* -------------------- UI -------------------- */
   return (
     <>
-      <Breadcrumbs items={[{label: "Follow-Up", path: "/followup"}, {label: "Customer Master"}]} />
-      <div className="mt-6 mb-4">
-        <h1 className="text-xl font-heading font-bold text-foreground">
-          Customer Master
-        </h1>
-        <p className="text-xs text-muted-foreground mt-0.5">Manage customer records and contact information.</p>
-      </div>
+      <Breadcrumbs items={["Dashboard", "Masters", "Customer Master"]} />
+      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
+        Customer Master
+      </h1>
       <MasterPage
         title="Customer"
         fields={fields}

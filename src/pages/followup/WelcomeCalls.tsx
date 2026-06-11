@@ -10,7 +10,6 @@ import {
   X,
   Clock,
   Calendar,
-  ChevronDown,
   User,
   StickyNote,
   CheckCircle2,
@@ -388,8 +387,6 @@ export function WelcomeCallsPage() {
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingSearch, setBookingSearch] = useState("");
   const bookingRef = useRef<HTMLDivElement>(null);
-  const [timePickerOpen, setTimePickerOpen] = useState(false);
-  const timePickerRef = useRef<HTMLDivElement>(null);
 
   // Bug 2 — close booking dropdown on outside click
   useEffect(() => {
@@ -402,37 +399,6 @@ export function WelcomeCallsPage() {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [bookingOpen]);
-
-  useEffect(() => {
-    if (!timePickerOpen) return;
-    function handleClick(e: MouseEvent) {
-      if (timePickerRef.current && !timePickerRef.current.contains(e.target as Node)) {
-        setTimePickerOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [timePickerOpen]);
-
-  // Parse stored 24h time into display parts
-  const timeParts = (() => {
-    const v = form.CallTime;
-    if (!v) return { h: "", m: "", ampm: "AM" };
-    const [hh, mm] = v.split(":");
-    const hour = parseInt(hh);
-    return {
-      h: String(hour % 12 || 12).padStart(2, "0"),
-      m: mm,
-      ampm: hour >= 12 ? "PM" : "AM",
-    };
-  })();
-
-  function applyTime(h: string, m: string, ampm: string) {
-    let hour = parseInt(h);
-    if (ampm === "PM" && hour !== 12) hour += 12;
-    if (ampm === "AM" && hour === 12) hour = 0;
-    set("CallTime", `${String(hour).padStart(2, "0")}:${m}`);
-  }
 
   const {
     data: calls = [],
@@ -967,7 +933,7 @@ export function WelcomeCallsPage() {
                 <div className="relative">
                   <Calendar
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
                   <input
                     type="date"
@@ -979,60 +945,12 @@ export function WelcomeCallsPage() {
               </div>
               <div className="space-y-2">
                 <Label>Call Time</Label>
-                <div className="relative" ref={timePickerRef}>
-                  <button
-                    type="button"
-                    onClick={() => setTimePickerOpen((o) => !o)}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left"
-                  >
-                    <Clock size={13} className="text-foreground shrink-0" />
-                    <span className={form.CallTime ? "" : "text-muted-foreground"}>
-                      {form.CallTime ? `${timeParts.h}:${timeParts.m} ${timeParts.ampm}` : "--:-- --"}
-                    </span>
-                  </button>
-                  {timePickerOpen && (
-                    <div className="absolute z-50 mt-1 left-0 bg-popover border border-border rounded-[9px] shadow-lg p-3 flex gap-2 items-start">
-                      {/* Hours */}
-                      <div className="flex flex-col gap-1 max-h-44 overflow-y-auto pr-1 scrollbar-thin">
-                        {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0")).map((h) => (
-                          <button
-                            key={h}
-                            type="button"
-                            onClick={() => { applyTime(h, timeParts.m || "00", timeParts.ampm); }}
-                            className={`px-2.5 py-1 rounded text-xs font-medium transition ${timeParts.h === h ? "bg-primary text-primary-foreground" : "hover:bg-muted text-foreground"}`}
-                          >{h}</button>
-                        ))}
-                      </div>
-                      <div className="w-px bg-border self-stretch" />
-                      {/* Minutes */}
-                      <div className="flex flex-col gap-1 max-h-44 overflow-y-auto pr-1 scrollbar-thin">
-                        {Array.from({ length: 60 }, (_, i) => String(i).padStart(2, "0")).map((m) => (
-                          <button
-                            key={m}
-                            type="button"
-                            onClick={() => { applyTime(timeParts.h || "12", m, timeParts.ampm); }}
-                            className={`px-2.5 py-1 rounded text-xs font-medium transition ${timeParts.m === m ? "bg-primary text-primary-foreground" : "hover:bg-muted text-foreground"}`}
-                          >{m}</button>
-                        ))}
-                      </div>
-                      <div className="w-px bg-border self-stretch" />
-                      {/* AM / PM */}
-                      <div className="flex flex-col gap-1">
-                        {["AM", "PM"].map((ap) => (
-                          <button
-                            key={ap}
-                            type="button"
-                            onClick={() => {
-                              applyTime(timeParts.h || "12", timeParts.m || "00", ap);
-                              setTimePickerOpen(false);
-                            }}
-                            className={`px-2.5 py-1 rounded text-xs font-medium transition ${timeParts.ampm === ap ? "bg-primary text-primary-foreground" : "hover:bg-muted text-foreground"}`}
-                          >{ap}</button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <Input
+                  type="time"
+                  value={form.CallTime}
+                  onChange={(e) => set("CallTime", e.target.value)}
+                  className="rounded-[9px]"
+                />
               </div>
             </div>
 
@@ -1050,12 +968,11 @@ export function WelcomeCallsPage() {
               </div>
               <div className="space-y-2">
                 <Label>Status</Label>
-                <div className="relative">
-                  <select
-                    value={form.Status}
-                    onChange={(e) => set("Status", e.target.value)}
-                    className="w-full appearance-none h-10 pl-3 pr-9 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-                  >
+                <select
+                  value={form.Status}
+                  onChange={(e) => set("Status", e.target.value)}
+                  className="w-full h-10 px-3 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                >
                   {(
                     meta?.statuses ?? ["Scheduled", "Completed", "Cancelled"]
                   ).map((s) => (
@@ -1063,9 +980,7 @@ export function WelcomeCallsPage() {
                       {s}
                     </option>
                   ))}
-                  </select>
-                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                </div>
+                </select>
               </div>
             </div>
 
@@ -1134,21 +1049,18 @@ export function WelcomeCallsPage() {
             {meta?.assignees && meta.assignees.length > 0 && (
               <div className="space-y-2">
                 <Label>Assigned To</Label>
-                <div className="relative">
-                  <select
-                    value={form.AssignedTo}
-                    onChange={(e) => set("AssignedTo", e.target.value)}
-                    className="w-full appearance-none h-10 pl-3 pr-9 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-                  >
-                    <option value="">— Not assigned —</option>
-                    {meta.assignees.map((u) => (
-                      <option key={u.Id} value={u.Id}>
-                        {u.Name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                </div>
+                <select
+                  value={form.AssignedTo}
+                  onChange={(e) => set("AssignedTo", e.target.value)}
+                  className="w-full h-10 px-3 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                >
+                  <option value="">— Not assigned —</option>
+                  {meta.assignees.map((u) => (
+                    <option key={u.Id} value={u.Id}>
+                      {u.Name}
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
 
@@ -1166,13 +1078,13 @@ export function WelcomeCallsPage() {
           </div>
 
           <DialogFooter>
-            <button
-              type="button"
+            <Button
+              variant="outline"
               onClick={() => setDialogOpen(false)}
-              className="px-4 py-2 rounded-[9px] border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors"
+              className="rounded-[9px]"
             >
               Cancel
-            </button>
+            </Button>
             <Button
               disabled={!form.ApplicantId || createMutation.isPending}
               onClick={handleSubmit}

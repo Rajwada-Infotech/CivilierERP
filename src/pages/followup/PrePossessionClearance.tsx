@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -270,7 +270,6 @@ function Combobox({ value, onChange, items, placeholder, disabled }: {
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
   const selected = items.find((i) => i.value === value);
   const filtered = useMemo(() => {
     if (!q) return items;
@@ -278,17 +277,8 @@ function Combobox({ value, onChange, items, placeholder, disabled }: {
     return items.filter((i) => i.label.toLowerCase().includes(lq) || (i.sub ?? "").toLowerCase().includes(lq));
   }, [items, q]);
 
-  useEffect(() => {
-    if (!open) return;
-    function handle(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
-  }, [open]);
-
   return (
-    <div className="pp-combo" ref={ref}>
+    <div className="pp-combo">
       <button
         type="button"
         className={`pp-combo-trigger${open ? " open" : ""}${!value ? " empty" : ""}${disabled ? " disabled" : ""}`}
@@ -406,7 +396,7 @@ export function PrePossessionClearancePage() {
   }, [meta, form.ApplicantId]);
 
   const projectItems: ComboItem[] = useMemo(() =>
-    filterProjectsByCompany((meta?.projects ?? []) as any[], form.CompanyId).map((p: any) => ({ value: String(p.Id), label: p.Name })), [meta]);
+    filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map((p) => ({ value: String(p.Id), label: p.Name })), [meta]);
 
   const companyItems: ComboItem[] = useMemo(() =>
     (meta?.companies ?? []).map((c) => ({ value: String(c.Id), label: c.Name })), [meta]);
@@ -916,8 +906,8 @@ export function PrePossessionClearancePage() {
               <div className="space-y-2">
                 <Label>Clearance Date</Label>
                 <div className="relative">
-                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
-                  <input type="date" value={form.ClearanceDate} onChange={(e) => set("ClearanceDate", e.target.value)} className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer" />
+                  <CalendarDays size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <Input type="date" value={form.ClearanceDate} onChange={(e) => set("ClearanceDate", e.target.value)} className="pl-8" />
                 </div>
               </div>
               <div className="space-y-2">
@@ -930,19 +920,16 @@ export function PrePossessionClearancePage() {
 
             <div className="space-y-2">
               <Label>Status</Label>
-              <div className="relative">
-                <select
-                  className="w-full appearance-none pl-3 pr-9 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-                  value={allCleared ? "Cleared" : form.Status}
-                  onChange={(e) => set("Status", e.target.value)}
-                  disabled={allCleared}
-                >
-                  {(meta?.statusOptions ?? (["Pending","In Progress","Cleared","Failed"] as PPStatus[])).map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-                <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              </div>
+              <select
+                className="w-full px-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                value={allCleared ? "Cleared" : form.Status}
+                onChange={(e) => set("Status", e.target.value)}
+                disabled={allCleared}
+              >
+                {(meta?.statusOptions ?? (["Pending","In Progress","Cleared","Failed"] as PPStatus[])).map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-2">
@@ -952,7 +939,7 @@ export function PrePossessionClearancePage() {
           </div>
 
           <DialogFooter>
-            <button type="button" className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={() => setDialogOpen(false)}>Cancel</button>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button
               disabled={!form.ApplicantId || isSaving}
               onClick={() => (editId ? updateMut.mutate() : createMut.mutate())}

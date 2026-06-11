@@ -20,7 +20,6 @@ import {
   Scale,
   Trash2,
   Clock,
-  CalendarDays,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
@@ -219,15 +218,14 @@ function MilestoneStepper({
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Completion Date</Label>
-                        <div className="relative">
-                          <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
-                          <input
-                            type="date"
-                            value={form.doneDate}
-                            onChange={(e) => setForm((f) => ({ ...f, doneDate: e.target.value }))}
-                            className="w-full pl-8 pr-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                          />
-                        </div>
+                        <Input
+                          type="date"
+                          value={form.doneDate}
+                          onChange={(e) =>
+                            setForm((f) => ({ ...f, doneDate: e.target.value }))
+                          }
+                          className="rounded-[9px]"
+                        />
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Notes</Label>
@@ -242,13 +240,14 @@ function MilestoneStepper({
                       </div>
                     </div>
                     <DialogFooter>
-                      <button
-                        type="button"
-                        className="px-3 py-1.5 rounded-[9px] border border-border bg-background text-foreground text-xs font-medium hover:bg-muted transition-colors"
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-[9px]"
                         onClick={() => setEditingStep(null)}
                       >
                         Cancel
-                      </button>
+                      </Button>
                       <Button
                         size="sm"
                         className="gradient-accent text-white rounded-[9px]"
@@ -519,18 +518,19 @@ export function LegalMilestonesPage() {
 
       {/* ── Create Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
+        <DialogContent className="max-w-lg" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle className="text-base font-bold">
               New Legal Milestone
             </DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-4 py-2 px-0.5">
+          <div className="grid grid-cols-2 gap-4 py-2 max-h-[65vh] overflow-y-auto pr-1">
             {/* Applicant */}
             <div className="col-span-2 space-y-1">
               <Label className="text-xs">Applicant *</Label>
               <Select
                 value={form.ApplicantId || ""}
+                // FIX #9: reset dependent fields when applicant changes
                 onValueChange={(v) =>
                   setForm((f) => ({ ...f, ApplicantId: v, UnitSelectionId: "", BookingId: "" }))
                 }
@@ -541,7 +541,7 @@ export function LegalMilestonesPage() {
                 <SelectContent>
                   {(meta?.applicants ?? []).map((a: any) => (
                     <SelectItem key={a.Id} value={String(a.Id)}>
-                      {a.ApplicantName}{a.ApplicantNo ? ` (${a.ApplicantNo})` : ""}
+                      {a.ApplicantName} ({a.ApplicantNo})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -549,84 +549,60 @@ export function LegalMilestonesPage() {
             </div>
 
             {/* Unit Selection */}
-            {(() => {
-              const filteredUnits = (meta?.unitSelections ?? []).filter(
-                (u: any) => !form.ApplicantId || String(u.ApplicantId) === form.ApplicantId
-              );
-              const noUnits = !!form.ApplicantId && filteredUnits.length === 0;
-              return (
-                <div className="space-y-1">
-                  <Label className="text-xs">Unit Selection</Label>
-                  <Select
-                    value={form.UnitSelectionId || ""}
-                    onValueChange={(v) => setForm((f) => ({ ...f, UnitSelectionId: v }))}
-                    disabled={!form.ApplicantId || noUnits}
-                  >
-                    <SelectTrigger className={`rounded-[9px] ${!form.ApplicantId || noUnits ? "opacity-50 cursor-not-allowed" : ""}`}>
-                      <SelectValue
-                        placeholder={
-                          !form.ApplicantId ? "Select applicant first"
-                          : noUnits ? "No unit selections found"
-                          : "Select…"
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {filteredUnits.map((u: any) => (
-                        <SelectItem key={u.Id} value={String(u.Id)}>
-                          {u.SelectionNo} — {u.UnitNo}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {noUnits && (
-                    <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
-                      <span>⚠</span> No unit selections for this applicant yet.
-                    </p>
-                  )}
-                </div>
-              );
-            })()}
+            <div className="space-y-1">
+              <Label className="text-xs">Unit Selection</Label>
+              <Select
+                value={form.UnitSelectionId || ""}
+                onValueChange={(v) =>
+                  setForm((f) => ({ ...f, UnitSelectionId: v }))
+                }
+              >
+                <SelectTrigger className="rounded-[9px]">
+                  <SelectValue placeholder="Select…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(meta?.unitSelections ?? [])
+                    .filter(
+                      (u: any) =>
+                        !form.ApplicantId ||
+                        String(u.ApplicantId) === form.ApplicantId
+                    )
+                    .map((u: any) => (
+                      <SelectItem key={u.Id} value={String(u.Id)}>
+                        {u.SelectionNo} — {u.UnitNo}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
 
             {/* Booking */}
-            {(() => {
-              const filteredBookings = (meta?.bookings ?? []).filter(
-                (b: any) => !form.ApplicantId || String(b.ApplicantId) === form.ApplicantId
-              );
-              const noBookings = !!form.ApplicantId && filteredBookings.length === 0;
-              return (
-                <div className="space-y-1">
-                  <Label className="text-xs">Booking</Label>
-                  <Select
-                    value={form.BookingId || ""}
-                    onValueChange={(v) => setForm((f) => ({ ...f, BookingId: v }))}
-                    disabled={!form.ApplicantId || noBookings}
-                  >
-                    <SelectTrigger className={`rounded-[9px] ${!form.ApplicantId || noBookings ? "opacity-50 cursor-not-allowed" : ""}`}>
-                      <SelectValue
-                        placeholder={
-                          !form.ApplicantId ? "Select applicant first"
-                          : noBookings ? "No bookings found"
-                          : "Select…"
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {filteredBookings.map((b: any) => (
-                        <SelectItem key={b.Id} value={String(b.Id)}>
-                          {b.BookingNo}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {noBookings && (
-                    <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
-                      <span>⚠</span> No bookings for this applicant yet.
-                    </p>
-                  )}
-                </div>
-              );
-            })()}
+            <div className="space-y-1">
+              <Label className="text-xs">Booking</Label>
+              <Select
+                value={form.BookingId || ""}
+                onValueChange={(v) =>
+                  setForm((f) => ({ ...f, BookingId: v }))
+                }
+              >
+                <SelectTrigger className="rounded-[9px]">
+                  <SelectValue placeholder="Select…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(meta?.bookings ?? [])
+                    .filter(
+                      (b: any) =>
+                        !form.ApplicantId ||
+                        String(b.ApplicantId) === form.ApplicantId
+                    )
+                    .map((b: any) => (
+                      <SelectItem key={b.Id} value={String(b.Id)}>
+                        {b.BookingNo}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
 
             {/* Project */}
             <div className="space-y-1">
@@ -681,25 +657,30 @@ export function LegalMilestonesPage() {
             {STEPS.map((s) => (
               <div key={s.field} className="space-y-1">
                 <Label className="text-xs">{s.label}</Label>
-                <div className="relative">
-                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
-                  <input
-                    type="date"
-                    className="w-full pl-8 pr-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                    onChange={(e) => setForm((f) => ({ ...f, [`${s.field}Due`]: e.target.value }))}
-                  />
-                </div>
+                <Input
+                  type="date"
+                  className="rounded-[9px]"
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      [`${s.field}Due`]: e.target.value,
+                    }))
+                  }
+                />
               </div>
             ))}
           </div>
           <DialogFooter>
-            <button
-              type="button"
-              className="px-4 py-2 rounded-[9px] border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors"
-              onClick={() => { setDialogOpen(false); setForm({}); }}
+            <Button
+              variant="outline"
+              className="rounded-[9px]"
+              onClick={() => {
+                setDialogOpen(false);
+                setForm({});
+              }}
             >
               Cancel
-            </button>
+            </Button>
             <Button
               disabled={!form.ApplicantId || createMutation.isPending}
               className="gradient-accent text-white rounded-[9px]"
@@ -752,13 +733,14 @@ export function LegalMilestonesPage() {
             ? This cannot be undone.
           </p>
           <DialogFooter>
-            <button
-              type="button"
-              className="px-3 py-1.5 rounded-[9px] border border-border bg-background text-foreground text-xs font-medium hover:bg-muted transition-colors"
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-[9px]"
               onClick={() => setDeleteTarget(null)}
             >
               Cancel
-            </button>
+            </Button>
             <Button
               size="sm"
               variant="destructive"

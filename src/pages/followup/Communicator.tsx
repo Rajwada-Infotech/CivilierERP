@@ -19,7 +19,6 @@ import {
   Channel,
   CommunicatorLog,
 } from "../../api/followupCommunicatorApi";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -141,21 +140,12 @@ export default function Communicator() {
   // ─── render ─────────────────────────────────────────────────────────────────
 
   return (
-    <>
-      <Breadcrumbs
-        items={[
-          { label: "Follow-Up", path: "/followup" },
-          { label: "Agreement" },
-          { label: "Communicator" },
-        ]}
-      />
-
-    <div className="space-y-6 mt-6">
+    <div className="p-6 space-y-6 max-w-6xl mx-auto">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">Communicator</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
+          <h1 className="text-2xl font-bold text-foreground">Communicator</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
             Send Email, SMS, or WhatsApp messages to applicants
           </p>
         </div>
@@ -262,7 +252,8 @@ export default function Communicator() {
             disabled={
               !recipient.trim() || !body.trim() || sendMutation.isPending
             }
-            className="w-full flex items-center justify-center gap-2 gradient-accent disabled:opacity-50 text-white text-sm font-semibold py-2.5 rounded-lg transition-colors"
+            className="w-full flex items-center justify-center gap-2 bg-primary hover:bg-primary/90
+                       disabled:opacity-50 text-primary-foreground text-sm font-medium py-2.5 rounded-lg transition-colors"
           >
             <Send size={14} />
             {sendMutation.isPending ? "Sending…" : `Send ${meta.label}`}
@@ -279,38 +270,32 @@ export default function Communicator() {
             <div className="flex items-center gap-2">
               <Filter size={14} className="text-muted-foreground" />
 
-              <div className="relative">
-                <select
-                  value={filterChannel}
-                  onChange={(e) => {
-                    setFilterChannel(e.target.value as any);
-                    setPage(1);
-                  }}
-                  className="appearance-none text-xs border border-border rounded-md pl-2 pr-7 py-1 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer"
-                >
-                  <option value="">All channels</option>
-                  <option value="email">Email</option>
-                  <option value="sms">SMS</option>
-                  <option value="whatsapp">WhatsApp</option>
-                </select>
-                <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              </div>
+              <select
+                value={filterChannel}
+                onChange={(e) => {
+                  setFilterChannel(e.target.value as any);
+                  setPage(1);
+                }}
+                className="text-xs border border-border rounded-md px-2 py-1 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+              >
+                <option value="">All channels</option>
+                <option value="email">Email</option>
+                <option value="sms">SMS</option>
+                <option value="whatsapp">WhatsApp</option>
+              </select>
 
-              <div className="relative">
-                <select
-                  value={filterStatus}
-                  onChange={(e) => {
-                    setFilterStatus(e.target.value as any);
-                    setPage(1);
-                  }}
-                  className="appearance-none text-xs border border-border rounded-md pl-2 pr-7 py-1 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer"
-                >
-                  <option value="">All statuses</option>
-                  <option value="Sent">Sent</option>
-                  <option value="Failed">Failed</option>
-                </select>
-                <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              </div>
+              <select
+                value={filterStatus}
+                onChange={(e) => {
+                  setFilterStatus(e.target.value as any);
+                  setPage(1);
+                }}
+                className="text-xs border border-border rounded-md px-2 py-1 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+              >
+                <option value="">All statuses</option>
+                <option value="Sent">Sent</option>
+                <option value="Failed">Failed</option>
+              </select>
 
               <button
                 onClick={() =>
@@ -438,6 +423,5 @@ export default function Communicator() {
         </div>
       </div>
     </div>
-    </>
   );
 }

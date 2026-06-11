@@ -16,8 +16,8 @@ const LIST_COLUMNS = `
   fho.Id,
   fho.HandoverNo,
   fho.ApplicantId,
-  COALESCE(fa.ApplicantName, ISNULL(ahm.DisplayName, ahm.LHeadName)) AS ApplicantName,
-  COALESCE(fa.ApplicantNo,   ahm.LHeadCode)                         AS ApplicantNo,
+  ISNULL(ahm.DisplayName, ahm.LHeadName) AS ApplicantName,
+  ahm.LHeadCode                          AS ApplicantNo,
   fho.UnitSelectionId,
   fus.SelectionNo,
   fus.UnitNo,
@@ -96,9 +96,9 @@ async function getApplicantSnapshot(applicantId) {
   const result = await getPool()
     .request()
     .input("ApplicantId", sql.Int, applicantId).query(`
-      SELECT TOP 1 Id FROM dbo.FollowupApplications WHERE Id = @ApplicantId AND IsDeleted = 0
-      UNION ALL
-      SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadId = @ApplicantId AND LHeadType = 'A' AND LHeadStatus = 1
+      SELECT TOP 1 LHeadId AS Id
+      FROM dbo.AccountHeadMaster
+      WHERE LHeadId = @ApplicantId AND LHeadType = 'A' AND LHeadStatus = 1
     `);
   return result.recordset[0] ?? null;
 }
@@ -184,10 +184,10 @@ async function buildOptions() {
     companiesR,
   ] = await Promise.all([
     pool.request().query(`
-        SELECT Id, ApplicantNo, ApplicantName, ProjectId, CompanyId
-        FROM dbo.FollowupApplications
-        WHERE IsDeleted = 0
-        ORDER BY ApplicantName
+        SELECT LHeadId AS Id, ISNULL(DisplayName, LHeadName) AS ApplicantName, LHeadCode AS ApplicantNo
+        FROM dbo.AccountHeadMaster
+        WHERE LHeadType = 'A' AND LHeadStatus = 1
+        ORDER BY ISNULL(DisplayName, LHeadName)
       `),
     pool.request().query(`
         SELECT fus.Id, fus.SelectionNo, fus.UnitNo, fus.ApplicantId, fus.ProjectId, fus.CompanyId
@@ -278,8 +278,8 @@ router.get("/", async (req, res) => {
     if (search) {
       filters.push(`(
         fho.HandoverNo                              LIKE @Search
-        OR COALESCE(fa.ApplicantNo,   ahm.LHeadCode)                          LIKE @Search
-        OR COALESCE(fa.ApplicantName, ISNULL(ahm.DisplayName, ahm.LHeadName)) LIKE @Search
+        OR ahm.LHeadCode                            LIKE @Search
+        OR ISNULL(ahm.DisplayName, ahm.LHeadName)  LIKE @Search
         OR fus.UnitNo                               LIKE @Search
         OR fag.AgreementNo                          LIKE @Search
         OR fsd.DeedNo                               LIKE @Search
@@ -294,8 +294,7 @@ router.get("/", async (req, res) => {
 
     const BASE_JOINS = `
       FROM dbo.FollowupHandovers fho
-      LEFT JOIN  dbo.AccountHeadMaster ahm     ON ahm.LHeadId = fho.ApplicantId AND ahm.LHeadType = 'A'
-      LEFT JOIN  dbo.FollowupApplications fa   ON fa.Id = fho.ApplicantId AND fa.IsDeleted = 0 AND ahm.LHeadId IS NULL
+      INNER JOIN dbo.AccountHeadMaster ahm   ON ahm.LHeadId = fho.ApplicantId AND ahm.LHeadType = 'A'
       LEFT JOIN  dbo.FollowupUnitSelections fus ON fus.Id = fho.UnitSelectionId
       LEFT JOIN  dbo.FollowupAgreements fag     ON fag.Id = fho.AgreementId
       LEFT JOIN  dbo.FollowupSalesDeeds fsd     ON fsd.Id = fho.SalesDeedId
