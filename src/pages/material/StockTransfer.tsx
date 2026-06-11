@@ -594,7 +594,8 @@ export default function StockTransfer() {
   const filteredGodowns = useMemo(() => {
     return allGodowns.filter((g) => {
       if (g.IsMain) return false; // exclude Main Godown — transfers only between project godowns
-      if (filterCompanyId && String(g.EnterpriseID ?? "") !== filterCompanyId)
+      // Use derived CompanyID (backend resolves it from project's company linkage)
+      if (filterCompanyId && String(g.CompanyID ?? "") !== filterCompanyId)
         return false;
       if (filterProjectId && String(g.ProjectID ?? "") !== filterProjectId)
         return false;
@@ -799,7 +800,7 @@ export default function StockTransfer() {
                   value={filterCompanyId}
                   onChange={(v) => {
                     setFilterCompanyId(v);
-                    setFilterProjectId("");
+                    setFilterProjectId(""); // reset project cascade when company changes
                     setFromGodownId(null);
                     setToGodownId(null);
                     setItems([emptyItem()]);
@@ -834,7 +835,11 @@ export default function StockTransfer() {
                   godowns={filteredGodowns}
                   exclude={toGodownId}
                   variant="from"
-                  placeholder="Select source godown…"
+                  placeholder={
+                    filteredGodowns.length === 0
+                      ? "No godowns available"
+                      : "Select source godown…"
+                  }
                 />
                 <GodownSelect
                   label="To"
@@ -843,7 +848,11 @@ export default function StockTransfer() {
                   godowns={filteredGodowns}
                   exclude={fromGodownId}
                   variant="to"
-                  placeholder="Select destination godown…"
+                  placeholder={
+                    filteredGodowns.length === 0
+                      ? "No godowns available"
+                      : "Select destination godown…"
+                  }
                 />
               </div>
 
