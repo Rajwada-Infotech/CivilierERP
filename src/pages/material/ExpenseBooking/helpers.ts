@@ -168,7 +168,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     bookingName: "",
     bookingReference: "",
     docTypeName: "",
-    bookingDate: "",
+    bookingDate: new Date().toISOString().slice(0, 10),
     dueDate: "",
     financialYear: "",
     companyId: null,
@@ -232,7 +232,10 @@ export function dbToRecord(row: any): ExpenseRecord {
 
   try {
     if (row.EBillingTermsData) {
-      const parsed = JSON.parse(row.EBillingTermsData);
+      // Backend was previously double-stringifying — parse once, then re-parse
+      // if we got a string back (legacy double-encoded rows in DB).
+      let parsed = JSON.parse(row.EBillingTermsData);
+      if (typeof parsed === "string") parsed = JSON.parse(parsed);
       if (Array.isArray(parsed) && parsed.length > 0) {
         billingTerms = parsed.map((t: any, i: number) => ({
           ...defaultDiscount(),
