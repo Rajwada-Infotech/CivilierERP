@@ -773,7 +773,7 @@ export default function GRN() {
   const godowns = (godownsData as any)?.data ?? [];
 
   const { data: projectsData = [] } = useQuery({
-    queryKey: ["projects"],
+    queryKey: ["grn-projects"],
     queryFn: getProjects,
   });
 
@@ -1399,13 +1399,14 @@ export default function GRN() {
                       }
                       className={inpSel}
                     >
-                      <option value="">Main Godown (default)</option>
-                      {godowns.map((g: any) => (
-                        <option key={g.GodownID} value={String(g.GodownID)}>
-                          {g.GodownName}
-                          {g.IsMain ? " [Main]" : ""}
-                        </option>
-                      ))}
+                      <option value="">Main Godown</option>
+                      {godowns
+                        .filter((g: any) => !g.IsMain)
+                        .map((g: any) => (
+                          <option key={g.GodownID} value={String(g.GodownID)}>
+                            {g.GodownName}
+                          </option>
+                        ))}
                     </select>
                     <ChevronDown
                       size={12}

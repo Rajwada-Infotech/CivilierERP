@@ -44,7 +44,7 @@ interface TrailStep {
   role: string | null;
   actionAt: string | null;
   note: string | null;
-  approvers?: Approver[];   // parallel only
+  approvers?: Approver[]; // parallel only
   workflowType?: string;
 }
 
@@ -67,25 +67,33 @@ interface Props {
 
 function fmtDate(iso: string | null) {
   if (!iso) return "";
-  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  return new Date(iso).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+  });
 }
 
-function badgeText(step: TrailStep, status: "Approved" | "Rejected" | "Pending"): string {
-  const label = step.label;
-  const name = step.approverName || step.approverEmail?.split("@")[0] || null;
-  const who = name ? ` · ${name}` : "";
-  return `${label}${who} · ${status}`;
+function badgeText(
+  step: TrailStep,
+  status: "Approved" | "Rejected" | "Pending",
+): string {
+  // Keep badge compact — just "L1 · Approved". Full name is in the tooltip.
+  return `${step.label} · ${status}`;
 }
 
 function tooltipText(step: TrailStep): string {
   if (step.workflowType === "parallel" && step.approvers?.length) {
     return step.approvers
-      .map((a) => `${a.name || a.email} — ${a.status}${a.actionAt ? ` (${fmtDate(a.actionAt)})` : ""}`)
+      .map(
+        (a) =>
+          `${a.name || a.email} — ${a.status}${a.actionAt ? ` (${fmtDate(a.actionAt)})` : ""}`,
+      )
       .join("\n");
   }
-  const who = step.approverEmail || step.approverName || "";
+  const name = step.approverName || step.approverEmail?.split("@")[0] || "";
   const when = step.actionAt ? ` (${fmtDate(step.actionAt)})` : "";
-  return who ? `${who}${when}` : step.label;
+  const label = `${step.label}${name ? ` · ${name}` : ""}`;
+  return label ? `${label}${when}` : step.label;
 }
 
 export function ApprovalStatusChain({ table, recordId, className }: Props) {
@@ -96,12 +104,20 @@ export function ApprovalStatusChain({ table, recordId, className }: Props) {
     if (!recordId) return;
     let cancelled = false;
     setLoading(true);
-    fetchWithAuth(`/api/approval-workflows/trail?module=${table}&id=${recordId}`)
+    fetchWithAuth(
+      `/api/approval-workflows/trail?module=${table}&id=${recordId}`,
+    )
       .then((r) => r.json())
-      .then((data: TrailData) => { if (!cancelled) setTrail(data); })
+      .then((data: TrailData) => {
+        if (!cancelled) setTrail(data);
+      })
       .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [table, recordId]);
 
   if (loading) {
@@ -119,8 +135,9 @@ export function ApprovalStatusChain({ table, recordId, className }: Props) {
   if (steps.length === 0) return null;
 
   const fullyApproved = steps.every((s) => s.status === "Approved");
-  const rejectedStep  = steps.find((s) => s.status === "Rejected");
-  const currentStep   = steps.find((s) => s.status !== "Approved") ?? steps[steps.length - 1];
+  const rejectedStep = steps.find((s) => s.status === "Rejected");
+  const currentStep =
+    steps.find((s) => s.status !== "Approved") ?? steps[steps.length - 1];
 
   // ── Fully approved ──────────────────────────────────────────────────────────
   if (fullyApproved) {
@@ -129,7 +146,8 @@ export function ApprovalStatusChain({ table, recordId, className }: Props) {
       <span
         title={tooltipText(last)}
         className={cn(
-          "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold",
+          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold",
+          "whitespace-nowrap",
           "bg-emerald-100 text-emerald-700 border border-emerald-200",
           "dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800",
           className,
@@ -147,7 +165,8 @@ export function ApprovalStatusChain({ table, recordId, className }: Props) {
       <span
         title={tooltipText(rejectedStep)}
         className={cn(
-          "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold",
+          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold",
+          "whitespace-nowrap",
           "bg-red-100 text-red-700 border border-red-200",
           "dark:bg-red-950/40 dark:text-red-400 dark:border-red-800",
           className,
@@ -164,7 +183,8 @@ export function ApprovalStatusChain({ table, recordId, className }: Props) {
     <span
       title={tooltipText(currentStep)}
       className={cn(
-        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold",
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold",
+        "whitespace-nowrap",
         "bg-amber-100 text-amber-700 border border-amber-200",
         "dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800",
         className,
