@@ -3944,10 +3944,7 @@ const Payment: React.FC = () => {
                         <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%] hidden md:table-cell">
                           Bank
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[8%]">
-                          Status
-                        </th>
-                        <th className="px-4 py-3 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%]">
+                        <th className="px-4 py-3 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[20%]">
                           Actions
                         </th>
                       </tr>
@@ -3956,7 +3953,7 @@ const Payment: React.FC = () => {
                       {records.length === 0 && (
                         <tr>
                           <td
-                            colSpan={9}
+                            colSpan={8}
                             className="text-center py-14 text-muted-foreground text-sm"
                           >
                             <AlertCircle
@@ -4050,25 +4047,12 @@ const Payment: React.FC = () => {
                           <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[100px] truncate hidden md:table-cell">
                             {rec.bankName || "—"}
                           </td>
-                          {/* Status */}
-                          <td className="px-4 py-2.5">
-                            <StatusBadge status={rec.status} />
-                          </td>
                           {/* Actions */}
                           <td className="px-4 py-2.5">
-                            <div className="flex items-center gap-1 justify-end">
-                              <ApprovalActions
-                                status={rec.status}
-                                recordId={Number(rec.id)}
-                                endpoint="/api/new-payment"
-                                submitOnly
-                                onSuccess={() => {
-                                  queryClient.invalidateQueries({
-                                    queryKey: ["payments"],
-                                    exact: false,
-                                  });
-                                  refetchPayments();
-                                }}
+                            <div className="flex items-center justify-end gap-2">
+                              <ApprovalStatusChain
+                                table="NewPayment"
+                                recordId={rec.id}
                               />
                               <button
                                 onClick={() => openViewRec(rec)}
