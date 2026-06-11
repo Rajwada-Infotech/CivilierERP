@@ -88,8 +88,16 @@ export const fetchCompanies = async (): Promise<
   try {
     const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = safeArray<{ id: number; label: string }>(await res.json());
-    return data.map((r) => ({ id: r.id, name: r.label ?? "" }));
+    const data = safeArray<{
+      id: number;
+      label: string;
+      company_id?: number | null;
+    }>(await res.json());
+    return data.map((r) => ({
+      id: r.id,
+      name: r.label ?? "",
+      company_id: r.company_id ?? null,
+    }));
   } catch (err) {
     console.error("[workOrderApi] fetchCompanies failed:", err);
     return [];
@@ -105,6 +113,7 @@ export const fetchProjects = async (): Promise<
     company_id?: number | null;
     company_ids?: string | null;
   }[]
+
 > => {
   try {
     const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
@@ -115,6 +124,7 @@ export const fetchProjects = async (): Promise<
       belongs_to?: string | number | null;
       company_id?: number | null;
       company_ids?: string | null;
+
     }>(await res.json());
     return data.map((r) => ({
       id: r.id,
@@ -122,6 +132,7 @@ export const fetchProjects = async (): Promise<
       belongs_to: r.belongs_to ?? null,
       company_id: r.company_id ?? null,
       company_ids: r.company_ids ?? null,
+
     }));
   } catch (err) {
     console.error("[workOrderApi] fetchProjects failed:", err);
@@ -430,3 +441,4 @@ export const confirmWorkOrder = async (
   }
   return res.json();
 };
+
