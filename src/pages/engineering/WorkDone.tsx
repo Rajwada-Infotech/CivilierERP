@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -15,6 +15,7 @@ import {
 import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { Button } from "@/components/ui/button";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import {
   Hammer,
   Plus,
@@ -92,6 +93,9 @@ interface WorkDoneEntry {
 interface DropdownOption {
   id: number;
   name: string;
+  belongs_to?: string | number | null;
+  company_id?: number | null;
+  company_ids?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -288,8 +292,17 @@ function WorkDoneForm({
 
   const setField = useCallback(
     <K extends keyof FormState>(k: K, v: FormState[K]) =>
-      setForm((prev) => ({ ...prev, [k]: v })),
+      setForm((prev) => ({
+        ...prev,
+        [k]: v,
+        ...(k === "companyId" ? { projectId: "" } : {}),
+      })),
     [],
+  );
+
+  const filteredProjects = useMemo(
+    () => filterProjectsByCompany(projects, form.companyId),
+    [projects, form.companyId],
   );
 
   const gross =
@@ -427,7 +440,7 @@ function WorkDoneForm({
               {renderSelect(
                 form.projectId,
                 (v) => setField("projectId", v),
-                projects,
+                filteredProjects,
                 "Select project…",
                 errors.projectId,
               )}

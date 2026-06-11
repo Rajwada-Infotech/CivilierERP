@@ -1,5 +1,6 @@
 import Webcam from "react-webcam";
-import { useRef, useState } from "react";
+import { useRef, useState, useMemo } from "react";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -292,9 +293,22 @@ const CreateTicket = () => {
     value: String(c.id),
     label: c.name,
   }));
-  const projectOptions = (dropdownData?.projects ?? []).map((p) => ({
+
+  const allProjectOptions = (dropdownData?.projects ?? []).map((p) => ({
     value: String(p.id),
     label: p.name,
+    // keep raw shape so filterProjectsByCompany can read company_id/company_ids
+    ...(p as any),
+  }));
+
+  const filteredProjectOptions = useMemo(
+    () => filterProjectsByCompany(allProjectOptions as any[], companyId),
+    [allProjectOptions, companyId],
+  );
+
+  const projectOptions = filteredProjectOptions.map((p: any) => ({
+    value: p.value ?? String(p.id),
+    label: p.label ?? p.name,
   }));
   const customerOptions = customers.map((c) => ({
     value: String(c.LHeadId),
@@ -429,7 +443,10 @@ const CreateTicket = () => {
                 <Combobox
                   options={companyOptions}
                   value={companyId}
-                  onSelect={(id) => setCompanyId(id)}
+                  onSelect={(id) => {
+                    setCompanyId(id);
+                    setProjectId(undefined);
+                  }}
                   placeholder="Select company"
                   loading={loadingDropdowns}
                 />

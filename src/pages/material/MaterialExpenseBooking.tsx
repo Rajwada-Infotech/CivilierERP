@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useNavigate } from "react-router-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -2272,7 +2273,7 @@ export default function MaterialExpenseBooking() {
                     <Select
                       value={form.companyId ? String(form.companyId) : ""}
                       onValueChange={(v) =>
-                        set("companyId", v ? parseInt(v, 10) : null)
+                        { set("companyId", v ? parseInt(v, 10) : null); set("projectSite", ""); set("projectName", ""); }
                       }
                     >
                       <SelectTrigger>
@@ -2380,7 +2381,7 @@ export default function MaterialExpenseBooking() {
                               {form.projectName || form.projectSite}
                             </SelectItem>
                           )}
-                        {projectOptions.map((p) => (
+                        {filterProjectsByCompany(projectOptions as any[], form.companyId ?? null).map((p: any) => (
                           <SelectItem key={p.id} value={String(p.id)}>
                             {p.label}
                           </SelectItem>

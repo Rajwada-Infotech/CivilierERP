@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { AlertTriangle } from "lucide-react";
 import {
   Dialog,
@@ -479,20 +480,19 @@ const PurchaseOrderMaster: React.FC = () => {
         name: p.label ?? "",
         belongsTo: p.belongs_to ?? null,
         companyId: p.company_id != null ? String(p.company_id) : null,
+        company_ids: p.company_ids ?? null,
       })),
     [projectsRaw],
   );
 
   // Projects filtered by the MR filter company (for the MR filter dropdown)
   const filteredMRProjects = useMemo(() => {
-    if (!mrFilterCompanyId) return allProjects;
-    return allProjects.filter((p) => p.companyId === mrFilterCompanyId);
+    return filterProjectsByCompany(allProjects, mrFilterCompanyId);
   }, [allProjects, mrFilterCompanyId]);
 
   // Projects filtered by the form's selected company (for Order Details)
   const filteredFormProjects = useMemo(() => {
-    if (!form.companyId) return allProjects;
-    return allProjects.filter((p) => p.companyId === form.companyId);
+    return filterProjectsByCompany(allProjects, form.companyId);
   }, [allProjects, form.companyId]);
 
   const uoms = useMemo(
