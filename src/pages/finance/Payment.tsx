@@ -53,6 +53,7 @@ import {
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { filterProjectsByCompany, projectBelongsToCompany } from "@/lib/projectBelongsTo";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -429,6 +430,7 @@ const fetchProjectOptions = async (): Promise<
     label: string;
     belongs_to?: number | null;
     company_id?: number | null;
+    company_ids?: string | null;
   }[]
 > => {
   const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
@@ -885,6 +887,7 @@ function FilterBar({
     label: string;
     belongs_to?: number | null;
     company_id?: number | null;
+    company_ids?: string | null;
   }[];
   supplierOptions: { id: number; label: string }[];
   finYearOptions: { id: number; label: string }[];
@@ -895,13 +898,10 @@ function FilterBar({
   const companies = companyOptions.map((o) => o.label);
 
   // Filter projects to only those belonging to the selected company
-  const filteredProjectOptions = selectedCompanyId
-    ? projectOptions.filter(
-        (p) =>
-          p.belongs_to === selectedCompanyId ||
-          p.company_id === selectedCompanyId,
-      )
-    : projectOptions;
+  const filteredProjectOptions = filterProjectsByCompany(
+    projectOptions,
+    selectedCompanyId,
+  );
   const projects = filteredProjectOptions.map((o) => o.label);
   const finYears = finYearOptions.map((o) => o.label);
   const suppliers = supplierOptions.map((o) => o.label);
@@ -1991,6 +1991,7 @@ const Payment: React.FC = () => {
       label: string;
       belongs_to?: number | null;
       company_id?: number | null;
+      company_ids?: string | null;
     }[]
   >({
     queryKey: ["project-options-payment-filter"],
@@ -2649,8 +2650,10 @@ const Payment: React.FC = () => {
                                     ? projectOptions.some(
                                         (p) =>
                                           p.label === prev.project &&
-                                          (p.belongs_to === newCompanyId ||
-                                            p.company_id === newCompanyId),
+                                          projectBelongsToCompany(
+                                            p,
+                                            newCompanyId,
+                                          ),
                                       )
                                     : true;
                                   if (!projStillValid) next.project = "";
@@ -3533,8 +3536,7 @@ const Payment: React.FC = () => {
                                   const stillValid = projectOptions.some(
                                     (p) =>
                                       p.label === projectFilter &&
-                                      (p.belongs_to === Number(val) ||
-                                        p.company_id === Number(val)),
+                                      projectBelongsToCompany(p, val),
                                   );
                                   if (!stillValid) setProjectFilter("");
                                 }
@@ -3571,13 +3573,9 @@ const Payment: React.FC = () => {
                               className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                             >
                               <option value="">All Projects</option>
-                              {(companyFilter
-                                ? projectOptions.filter(
-                                    (p) =>
-                                      p.belongs_to === Number(companyFilter) ||
-                                      p.company_id === Number(companyFilter),
-                                  )
-                                : projectOptions
+                              {filterProjectsByCompany(
+                                projectOptions,
+                                companyFilter,
                               ).map((p) => (
                                 <option key={p.id} value={p.label}>
                                   {p.label}
@@ -3944,10 +3942,7 @@ const Payment: React.FC = () => {
                         <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%] hidden md:table-cell">
                           Bank
                         </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[8%]">
-                          Status
-                        </th>
-                        <th className="px-4 py-3 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%]">
+                        <th className="px-4 py-3 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[20%]">
                           Actions
                         </th>
                       </tr>
@@ -3956,7 +3951,7 @@ const Payment: React.FC = () => {
                       {records.length === 0 && (
                         <tr>
                           <td
-                            colSpan={9}
+                            colSpan={8}
                             className="text-center py-14 text-muted-foreground text-sm"
                           >
                             <AlertCircle
@@ -4050,25 +4045,12 @@ const Payment: React.FC = () => {
                           <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[100px] truncate hidden md:table-cell">
                             {rec.bankName || "—"}
                           </td>
-                          {/* Status */}
-                          <td className="px-4 py-2.5">
-                            <StatusBadge status={rec.status} />
-                          </td>
                           {/* Actions */}
                           <td className="px-4 py-2.5">
-                            <div className="flex items-center gap-1 justify-end">
-                              <ApprovalActions
-                                status={rec.status}
-                                recordId={Number(rec.id)}
-                                endpoint="/api/new-payment"
-                                submitOnly
-                                onSuccess={() => {
-                                  queryClient.invalidateQueries({
-                                    queryKey: ["payments"],
-                                    exact: false,
-                                  });
-                                  refetchPayments();
-                                }}
+                            <div className="flex items-center justify-end gap-2">
+                              <ApprovalStatusChain
+                                table="NewPayment"
+                                recordId={rec.id}
                               />
                               <button
                                 onClick={() => openViewRec(rec)}

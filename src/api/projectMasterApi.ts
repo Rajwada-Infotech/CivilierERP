@@ -4,6 +4,8 @@ const BASE = "/api/project-master";
 
 export interface ProjectMasterPayload {
   company_id: number;
+  companyId?: number | null;
+  companyIds?: number[];
   project_name: string;
   project_initial: string;
   project_code?: string;

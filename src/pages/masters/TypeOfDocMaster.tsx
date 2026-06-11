@@ -30,6 +30,7 @@ import {
   type ProjectOption,
   type DocTypePayload,
 } from "@/api/documentTypeApi";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -339,7 +340,12 @@ const TypeOfDocMaster: React.FC = () => {
   });
 
   // ── Derived: selected project's short_name for live preview ──────────────
-  const selectedProject = projects.find(
+  const filteredProjects = useMemo(
+    () => filterProjectsByCompany(projects as any[], form.CompanyId),
+    [projects, form.CompanyId],
+  );
+
+  const selectedProject = filteredProjects.find(
     (p) => String(p.ProjectId) === String(form.ProjectId),
   );
   const selectedProjectCode = selectedProject?.ProjectCode ?? null;
@@ -562,7 +568,7 @@ const TypeOfDocMaster: React.FC = () => {
                   <select
                     value={form.CompanyId}
                     onChange={(e) =>
-                      setForm({ ...form, CompanyId: e.target.value })
+                      setForm({ ...form, CompanyId: e.target.value, ProjectId: "" })
                     }
                     className="w-full border border-border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary"
                   >
@@ -588,7 +594,7 @@ const TypeOfDocMaster: React.FC = () => {
                     className="w-full border border-border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary"
                   >
                     <option value="">All Projects</option>
-                    {projects.map((p) => (
+                    {filteredProjects.map((p: any) => (
                       <option key={p.ProjectId} value={p.ProjectId}>
                         {p.ProjectCode ? `${p.ProjectCode} – ` : ""}
                         {p.ProjectName}

@@ -395,21 +395,64 @@ router.get("/options", async (req, res) => {
     const conditions = [];
 
     if (req.query.type) {
-      conditions.push("entity_type = @entityType");
+      conditions.push("e.entity_type = @entityType");
       request.input("entityType", sql.NVarChar(50), req.query.type);
     }
     if (req.query.business_type) {
-      conditions.push("business_type = @businessType");
+      conditions.push("e.business_type = @businessType");
       request.input("businessType", sql.NVarChar(100), req.query.business_type);
     }
 
     // Always exclude soft-deleted rows from dropdown options
-    conditions.push("(discontinue IS NULL OR discontinue = 0)");
+    conditions.push("(e.discontinue IS NULL OR e.discontinue = 0)");
 
-    let query =
-      "SELECT id, name AS label, belongs_to, company_id FROM dbo.enterprise";
+    // Check if ProjectCompanies table exists (migration 103 may not have run yet)
+    const tableCheck = await pool.request().query(`
+      SELECT CASE WHEN OBJECT_ID(N'dbo.ProjectCompanies', N'U') IS NULL THEN 0 ELSE 1 END AS exists_flag
+    `);
+    const hasProjectCompanies = tableCheck.recordset[0].exists_flag === 1;
+
+    let query;
+    if (hasProjectCompanies) {
+      query = `
+        SELECT
+          e.id,
+          e.name AS label,
+          CASE
+            WHEN e.business_type = 'P' THEN CAST(COALESCE(e.company_id, pc.PrimaryCompanyId) AS NVARCHAR(50))
+            ELSE e.belongs_to
+          END AS belongs_to,
+          COALESCE(e.company_id, pc.PrimaryCompanyId) AS company_id,
+          pc.CompanyIds AS company_ids
+        FROM dbo.enterprise e
+        OUTER APPLY (
+          SELECT
+            MIN(x.CompanyId) AS PrimaryCompanyId,
+            STRING_AGG(CAST(x.CompanyId AS NVARCHAR(20)), ',') WITHIN GROUP (ORDER BY x.CompanyId) AS CompanyIds
+          FROM (
+            SELECT e.company_id AS CompanyId WHERE e.business_type = 'P' AND e.company_id IS NOT NULL
+            UNION
+            SELECT pc2.CompanyId FROM dbo.ProjectCompanies pc2 WHERE pc2.ProjectId = e.id
+          ) x
+        ) pc
+      `;
+    } else {
+      // Fallback: migration 103 not yet applied — use legacy company_id only
+      query = `
+        SELECT
+          e.id,
+          e.name AS label,
+          CASE
+            WHEN e.business_type = 'P' THEN CAST(e.company_id AS NVARCHAR(50))
+            ELSE e.belongs_to
+          END AS belongs_to,
+          e.company_id,
+          CAST(e.company_id AS NVARCHAR(50)) AS company_ids
+        FROM dbo.enterprise e
+      `;
+    }
     query += " WHERE " + conditions.join(" AND ");
-    query += " ORDER BY name";
+    query += " ORDER BY e.name";
 
     const result = await request.query(query);
     res.json(result.recordset);

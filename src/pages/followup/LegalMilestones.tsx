@@ -641,7 +641,7 @@ export function LegalMilestonesPage() {
                   <SelectValue placeholder="Select…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(meta?.projects ?? []).map((p: any) => (
+                  {filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map((p: any) => (
                     <SelectItem key={p.Id} value={String(p.Id)}>
                       {p.Name}
                     </SelectItem>
@@ -656,7 +656,7 @@ export function LegalMilestonesPage() {
               <Select
                 value={form.CompanyId || ""}
                 onValueChange={(v) =>
-                  setForm((f) => ({ ...f, CompanyId: v }))
+                  setForm((f) => ({ ...f, CompanyId: v, ProjectId: "" }))
                 }
               >
                 <SelectTrigger className="rounded-[9px]">

@@ -12,6 +12,10 @@ export interface Godown {
   IsMain: boolean;
   EnterpriseID: number | null;
   ProjectID: number | null;
+  /** Derived: company that owns this godown — set from EnterpriseID if present,
+   *  otherwise resolved from the linked project's company_id / belongs_to.
+   *  Use this for the Company → Project → Godown cascade filter. */
+  CompanyID: number | null;
   EnterpriseName: string | null;
   ProjectName: string | null;
   Location: string | null;

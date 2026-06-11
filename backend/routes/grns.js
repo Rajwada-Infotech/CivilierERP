@@ -667,17 +667,8 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
 
     await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
 
-    // Use the godown sent by the client; fall back to Main Godown only if none given
-    const resolvedGodownId = godownId
-      ? parseInt(godownId, 10)
-      : await resolveMainGodownId(pool);
-    await insertStockLedgerEntries(
-      transaction,
-      grnId,
-      grnItems,
-      finalDocNo,
-      resolvedGodownId,
-    );
+    // Stock ledger entries are intentionally NOT written here.
+    // They are only written once the GRN is Approved (see PUT /:id/approve).
 
     await transaction.commit();
 
@@ -741,6 +732,7 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
     }
     await bumpCacheVersion("stock-ledger");
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("inventory-master");
 
     // Auto-submit: transition Draft → Pending immediately after creation.
     try {
@@ -839,27 +831,33 @@ router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
         "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
       );
 
-    // Preserve the godown that was set when the GRN was created
-    const grnGodownRes = await pool
+    // Only re-write stock ledger entries if the GRN is already Approved.
+    // Pre-approval edits must not affect godown stock.
+    const currentStatusRes = await pool
       .request()
       .input("GID", sql.Int, grnId)
       .query(
-        "SELECT TOP 1 GodownID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GID",
+        "SELECT TOP 1 Status, GodownID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GID",
       );
-    const putGodownId =
-      grnGodownRes.recordset[0]?.GodownID ?? (await resolveMainGodownId(pool));
-    await insertStockLedgerEntries(
-      transaction,
-      grnId,
-      grnItems,
-      docNo,
-      putGodownId,
-    );
+    const currentStatus = currentStatusRes.recordset[0]?.Status;
+    if (currentStatus === "Approved") {
+      const putGodownId =
+        currentStatusRes.recordset[0]?.GodownID ??
+        (await resolveMainGodownId(pool));
+      await insertStockLedgerEntries(
+        transaction,
+        grnId,
+        grnItems,
+        docNo,
+        putGodownId,
+      );
+    }
     await transaction.commit();
 
     await bumpCacheVersion("grns");
     await bumpCacheVersion("expense-booking-options");
     await bumpCacheVersion("stock-ledger");
+    await bumpCacheVersion("inventory-master");
     res.json({ message: "GRN updated successfully" });
   } catch (err) {
     await transaction.rollback().catch(() => {});
@@ -1056,8 +1054,58 @@ router.put("/:id/approve", async (req, res) => {
       userEmail,
       req.user?.role,
     );
+
+    // Write stock ledger entries now that the GRN is Approved.
+    // Fetch GRN items + godown from the DB (source of truth).
+    try {
+      const pool = getPool();
+      const grnRow = await pool
+        .request()
+        .input("GRNID", sql.Int, id)
+        .query(
+          "SELECT TOP 1 GRNItems, GodownID, DocNo FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID",
+        );
+
+      if (grnRow.recordset.length > 0) {
+        const { GRNItems, GodownID, DocNo } = grnRow.recordset[0];
+        const resolvedGodownId = GodownID ?? (await resolveMainGodownId(pool));
+
+        const transaction = pool.transaction();
+        await transaction.begin();
+        try {
+          // Clear any stale entries (e.g. from a previous approve-reject cycle)
+          await transaction
+            .request()
+            .input("RefID", sql.Int, id)
+            .query(
+              "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
+            );
+          await insertStockLedgerEntries(
+            transaction,
+            id,
+            GRNItems,
+            DocNo,
+            resolvedGodownId,
+          );
+          await transaction.commit();
+        } catch (txErr) {
+          await transaction.rollback().catch(() => {});
+          throw txErr;
+        }
+      }
+    } catch (stockErr) {
+      // Stock write failure is non-fatal for the approval response,
+      // but log it clearly so it can be investigated.
+      console.error(
+        "[GRN approve] Stock ledger write failed (non-fatal):",
+        stockErr.message,
+      );
+    }
+
     await bumpCacheVersion("grns");
     await bumpCacheVersion("expense-booking-options");
+    await bumpCacheVersion("stock-ledger");
+    await bumpCacheVersion("inventory-master");
     res.json({ message: "GRN approved", ...result });
   } catch (err) {
     console.error("GRN approve error:", err.message);

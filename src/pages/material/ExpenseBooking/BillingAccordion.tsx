@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -328,8 +328,25 @@ interface Props {
   grnNetAmount?: number | null;
   /** When set (GRN source), use real per-item GST breakdown instead of averaged rates */
   gstBreakdown?: {
-    items: { itemName: string; cgstRate: number; sgstRate: number; cgstAmount: number; sgstAmount: number; baseAmount: number; gstAmount: number; totalAmountInclGST: number; receivedQty: number; gstPercent: number }[];
-    totals: { totalBase: number; totalCGST: number; totalSGST: number; totalGST: number; totalInclGST: number };
+    items: {
+      itemName: string;
+      cgstRate: number;
+      sgstRate: number;
+      cgstAmount: number;
+      sgstAmount: number;
+      baseAmount: number;
+      gstAmount: number;
+      totalAmountInclGST: number;
+      receivedQty: number;
+      gstPercent: number;
+    }[];
+    totals: {
+      totalBase: number;
+      totalCGST: number;
+      totalSGST: number;
+      totalGST: number;
+      totalInclGST: number;
+    };
   } | null;
 }
 
@@ -366,6 +383,25 @@ export function BillingAccordion({
       onChange(next[0] ?? defaultDiscount());
     }
   };
+
+  // Sync initial terms into form.billingTerms on first render when isMulti and
+  // the parent form has no saved terms yet. Without this, form.billingTerms stays []
+  // on submit if the user never explicitly touched the accordion.
+  const mountSyncDone = useRef(false);
+  useEffect(() => {
+    if (!isMulti || !onChangeBillingTerms) return;
+    if (mountSyncDone.current) return;
+    mountSyncDone.current = true;
+    // Only write back if the parent has no terms — don't clobber a loaded record.
+    // And only if there is a real term to persist (not a blank unapplicable stub).
+    if (!billingTerms || billingTerms.length === 0) {
+      const hasRealTerm = terms.some(
+        (t) => t.applicable && (t.masterTermName || t.value > 0),
+      );
+      if (hasRealTerm) onChangeBillingTerms(terms);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [pickerForIndex, setPickerForIndex] = useState<number | null>(null);
 
@@ -624,38 +660,64 @@ export function BillingAccordion({
                   <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-xs">
                     {/* Basic */}
                     <div className="flex justify-between items-center px-3 py-2 bg-muted/20">
-                      <span className="text-muted-foreground">Basic Amount</span>
-                      <span className="font-medium tabular-nums">₹{fmt(gstBreakdown.totals.totalBase)}</span>
+                      <span className="text-muted-foreground">
+                        Basic Amount
+                      </span>
+                      <span className="font-medium tabular-nums">
+                        ₹{fmt(gstBreakdown.totals.totalBase)}
+                      </span>
                     </div>
                     {/* Per-item CGST rows */}
                     {gstBreakdown.items.map((item, i) => (
-                      <div key={`cgst-${i}`} className="flex justify-between items-center px-3 py-1.5 bg-amber-500/[0.04]">
+                      <div
+                        key={`cgst-${i}`}
+                        className="flex justify-between items-center px-3 py-1.5 bg-amber-500/[0.04]"
+                      >
                         <span className="text-muted-foreground">
                           CGST [{item.cgstRate}%]
-                          <span className="ml-1 text-[10px] text-muted-foreground/60">· {item.itemName}</span>
+                          <span className="ml-1 text-[10px] text-muted-foreground/60">
+                            · {item.itemName}
+                          </span>
                         </span>
-                        <span className="text-amber-600 dark:text-amber-400 tabular-nums">+ ₹{fmt(item.cgstAmount)}</span>
+                        <span className="text-amber-600 dark:text-amber-400 tabular-nums">
+                          + ₹{fmt(item.cgstAmount)}
+                        </span>
                       </div>
                     ))}
                     {/* Per-item SGST rows */}
                     {gstBreakdown.items.map((item, i) => (
-                      <div key={`sgst-${i}`} className="flex justify-between items-center px-3 py-1.5 bg-amber-500/[0.04]">
+                      <div
+                        key={`sgst-${i}`}
+                        className="flex justify-between items-center px-3 py-1.5 bg-amber-500/[0.04]"
+                      >
                         <span className="text-muted-foreground">
                           SGST [{item.sgstRate}%]
-                          <span className="ml-1 text-[10px] text-muted-foreground/60">· {item.itemName}</span>
+                          <span className="ml-1 text-[10px] text-muted-foreground/60">
+                            · {item.itemName}
+                          </span>
                         </span>
-                        <span className="text-amber-600 dark:text-amber-400 tabular-nums">+ ₹{fmt(item.sgstAmount)}</span>
+                        <span className="text-amber-600 dark:text-amber-400 tabular-nums">
+                          + ₹{fmt(item.sgstAmount)}
+                        </span>
                       </div>
                     ))}
                     {/* Gross subtotal */}
                     <div className="flex justify-between items-center px-3 py-2 bg-muted/30">
-                      <span className="text-muted-foreground">Gross Amount</span>
-                      <span className="font-medium tabular-nums">₹{fmt(gstBreakdown.totals.totalInclGST)}</span>
+                      <span className="text-muted-foreground">
+                        Gross Amount
+                      </span>
+                      <span className="font-medium tabular-nums">
+                        ₹{fmt(gstBreakdown.totals.totalInclGST)}
+                      </span>
                     </div>
                     {/* Net Payable */}
                     <div className="flex justify-between items-center px-3 py-2.5 bg-primary/[0.06]">
-                      <span className="font-heading font-semibold text-foreground">Net Payable</span>
-                      <span className="font-heading font-bold text-primary tabular-nums">₹{fmt(gstBreakdown.totals.totalInclGST)}</span>
+                      <span className="font-heading font-semibold text-foreground">
+                        Net Payable
+                      </span>
+                      <span className="font-heading font-bold text-primary tabular-nums">
+                        ₹{fmt(gstBreakdown.totals.totalInclGST)}
+                      </span>
                     </div>
                   </div>
                 ) : (
