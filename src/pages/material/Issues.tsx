@@ -54,6 +54,7 @@ import {
 import { useFinYear } from "@/contexts/FinYearContext";
 import { Badge } from "@/components/ui/badge";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -496,9 +497,7 @@ export default function Issues() {
   // ── Company → Project filtering ──────────────────────────────────────────
 
   const filteredProjects = useMemo(() => {
-    if (!header.companyId) return projects as any[];
-    const cid = Number(header.companyId);
-    return (projects as any[]).filter((p) => Number(p.company_id) === cid);
+    return filterProjectsByCompany(projects as any[], header.companyId);
   }, [projects, header.companyId]);
 
   const handleCompanyChange = (v: string) => {

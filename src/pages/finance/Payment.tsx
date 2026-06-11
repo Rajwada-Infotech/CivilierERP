@@ -53,6 +53,7 @@ import {
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { filterProjectsByCompany, projectBelongsToCompany } from "@/lib/projectBelongsTo";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -429,6 +430,7 @@ const fetchProjectOptions = async (): Promise<
     label: string;
     belongs_to?: number | null;
     company_id?: number | null;
+    company_ids?: string | null;
   }[]
 > => {
   const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
@@ -885,6 +887,7 @@ function FilterBar({
     label: string;
     belongs_to?: number | null;
     company_id?: number | null;
+    company_ids?: string | null;
   }[];
   supplierOptions: { id: number; label: string }[];
   finYearOptions: { id: number; label: string }[];
@@ -895,13 +898,10 @@ function FilterBar({
   const companies = companyOptions.map((o) => o.label);
 
   // Filter projects to only those belonging to the selected company
-  const filteredProjectOptions = selectedCompanyId
-    ? projectOptions.filter(
-        (p) =>
-          p.belongs_to === selectedCompanyId ||
-          p.company_id === selectedCompanyId,
-      )
-    : projectOptions;
+  const filteredProjectOptions = filterProjectsByCompany(
+    projectOptions,
+    selectedCompanyId,
+  );
   const projects = filteredProjectOptions.map((o) => o.label);
   const finYears = finYearOptions.map((o) => o.label);
   const suppliers = supplierOptions.map((o) => o.label);
@@ -1991,6 +1991,7 @@ const Payment: React.FC = () => {
       label: string;
       belongs_to?: number | null;
       company_id?: number | null;
+      company_ids?: string | null;
     }[]
   >({
     queryKey: ["project-options-payment-filter"],
@@ -2649,8 +2650,10 @@ const Payment: React.FC = () => {
                                     ? projectOptions.some(
                                         (p) =>
                                           p.label === prev.project &&
-                                          (p.belongs_to === newCompanyId ||
-                                            p.company_id === newCompanyId),
+                                          projectBelongsToCompany(
+                                            p,
+                                            newCompanyId,
+                                          ),
                                       )
                                     : true;
                                   if (!projStillValid) next.project = "";
@@ -3533,8 +3536,7 @@ const Payment: React.FC = () => {
                                   const stillValid = projectOptions.some(
                                     (p) =>
                                       p.label === projectFilter &&
-                                      (p.belongs_to === Number(val) ||
-                                        p.company_id === Number(val)),
+                                      projectBelongsToCompany(p, val),
                                   );
                                   if (!stillValid) setProjectFilter("");
                                 }
@@ -3571,13 +3573,9 @@ const Payment: React.FC = () => {
                               className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                             >
                               <option value="">All Projects</option>
-                              {(companyFilter
-                                ? projectOptions.filter(
-                                    (p) =>
-                                      p.belongs_to === Number(companyFilter) ||
-                                      p.company_id === Number(companyFilter),
-                                  )
-                                : projectOptions
+                              {filterProjectsByCompany(
+                                projectOptions,
+                                companyFilter,
                               ).map((p) => (
                                 <option key={p.id} value={p.label}>
                                   {p.label}

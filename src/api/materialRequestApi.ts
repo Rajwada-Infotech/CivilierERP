@@ -131,7 +131,14 @@ export const getMRCompanies = () =>
   fetchWithAuth(`${BASE}/companies`).then((r) => handleResponse<any[]>(r));
 
 export const getMRProjects = () =>
-  fetchWithAuth(`${BASE}/projects`).then((r) => handleResponse<any[]>(r));
+  fetchWithAuth("/api/enterprises/options?business_type=P")
+    .then((r) => handleResponse<any[]>(r))
+    .then((rows) =>
+      rows.map((p) => ({
+        ...p,
+        name: p.name ?? p.label ?? "",
+      })),
+    );
 
 export const getMRFinYears = () =>
   fetchWithAuth(`${BASE}/fin-years`).then((r) => handleResponse<any[]>(r));
