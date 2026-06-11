@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -2286,6 +2285,1443 @@ export default function MaterialExpenseBooking() {
                   <Field label="Company" required>
                     <Select
                       value={form.companyId ? String(form.companyId) : ""}
-                      onValueChange={(v) =>
-                        { set("companyId", v ? parseInt(v, 10) : null); set("projectSite", ""); set("projectName", ""); }
+                      onValueChange={(v) => {
+                        set("companyId", v ? parseInt(v, 10) : null);
+                        set("projectSite", "");
+                      }}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <div className="flex items-center gap-2">
+                          <Building2
+                            size={13}
+                            className="text-muted-foreground shrink-0"
+                          />
+                          <SelectValue placeholder="Select company…" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {companyOptions.length === 0 && (
+                          <SelectItem value="__none__" disabled>
+                            No companies found
+                          </SelectItem>
+                        )}
+                        {companyOptions.map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field
+                    label="Project / Site"
+                    hint={
+                      selectedDoc?.projectId
+                        ? "Pre-filled from linked order"
+                        : !form.companyId
+                          ? "Select a company first"
+                          : undefined
+                    }
+                  >
+                    <Select
+                      value={form.projectSite || ""}
+                      onValueChange={(v) => set("projectSite", v || "")}
+                      disabled={!form.companyId && !selectedDoc?.projectId}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <div className="flex items-center gap-2">
+                          <FolderKanban
+                            size={13}
+                            className="text-muted-foreground shrink-0"
+                          />
+                          <SelectValue placeholder="Select project…" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(() => {
+                          const filtered = form.companyId
+                            ? projectOptions.filter(
+                                (p) =>
+                                  !p.company_id ||
+                                  p.company_id === form.companyId,
+                              )
+                            : projectOptions;
+                          return (
+                            <>
+                              {filtered.length === 0 && !form.projectSite && (
+                                <SelectItem value="__none__" disabled>
+                                  {form.companyId
+                                    ? "No projects for this company"
+                                    : "No projects found"}
+                                </SelectItem>
+                              )}
+                              {form.projectSite &&
+                                !filtered.some(
+                                  (p) => String(p.id) === form.projectSite,
+                                ) && (
+                                  <SelectItem
+                                    key="__current__"
+                                    value={form.projectSite}
+                                  >
+                                    {form.projectName || form.projectSite}
+                                  </SelectItem>
+                                )}
+                              {filtered.map((p) => (
+                                <SelectItem key={p.id} value={String(p.id)}>
+                                  {p.label}
+                                </SelectItem>
+                              ))}
+                            </>
+                          );
+                        })()}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field
+                    label={vendorLabel}
+                    hint={
+                      selectedDoc?.vendorLabel
+                        ? `Auto-filled from ${selectedDoc.kind === "PO" ? "Purchase Order (supplier)" : selectedDoc.kind === "GRN" ? "GRN (supplier)" : "Work Done (contractor)"}`
+                        : "Select supplier or auto-filled when a source document is selected"
+                    }
+                  >
+                    {selectedDoc?.vendorLabel ? (
+                      <div className="relative">
+                        <User
+                          size={13}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                        />
+                        <Input
+                          value={form.supplier}
+                          readOnly
+                          placeholder="Auto-filled from linked order"
+                          className="pl-8 h-9 text-sm bg-muted/30 cursor-not-allowed"
+                        />
+                      </div>
+                    ) : (
+                      <Select
+                        value={form.supplier || "__none__"}
+                        onValueChange={(v) =>
+                          set("supplier", v === "__none__" ? "" : v)
+                        }
+                      >
+                        <SelectTrigger className="h-9 text-sm">
+                          <SelectValue placeholder="Select supplier…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">— None —</SelectItem>
+                          {supplierHeads.map((s) => (
+                            <SelectItem key={s.id} value={s.label}>
+                              {s.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </Field>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <Field label="Booking Date" required>
+                    <div className="relative">
+                      <CalendarDays
+                        size={13}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                      <input
+                        type="date"
+                        value={form.bookingDate}
+                        min={today}
+                        onChange={(e) => set("bookingDate", e.target.value)}
+                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                      />
+                    </div>
+                  </Field>
+                  <Field label="Due Date">
+                    <div className="relative">
+                      <CalendarDays
+                        size={13}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                      <input
+                        type="date"
+                        value={form.dueDate}
+                        min={form.bookingDate || today}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (
+                            val &&
+                            form.bookingDate &&
+                            val < form.bookingDate
+                          ) {
+                            toast.error(
+                              "Due date cannot be before the booking date.",
+                            );
+                            return;
+                          }
+                          set("dueDate", val);
+                        }}
+                        className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${
+                          form.dueDate &&
+                          form.bookingDate &&
+                          form.dueDate < form.bookingDate
+                            ? "border-destructive ring-1 ring-destructive/30"
+                            : "border-border"
+                        }`}
+                      />
+                      {form.dueDate &&
+                        form.bookingDate &&
+                        form.dueDate < form.bookingDate && (
+                          <p className="mt-1 text-[11px] text-destructive flex items-center gap-1">
+                            ⚠ Due date is before the booking date
+                          </p>
+                        )}
+                    </div>
+                  </Field>
+                  <Field
+                    label="Financial Year"
+                    hint={
+                      selectedTod
+                        ? "Changing year updates the booking reference number"
+                        : undefined
+                    }
+                  >
+                    <Select
+                      value={form.financialYear}
+                      onValueChange={(v) => set("financialYear", v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select year…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activeFinYears.map((fy) => (
+                          <SelectItem key={fy.id} value={fy.year}>
+                            {fy.year}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+              </div>
+
+              {/* ── 1. Document Selection ──────────────────────────────── */}
+              {showDocSection ? (
+                <>
+                  <div className="space-y-3">
+                    <SectionHeader label="Document Selection" />
+                    <p className="text-[11px] text-muted-foreground -mt-1">
+                      Pick a Purchase Order, confirmed Work Done entry, or GRN
+                      to auto-fill booking details, or choose a document type
+                      from Other Expenses for standalone expense entries.
+                    </p>
+                    <DocSelectorPanel
+                      poList={poList}
+                      woPOList={woPOList}
+                      workDoneList={workDoneList}
+                      todList={todList}
+                      grnList={grnList}
+                      loadingPO={loadingPO}
+                      loadingWorkDone={loadingWorkDone}
+                      loadingWOPO={loadingWOPO}
+                      loadingTOD={loadingTOD}
+                      loadingGRN={loadingGRN}
+                      companyOptions={companyOptions}
+                      projectOptions={projectOptions}
+                      suppliers={suppliers}
+                      selected={selectedDoc}
+                      finYear={form.financialYear || undefined}
+                      filterCompanyId={form.companyId ?? null}
+                      filterProjectId={
+                        form.projectSite ? parseInt(form.projectSite) : null
                       }
+                      filterFinYear={form.financialYear || null}
+                      filterSupplier={form.supplier || null}
+                      bookedPOIds={bookedPOIds}
+                      bookedWorkDoneIds={bookedWorkDoneIds}
+                      bookedWOPOIds={bookedWOPOIds}
+                      bookedGRNIds={bookedGRNIds}
+                      onSelect={applyDoc}
+                      onClear={clearDoc}
+                      onTodSelected={setSelectedTod}
+                    />
+
+                    {/* Source chain banner */}
+                    {selectedDoc &&
+                      (selectedDoc.kind === "WORK_DONE" ||
+                        selectedDoc.kind === "WO_PO" ||
+                        selectedDoc.kind === "PO" ||
+                        selectedDoc.kind === "GRN") && (
+                        <div
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium ${selectedDoc.kind === "GRN" ? "border-teal-500/30 bg-teal-500/5 text-teal-600 dark:text-teal-400" : "border-primary/30 bg-primary/5 text-primary"}`}
+                        >
+                          <span className="shrink-0">←</span>
+                          <span className="font-mono font-semibold">
+                            {selectedDoc.docNo}
+                          </span>
+                          {selectedDoc.vendorLabel && (
+                            <>
+                              <span className="text-muted-foreground">|</span>
+                              <span className="text-foreground">
+                                {selectedDoc.vendorLabel}
+                              </span>
+                            </>
+                          )}
+                          {selectedDoc.amount != null &&
+                            selectedDoc.amount > 0 && (
+                              <>
+                                <span className="text-muted-foreground">|</span>
+                                <span className="text-foreground font-semibold">
+                                  ₹{selectedDoc.amount.toLocaleString("en-IN")}
+                                </span>
+                              </>
+                            )}
+                          <span
+                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${selectedDoc.kind === "WORK_DONE" ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400" : selectedDoc.kind === "GRN" ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400" : "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400"}`}
+                          >
+                            {selectedDoc.kind === "WORK_DONE"
+                              ? "Work Done"
+                              : selectedDoc.kind === "GRN"
+                                ? "GRN"
+                                : "Purchase Order"}
+                          </span>
+                        </div>
+                      )}
+
+                    <Field
+                      label="Booking Reference"
+                      required
+                      hint={
+                        selectedDoc
+                          ? `Auto-filled from the selected ${selectedDoc.kind === "PO" ? "Purchase Order" : selectedDoc.kind === "WORK_DONE" ? "Work Done" : selectedDoc.kind === "GRN" ? "GRN" : "document"}.`
+                          : "Will be populated once you select a document above."
+                      }
+                    >
+                      <Input
+                        value={form.bookingReference}
+                        readOnly
+                        placeholder="Auto-filled from selected document"
+                        className="font-mono bg-muted/30 cursor-not-allowed"
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Field
+                      label="Booking Name"
+                      hint={
+                        selectedDoc?.nameLabel
+                          ? "Auto-filled from selected document — editable"
+                          : undefined
+                      }
+                    >
+                      <Input
+                        value={form.bookingName}
+                        onChange={(e) => set("bookingName", e.target.value)}
+                        placeholder="e.g. Cement supply for Block A, Q1 contractor payment…"
+                      />
+                    </Field>
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-dashed border-border/60 text-xs text-muted-foreground">
+                  <FileText size={13} className="shrink-0 opacity-40" />
+                  Fill in the booking information above to see matching
+                  documents.
+                </div>
+              )}
+
+              {/* ── 2. Amount & GST ────────────────────────────────────── */}
+              <div className="space-y-4">
+                <SectionHeader label="Amount & GST" />
+                {hasParentGST && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
+                    <BadgePercent size={12} className="text-primary shrink-0" />
+                    {selectedDoc!.gst?.applicable ? (
+                      <span className="text-foreground">
+                        GST auto-filled from linked{" "}
+                        <span className="font-semibold">
+                          {selectedDoc!.kind === "PO"
+                            ? "Purchase Order"
+                            : "Work Done"}
+                        </span>
+                        {" — "}
+                        {selectedDoc!.gst!.type === "cgst_sgst"
+                          ? `CGST ${selectedDoc!.gst!.rate / 2}% + SGST ${selectedDoc!.gst!.rate / 2}% (total ${selectedDoc!.gst!.rate}%)`
+                          : selectedDoc!.gst!.type === "igst"
+                            ? `IGST ${selectedDoc!.gst!.rate}% (mapped to CGST)`
+                            : "GST not applicable"}
+                        . Editable if needed.
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        Linked{" "}
+                        {selectedDoc!.kind === "PO"
+                          ? "Purchase Order"
+                          : "Work Done"}{" "}
+                        has no GST applied — rates set to 0. Editable if needed.
+                      </span>
+                    )}
+                  </div>
+                )}
+                <div
+                  className={`grid grid-cols-1 gap-4 ${isGRN ? "sm:grid-cols-1" : "sm:grid-cols-3"}`}
+                >
+                  <Field
+                    label="Basic Amount (₹)"
+                    required
+                    hint={
+                      isGRN
+                        ? "Enter the invoice amount being booked against this GRN"
+                        : selectedDoc?.amount != null
+                          ? "Auto-filled from linked order value"
+                          : "Will be auto-filled when a PO or WO is selected"
+                    }
+                  >
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
+                        ₹
+                      </span>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={form.basicAmount || ""}
+                        readOnly={!isGRN && !!selectedDoc?.amount}
+                        onChange={(e) => {
+                          if (!isGRN && selectedDoc?.amount) return;
+                          set("basicAmount", parseFloat(e.target.value) || 0);
+                        }}
+                        className={`pl-7 font-mono ${!isGRN && selectedDoc?.amount != null ? "bg-muted/30 cursor-not-allowed" : ""}`}
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </Field>
+                  {!isGRN && (
+                    <>
+                      <Field
+                        label="CGST Rate (%)"
+                        hint={
+                          isPOorWO
+                            ? selectedDoc!.gst?.applicable
+                              ? selectedDoc!.gst!.type === "igst"
+                                ? "IGST mapped here — editable"
+                                : "Auto-filled from linked order — editable"
+                              : "No GST on this order — editable"
+                            : "Enter CGST rate manually"
+                        }
+                      >
+                        <RateInput
+                          value={form.cgstRate}
+                          onChange={(v) => set("cgstRate", v)}
+                          highlighted={gstHighlighted}
+                        />
+                      </Field>
+                      <Field
+                        label={
+                          selectedDoc?.gst?.type === "igst"
+                            ? "SGST Rate (%) — N/A for IGST"
+                            : "SGST Rate (%)"
+                        }
+                        hint={
+                          isPOorWO
+                            ? selectedDoc!.gst?.type === "igst"
+                              ? "IGST order — SGST is 0"
+                              : selectedDoc!.gst?.applicable
+                                ? "Auto-filled from linked order — editable"
+                                : "No GST on this order — editable"
+                            : "Enter SGST rate manually"
+                        }
+                      >
+                        <RateInput
+                          value={form.sgstRate}
+                          onChange={(v) => set("sgstRate", v)}
+                          highlighted={gstHighlighted}
+                        />
+                      </Field>
+                    </>
+                  )}
+                </div>
+                {form.basicAmount > 0 && (
+                  <>
+                    {isGRN && gstBreakdown ? (
+                      <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-sm">
+                        <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
+                          <div>
+                            <p className="text-xs font-medium">Basic Amount</p>
+                            <p className="text-[10px] text-muted-foreground">
+                              Pre-tax value (excl. GST)
+                            </p>
+                          </div>
+                          <p className="font-mono text-sm font-semibold">
+                            ₹{fmt(gstBreakdown.totals.totalBase)}
+                          </p>
+                        </div>
+                        {gstBreakdown.totals.totalCGST > 0 && (
+                          <div className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]">
+                            <div>
+                              <p className="text-xs text-muted-foreground">
+                                CGST
+                              </p>
+                              <p className="text-[10px] text-muted-foreground">
+                                Central GST
+                              </p>
+                            </div>
+                            <p className="font-mono text-sm text-foreground/80">
+                              + ₹{fmt(gstBreakdown.totals.totalCGST)}
+                            </p>
+                          </div>
+                        )}
+                        {gstBreakdown.totals.totalSGST > 0 && (
+                          <div className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]">
+                            <div>
+                              <p className="text-xs text-muted-foreground">
+                                SGST
+                              </p>
+                              <p className="text-[10px] text-muted-foreground">
+                                State GST
+                              </p>
+                            </div>
+                            <p className="font-mono text-sm text-foreground/80">
+                              + ₹{fmt(gstBreakdown.totals.totalSGST)}
+                            </p>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20">
+                          <div>
+                            <p className="text-xs font-medium">Gross Amount</p>
+                            <p className="text-[10px] text-muted-foreground">
+                              Basic + CGST + SGST
+                            </p>
+                          </div>
+                          <p className="font-mono text-sm font-semibold">
+                            ₹{fmt(gstBreakdown.totals.totalInclGST)}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <PriceBreakdownPanel
+                        bd={bd}
+                        cgstRate={form.cgstRate}
+                        sgstRate={form.sgstRate}
+                        hasDiscount={form.discount.applicable}
+                      />
+                    )}
+                    <div className="flex items-center justify-between rounded-xl bg-primary/8 border border-primary/20 px-5 py-4">
+                      <div className="flex items-center gap-2">
+                        <TrendingUp size={15} className="text-primary" />
+                        <span className="text-sm font-heading font-semibold text-foreground">
+                          Net Payable Amount
+                        </span>
+                      </div>
+                      <span className="font-mono text-xl font-bold text-primary">
+                        ₹
+                        {fmt(
+                          isGRN && gstBreakdown
+                            ? gstBreakdown.totals.totalInclGST
+                            : bd.netAmount,
+                        )}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* ── GRN Items Summary ──────────────────────────────────── */}
+              {isGRN && (
+                <div className="space-y-3">
+                  <SectionHeader label="GRN Items Summary" />
+                  {grnItemsLoading ? (
+                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                      <div className="w-3.5 h-3.5 rounded-full border-2 border-teal-400 border-t-transparent animate-spin shrink-0" />
+                      <span>Loading GRN items…</span>
+                    </div>
+                  ) : !selectedDoc?.grnItems ||
+                    selectedDoc.grnItems.length === 0 ? (
+                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                      <Truck size={13} className="text-teal-400 shrink-0" />
+                      <span>No items recorded against this GRN.</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {/* Per-item breakdown table */}
+                      <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 overflow-hidden">
+                        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-teal-500/20 bg-teal-500/8">
+                          <Truck size={12} className="text-teal-500 shrink-0" />
+                          <span className="text-xs font-heading font-semibold text-teal-600 dark:text-teal-400">
+                            Items received against this GRN
+                          </span>
+                          <span className="ml-auto text-[10px] text-muted-foreground">
+                            {selectedDoc!.grnItems!.length}{" "}
+                            {selectedDoc!.grnItems!.length === 1
+                              ? "item"
+                              : "items"}
+                          </span>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="bg-muted/20 border-b border-teal-500/15">
+                                <th className="px-3 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                  Item
+                                </th>
+                                <th className="px-3 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                  HSN
+                                </th>
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400 text-[10px]">
+                                  Rcvd Qty
+                                </th>
+                                <th className="px-3 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                  UOM
+                                </th>
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                  Rate (₹)
+                                </th>
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                  Incl. GST (₹)
+                                </th>
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-blue-600 dark:text-blue-400 text-[10px]">
+                                  Base (₹)
+                                </th>
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-violet-600 dark:text-violet-400 text-[10px]">
+                                  CGST
+                                </th>
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-violet-600 dark:text-violet-400 text-[10px]">
+                                  SGST
+                                </th>
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-orange-600 dark:text-orange-400 text-[10px]">
+                                  GST (₹)
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-teal-500/10">
+                              {(() => {
+                                const bdItems = gstBreakdown?.items;
+                                const rows =
+                                  bdItems && bdItems.length > 0
+                                    ? bdItems
+                                    : selectedDoc!.grnItems!.map((it) => ({
+                                        ...it,
+                                        totalAmountInclGST:
+                                          Number(it.totalAmount) > 0
+                                            ? Number(it.totalAmount)
+                                            : Number(it.rate || 0) *
+                                              Number(
+                                                it.receivedQty ||
+                                                  it.quantity ||
+                                                  0,
+                                              ),
+                                      }));
+                                return rows.map((item, idx) => (
+                                  <tr
+                                    key={idx}
+                                    className="hover:bg-teal-500/5 transition-colors"
+                                  >
+                                    <td className="px-3 py-2.5 font-medium text-foreground max-w-[160px] truncate">
+                                      {item.itemName || `Item ${idx + 1}`}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-muted-foreground font-mono text-[10px]">
+                                      {item.hsnCode || "—"}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                                      {Number(item.receivedQty) || 0}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-muted-foreground">
+                                      {item.uom || "—"}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
+                                      {Number(item.rate || 0) > 0
+                                        ? `₹${fmt(Number(item.rate))}`
+                                        : "—"}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-mono font-semibold text-foreground">
+                                      {Number(item.totalAmountInclGST) > 0
+                                        ? `₹${fmt(Number(item.totalAmountInclGST))}`
+                                        : "—"}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-mono font-semibold text-blue-600 dark:text-blue-400">
+                                      {item.baseAmount != null
+                                        ? `₹${fmt(item.baseAmount)}`
+                                        : "—"}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-mono text-violet-600 dark:text-violet-400">
+                                      {item.cgstRate != null &&
+                                      item.cgstAmount != null ? (
+                                        <span className="flex flex-col items-end gap-0.5">
+                                          <span className="text-[10px] text-muted-foreground">
+                                            {item.cgstRate}%
+                                          </span>
+                                          <span>₹{fmt(item.cgstAmount)}</span>
+                                        </span>
+                                      ) : (
+                                        "—"
+                                      )}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-mono text-violet-600 dark:text-violet-400">
+                                      {item.sgstRate != null &&
+                                      item.sgstAmount != null ? (
+                                        <span className="flex flex-col items-end gap-0.5">
+                                          <span className="text-[10px] text-muted-foreground">
+                                            {item.sgstRate}%
+                                          </span>
+                                          <span>₹{fmt(item.sgstAmount)}</span>
+                                        </span>
+                                      ) : (
+                                        "—"
+                                      )}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-mono font-semibold text-orange-600 dark:text-orange-400">
+                                      {item.gstAmount != null
+                                        ? `₹${fmt(item.gstAmount)}`
+                                        : "—"}
+                                    </td>
+                                  </tr>
+                                ));
+                              })()}
+                            </tbody>
+                            <tfoot className="border-t-2 border-teal-500/30 bg-muted/15">
+                              <tr>
+                                <td
+                                  colSpan={5}
+                                  className="px-3 py-2.5 text-[10px] font-heading uppercase tracking-wider text-muted-foreground"
+                                >
+                                  Totals
+                                </td>
+                                <td className="px-3 py-2.5 text-right font-mono text-xs font-bold text-foreground">
+                                  ₹
+                                  {fmt(
+                                    gstBreakdown?.totals.totalInclGST ??
+                                      selectedDoc!.grnItems!.reduce(
+                                        (s, i) =>
+                                          s +
+                                          (Number(i.totalAmountInclGST) ||
+                                            Number(i.totalAmount) ||
+                                            0),
+                                        0,
+                                      ),
+                                  )}
+                                </td>
+                                <td className="px-3 py-2.5 text-right font-mono text-xs font-bold text-blue-600 dark:text-blue-400">
+                                  {gstBreakdown
+                                    ? `₹${fmt(gstBreakdown.totals.totalBase)}`
+                                    : "—"}
+                                </td>
+                                <td className="px-3 py-2.5 text-right font-mono text-xs font-bold text-violet-600 dark:text-violet-400">
+                                  {gstBreakdown
+                                    ? `₹${fmt(gstBreakdown.totals.totalCGST)}`
+                                    : "—"}
+                                </td>
+                                <td className="px-3 py-2.5 text-right font-mono text-xs font-bold text-violet-600 dark:text-violet-400">
+                                  {gstBreakdown
+                                    ? `₹${fmt(gstBreakdown.totals.totalSGST)}`
+                                    : "—"}
+                                </td>
+                                <td className="px-3 py-2.5 text-right font-mono text-xs font-bold text-orange-600 dark:text-orange-400">
+                                  {gstBreakdown
+                                    ? `₹${fmt(gstBreakdown.totals.totalGST)}`
+                                    : "—"}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* GST Summary Cards + Equation */}
+                      {gstBreakdown && gstBreakdown.totals.totalInclGST > 0 && (
+                        <>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            {[
+                              {
+                                label: "Base Amount",
+                                value: gstBreakdown.totals.totalBase,
+                                cls: "border-blue-500/30 bg-blue-500/5 text-blue-700 dark:text-blue-300",
+                              },
+                              {
+                                label: "CGST",
+                                value: gstBreakdown.totals.totalCGST,
+                                cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
+                              },
+                              {
+                                label: "SGST",
+                                value: gstBreakdown.totals.totalSGST,
+                                cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
+                              },
+                              {
+                                label: "Total GST",
+                                value: gstBreakdown.totals.totalGST,
+                                cls: "border-orange-500/30 bg-orange-500/5 text-orange-700 dark:text-orange-300",
+                              },
+                            ].map(({ label, value, cls }) => (
+                              <div
+                                key={label}
+                                className={`rounded-lg border px-3 py-2 ${cls}`}
+                              >
+                                <div className="text-[10px] font-heading uppercase tracking-wider opacity-70">
+                                  {label}
+                                </div>
+                                <div className="text-sm font-mono font-bold mt-1">
+                                  ₹{fmt(value)}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="px-4 py-2.5 bg-muted/10 border-t border-blue-500/10 flex flex-wrap items-center gap-1.5 text-[11px] font-mono mt-3">
+                            <span className="text-blue-600 dark:text-blue-400 font-semibold">
+                              ₹{fmt(gstBreakdown.totals.totalBase)}
+                            </span>
+                            <span className="text-muted-foreground">
+                              (base)
+                            </span>
+                            <span className="text-muted-foreground">+</span>
+                            <span className="text-violet-600 dark:text-violet-400 font-semibold">
+                              ₹{fmt(gstBreakdown.totals.totalCGST)}
+                            </span>
+                            <span className="text-muted-foreground">
+                              (CGST)
+                            </span>
+                            <span className="text-muted-foreground">+</span>
+                            <span className="text-violet-600 dark:text-violet-400 font-semibold">
+                              ₹{fmt(gstBreakdown.totals.totalSGST)}
+                            </span>
+                            <span className="text-muted-foreground">
+                              (SGST)
+                            </span>
+                            <span className="text-muted-foreground">=</span>
+                            <span className="text-foreground font-bold">
+                              ₹{fmt(gstBreakdown.totals.totalInclGST)}
+                            </span>
+                            <span className="text-muted-foreground">
+                              (incl. GST)
+                            </span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── 3. Billing Terms ──────────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader label="Billing Terms" />
+                <BillingAccordion
+                  basicAmount={form.basicAmount}
+                  cgstRate={form.cgstRate}
+                  sgstRate={form.sgstRate}
+                  discount={form.discount}
+                  billingTerms={form.billingTerms}
+                  onChange={(d) => set("discount", d)}
+                  onChangeBillingTerms={(terms) => set("billingTerms", terms)}
+                  grnNetAmount={
+                    isGRN && selectedDoc?.amount != null
+                      ? selectedDoc.amount
+                      : null
+                  }
+                />
+              </div>
+
+              {/* ── 4. EMI Options ─────────────────────────────────────── */}
+              {!isGRN && (
+                <div className="space-y-3">
+                  <SectionHeader label="EMI / Installment Options" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="Payment Type" required>
+                      <Select
+                        value={form.paymentType || "full"}
+                        onValueChange={(value) =>
+                          set("paymentType", value as "full" | "partial")
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select payment type…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="full">Full payment</SelectItem>
+                          <SelectItem value="partial">
+                            Partial payment (EMI)
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </div>
+                  <EmiSection
+                    emi={form.emi}
+                    netAmount={bd.netAmount}
+                    baseDocNo={form.bookingReference}
+                    onChange={(emi) => set("emi", emi)}
+                    liveSchedule={isEditing ? liveEmiSchedule : null}
+                    loadingEmi={loadingEmi}
+                    onDisableEmi={isEditing ? disableEmi : undefined}
+                  />
+                </div>
+              )}
+
+              {/* ── 5. Approval Trail ──────────────────────────────────── */}
+              {isEditing && (
+                <div className="space-y-3">
+                  <SectionHeader label="Approval Workflow" />
+                  <ApprovalTrailPanel
+                    trail={approvalTrail}
+                    currentStatus={form.status}
+                  />
+                </div>
+              )}
+
+              {/* ── 6. Terms & Conditions ─────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader label="Terms & Conditions" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field
+                    label="T&C Template"
+                    hint="Select a Terms & Conditions template to attach"
+                  >
+                    <Select
+                      value={form.tcId ? String(form.tcId) : ""}
+                      onValueChange={(v) => {
+                        const tc = tcOptions.find((t) => String(t.Id) === v);
+                        set("tcId", tc ? tc.Id : null);
+                        set("tcName", tc?.Name ?? "");
+                        set("tcText", tc?.TermsAndCondition ?? "");
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select T&C template…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">None</SelectItem>
+                        {tcOptions.map((t) => (
+                          <SelectItem key={t.Id} value={String(t.Id)}>
+                            {t.Name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+                {form.tcText && (
+                  <div className="rounded-xl border border-border bg-muted/20 p-4">
+                    <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-2">
+                      T&amp;C Preview
+                    </p>
+                    <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">
+                      {form.tcText}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* ── 7. Remarks ─────────────────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader label="Remarks" />
+                <textarea
+                  value={form.remarks}
+                  onChange={(e) => set("remarks", e.target.value)}
+                  placeholder="Optional notes or internal comments…"
+                  rows={3}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none text-foreground placeholder:text-muted-foreground"
+                />
+              </div>
+
+              {/* Save row */}
+              <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-4 border-t border-border">
+                <Button
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                  onClick={cancelForm}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                  onClick={handleSave}
+                  disabled={saving}
+                >
+                  {saving
+                    ? "Saving…"
+                    : isEditing
+                      ? "Update Booking"
+                      : "Save Booking"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* List View */}
+        {view === "list" && (
+          <>
+            {!loading && records.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <StatCard
+                  label="Total Booked"
+                  value={`₹${fmt(totalNet)}`}
+                  icon={Receipt}
+                  color="text-primary bg-primary/10"
+                  accentColor="border-l-primary"
+                />
+                <StatCard
+                  label="Approved"
+                  value={approvedCount}
+                  icon={CheckCircle2}
+                  color="text-emerald-500 bg-emerald-500/10"
+                  accentColor="border-l-emerald-500"
+                />
+                <StatCard
+                  label="Pending"
+                  value={pendingCount}
+                  icon={Clock}
+                  color="text-amber-500 bg-amber-500/10"
+                  accentColor="border-l-amber-500"
+                />
+                <StatCard
+                  label="EMI Active"
+                  value={emiCount}
+                  icon={CreditCard}
+                  color="text-violet-500 bg-violet-500/10"
+                  accentColor="border-l-violet-500"
+                />
+              </div>
+            )}
+            {loading && (
+              <div className="text-center py-16 text-muted-foreground text-sm">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                Loading bookings…
+              </div>
+            )}
+            {!loading && (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  {ALL_STATUSES.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setStatusFilter(s)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === s ? "bg-primary text-primary-foreground border-primary shadow-sm" : "bg-background text-muted-foreground border-border hover:border-primary/40"}`}
+                    >
+                      {s}
+                      {s !== "All" && (
+                        <span className="ml-1.5 text-[10px] opacity-70">
+                          ({statusCounts[s] ?? 0})
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Mobile cards */}
+                <div className="flex flex-col gap-3 sm:hidden">
+                  {filteredRecords.length === 0 && (
+                    <div className="text-center py-16 text-muted-foreground text-sm border rounded-xl border-dashed border-border">
+                      <AlertCircle
+                        size={20}
+                        className="mx-auto mb-2 opacity-30"
+                      />
+                      No bookings
+                      {statusFilter !== "All"
+                        ? ` with status "${statusFilter}"`
+                        : ""}
+                      .
+                    </div>
+                  )}
+                  {filteredRecords.map((rec, index) => (
+                    <RecordCard
+                      key={
+                        rec.id
+                          ? `booking-card-${rec.id}`
+                          : `booking-card-${index}`
+                      }
+                      rec={rec}
+                      onEdit={() => openAmend(rec)}
+                      onPreview={() => setPreviewRecord(rec)}
+                      onDelete={() => requestDelete(rec.id)}
+                      onApprovalSuccess={fetchRecords}
+                    />
+                  ))}
+                </div>
+
+                {/* Records table */}
+                <Card className="hidden sm:block border-border shadow-sm">
+                  <CardContent className="p-0">
+                    <div className="rounded-md">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-muted/30">
+                            <TableHead className="text-xs font-heading w-[20%]">
+                              Booking Ref
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[16%]">
+                              Vendor
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[10%] text-right">
+                              Basic Amt
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[8%] text-right hidden md:table-cell">
+                              CGST
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[8%] text-right hidden md:table-cell">
+                              SGST
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[12%] text-right">
+                              Net Amt
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[12%] hidden lg:table-cell">
+                              GRN
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[9%]">
+                              Status
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[10%] text-right">
+                              Actions
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredRecords.map((rec, index) => {
+                            const rbd = computeBreakdown(
+                              rec.basicAmount,
+                              rec.cgstRate,
+                              rec.sgstRate,
+                              rec.billingTerms && rec.billingTerms.length > 0
+                                ? rec.billingTerms
+                                : rec.discount,
+                            );
+                            return (
+                              <TableRow
+                                key={
+                                  rec.id
+                                    ? `booking-row-${rec.id}`
+                                    : `booking-row-${index}`
+                                }
+                                className={`hover:bg-muted/30 transition-colors border-b border-border/50 last:border-0 ${rec.status === "Draft" ? "opacity-70" : ""}`}
+                              >
+                                <TableCell className="py-3">
+                                  {rec.status === "Draft" ? (
+                                    <p
+                                      className="text-[11px] font-semibold text-amber-500 dark:text-amber-400 leading-tight max-w-[180px] truncate"
+                                      title={rec.bookingReference || ""}
+                                    >
+                                      {rec.bookingReference || "—"}
+                                    </p>
+                                  ) : (
+                                    <p
+                                      className="font-mono text-[11px] font-semibold text-primary leading-tight max-w-[160px] truncate"
+                                      title={rec.bookingReference || ""}
+                                    >
+                                      {rec.bookingReference || "—"}
+                                    </p>
+                                  )}
+                                  <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
+                                    {rec.bookingDate && (
+                                      <span>{rec.bookingDate}</span>
+                                    )}
+                                    {rec.docTypeName ? (
+                                      <span className="opacity-60">
+                                        · {rec.docTypeName}
+                                      </span>
+                                    ) : null}
+                                    {rec.emi?.enabled ? (
+                                      <span className="inline-flex items-center gap-0.5 text-[9px] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-1 py-0.5 rounded-full">
+                                        <CreditCard size={8} />
+                                        {rec.emi.installmentCount}x
+                                      </span>
+                                    ) : null}
+                                  </p>
+                                </TableCell>
+                                <TableCell className="text-xs max-w-[120px] truncate py-3 text-foreground/80">
+                                  {rec.supplier || "—"}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs text-right text-muted-foreground py-3">
+                                  {rec.status === "Draft" ? (
+                                    <span className="text-muted-foreground/50">
+                                      —
+                                    </span>
+                                  ) : (
+                                    `₹${fmt(rec.basicAmount)}`
+                                  )}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs text-right text-foreground/70 py-3 hidden md:table-cell">
+                                  {rec.status === "Draft"
+                                    ? "—"
+                                    : `${rec.cgstRate}%`}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs text-right text-foreground/70 py-3 hidden md:table-cell">
+                                  {rec.status === "Draft"
+                                    ? "—"
+                                    : `${rec.sgstRate}%`}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs font-semibold text-right py-3">
+                                  {rec.status === "Draft" ? (
+                                    <span className="text-amber-500 dark:text-amber-400">
+                                      ₹{fmt(rec.netAmount ?? rbd.netAmount)}
+                                    </span>
+                                  ) : (
+                                    `₹${fmt(rec.netAmount ?? rbd.netAmount)}`
+                                  )}
+                                </TableCell>
+                                <TableCell className="hidden lg:table-cell py-3 min-w-[100px]">
+                                  <GRNChainBadge bookingId={rec.id} />
+                                </TableCell>
+                                <TableCell className="py-3">
+                                  {rec.status === "Draft" ? (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25">
+                                      <Package size={10} className="shrink-0" />
+                                      Pending Items
+                                    </span>
+                                  ) : null}
+                                  <ApprovalStatusChain
+                                    table="ExpenseBooking"
+                                    recordId={rec.id}
+                                  />
+                                </TableCell>
+                                <TableCell className="py-3">
+                                  <div className="flex gap-1 items-center justify-end">
+                                    <ApprovalActions
+                                      status={rec.status}
+                                      recordId={rec.id}
+                                      endpoint="/api/expense-booking"
+                                      submitOnly
+                                      onSuccess={() => fetchRecords(page)}
+                                    />
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 w-7 p-0"
+                                      onClick={() => setPreviewRecord(rec)}
+                                      title="Preview"
+                                    >
+                                      <Eye size={12} />
+                                    </Button>
+                                    <Button
+                                      variant="destructive"
+                                      size="sm"
+                                      className="h-7 w-7 p-0"
+                                      onClick={() => requestDelete(rec.id)}
+                                    >
+                                      <Trash2 size={12} />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                          {filteredRecords.length === 0 && (
+                            <TableRow>
+                              <TableCell
+                                colSpan={9}
+                                className="text-center py-14 text-muted-foreground text-sm"
+                              >
+                                <AlertCircle
+                                  size={18}
+                                  className="mx-auto mb-2 opacity-30"
+                                />
+                                {statusFilter !== "All"
+                                  ? `No bookings with status "${statusFilter}". Try a different filter.`
+                                  : `No bookings yet. Click "New Booking" to get started.`}
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-2 px-1">
+                    <p className="text-xs text-muted-foreground text-center sm:text-left">
+                      Page {page} of {totalPages} · {totalRecords} total
+                    </p>
+                    <div className="flex flex-wrap items-center justify-center gap-1 mt-2 sm:mt-0">
+                      <button
+                        onClick={() => fetchRecords(Math.max(1, page - 1))}
+                        disabled={page === 1}
+                        className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                      >
+                        <ChevronLeft size={14} />
+                      </button>
+                      {Array.from(
+                        { length: Math.min(5, totalPages) },
+                        (_, i) => {
+                          const pg = page <= 3 ? i + 1 : page - 2 + i;
+                          if (pg < 1 || pg > totalPages) return null;
+                          return (
+                            <button
+                              key={pg}
+                              onClick={() => fetchRecords(pg)}
+                              className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${pg === page ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                            >
+                              {pg}
+                            </button>
+                          );
+                        },
+                      )}
+                      <button
+                        onClick={() =>
+                          fetchRecords(Math.min(totalPages, page + 1))
+                        }
+                        disabled={page === totalPages}
+                        className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                      >
+                        <ChevronRight size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* BRS / Payment block dialog */}
+      <Dialog
+        open={!!deleteBlockInfo}
+        onOpenChange={() => setDeleteBlockInfo(null)}
+      >
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle size={16} className="shrink-0" />
+              Cannot Delete Booking
+            </DialogTitle>
+          </DialogHeader>
+
+          {deleteBlockInfo?.reason === "brs_cleared" && (
+            <div className="space-y-4 text-sm">
+              <p className="text-muted-foreground">
+                This expense booking has payment(s) that are{" "}
+                <span className="font-semibold text-foreground">
+                  cleared in BRS
+                </span>
+                . To delete it, complete the following steps in order:
+              </p>
+              <ol className="space-y-2 pl-1">
+                {[
+                  {
+                    step: 1,
+                    label: "Go to Finance → BRS",
+                    sub: "Find the payment record and mark it as Uncleared",
+                  },
+                  {
+                    step: 2,
+                    label: "Go to Finance → Payment Management",
+                    sub: "Delete the payment record linked to this booking",
+                  },
+                  {
+                    step: 3,
+                    label: "Return here",
+                    sub: "Delete this expense booking",
+                  },
+                ].map(({ step, label, sub }) => (
+                  <li key={step} className="flex gap-3">
+                    <span className="shrink-0 w-5 h-5 rounded-full bg-destructive/10 text-destructive text-[11px] font-bold flex items-center justify-center mt-0.5">
+                      {step}
+                    </span>
+                    <div>
+                      <p className="font-medium text-foreground">{label}</p>
+                      <p className="text-xs text-muted-foreground">{sub}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              {deleteBlockInfo.clearedPayments &&
+                deleteBlockInfo.clearedPayments.length > 0 && (
+                  <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">
+                    {deleteBlockInfo.clearedPayments.map((p) => (
+                      <div
+                        key={p.paymentId}
+                        className="flex items-center justify-between px-3 py-2"
+                      >
+                        <span className="text-xs font-mono text-foreground">
+                          {p.paymentName || `Payment #${p.paymentId}`}
+                        </span>
+                        <span className="text-xs font-semibold text-foreground">
+                          ₹
+                          {Number(p.amount).toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </div>
+          )}
+
+          {deleteBlockInfo?.reason === "has_payments" && (
+            <div className="space-y-4 text-sm">
+              <p className="text-muted-foreground">
+                This expense booking has{" "}
+                <span className="font-semibold text-foreground">
+                  linked payment records
+                </span>
+                . Delete the payment(s) first before deleting this booking.
+              </p>
+              {deleteBlockInfo.linkedPayments &&
+                deleteBlockInfo.linkedPayments.length > 0 && (
+                  <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">
+                    {deleteBlockInfo.linkedPayments.map((p) => (
+                      <div
+                        key={p.paymentId}
+                        className="flex items-center justify-between px-3 py-2"
+                      >
+                        <span className="text-xs font-mono text-foreground">
+                          {p.paymentName || `Payment #${p.paymentId}`}
+                        </span>
+                        <span className="text-xs font-semibold text-foreground">
+                          ₹
+                          {Number(p.amount).toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteBlockInfo(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirm */}
+      <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Booking</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this expense booking? This cannot
+              be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setDeleteId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteId && handleDelete(deleteId)}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Preview modal */}
+      <ExpenseBookingPreviewModal
+        previewRecord={previewRecord}
+        onClose={() => setPreviewRecord(null)}
+        onEdit={(record) => openAmend(record)}
+      />
+
+      {/* Remaining GRN Items — auto-created silently on save */}
+    </>
+  );
+}
