@@ -934,10 +934,12 @@ export function NOCPage() {
           padding-top: 8px; border-top: 1px solid hsl(var(--border)); margin-top: 4px;
         }
         .noc-status-select {
-          width: 100%; padding: 8px 12px; border: 1.5px solid hsl(var(--border)); border-radius: 9px;
+          width: 100%; padding: 8px 32px 8px 12px; border: 1.5px solid hsl(var(--border)); border-radius: 9px;
           font-size: 13.5px; color: hsl(var(--foreground)); background: hsl(var(--card));
           outline: none; transition: border-color 0.15s; font-family: inherit;
           cursor: pointer; appearance: none; -webkit-appearance: none;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+          background-repeat: no-repeat; background-position: right 10px center;
         }
         .noc-status-select:focus { border-color: hsl(var(--primary)); }
 
@@ -1507,30 +1509,42 @@ export function NOCPage() {
             <div className="noc-form-grid">
               <div className="space-y-2">
                 <Label>NOC Date</Label>
-                <Input
-                  type="date"
-                  value={form.NOCDate}
-                  onChange={(e) => set("NOCDate", e.target.value)}
-                />
+                <div className="relative">
+                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                  <input
+                    type="date"
+                    value={form.NOCDate}
+                    onChange={(e) => set("NOCDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Approval Date</Label>
-                <Input
-                  type="date"
-                  value={form.ApprovalDate}
-                  onChange={(e) => set("ApprovalDate", e.target.value)}
-                />
+                <div className="relative">
+                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                  <input
+                    type="date"
+                    value={form.ApprovalDate}
+                    onChange={(e) => set("ApprovalDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
             </div>
 
             <div className="noc-form-grid">
               <div className="space-y-2">
                 <Label>Issued Date</Label>
-                <Input
-                  type="date"
-                  value={form.IssuedDate}
-                  onChange={(e) => set("IssuedDate", e.target.value)}
-                />
+                <div className="relative">
+                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                  <input
+                    type="date"
+                    value={form.IssuedDate}
+                    onChange={(e) => set("IssuedDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Approved By</Label>
@@ -1625,11 +1639,15 @@ export function NOCPage() {
             <div className="noc-form-grid">
               <div className="space-y-2">
                 <Label>Sanction Date</Label>
-                <Input
-                  type="date"
-                  value={form.LoanSanctionDate}
-                  onChange={(e) => set("LoanSanctionDate", e.target.value)}
-                />
+                <div className="relative">
+                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                  <input
+                    type="date"
+                    value={form.LoanSanctionDate}
+                    onChange={(e) => set("LoanSanctionDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Disbursement Status</Label>
@@ -1654,11 +1672,15 @@ export function NOCPage() {
             <div className="noc-form-grid">
               <div className="space-y-2">
                 <Label>Disbursement Date</Label>
-                <Input
-                  type="date"
-                  value={form.LoanDisbursementDate}
-                  onChange={(e) => set("LoanDisbursementDate", e.target.value)}
-                />
+                <div className="relative">
+                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                  <input
+                    type="date"
+                    value={form.LoanDisbursementDate}
+                    onChange={(e) => set("LoanDisbursementDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Bank NOC Status</Label>
@@ -1680,11 +1702,15 @@ export function NOCPage() {
             <div className="noc-form-grid">
               <div className="space-y-2">
                 <Label>Bank NOC Date</Label>
-                <Input
-                  type="date"
-                  value={form.BankNOCDate}
-                  onChange={(e) => set("BankNOCDate", e.target.value)}
-                />
+                <div className="relative">
+                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                  <input
+                    type="date"
+                    value={form.BankNOCDate}
+                    onChange={(e) => set("BankNOCDate", e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Bank NOC Notes</Label>
@@ -1709,9 +1735,9 @@ export function NOCPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setDialogOpen(false); setEditId(null); setForm(EMPTY_FORM); }}>
+            <button type="button" className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={() => { setDialogOpen(false); setEditId(null); setForm(EMPTY_FORM); }}>
               Cancel
-            </Button>
+            </button>
             <Button
               disabled={
                 !form.ApplicantId || createMut.isPending || updateMut.isPending

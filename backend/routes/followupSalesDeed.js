@@ -17,8 +17,8 @@ const LIST_COLUMNS = `
   fsd.Id,
   fsd.DeedNo,
   fsd.ApplicantId,
-  ISNULL(ahm.DisplayName, ahm.LHeadName) AS ApplicantName,
-  ahm.LHeadCode                          AS ApplicantNo,
+  COALESCE(fa.ApplicantName, ISNULL(ahm.DisplayName, ahm.LHeadName)) AS ApplicantName,
+  COALESCE(fa.ApplicantNo,   ahm.LHeadCode)                         AS ApplicantNo,
   fsd.UnitSelectionId,
   fus.SelectionNo,
   fus.UnitNo,
@@ -77,17 +77,14 @@ function normalizeNumber(value) {
   return Number.isFinite(numeric) ? numeric : Number.NaN;
 }
 
-// Validate applicant exists in AccountHeadMaster LHeadType='A'
 async function getApplicantSnapshot(applicantId) {
   if (!applicantId) return null;
   const result = await getPool()
     .request()
     .input("ApplicantId", sql.Int, applicantId).query(`
-      SELECT TOP 1 LHeadId AS Id
-      FROM dbo.AccountHeadMaster
-      WHERE LHeadId = @ApplicantId
-        AND LHeadType = 'A'
-        AND LHeadStatus = 1
+      SELECT TOP 1 Id FROM dbo.FollowupApplications WHERE Id = @ApplicantId AND IsDeleted = 0
+      UNION ALL
+      SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadId = @ApplicantId AND LHeadType = 'A' AND LHeadStatus = 1
     `);
   return result.recordset[0] ?? null;
 }
@@ -168,16 +165,11 @@ async function buildOptions() {
     projectsResult,
     companiesResult,
   ] = await Promise.all([
-    // Applicants from AccountHeadMaster where LHeadType = 'A'
     pool.request().query(`
-        SELECT
-          LHeadId                        AS Id,
-          ISNULL(DisplayName, LHeadName) AS ApplicantName,
-          LHeadCode                      AS ApplicantNo
-        FROM dbo.AccountHeadMaster
-        WHERE LHeadType = 'A'
-          AND LHeadStatus = 1
-        ORDER BY ISNULL(DisplayName, LHeadName)
+        SELECT Id, ApplicantNo, ApplicantName, ProjectId, CompanyId
+        FROM dbo.FollowupApplications
+        WHERE IsDeleted = 0
+        ORDER BY ApplicantName
       `),
     // Unit selections
     pool.request().query(`
@@ -280,8 +272,8 @@ router.get("/", async (req, res) => {
         (
           fsd.DeedNo                                  LIKE @Search
           OR fsd.RegistrationNo                       LIKE @Search
-          OR ahm.LHeadCode                            LIKE @Search
-          OR ISNULL(ahm.DisplayName, ahm.LHeadName)  LIKE @Search
+          OR COALESCE(fa.ApplicantNo,   ahm.LHeadCode)                          LIKE @Search
+          OR COALESCE(fa.ApplicantName, ISNULL(ahm.DisplayName, ahm.LHeadName)) LIKE @Search
           OR fus.UnitNo                               LIKE @Search
           OR fag.AgreementNo                          LIKE @Search
           OR ep.name                                  LIKE @Search
@@ -297,7 +289,8 @@ router.get("/", async (req, res) => {
 
     const BASE_JOINS = `
       FROM dbo.FollowupSalesDeeds fsd
-      INNER JOIN dbo.AccountHeadMaster ahm  ON ahm.LHeadId = fsd.ApplicantId AND ahm.LHeadType = 'A'
+      LEFT JOIN  dbo.AccountHeadMaster ahm     ON ahm.LHeadId = fsd.ApplicantId AND ahm.LHeadType = 'A'
+      LEFT JOIN  dbo.FollowupApplications fa   ON fa.Id = fsd.ApplicantId AND fa.IsDeleted = 0 AND ahm.LHeadId IS NULL
       LEFT JOIN  dbo.FollowupUnitSelections fus ON fus.Id  = fsd.UnitSelectionId
       LEFT JOIN  dbo.FollowupAgreements fag     ON fag.Id  = fsd.AgreementId
       LEFT JOIN  dbo.enterprise ep              ON ep.id   = fsd.ProjectId  AND ep.business_type = 'P'

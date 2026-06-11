@@ -1,12 +1,9 @@
 import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   AlertCircle,
-  ArrowLeft,
   CheckCircle2,
-  ChevronRight,
   ClipboardList,
   Clock,
   Inbox,
@@ -18,8 +15,11 @@ import {
   UserCircle,
   Zap,
   CalendarClock,
+  CalendarDays,
+  ChevronDown,
   ListTodo,
 } from "lucide-react";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { toast } from "sonner";
 
 import { useAuth } from "@/contexts/AuthContext";
@@ -149,6 +149,7 @@ function StatCard({
   value,
   icon: Icon,
   accent,
+  iconClass,
   sublabel,
   active,
   onClick,
@@ -157,6 +158,7 @@ function StatCard({
   value: number;
   icon: React.ElementType;
   accent: string;
+  iconClass: string;
   sublabel?: string;
   active?: boolean;
   onClick?: () => void;
@@ -176,7 +178,7 @@ function StatCard({
         className={`absolute top-0 right-0 w-24 h-24 rounded-full opacity-10 -translate-y-6 translate-x-6 ${accent}`}
       />
       <div
-        className={`inline-flex items-center justify-center w-10 h-10 rounded-xl mb-3 ${accent} bg-opacity-10`}
+        className={`inline-flex items-center justify-center w-10 h-10 rounded-xl mb-3 ${iconClass}`}
       >
         <Icon className="w-5 h-5" />
       </div>
@@ -433,7 +435,6 @@ function TaskRow({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PendingTasksPage() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { currentUser, allUsers } = useAuth();
 
@@ -529,51 +530,34 @@ export default function PendingTasksPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-[1280px] mx-auto px-6 py-8 space-y-6">
+    <>
+      <Breadcrumbs items={[{label: "Follow-Up", path: "/followup"}, {label: "Pending Tasks"}]} />
+      <div className="space-y-6 mt-6">
         {/* ── Header ── */}
-        <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2 font-medium tracking-wide uppercase">
-              <button
-                onClick={() => navigate("/followup")}
-                className="hover:text-primary transition-colors flex items-center gap-1"
-              >
-                <ArrowLeft className="w-3 h-3" />
-                Follow-Up
-              </button>
-              <ChevronRight className="w-3 h-3" />
-              <span className="text-foreground">Pending Tasks</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 bg-primary/10 rounded-xl flex items-center justify-center">
-                <ClipboardList className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-foreground tracking-tight">
-                  Pending Tasks
-                </h1>
-                <p className="text-muted-foreground text-sm mt-0.5">
-                  All follow-up tasks — create, assign, and track to completion.
-                </p>
-              </div>
-            </div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Pending Tasks
+            </h1>
+            <p className="text-muted-foreground text-xs mt-0.5">
+              All follow-up tasks — create, assign, and track to completion.
+            </p>
           </div>
 
           <div className="flex items-center gap-2">
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="p-2 rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors disabled:opacity-50"
             >
               <RefreshCw
-                className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`}
-              />
+                className={`w-3.5 h-3.5 ${isFetching ? "animate-spin" : ""}`}
+              /> Refresh
             </button>
             {canCreate && (
               <Button
                 onClick={() => setIsDialogOpen(true)}
-                className="gap-2 gradient-accent text-primary-foreground shadow-sm shadow-primary/20 rounded-xl h-10 px-4"
+                className="gap-2 gradient-accent text-white font-semibold rounded-xl h-10 px-4"
               >
                 <Plus className="w-4 h-4" />
                 New Task
@@ -588,7 +572,8 @@ export default function PendingTasksPage() {
             label="Open"
             value={counts.open}
             icon={ListTodo}
-            accent="bg-muted-foreground text-muted-foreground"
+            accent="bg-slate-500"
+            iconClass="bg-slate-500/10 text-slate-400"
             sublabel="Awaiting action"
             active={activeFilter === "open"}
             onClick={() =>
@@ -599,7 +584,8 @@ export default function PendingTasksPage() {
             label="In Progress"
             value={counts.inProgress}
             icon={Activity}
-            accent="bg-primary text-primary"
+            accent="bg-primary"
+            iconClass="bg-primary/10 text-primary"
             sublabel="Currently active"
             active={activeFilter === "in_progress"}
             onClick={() =>
@@ -612,7 +598,8 @@ export default function PendingTasksPage() {
             label="Completed"
             value={counts.completed}
             icon={CheckCircle2}
-            accent="bg-emerald-500 text-emerald-600"
+            accent="bg-emerald-500"
+            iconClass="bg-emerald-500/10 text-emerald-500"
             sublabel="Closed + reviewed"
             active={activeFilter === "closed"}
             onClick={() =>
@@ -623,7 +610,8 @@ export default function PendingTasksPage() {
             label="Overdue"
             value={counts.overdue}
             icon={AlertCircle}
-            accent="bg-red-500 text-red-600"
+            accent="bg-red-500"
+            iconClass="bg-red-500/10 text-red-500"
             sublabel="Past due date"
           />
         </div>
@@ -700,18 +688,21 @@ export default function PendingTasksPage() {
                 {/* Priority filter */}
                 <div className="flex items-center gap-1.5">
                   <SlidersHorizontal className="w-3.5 h-3.5 text-muted-foreground" />
-                  <select
-                    value={priorityFilter}
-                    onChange={(e) =>
-                      setPriorityFilter(e.target.value as "all" | TaskPriority)
-                    }
-                    className="text-sm text-foreground bg-background border border-border rounded-lg px-2 py-1.5 outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/15 transition-all"
-                  >
-                    <option value="all">All priorities</option>
-                    <option value="high">High</option>
-                    <option value="medium">Medium</option>
-                    <option value="low">Low</option>
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={priorityFilter}
+                      onChange={(e) =>
+                        setPriorityFilter(e.target.value as "all" | TaskPriority)
+                      }
+                      className="appearance-none text-sm text-foreground bg-background border border-border rounded-lg pl-2 pr-7 py-1.5 outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/15 transition-all cursor-pointer"
+                    >
+                      <option value="all">All priorities</option>
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                    <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  </div>
                 </div>
 
                 {/* Search */}
@@ -890,14 +881,15 @@ export default function PendingTasksPage() {
                 <label className="text-sm font-medium text-foreground">
                   Due Date <span className="text-red-500">*</span>
                 </label>
-                <Input
-                  type="date"
-                  value={form.dueDate}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, dueDate: e.target.value }))
-                  }
-                  className="rounded-xl"
-                />
+                <div className="relative">
+                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                  <input
+                    type="date"
+                    value={form.dueDate}
+                    onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
+                    className="w-full pl-8 pr-3 py-2 rounded-xl text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
             </div>
 
@@ -924,13 +916,13 @@ export default function PendingTasksPage() {
           </div>
 
           <DialogFooter className="mt-2 gap-2">
-            <Button
-              variant="outline"
+            <button
+              type="button"
               onClick={() => setIsDialogOpen(false)}
-              className="rounded-xl flex-1"
+              className="flex-1 px-4 py-2 rounded-xl border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors"
             >
               Cancel
-            </Button>
+            </button>
             <Button
               onClick={() =>
                 createMutation.mutate({
@@ -955,6 +947,6 @@ export default function PendingTasksPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

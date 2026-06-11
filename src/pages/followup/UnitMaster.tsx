@@ -180,10 +180,13 @@ const UnitMaster: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Follow-Up", "Setup", "Unit Master"]} />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Unit Master
-      </h1>
+      <Breadcrumbs items={[{label: "Follow-Up", path: "/followup"}, {label: "Setup"}, {label: "Unit Master"}]} />
+      <div className="mt-6 mb-4">
+        <h1 className="text-xl font-heading font-bold text-foreground">
+          Unit Master
+        </h1>
+        <p className="text-xs text-muted-foreground mt-0.5">Manage units within your blocks and projects.</p>
+      </div>
       <MasterPage
         title="Unit"
         fields={fields}

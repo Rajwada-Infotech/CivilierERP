@@ -52,9 +52,10 @@ router.get("/meta/options", async (req, res) => {
     const [applicantsR, unitSelectionsR, bookingsR, agreementsR, projectsR, companiesR] =
       await Promise.all([
         pool.request().query(`
-          SELECT LHeadId AS Id, ISNULL(DisplayName, LHeadName) AS ApplicantName, LHeadCode AS ApplicantNo
-          FROM dbo.AccountHeadMaster WHERE LHeadType = 'A' AND LHeadStatus = 1
-          ORDER BY ISNULL(DisplayName, LHeadName)
+          SELECT Id, ApplicantNo, ApplicantName, ProjectId, CompanyId
+          FROM dbo.FollowupApplications
+          WHERE IsDeleted = 0
+          ORDER BY ApplicantName
         `),
         pool.request().query(`
           SELECT Id, SelectionNo, UnitNo, ApplicantId
@@ -129,7 +130,7 @@ router.get("/", async (req, res) => {
       return res.status(400).json({ error: "applicantId must be a valid number" });
 
     const filters = ["lm.IsDeleted = 0"];
-    if (search) filters.push(`(lm.MilestoneNo LIKE @Search OR ISNULL(ahm.DisplayName, ahm.LHeadName) LIKE @Search OR ahm.LHeadCode LIKE @Search)`);
+    if (search) filters.push(`(lm.MilestoneNo LIKE @Search OR fa.ApplicantName LIKE @Search OR fa.ApplicantNo LIKE @Search)`);
     if (overallStatus) filters.push("lm.OverallStatus = @OverallStatus");
     if (applicantId) filters.push("lm.ApplicantId = @ApplicantId");
 
@@ -138,9 +139,9 @@ router.get("/", async (req, res) => {
 
     const BASE_JOINS = `
       FROM dbo.FollowupLegalMilestones lm
-      INNER JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = lm.ApplicantId AND ahm.LHeadType = 'A'
-      LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = lm.UnitSelectionId
-      LEFT JOIN dbo.FollowupBookings fb ON fb.Id = lm.BookingId
+      LEFT JOIN dbo.FollowupApplications fa ON fa.Id = lm.ApplicantId AND fa.IsDeleted = 0
+      LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = lm.UnitSelectionId AND fus.IsDeleted = 0
+      LEFT JOIN dbo.FollowupBookings fb ON fb.Id = lm.BookingId AND fb.IsDeleted = 0
       LEFT JOIN dbo.enterprise ep ON ep.id = lm.ProjectId AND ep.business_type = 'P'
       LEFT JOIN dbo.enterprise ec ON ec.id = lm.CompanyId AND ec.business_type = 'C'
     `;
@@ -161,8 +162,7 @@ router.get("/", async (req, res) => {
       .input("PageSize", sql.Int, pageSize).query(`
         SELECT
           lm.Id, lm.MilestoneNo, lm.ApplicantId,
-          ISNULL(ahm.DisplayName, ahm.LHeadName) AS ApplicantName,
-          ahm.LHeadCode AS ApplicantNo,
+          fa.ApplicantName, fa.ApplicantNo,
           lm.UnitSelectionId, fus.UnitNo,
           lm.BookingId, fb.BookingNo,
           lm.ProjectId, ep.name AS ProjectName,

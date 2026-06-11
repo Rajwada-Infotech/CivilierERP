@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -344,6 +344,7 @@ function Combobox({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
   const selected = items.find((i) => i.value === value);
   const filtered = useMemo(() => {
     if (!q) return items;
@@ -355,8 +356,17 @@ function Combobox({
     );
   }, [items, q]);
 
+  useEffect(() => {
+    if (!open) return;
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [open]);
+
   return (
-    <div className="sd-combo">
+    <div className="sd-combo" ref={ref}>
       <button
         type="button"
         className={`sd-combo-trigger${open ? " open" : ""}${!value ? " empty" : ""}${disabled ? " disabled" : ""}`}
@@ -516,7 +526,7 @@ export function SalesDeedPage() {
 
   const projectItems: ComboItem[] = useMemo(
     () =>
-      filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map((p) => ({
+      filterProjectsByCompany((meta?.projects ?? []) as any[], form.CompanyId).map((p: any) => ({
         value: String(p.Id),
         label: p.Name,
       })),
@@ -922,10 +932,12 @@ export function SalesDeedPage() {
           padding-top: 8px; border-top: 1px solid hsl(var(--border)); margin-top: 4px;
         }
         .sd-status-select {
-          width: 100%; padding: 8px 12px; border: 1.5px solid hsl(var(--border)); border-radius: 9px;
+          width: 100%; padding: 8px 32px 8px 12px; border: 1.5px solid hsl(var(--border)); border-radius: 9px;
           font-size: 13.5px; color: hsl(var(--foreground)); background: hsl(var(--card));
           outline: none; transition: border-color 0.15s; font-family: inherit;
           cursor: pointer; appearance: none; -webkit-appearance: none;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+          background-repeat: no-repeat; background-position: right 10px center;
         }
         .sd-status-select:focus { border-color: hsl(var(--primary)); }
 
@@ -1526,7 +1538,7 @@ export function SalesDeedPage() {
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
                   />
                   <input
                     type="date"
@@ -1541,7 +1553,7 @@ export function SalesDeedPage() {
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
                   />
                   <input
                     type="date"
@@ -1556,7 +1568,7 @@ export function SalesDeedPage() {
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
                   />
                   <input
                     type="date"
@@ -1637,9 +1649,9 @@ export function SalesDeedPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+            <button type="button" className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={() => setDialogOpen(false)}>
               Cancel
-            </Button>
+            </button>
             <Button
               disabled={
                 !form.ApplicantId || createMut.isPending || updateMut.isPending

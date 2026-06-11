@@ -618,7 +618,7 @@ export default function PaymentLogs() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" size="sm" className="text-xs" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <button type="button" className="px-3 py-1.5 rounded-lg border border-border bg-background text-foreground text-xs font-medium hover:bg-muted transition-colors" onClick={() => setAddOpen(false)}>Cancel</button>
             <Button
               size="sm"
               className="text-xs gradient-accent"

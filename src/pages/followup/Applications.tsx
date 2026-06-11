@@ -808,9 +808,9 @@ function ApplicationDrawer({
         </div>
 
         <div className="flex justify-end gap-2 border-t border-border px-6 py-4 shrink-0">
-          <Button variant="outline" onClick={onClose} className="h-9">
+          <button type="button" className="h-9 px-4 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={onClose}>
             Cancel
-          </Button>
+          </button>
           <Button
             onClick={onSubmit}
             disabled={saving}
@@ -1096,23 +1096,14 @@ export default function ApplicationsPage() {
         ]}
       />
 
-      <div className="space-y-6 mt-4">
+      <div className="relative space-y-8 mt-6">
         {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="flex items-end justify-between gap-4">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2.5 mb-1">
-              <div className="w-1 h-5 rounded-full gradient-accent" />
-              <h1 className="text-[22px] font-heading font-bold text-foreground tracking-tight leading-none">
-                Applications
-              </h1>
-              {isFetching && (
-                <Loader2
-                  size={13}
-                  className="animate-spin text-muted-foreground"
-                />
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground pl-3.5">
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Applications
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
               Track and manage sales applications before unit selection and
               booking.
             </p>
@@ -1121,61 +1112,38 @@ export default function ApplicationsPage() {
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-lg border border-border hover:bg-muted/60 transition-colors disabled:opacity-40 text-muted-foreground hover:text-foreground"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
               <RefreshCw
-                size={12}
+                size={13}
                 className={isFetching ? "animate-spin" : ""}
-              />{" "}
+              />
               Refresh
             </button>
             <Button
+              size="sm"
               onClick={resetAndOpen}
-              className="gradient-accent gap-1.5 font-semibold text-white text-sm h-9 px-4 rounded-xl shadow-lg shadow-primary/20"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               <Plus size={14} /> New Application
             </Button>
           </div>
         </div>
 
-        {/* ── Bento Stats ─────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <BentoCard
-            icon={<Users size={15} />}
-            label="Total Applications"
-            value={totals.total}
-            sub={`across all projects`}
-            accentFrom="from-blue-500/5"
-            accentTo="to-indigo-500/5"
-            iconColor="text-blue-400"
-          />
-          <BentoCard
-            icon={<UserCheck size={15} />}
-            label="Active on Page"
-            value={totals.active}
-            sub={`${totals.total > 0 ? Math.round((totals.active / applications.length) * 100) : 0}% of this page`}
-            accentFrom="from-emerald-500/5"
-            accentTo="to-teal-500/5"
-            iconColor="text-emerald-400"
-          />
-          <BentoCard
-            icon={<AlertTriangle size={15} />}
-            label="Docs Pending"
-            value={totals.pendingDocs}
-            sub="needs attention"
-            accentFrom="from-amber-500/5"
-            accentTo="to-orange-500/5"
-            iconColor="text-amber-400"
-          />
-          <BentoCard
-            icon={<TrendingUp size={15} />}
-            label="Budget on Page"
-            value={formatCurrency(totals.budget)}
-            sub="combined applicant budget"
-            accentFrom="from-violet-500/5"
-            accentTo="to-purple-500/5"
-            iconColor="text-violet-400"
-          />
+        {/* ── Stats ───────────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { label: "Total Applications", value: totals.total, dot: "bg-blue-400" },
+            { label: "Active on Page", value: totals.active, dot: "bg-emerald-500" },
+            { label: "Docs Pending", value: totals.pendingDocs, dot: "bg-amber-400" },
+            { label: "Budget on Page", value: formatCurrency(totals.budget), dot: "bg-violet-500" },
+          ].map(({ label, value, dot }) => (
+            <div key={label} className="rounded-xl border border-border bg-card p-4">
+              <div className={`w-2 h-2 rounded-full ${dot} mb-3`} />
+              <p className="text-2xl font-bold font-heading text-foreground leading-none">{value}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">{label}</p>
+            </div>
+          ))}
         </div>
 
         {/* ── Table Card ───────────────────────────────────────────────────── */}
