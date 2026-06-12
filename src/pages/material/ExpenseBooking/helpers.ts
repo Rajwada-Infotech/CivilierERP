@@ -365,13 +365,14 @@ export function dbToRecord(row: any): ExpenseRecord {
     sgstRate: row.ESgstRate ? parseFloat(row.ESgstRate) : 0,
     discount,
     emi,
-    // For GRN-linked bookings, use the live GRN total (incl GST) returned by
-    // the backend as the authoritative net amount. Falls back to stored ENetAmount.
+    // For GRN-linked bookings, prefer the stored ENetAmount (net after billing terms).
+    // Fall back to EGrnTotalAmount (incl-GST, before terms) if ENetAmount not set,
+    // then fall back to EAmount for non-GRN / very old records.
     netAmount:
-      row.EGrnTotalAmount != null
-        ? parseFloat(row.EGrnTotalAmount)
-        : row.ENetAmount
-          ? parseFloat(row.ENetAmount)
+      row.ENetAmount
+        ? parseFloat(row.ENetAmount)
+        : row.EGrnTotalAmount != null
+          ? parseFloat(row.EGrnTotalAmount)
           : parseFloat(row.EAmount) || 0,
     grnTotalAmount:
       row.EGrnTotalAmount != null ? parseFloat(row.EGrnTotalAmount) : null,

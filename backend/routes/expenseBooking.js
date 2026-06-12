@@ -899,7 +899,10 @@ router.get("/:id", async (req, res) => {
                  WHEN eb.ESourceType = 'GRN' AND grn_det.TotalAmount IS NOT NULL AND grn_det.TotalAmount > 0
                  THEN grn_det.TotalAmount
                  ELSE NULL
-               END AS EGrnTotalAmount
+               END AS EGrnTotalAmount,
+               -- Pass through source info needed for fallback computation
+               eb.ESourceType AS _ESourceType,
+               eb.ESourceId   AS _ESourceId
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
         LEFT JOIN dbo.enterprise ec ON ec.id = eb.ECompanyId
@@ -918,30 +921,50 @@ router.get("/:id", async (req, res) => {
     if (!result.recordset.length)
       return res.status(404).json({ error: "Not found" });
 
-    const raw = result.recordset[0];
+    // Destructure to separate the internal _ESourceType/_ESourceId aliases
+    // from the rest. mssql recordset rows can be non-configurable so we must
+    // not mutate them in-place (delete/assignment throws in strict contexts).
+    const { _ESourceType, _ESourceId, ...row } = result.recordset[0];
+
+    // If EGrnTotalAmount is NULL (grn.TotalAmount not populated for older records),
+    // compute the authoritative total from buildGrnGstData (item qty x PO rate + GST).
+    let EGrnTotalAmount = row.EGrnTotalAmount ?? null;
+    if (!EGrnTotalAmount && _ESourceType === "GRN" && _ESourceId) {
+      try {
+        const grnId = parseInt(String(_ESourceId), 10);
+        if (Number.isFinite(grnId) && grnId > 0) {
+          const grnData = await buildGrnGstData(pool, grnId);
+          if (grnData && grnData.totals.netAmount > 0) {
+            EGrnTotalAmount = grnData.totals.netAmount;
+          }
+        }
+      } catch {
+        /* non-fatal: frontend will fall back to standard breakdown */
+      }
+    }
 
     // For GRN-linked bookings, recompute ENetAmount live from the GRN total + billing terms.
     // The stored ENetAmount may be stale if the GRN was amended after the booking was created.
-    let liveENetAmount = raw.ENetAmount;
+    let liveENetAmount = row.ENetAmount;
     if (
-      raw.ESourceType === "GRN" &&
-      raw.EGrnTotalAmount != null &&
-      parseFloat(raw.EGrnTotalAmount) > 0
+      _ESourceType === "GRN" &&
+      EGrnTotalAmount != null &&
+      parseFloat(EGrnTotalAmount) > 0
     ) {
       liveENetAmount = applyBillingTermsToAmount(
-        parseFloat(raw.EGrnTotalAmount),
-        parseFloat(raw.EAmount ?? 0),
-        parseFloat(raw.ECgstRate ?? 0),
-        parseFloat(raw.ESgstRate ?? 0),
-        raw.EBillingTermsData,
-        raw.EDiscountData,
+        parseFloat(EGrnTotalAmount),
+        parseFloat(row.EAmount ?? 0),
+        parseFloat(row.ECgstRate ?? 0),
+        parseFloat(row.ESgstRate ?? 0),
+        row.EBillingTermsData,
+        row.EDiscountData,
       );
       console.log(
-        `[/:id] Eid=${raw.Eid} ESourceType=${raw.ESourceType} EGrnTotalAmount=${raw.EGrnTotalAmount} stored=${raw.ENetAmount} live=${liveENetAmount} billingTerms=${JSON.stringify(raw.EBillingTermsData)}`,
+        `[/:id] Eid=${row.Eid} ESourceType=${_ESourceType} EGrnTotalAmount=${EGrnTotalAmount} stored=${row.ENetAmount} live=${liveENetAmount} billingTerms=${JSON.stringify(row.EBillingTermsData)}`,
       );
     }
 
-    res.json({ ...raw, ENetAmount: liveENetAmount });
+    res.json({ ...row, EGrnTotalAmount, ENetAmount: liveENetAmount });
   } catch (err) {
     console.error("Get by id error:", err.message);
     res.status(500).json({ error: err.message });
