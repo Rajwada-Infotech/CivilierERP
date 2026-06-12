@@ -125,19 +125,60 @@ export function computeBreakdown(
 export function computeGrnNetWithTerms(
   grnTotal: number,
   terms: DiscountConfig[],
+  basicAmount?: number,
 ): number {
-  let running = grnTotal;
-  for (const t of terms) {
+  // Split by pre/post-GST
+  const preTerms = terms.filter((t) => t.appliedOn !== "post-gst");
+  const postTerms = terms.filter((t) => t.appliedOn === "post-gst");
+
+  if (preTerms.length === 0) {
+    // No pre-GST terms — apply all post-GST terms on gross directly
+    let running = grnTotal;
+    for (const t of postTerms) {
+      const amt =
+        t.type === "percentage"
+          ? (running * (t.value ?? 0)) / 100
+          : (t.value ?? 0);
+      if (t.deductionType === "Addition") running += amt;
+      else running = Math.max(0, running - amt);
+    }
+    return Math.round(running);
+  }
+
+  // Derive effective GST rates from basicAmount (base) and grnTotal (incl-GST)
+  const base = basicAmount ?? 0;
+  const gst = grnTotal - base;
+  const effectiveGSTRate = base > 0 ? (gst / base) * 100 : 0;
+  // Split GST rate evenly for CGST/SGST (used for recomputation)
+  const effectiveCGSTRate = effectiveGSTRate / 2;
+  const effectiveSGSTRate = effectiveGSTRate / 2;
+
+  // Apply pre-GST terms on base
+  let runningBase = base;
+  for (const t of preTerms) {
+    const amt =
+      t.type === "percentage"
+        ? (runningBase * (t.value ?? 0)) / 100
+        : (t.value ?? 0);
+    if (t.deductionType === "Addition") runningBase += amt;
+    else runningBase = Math.max(0, runningBase - amt);
+  }
+
+  // Recompute GST on adjusted base
+  const adjCGST = (runningBase * effectiveCGSTRate) / 100;
+  const adjSGST = (runningBase * effectiveSGSTRate) / 100;
+  let running = runningBase + adjCGST + adjSGST;
+
+  // Apply post-GST terms on adjusted gross
+  for (const t of postTerms) {
     const amt =
       t.type === "percentage"
         ? (running * (t.value ?? 0)) / 100
         : (t.value ?? 0);
-    if (t.deductionType === "Addition") {
-      running += amt;
-    } else {
-      running = Math.max(0, running - amt);
-    }
+    if (t.deductionType === "Addition") running += amt;
+    else running = Math.max(0, running - amt);
   }
+
   return Math.round(running);
 }
 
