@@ -85,70 +85,72 @@ export function ExpenseBookingPreviewModal({
 
   useEffect(() => {
     setGrnBreakdown(null);
-    if (previewRecord?.eSourceType === "GRN" && previewRecord?.eSourceId) {
-      fetchWithAuth(`/api/grns/${previewRecord.eSourceId}/gst-breakdown`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (data?.totals?.totalInclGST > 0) {
-            setGrnBreakdown(data);
-          } else {
-            // API returned wrong shape or zero — synthesize ONLY from the live
-            // GRN total (grnTotalAmount) returned by GET /api/expense-booking/:id.
-            // Do NOT fall back to basicAmount: for old records basicAmount is the
-            // stale EAmount snapshot, which would produce a wrong breakdown.
-            const inclGST = previewRecord.grnTotalAmount ?? 0;
-            if (inclGST > 0) {
-              const cgstRate = previewRecord.cgstRate ?? 0;
-              const sgstRate = previewRecord.sgstRate ?? 0;
-              const totalGstRate = cgstRate + sgstRate;
-              const base =
-                totalGstRate > 0
-                  ? Math.round((inclGST / (1 + totalGstRate / 100)) * 100) / 100
-                  : inclGST;
-              const cgst = Math.round(((base * cgstRate) / 100) * 100) / 100;
-              const sgst = Math.round(((base * sgstRate) / 100) * 100) / 100;
-              setGrnBreakdown({
-                items: [],
-                totals: {
-                  totalBase: base,
-                  totalCGST: cgst,
-                  totalSGST: sgst,
-                  totalGST: cgst + sgst,
-                  totalInclGST: inclGST,
-                },
-              });
-            }
-            // If inclGST is 0 (old record without EGrnTotalAmount), grnBreakdown stays
-            // null and the modal falls back to the standard non-GRN breakdown using
-            // the stored basicAmount / cgstRate / sgstRate fields.
+    if (!previewRecord) return;
+
+    /**
+     * Given a GRNID, fetch /api/grns/:id/gst-breakdown and call setGrnBreakdown.
+     * Falls back to synthesizing from inclGST + stored rates if the API returns
+     * empty totals (e.g. GRN has no item-level HSN data yet).
+     */
+    const loadGrnBreakdown = async (grnId: number) => {
+      try {
+        const r = await fetchWithAuth(`/api/grns/${grnId}/gst-breakdown`);
+        const data = r.ok ? await r.json() : null;
+        if (data?.totals?.totalInclGST > 0) {
+          setGrnBreakdown(data);
+          return;
+        }
+      } catch {
+        /* fall through to synthesis */
+      }
+      // Synthesis fallback: back-calculate from stored incl-GST total + rates.
+      // Only fires when the per-item breakdown API returned zero/empty.
+      const inclGST = previewRecord.grnTotalAmount ?? 0;
+      if (inclGST > 0) {
+        const cgstRate = previewRecord.cgstRate ?? 0;
+        const sgstRate = previewRecord.sgstRate ?? 0;
+        const totalGstRate = cgstRate + sgstRate;
+        const base = totalGstRate > 0
+          ? Math.round((inclGST / (1 + totalGstRate / 100)) * 100) / 100
+          : inclGST;
+        const cgst = Math.round((base * cgstRate / 100) * 100) / 100;
+        const sgst = Math.round((base * sgstRate / 100) * 100) / 100;
+        setGrnBreakdown({
+          items: [],
+          totals: { totalBase: base, totalCGST: cgst, totalSGST: sgst, totalGST: cgst + sgst, totalInclGST: inclGST },
+        });
+      }
+    };
+
+    const { eSourceType, eSourceId } = previewRecord;
+
+    if (eSourceType === "GRN" && eSourceId) {
+      // Direct GRN link — load its breakdown immediately.
+      loadGrnBreakdown(eSourceId);
+    } else if (
+      (eSourceType === "PO" || eSourceType === "WO_PO") &&
+      eSourceId
+    ) {
+      // PO-linked booking: find the GRN(s) created against this PO,
+      // then load the most recent one's GST breakdown.
+      // This is the authoritative source for GST because the PO itself
+      // stores rates/GST at booking time, but the GRN holds the actual
+      // received quantities and item-level HSN rates used for payment.
+      fetchWithAuth(`/api/grns/by-po/${eSourceId}`)
+        .then((r) => (r.ok ? r.json() : []))
+        .then((grns: { GRNID: number }[]) => {
+          if (Array.isArray(grns) && grns.length > 0) {
+            // grns is ordered newest-first (ORDER BY GRNID DESC)
+            loadGrnBreakdown(grns[0].GRNID);
           }
+          // If no GRNs exist for this PO, grnBreakdown stays null →
+          // modal falls back to standard breakdown using stored rates.
         })
         .catch(() => {
-          // Network failure — synthesize from live GRN total only (not basicAmount)
-          const inclGST = previewRecord.grnTotalAmount ?? 0;
-          if (inclGST > 0) {
-            const cgstRate = previewRecord.cgstRate ?? 0;
-            const sgstRate = previewRecord.sgstRate ?? 0;
-            const totalGstRate = cgstRate + sgstRate;
-            const base =
-              totalGstRate > 0
-                ? Math.round((inclGST / (1 + totalGstRate / 100)) * 100) / 100
-                : inclGST;
-            const cgst = Math.round(((base * cgstRate) / 100) * 100) / 100;
-            const sgst = Math.round(((base * sgstRate) / 100) * 100) / 100;
-            setGrnBreakdown({
-              items: [],
-              totals: {
-                totalBase: base,
-                totalCGST: cgst,
-                totalSGST: sgst,
-                totalGST: cgst + sgst,
-                totalInclGST: inclGST,
-              },
-            });
-          }
+          /* non-fatal — standard breakdown will be shown */
         });
     }
+
     // Fetch billing terms master to hydrate terms when EBillingTermsData is missing
     fetchWithAuth("/api/billing-terms")
       .then((r) => (r.ok ? r.json() : []))
