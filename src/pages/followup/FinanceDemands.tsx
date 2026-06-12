@@ -352,7 +352,7 @@ export function FinanceDemandsPage() {
           <div>
             <Breadcrumbs
               items={[
-                { label: "Follow-Up", href: "/followup" },
+                { label: "Follow-Up", path: "/followup" },
                 { label: "Finance" },
                 { label: "Demands" },
               ]}

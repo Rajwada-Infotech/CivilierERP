@@ -114,6 +114,33 @@ export function computeBreakdown(
   };
 }
 
+/**
+ * Compute the net payable for a GRN-linked booking by applying billing terms
+ * on top of the live GRN gross (incl-GST) amount.  Mirrors the modal's
+ * grnNetPayable useMemo so the list table and summary card stay in sync.
+ *
+ * @param grnTotal  - GRN TotalAmount (incl. GST)
+ * @param terms     - billing terms array from the record (billingTerms)
+ */
+export function computeGrnNetWithTerms(
+  grnTotal: number,
+  terms: DiscountConfig[],
+): number {
+  let running = grnTotal;
+  for (const t of terms) {
+    const amt =
+      t.type === "percentage"
+        ? (running * (t.value ?? 0)) / 100
+        : (t.value ?? 0);
+    if (t.deductionType === "Addition") {
+      running += amt;
+    } else {
+      running = Math.max(0, running - amt);
+    }
+  }
+  return Math.round(running);
+}
+
 export function computeGrnGst(grnGst: GrnGstData): PriceBreakdown {
   const grossAmount =
     grnGst.totals.taxableAmount +
@@ -168,7 +195,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     bookingName: "",
     bookingReference: "",
     docTypeName: "",
-    bookingDate: new Date().toISOString().slice(0, 10),
+    bookingDate: "",
     dueDate: "",
     financialYear: "",
     companyId: null,
@@ -185,6 +212,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     /** Default payment type for new bookings. */
     paymentType: "full",
     netAmount: null,
+    grnTotalAmount: null,
     status: "Draft",
     remarks: "",
     billingTermId: null,
@@ -232,8 +260,8 @@ export function dbToRecord(row: any): ExpenseRecord {
 
   try {
     if (row.EBillingTermsData) {
-      // Backend was previously double-stringifying — parse once, then re-parse
-      // if we got a string back (legacy double-encoded rows in DB).
+      // Backend double-stringifies (JSON.stringify on an already-stringified string),
+      // so we may need two rounds of JSON.parse to get the actual array.
       let parsed = JSON.parse(row.EBillingTermsData);
       if (typeof parsed === "string") parsed = JSON.parse(parsed);
       if (Array.isArray(parsed) && parsed.length > 0) {
@@ -294,9 +322,16 @@ export function dbToRecord(row: any): ExpenseRecord {
     sgstRate: row.ESgstRate ? parseFloat(row.ESgstRate) : 0,
     discount,
     emi,
-    netAmount: row.ENetAmount
-      ? parseFloat(row.ENetAmount)
-      : parseFloat(row.EAmount) || 0,
+    // For GRN-linked bookings, use the live GRN total (incl GST) returned by
+    // the backend as the authoritative net amount. Falls back to stored ENetAmount.
+    netAmount:
+      row.EGrnTotalAmount != null
+        ? parseFloat(row.EGrnTotalAmount)
+        : row.ENetAmount
+          ? parseFloat(row.ENetAmount)
+          : parseFloat(row.EAmount) || 0,
+    grnTotalAmount:
+      row.EGrnTotalAmount != null ? parseFloat(row.EGrnTotalAmount) : null,
     status: (row.EStatus ?? row.Status ?? "Draft") as any,
     remarks: row.ERemarks ?? "",
     billingTermId: row.EBillingTermId ? parseInt(row.EBillingTermId, 10) : null,

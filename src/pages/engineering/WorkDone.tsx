@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -93,7 +92,6 @@ interface WorkDoneEntry {
 interface DropdownOption {
   id: number;
   name: string;
-  company_id?: number | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -409,10 +407,7 @@ function WorkDoneForm({
               </FieldLabel>
               {renderSelect(
                 form.companyId,
-                (v) => {
-                  setField("companyId", v);
-                  setField("projectId", ""); // clear project when company changes
-                },
+                (v) => setField("companyId", v),
                 companies,
                 "Select company…",
                 errors.companyId,
@@ -429,33 +424,12 @@ function WorkDoneForm({
                   Project
                 </span>
               </FieldLabel>
-              {loadingDropdowns ? (
-                <SelectSkeleton />
-              ) : (
-                <select
-                  value={form.projectId}
-                  onChange={(e) => setField("projectId", e.target.value)}
-                  disabled={!form.companyId}
-                  className={`${selectCls} ${errors.projectId ? "border-red-400" : ""} ${!form.companyId ? "opacity-50 cursor-not-allowed" : ""}`}
-                >
-                  <option value="">
-                    {!form.companyId
-                      ? "Select a company first"
-                      : "Select project…"}
-                  </option>
-                  {(form.companyId
-                    ? projects.filter(
-                        (p) =>
-                          !p.company_id ||
-                          p.company_id === parseInt(form.companyId),
-                      )
-                    : projects
-                  ).map((o) => (
-                    <option key={o.id} value={String(o.id)}>
-                      {o.name}
-                    </option>
-                  ))}
-                </select>
+              {renderSelect(
+                form.projectId,
+                (v) => setField("projectId", v),
+                projects,
+                "Select project…",
+                errors.projectId,
               )}
               {errors.projectId && (
                 <p className="text-xs text-red-500 mt-1">Required</p>
@@ -1010,7 +984,6 @@ function WorkDoneForm({
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function WorkDone() {
   const { finYears } = useFinYear();
-  const navigate = useNavigate();
   const [view, setView] = useState<"list" | "form">("list");
   const [editRecord, setEditRecord] = useState<WorkDoneEntry | null>(null);
   const [viewRecord, setViewRecord] = useState<WorkDoneEntry | null>(null);
@@ -1101,19 +1074,8 @@ export default function WorkDone() {
   };
 
   const openEdit = (r: WorkDoneEntry) => {
-    navigate("/engineering/amendment-menu", {
-      state: {
-        prefill: {
-          tab: "WORK_DONE",
-          docId: r.ID,
-          docNo: r.DocNo,
-          supplierName: r.SupplierName || r.ContractorName,
-          projectName: r.ProjectName,
-          companyName: r.CompanyName,
-          totalAmount: r.CertifiedAmount,
-        },
-      },
-    });
+    setEditRecord(r);
+    setView("form");
   };
 
   const closeForm = () => {

@@ -15,7 +15,33 @@ import {
 import { NavItem } from "./SidebarPrimitives";
 
 export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
+  // ── 1. Dashboard ───────────────────────────────────────────────────────────
   { label: "Control Center", icon: BarChart3, path: "/admin/dashboard" },
+
+  // ── 2. Data Entry — Master Setup (things you configure before using the system)
+  {
+    label: "Enterprise",
+    icon: Building2,
+    children: [
+      { label: "Enterprise", path: "/admin/masters/business-unit" },
+      { label: "Company", path: "/admin/masters/company" },
+      { label: "Project", path: "/admin/masters/project" },
+    ],
+  },
+  {
+    label: "Masters",
+    icon: Layers,
+    children: [
+      {
+        label: "Contractor Categories",
+        path: "/admin/masters/contractor-categories",
+      },
+      { label: "Godowns", path: "/admin/masters/godowns" },
+      { label: "Page Definitions", path: "/admin/page-definitions" },
+    ],
+  },
+
+  // ── 3. User & Access Control ───────────────────────────────────────────────
   {
     label: "User Control",
     icon: Users,
@@ -34,14 +60,14 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
     ],
   },
   {
-    label: "Enterprise",
-    icon: Building2,
+    label: "Security",
+    icon: ShieldCheck,
     children: [
-      { label: "Enterprise", path: "/admin/masters/business-unit" },
-      { label: "Company", path: "/admin/masters/company" },
-      { label: "Project", path: "/admin/masters/project" },
+      { label: "Password Reset", path: "/admin/security/password-reset" },
     ],
   },
+
+  // ── 4. Approval Workflow ───────────────────────────────────────────────────
   {
     label: "Approval",
     icon: CheckCircle2,
@@ -55,13 +81,8 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
       { label: "Post Approval Rights", path: "/admin/approval/post-rights" },
     ],
   },
-  {
-    label: "Security",
-    icon: ShieldCheck,
-    children: [
-      { label: "Password Reset", path: "/admin/security/password-reset" },
-    ],
-  },
+
+  // ── 5. Integrations & Communications ──────────────────────────────────────
   {
     label: "Communicator",
     icon: MessageSquare,
@@ -69,24 +90,22 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
       { label: "SMS Setup", path: "/admin/communicator/sms-setup" },
       { label: "Email Setup", path: "/admin/communicator/email-setup" },
       { label: "WhatsApp Setup", path: "/admin/communicator/whatsapp-setup" },
-      { label: "Integration Channels", path: "/admin/masters/integration-channels" },
+      {
+        label: "Integration Channels",
+        path: "/admin/masters/integration-channels",
+      },
     ],
   },
-  {
-    label: "Masters",
-    icon: Layers,
-    children: [
-      { label: "Contractor Categories", path: "/admin/masters/contractor-categories" },
-      { label: "Godowns", path: "/admin/masters/godowns" },
-      { label: "Page Definitions", path: "/admin/page-definitions" },
-    ],
-  },
+  { label: "API Integration", icon: Plug, path: "/admin/api-integration" },
+
+  // ── 6. Monitoring & Support ────────────────────────────────────────────────
+  { label: "Live Metrics", icon: TrendingUp, path: "/admin/metrics" },
   {
     label: "Support Tickets",
     icon: Ticket,
     children: [{ label: "Resolution", path: "/admin/tickets/resolution" }],
   },
-  { label: "API Integration", icon: Shield, path: "/admin/api-integration" },
-  { label: "Live Metrics", icon: TrendingUp, path: "/admin/metrics" },
+
+  // ── 7. Miscellaneous ───────────────────────────────────────────────────────
   { label: "Signature", icon: FileText, path: "/admin/signature" },
 ];

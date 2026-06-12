@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -50,7 +51,7 @@ import { Textarea } from "@/components/ui/textarea";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type NoticeType = "30-day" | "60-day" | "Final";
-type PNStatus   = "Sent" | "Acknowledged" | "Overdue" | "Cancelled";
+type PNStatus = "Sent" | "Acknowledged" | "Overdue" | "Cancelled";
 
 interface PossessionNotice {
   Id: number;
@@ -80,12 +81,37 @@ interface PossessionNotice {
   CreatedAt: string;
 }
 
-interface OptionApplicant { Id: number; ApplicantNo: string | null; ApplicantName: string; }
-interface OptionUnitSelection { Id: number; SelectionNo: string; UnitNo: string; ApplicantId: number; ProjectId: number | null; CompanyId: number | null; }
-interface OptionHandover { Id: number; HandoverNo: string; ApplicantId: number; }
-interface OptionPrePossession { Id: number; ClearanceNo: string; ApplicantId: number; }
-interface OptionProject { Id: number; Name: string; }
-interface OptionCompany { Id: number; Name: string; }
+interface OptionApplicant {
+  Id: number;
+  ApplicantNo: string | null;
+  ApplicantName: string;
+}
+interface OptionUnitSelection {
+  Id: number;
+  SelectionNo: string;
+  UnitNo: string;
+  ApplicantId: number;
+  ProjectId: number | null;
+  CompanyId: number | null;
+}
+interface OptionHandover {
+  Id: number;
+  HandoverNo: string;
+  ApplicantId: number;
+}
+interface OptionPrePossession {
+  Id: number;
+  ClearanceNo: string;
+  ApplicantId: number;
+}
+interface OptionProject {
+  Id: number;
+  Name: string;
+}
+interface OptionCompany {
+  Id: number;
+  Name: string;
+}
 
 interface MetaOptions {
   applicants: OptionApplicant[];
@@ -145,47 +171,87 @@ function fmtDate(d: string | null | undefined): string {
 }
 
 function avatarColor(name: string): string {
-  const colors = ["#2563eb","#7c3aed","#0891b2","#059669","#d97706","#dc2626","#db2777","#65a30d"];
+  const colors = [
+    "#2563eb",
+    "#7c3aed",
+    "#0891b2",
+    "#059669",
+    "#d97706",
+    "#dc2626",
+    "#db2777",
+    "#65a30d",
+  ];
   let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffffffff;
+  for (let i = 0; i < name.length; i++)
+    h = (h * 31 + name.charCodeAt(i)) & 0xffffffff;
   return colors[Math.abs(h) % colors.length];
 }
 
 function initials(name: string): string {
-  return name.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
 }
 
 /** Calculate days remaining to ScheduledPossDate (negative = overdue) */
 function daysRemaining(scheduledDate: string | null): number | null {
   if (!scheduledDate) return null;
-  const diff = new Date(scheduledDate).getTime() - new Date().setHours(0, 0, 0, 0);
+  const diff =
+    new Date(scheduledDate).getTime() - new Date().setHours(0, 0, 0, 0);
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
 // ─── Status config ────────────────────────────────────────────────────────────
 
-const STATUS_META: Record<PNStatus, { label: string; icon: ReactNode; cls: string }> = {
-  Sent:         { label: "Sent",         icon: <Send size={11} />,         cls: "pn-badge-sent" },
-  Acknowledged: { label: "Acknowledged", icon: <CheckCircle2 size={11} />, cls: "pn-badge-acknowledged" },
-  Overdue:      { label: "Overdue",      icon: <AlertCircle size={11} />,  cls: "pn-badge-overdue" },
-  Cancelled:    { label: "Cancelled",    icon: <Ban size={11} />,          cls: "pn-badge-cancelled" },
+const STATUS_META: Record<
+  PNStatus,
+  { label: string; icon: ReactNode; cls: string }
+> = {
+  Sent: { label: "Sent", icon: <Send size={11} />, cls: "pn-badge-sent" },
+  Acknowledged: {
+    label: "Acknowledged",
+    icon: <CheckCircle2 size={11} />,
+    cls: "pn-badge-acknowledged",
+  },
+  Overdue: {
+    label: "Overdue",
+    icon: <AlertCircle size={11} />,
+    cls: "pn-badge-overdue",
+  },
+  Cancelled: {
+    label: "Cancelled",
+    icon: <Ban size={11} />,
+    cls: "pn-badge-cancelled",
+  },
 };
 
 const NOTICE_TYPE_META: Record<NoticeType, string> = {
   "30-day": "pn-type-30",
   "60-day": "pn-type-60",
-  "Final":  "pn-type-final",
+  Final: "pn-type-final",
 };
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 
 async function fetchMeta(): Promise<MetaOptions> {
-  const res = await fetchWithAuth("/api/followup-possession-notice/meta/options");
+  const res = await fetchWithAuth(
+    "/api/followup-possession-notice/meta/options",
+  );
   if (!res.ok) throw new Error("Failed to load options");
   return res.json();
 }
 
-async function fetchPNs(params: { page: number; pageSize: number; search: string; status: string; noticeType: string }) {
+async function fetchPNs(params: {
+  page: number;
+  pageSize: number;
+  search: string;
+  status: string;
+  noticeType: string;
+}) {
   const q = new URLSearchParams({
     page: String(params.page),
     pageSize: String(params.pageSize),
@@ -195,7 +261,15 @@ async function fetchPNs(params: { page: number; pageSize: number; search: string
   });
   const res = await fetchWithAuth(`/api/followup-possession-notice?${q}`);
   if (!res.ok) throw new Error("Failed to load Possession Notices");
-  return res.json() as Promise<{ data: PossessionNotice[]; pagination: { page: number; pageSize: number; total: number; totalPages: number } }>;
+  return res.json() as Promise<{
+    data: PossessionNotice[];
+    pagination: {
+      page: number;
+      pageSize: number;
+      total: number;
+      totalPages: number;
+    };
+  }>;
 }
 
 async function createPN(payload: Record<string, unknown>) {
@@ -206,7 +280,9 @@ async function createPN(payload: Record<string, unknown>) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error((err as { error?: string }).error || "Failed to create Possession Notice");
+    throw new Error(
+      (err as { error?: string }).error || "Failed to create Possession Notice",
+    );
   }
 }
 
@@ -218,22 +294,39 @@ async function updatePN(id: number, payload: Record<string, unknown>) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error((err as { error?: string }).error || "Failed to update Possession Notice");
+    throw new Error(
+      (err as { error?: string }).error || "Failed to update Possession Notice",
+    );
   }
 }
 
 async function deletePN(id: number) {
-  const res = await fetchWithAuth(`/api/followup-possession-notice/${id}`, { method: "DELETE" });
+  const res = await fetchWithAuth(`/api/followup-possession-notice/${id}`, {
+    method: "DELETE",
+  });
   if (!res.ok) throw new Error("Failed to delete Possession Notice");
 }
 
 // ─── Combobox ─────────────────────────────────────────────────────────────────
 
-interface ComboItem { value: string; label: string; sub?: string; }
+interface ComboItem {
+  value: string;
+  label: string;
+  sub?: string;
+}
 
-function Combobox({ value, onChange, items, placeholder, disabled }: {
-  value: string; onChange: (v: string) => void;
-  items: ComboItem[]; placeholder: string; disabled?: boolean;
+function Combobox({
+  value,
+  onChange,
+  items,
+  placeholder,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  items: ComboItem[];
+  placeholder: string;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -241,7 +334,11 @@ function Combobox({ value, onChange, items, placeholder, disabled }: {
   const filtered = useMemo(() => {
     if (!q) return items;
     const lq = q.toLowerCase();
-    return items.filter((i) => i.label.toLowerCase().includes(lq) || (i.sub ?? "").toLowerCase().includes(lq));
+    return items.filter(
+      (i) =>
+        i.label.toLowerCase().includes(lq) ||
+        (i.sub ?? "").toLowerCase().includes(lq),
+    );
   }, [items, q]);
 
   return (
@@ -249,36 +346,73 @@ function Combobox({ value, onChange, items, placeholder, disabled }: {
       <button
         type="button"
         className={`pn-combo-trigger${open ? " open" : ""}${!value ? " empty" : ""}${disabled ? " disabled" : ""}`}
-        onClick={() => { if (!disabled) { setOpen((v) => !v); setQ(""); } }}
+        onClick={() => {
+          if (!disabled) {
+            setOpen((v) => !v);
+            setQ("");
+          }
+        }}
       >
         <span className="pn-combo-left">
-          {selected ? <span className="pn-combo-val">{selected.label}</span> : <span className="pn-combo-placeholder">{placeholder}</span>}
-        </span>
-        <span style={{ display:"flex", alignItems:"center", gap:4 }}>
-          {value && !disabled && (
-            <span className="pn-combo-clear" onClick={(e) => { e.stopPropagation(); onChange(""); setOpen(false); }}><X size={12} /></span>
+          {selected ? (
+            <span className="pn-combo-val">{selected.label}</span>
+          ) : (
+            <span className="pn-combo-placeholder">{placeholder}</span>
           )}
-          <ChevronDown size={13} className={`pn-combo-chevron${open ? " open" : ""}`} />
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          {value && !disabled && (
+            <span
+              className="pn-combo-clear"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange("");
+                setOpen(false);
+              }}
+            >
+              <X size={12} />
+            </span>
+          )}
+          <ChevronDown
+            size={13}
+            className={`pn-combo-chevron${open ? " open" : ""}`}
+          />
         </span>
       </button>
       {open && (
         <div className="pn-combo-drop">
           <div className="pn-combo-search-wrap">
             <Search size={13} />
-            <input className="pn-combo-search" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+            <input
+              className="pn-combo-search"
+              placeholder="Search…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              autoFocus
+            />
           </div>
           <div className="pn-combo-list">
-            {filtered.length === 0
-              ? <div className="pn-combo-empty">No results</div>
-              : filtered.map((item) => (
-                <button key={item.value} type="button"
+            {filtered.length === 0 ? (
+              <div className="pn-combo-empty">No results</div>
+            ) : (
+              filtered.map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
                   className={`pn-combo-item${value === item.value ? " selected" : ""}`}
-                  onClick={() => { onChange(item.value); setOpen(false); setQ(""); }}
+                  onClick={() => {
+                    onChange(item.value);
+                    setOpen(false);
+                    setQ("");
+                  }}
                 >
                   <span className="pn-combo-item-label">{item.label}</span>
-                  {item.sub && <span className="pn-combo-item-sub">{item.sub}</span>}
+                  {item.sub && (
+                    <span className="pn-combo-item-sub">{item.sub}</span>
+                  )}
                 </button>
-              ))}
+              ))
+            )}
           </div>
         </div>
       )}
@@ -289,12 +423,17 @@ function Combobox({ value, onChange, items, placeholder, disabled }: {
 // ─── Days Remaining Badge ─────────────────────────────────────────────────────
 
 function DaysRemainingBadge({ record }: { record: PossessionNotice }) {
-  if (record.Status === "Acknowledged" || record.Status === "Cancelled") return null;
+  if (record.Status === "Acknowledged" || record.Status === "Cancelled")
+    return null;
   const days = daysRemaining(record.ScheduledPossDate);
   if (days === null) return <span className="pn-date-sub">No date set</span>;
-  if (days < 0)  return <span className="pn-days-badge overdue">{Math.abs(days)}d overdue</span>;
+  if (days < 0)
+    return (
+      <span className="pn-days-badge overdue">{Math.abs(days)}d overdue</span>
+    );
   if (days === 0) return <span className="pn-days-badge today">Today</span>;
-  if (days <= 7)  return <span className="pn-days-badge urgent">{days}d left</span>;
+  if (days <= 7)
+    return <span className="pn-days-badge urgent">{days}d left</span>;
   return <span className="pn-days-badge normal">{days}d remaining</span>;
 }
 
@@ -323,58 +462,106 @@ export function PossessionNoticePage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: result, isLoading, isFetching, refetch } = useQuery({
+  const {
+    data: result,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useQuery({
     queryKey: ["possession-notices", page, search, statusFilter, typeFilter],
-    queryFn: () => fetchPNs({ page, pageSize: PAGE_SIZE, search, status: statusFilter, noticeType: typeFilter }),
+    queryFn: () =>
+      fetchPNs({
+        page,
+        pageSize: PAGE_SIZE,
+        search,
+        status: statusFilter,
+        noticeType: typeFilter,
+      }),
     placeholderData: (prev) => prev,
   });
 
   const records = result?.data ?? [];
   const pagination = result?.pagination;
 
-  const stats = useMemo(() => ({
-    total:         pagination?.total ?? 0,
-    sent:          records.filter((r) => r.Status === "Sent").length,
-    acknowledged:  records.filter((r) => r.Status === "Acknowledged").length,
-    overdue:       records.filter((r) => {
-      if (r.Status === "Acknowledged" || r.Status === "Cancelled") return false;
-      const days = daysRemaining(r.ScheduledPossDate);
-      return days !== null && days < 0;
-    }).length,
-  }), [records, pagination]);
+  const stats = useMemo(
+    () => ({
+      total: pagination?.total ?? 0,
+      sent: records.filter((r) => r.Status === "Sent").length,
+      acknowledged: records.filter((r) => r.Status === "Acknowledged").length,
+      overdue: records.filter((r) => {
+        if (r.Status === "Acknowledged" || r.Status === "Cancelled")
+          return false;
+        const days = daysRemaining(r.ScheduledPossDate);
+        return days !== null && days < 0;
+      }).length,
+    }),
+    [records, pagination],
+  );
 
   // Combobox items
-  const applicantItems: ComboItem[] = useMemo(() =>
-    (meta?.applicants ?? []).map((a) => ({ value: String(a.Id), label: a.ApplicantName, sub: a.ApplicantNo ?? undefined })), [meta]);
+  const applicantItems: ComboItem[] = useMemo(
+    () =>
+      (meta?.applicants ?? []).map((a) => ({
+        value: String(a.Id),
+        label: a.ApplicantName,
+        sub: a.ApplicantNo ?? undefined,
+      })),
+    [meta],
+  );
 
   const unitItems: ComboItem[] = useMemo(() => {
     const all = meta?.unitSelections ?? [];
-    const filtered = form.ApplicantId ? all.filter((u) => String(u.ApplicantId) === form.ApplicantId) : all;
-    return filtered.map((u) => ({ value: String(u.Id), label: u.UnitNo, sub: u.SelectionNo }));
+    const filtered = form.ApplicantId
+      ? all.filter((u) => String(u.ApplicantId) === form.ApplicantId)
+      : all;
+    return filtered.map((u) => ({
+      value: String(u.Id),
+      label: u.UnitNo,
+      sub: u.SelectionNo,
+    }));
   }, [meta, form.ApplicantId]);
 
   const handoverItems: ComboItem[] = useMemo(() => {
     const all = meta?.handovers ?? [];
-    const filtered = form.ApplicantId ? all.filter((h) => String(h.ApplicantId) === form.ApplicantId) : all;
+    const filtered = form.ApplicantId
+      ? all.filter((h) => String(h.ApplicantId) === form.ApplicantId)
+      : all;
     return filtered.map((h) => ({ value: String(h.Id), label: h.HandoverNo }));
   }, [meta, form.ApplicantId]);
 
   const prePossessionItems: ComboItem[] = useMemo(() => {
     const all = meta?.prePossessions ?? [];
-    const filtered = form.ApplicantId ? all.filter((p) => String(p.ApplicantId) === form.ApplicantId) : all;
+    const filtered = form.ApplicantId
+      ? all.filter((p) => String(p.ApplicantId) === form.ApplicantId)
+      : all;
     return filtered.map((p) => ({ value: String(p.Id), label: p.ClearanceNo }));
   }, [meta, form.ApplicantId]);
 
-  const projectItems: ComboItem[] = useMemo(() =>
-    (meta?.projects ?? []).map((p) => ({ value: String(p.Id), label: p.Name })), [meta]);
+  const projectItems: ComboItem[] = useMemo(
+    () =>
+      filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map(
+        (p) => ({ value: String(p.Id), label: p.Name }),
+      ),
+    [meta, form.CompanyId],
+  );
 
-  const companyItems: ComboItem[] = useMemo(() =>
-    (meta?.companies ?? []).map((c) => ({ value: String(c.Id), label: c.Name })), [meta]);
+  const companyItems: ComboItem[] = useMemo(
+    () =>
+      (meta?.companies ?? []).map((c) => ({
+        value: String(c.Id),
+        label: c.Name,
+      })),
+    [meta],
+  );
 
   function set(k: keyof FormState, v: string) {
     setForm((f) => {
       const next = { ...f, [k]: v };
-      if (k === "ApplicantId") { next.UnitSelectionId = ""; next.HandoverId = ""; next.PrePossessionId = ""; }
+      if (k === "ApplicantId") {
+        next.UnitSelectionId = "";
+        next.HandoverId = "";
+        next.PrePossessionId = "";
+      }
       if (k === "UnitSelectionId") {
         const us = meta?.unitSelections.find((u) => String(u.Id) === v);
         if (us) {
@@ -386,7 +573,11 @@ export function PossessionNoticePage() {
     });
   }
 
-  function openCreate() { setEditId(null); setForm(EMPTY_FORM); setDialogOpen(true); }
+  function openCreate() {
+    setEditId(null);
+    setForm(EMPTY_FORM);
+    setDialogOpen(true);
+  }
 
   function openEdit(r: PossessionNotice) {
     setEditId(r.Id);
@@ -430,30 +621,65 @@ export function PossessionNoticePage() {
     };
   }
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["possession-notices"] });
+  const invalidate = () =>
+    qc.invalidateQueries({ queryKey: ["possession-notices"] });
 
   const createMut = useMutation({
     mutationFn: () => createPN(buildPayload()),
-    onSuccess: () => { toast.success("Possession Notice created"); invalidate(); setDialogOpen(false); },
+    onSuccess: () => {
+      toast.success("Possession Notice created");
+      invalidate();
+      setDialogOpen(false);
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const updateMut = useMutation({
     mutationFn: () => updatePN(editId!, buildPayload()),
-    onSuccess: () => { toast.success("Possession Notice updated"); invalidate(); setDialogOpen(false); },
+    onSuccess: () => {
+      toast.success("Possession Notice updated");
+      invalidate();
+      setDialogOpen(false);
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const deleteMut = useMutation({
     mutationFn: () => deletePN(deleteId!),
-    onSuccess: () => { toast.success("Possession Notice deleted"); invalidate(); setDeleteId(null); },
+    onSuccess: () => {
+      toast.success("Possession Notice deleted");
+      invalidate();
+      setDeleteId(null);
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const STATUS_FILTERS: Array<PNStatus | ""> = ["", "Sent", "Acknowledged", "Overdue", "Cancelled"];
-  const STATUS_LABELS: Record<string, string> = { "":"All", Sent:"Sent", Acknowledged:"Acknowledged", Overdue:"Overdue", Cancelled:"Cancelled" };
-  const TYPE_FILTERS: Array<NoticeType | ""> = ["", "30-day", "60-day", "Final"];
-  const TYPE_LABELS: Record<string, string> = { "":"All Types", "30-day":"30-day", "60-day":"60-day", "Final":"Final" };
+  const STATUS_FILTERS: Array<PNStatus | ""> = [
+    "",
+    "Sent",
+    "Acknowledged",
+    "Overdue",
+    "Cancelled",
+  ];
+  const STATUS_LABELS: Record<string, string> = {
+    "": "All",
+    Sent: "Sent",
+    Acknowledged: "Acknowledged",
+    Overdue: "Overdue",
+    Cancelled: "Cancelled",
+  };
+  const TYPE_FILTERS: Array<NoticeType | ""> = [
+    "",
+    "30-day",
+    "60-day",
+    "Final",
+  ];
+  const TYPE_LABELS: Record<string, string> = {
+    "": "All Types",
+    "30-day": "30-day",
+    "60-day": "60-day",
+    Final: "Final",
+  };
 
   const pageNums = useMemo(() => {
     if (!pagination) return [];
@@ -461,7 +687,8 @@ export function PossessionNoticePage() {
     const cur = pagination.page;
     if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
     if (cur <= 4) return [1, 2, 3, 4, 5, "…", total];
-    if (cur >= total - 3) return [1, "…", total - 4, total - 3, total - 2, total - 1, total];
+    if (cur >= total - 3)
+      return [1, "…", total - 4, total - 3, total - 2, total - 1, total];
     return [1, "…", cur - 1, cur, cur + 1, "…", total];
   }, [pagination]);
 
@@ -613,28 +840,47 @@ export function PossessionNoticePage() {
         }
       `}</style>
 
-      <Breadcrumbs items={[
-        { label: "Follow-Up", path: "/followup" },
-        { label: "Closure",   path: "/followup/closure/possession-notice" },
-        { label: "Possession Notice", path: "/followup/closure/possession-notice" },
-      ]} />
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Closure", path: "/followup/closure/possession-notice" },
+          {
+            label: "Possession Notice",
+            path: "/followup/closure/possession-notice",
+          },
+        ]}
+      />
 
-      <div className="pn-page relative space-y-8 mt-6" onClick={() => setOpenMenuId(null)}>
-
+      <div
+        className="pn-page relative space-y-8 mt-6"
+        onClick={() => setOpenMenuId(null)}
+      >
         {/* ── Header ── */}
         <div className="flex items-start justify-between gap-4">
           <div className="pn-title-row">
-            <div className="pn-icon"><Bell size={20} /></div>
+            <div className="pn-icon">
+              <Bell size={20} />
+            </div>
             <span className="pn-title">Possession Notices</span>
             <span className="pn-count">{pagination?.total ?? 0}</span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => refetch()} disabled={isFetching}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50">
-              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /> Refresh
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
+              />{" "}
+              Refresh
             </button>
-            <Button size="sm" onClick={openCreate}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto">
+            <Button
+              size="sm"
+              onClick={openCreate}
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+            >
               <Plus size={14} /> New Notice
             </Button>
           </div>
@@ -644,22 +890,50 @@ export function PossessionNoticePage() {
         <div className="pn-filter-bar">
           <div className="pn-search-wrap">
             <Search size={14} />
-            <input className="pn-search" placeholder="Search by applicant, notice no, unit…"
-              value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
-            {search && <button className="pn-search-clear" onClick={() => { setSearch(""); setPage(1); }}><X size={13} /></button>}
+            <input
+              className="pn-search"
+              placeholder="Search by applicant, notice no, unit…"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+            />
+            {search && (
+              <button
+                className="pn-search-clear"
+                onClick={() => {
+                  setSearch("");
+                  setPage(1);
+                }}
+              >
+                <X size={13} />
+              </button>
+            )}
           </div>
           <div className="pn-pills">
             {STATUS_FILTERS.map((s) => {
               const isActive = statusFilter === s;
               const cls = isActive
-                ? s === "" ? "pn-pill active"
-                  : s === "Sent" ? "pn-pill active-sent"
-                  : s === "Acknowledged" ? "pn-pill active-ack"
-                  : s === "Overdue" ? "pn-pill active-overdue"
-                  : "pn-pill active-cancelled"
+                ? s === ""
+                  ? "pn-pill active"
+                  : s === "Sent"
+                    ? "pn-pill active-sent"
+                    : s === "Acknowledged"
+                      ? "pn-pill active-ack"
+                      : s === "Overdue"
+                        ? "pn-pill active-overdue"
+                        : "pn-pill active-cancelled"
                 : "pn-pill";
               return (
-                <button key={s} className={cls} onClick={() => { setStatusFilter(s as PNStatus | ""); setPage(1); }}>
+                <button
+                  key={s}
+                  className={cls}
+                  onClick={() => {
+                    setStatusFilter(s as PNStatus | "");
+                    setPage(1);
+                  }}
+                >
                   {STATUS_LABELS[s]}
                 </button>
               );
@@ -670,13 +944,23 @@ export function PossessionNoticePage() {
             {TYPE_FILTERS.map((t) => {
               const isActive = typeFilter === t;
               const cls = isActive
-                ? t === "" ? "pn-pill active"
-                  : t === "30-day" ? "pn-pill active-30"
-                  : t === "60-day" ? "pn-pill active-60"
-                  : "pn-pill active-final"
+                ? t === ""
+                  ? "pn-pill active"
+                  : t === "30-day"
+                    ? "pn-pill active-30"
+                    : t === "60-day"
+                      ? "pn-pill active-60"
+                      : "pn-pill active-final"
                 : "pn-pill";
               return (
-                <button key={t} className={cls} onClick={() => { setTypeFilter(t as NoticeType | ""); setPage(1); }}>
+                <button
+                  key={t}
+                  className={cls}
+                  onClick={() => {
+                    setTypeFilter(t as NoticeType | "");
+                    setPage(1);
+                  }}
+                >
                   {TYPE_LABELS[t]}
                 </button>
               );
@@ -687,10 +971,10 @@ export function PossessionNoticePage() {
         {/* Stats bar */}
         <div className="pn-stats">
           {[
-            { label: "Total",         val: pagination?.total ?? 0, cls: "blue"  },
-            { label: "Sent",          val: stats.sent,             cls: ""      },
-            { label: "Acknowledged",  val: stats.acknowledged,     cls: "green" },
-            { label: "Overdue",       val: stats.overdue,          cls: "red"   },
+            { label: "Total", val: pagination?.total ?? 0, cls: "blue" },
+            { label: "Sent", val: stats.sent, cls: "" },
+            { label: "Acknowledged", val: stats.acknowledged, cls: "green" },
+            { label: "Overdue", val: stats.overdue, cls: "red" },
           ].map(({ label, val, cls }) => (
             <div key={label} className="pn-stat">
               <div className={`pn-stat-val ${cls}`}>{val}</div>
@@ -703,20 +987,51 @@ export function PossessionNoticePage() {
         <div className="pn-table-wrap">
           {isLoading ? (
             <table className="pn-table">
-              <thead><tr>{["Notice No","Applicant","Unit","Type","Possession Date","Status",""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+              <thead>
+                <tr>
+                  {[
+                    "Notice No",
+                    "Applicant",
+                    "Unit",
+                    "Type",
+                    "Possession Date",
+                    "Status",
+                    "",
+                  ].map((h) => (
+                    <th key={h}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
               <tbody>
                 {Array.from({ length: 6 }).map((_, i) => (
-                  <tr key={i}>{[80,160,100,60,120,80,40].map((w, j) => (
-                    <td key={j}><div className="pn-skel" style={{ height:14, width:w }} /></td>
-                  ))}</tr>
+                  <tr key={i}>
+                    {[80, 160, 100, 60, 120, 80, 40].map((w, j) => (
+                      <td key={j}>
+                        <div
+                          className="pn-skel"
+                          style={{ height: 14, width: w }}
+                        />
+                      </td>
+                    ))}
+                  </tr>
                 ))}
               </tbody>
             </table>
           ) : records.length === 0 ? (
             <div className="pn-empty">
-              <div className="pn-empty-icon"><Bell size={26} style={{ color:"hsl(var(--primary))" }} /></div>
-              <h3>{search || statusFilter || typeFilter ? "No matching notices" : "No Possession Notices yet"}</h3>
-              <p>{search || statusFilter || typeFilter ? "Try adjusting your search or filters" : "Create your first possession notice above"}</p>
+              <div className="pn-empty-icon">
+                <Bell size={26} style={{ color: "hsl(var(--primary))" }} />
+              </div>
+              <h3>
+                {search || statusFilter || typeFilter
+                  ? "No matching notices"
+                  : "No Possession Notices yet"}
+              </h3>
+              <p>
+                {search || statusFilter || typeFilter
+                  ? "Try adjusting your search or filters"
+                  : "Create your first possession notice above"}
+              </p>
             </div>
           ) : (
             <>
@@ -736,49 +1051,98 @@ export function PossessionNoticePage() {
                 <tbody>
                   {records.map((rec) => {
                     const sm = STATUS_META[rec.Status] ?? STATUS_META["Sent"];
-                    const typeCls = NOTICE_TYPE_META[rec.NoticeType] ?? "pn-type-30";
+                    const typeCls =
+                      NOTICE_TYPE_META[rec.NoticeType] ?? "pn-type-30";
                     return (
                       <tr key={rec.Id}>
-                        <td><span className="pn-noticeno">{rec.NoticeNo}</span></td>
+                        <td>
+                          <span className="pn-noticeno">{rec.NoticeNo}</span>
+                        </td>
                         <td>
                           <div className="pn-applicant-cell">
-                            <div className="pn-avatar" style={{ background: avatarColor(rec.ApplicantName) }}>
+                            <div
+                              className="pn-avatar"
+                              style={{
+                                background: avatarColor(rec.ApplicantName),
+                              }}
+                            >
                               {initials(rec.ApplicantName)}
                             </div>
                             <div>
-                              <div className="pn-applicant-name">{rec.ApplicantName}</div>
-                              <div className="pn-applicant-no">{rec.ApplicantNo}</div>
+                              <div className="pn-applicant-name">
+                                {rec.ApplicantName}
+                              </div>
+                              <div className="pn-applicant-no">
+                                {rec.ApplicantNo}
+                              </div>
                             </div>
                           </div>
                         </td>
                         <td>
                           <div className="pn-unit">{rec.UnitNo ?? "—"}</div>
-                          {rec.ProjectName && <div className="pn-unit-sub">{rec.ProjectName}</div>}
+                          {rec.ProjectName && (
+                            <div className="pn-unit-sub">{rec.ProjectName}</div>
+                          )}
                         </td>
-                        <td><span className={`pn-type ${typeCls}`}>{rec.NoticeType}</span></td>
                         <td>
-                          <div className="pn-date">{fmtDate(rec.ScheduledPossDate)}</div>
+                          <span className={`pn-type ${typeCls}`}>
+                            {rec.NoticeType}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="pn-date">
+                            {fmtDate(rec.ScheduledPossDate)}
+                          </div>
                           <DaysRemainingBadge record={rec} />
                         </td>
                         <td>
                           <div className="pn-date">{rec.SentVia ?? "—"}</div>
-                          {rec.AcknowledgedDate && <div className="pn-date-sub">Ack: {fmtDate(rec.AcknowledgedDate)}</div>}
+                          {rec.AcknowledgedDate && (
+                            <div className="pn-date-sub">
+                              Ack: {fmtDate(rec.AcknowledgedDate)}
+                            </div>
+                          )}
                         </td>
                         <td>
-                          <span className={`pn-badge ${sm.cls}`}>{sm.icon}{sm.label}</span>
+                          <span className={`pn-badge ${sm.cls}`}>
+                            {sm.icon}
+                            {sm.label}
+                          </span>
                         </td>
                         <td>
-                          <div className="pn-actions" onClick={(e) => e.stopPropagation()}>
-                            <button className="pn-menu-btn" onClick={() => setOpenMenuId(openMenuId === rec.Id ? null : rec.Id)}>
+                          <div
+                            className="pn-actions"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              className="pn-menu-btn"
+                              onClick={() =>
+                                setOpenMenuId(
+                                  openMenuId === rec.Id ? null : rec.Id,
+                                )
+                              }
+                            >
                               <MoreHorizontal size={16} />
                             </button>
                             {openMenuId === rec.Id && (
                               <div className="pn-menu">
-                                <button className="pn-menu-item" onClick={() => { openEdit(rec); setOpenMenuId(null); }}>
+                                <button
+                                  className="pn-menu-item"
+                                  onClick={() => {
+                                    openEdit(rec);
+                                    setOpenMenuId(null);
+                                  }}
+                                >
                                   <Pencil size={14} /> Edit
                                 </button>
                                 {canDeleteRecords && (
-                                  <button className="pn-menu-item danger" onClick={() => { setDeleteId(rec.Id); setOpenMenuId(null); }}>
+                                  <button
+                                    className="pn-menu-item danger"
+                                    onClick={() => {
+                                      setDeleteId(rec.Id);
+                                      setOpenMenuId(null);
+                                    }}
+                                  >
                                     <Trash2 size={14} /> Delete
                                   </button>
                                 )}
@@ -794,15 +1158,48 @@ export function PossessionNoticePage() {
 
               {pagination && pagination.totalPages > 1 && (
                 <div className="pn-pagination">
-                  <span>Showing {records.length} of {pagination.total}</span>
+                  <span>
+                    Showing {records.length} of {pagination.total}
+                  </span>
                   <div className="pn-pag-btns">
-                    <button className="pn-pag-btn" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft size={14} /></button>
+                    <button
+                      className="pn-pag-btn"
+                      disabled={page <= 1}
+                      onClick={() => setPage((p) => p - 1)}
+                    >
+                      <ChevronLeft size={14} />
+                    </button>
                     {pageNums.map((n, i) =>
-                      n === "…"
-                        ? <span key={`e-${i}`} style={{ display:"flex",alignItems:"center",padding:"0 4px",color:"hsl(var(--muted-foreground))",fontSize:13 }}>…</span>
-                        : <button key={n} className={`pn-pag-btn${page === n ? " active" : ""}`} onClick={() => setPage(n as number)}>{n}</button>
+                      n === "…" ? (
+                        <span
+                          key={`e-${i}`}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            padding: "0 4px",
+                            color: "hsl(var(--muted-foreground))",
+                            fontSize: 13,
+                          }}
+                        >
+                          …
+                        </span>
+                      ) : (
+                        <button
+                          key={n}
+                          className={`pn-pag-btn${page === n ? " active" : ""}`}
+                          onClick={() => setPage(n as number)}
+                        >
+                          {n}
+                        </button>
+                      ),
                     )}
-                    <button className="pn-pag-btn" disabled={page >= pagination.totalPages} onClick={() => setPage((p) => p + 1)}><ChevronRight size={14} /></button>
+                    <button
+                      className="pn-pag-btn"
+                      disabled={page >= pagination.totalPages}
+                      onClick={() => setPage((p) => p + 1)}
+                    >
+                      <ChevronRight size={14} />
+                    </button>
                   </div>
                 </div>
               )}
@@ -812,36 +1209,75 @@ export function PossessionNoticePage() {
       </div>
 
       {/* ── Create / Edit Dialog ── */}
-      <Dialog open={dialogOpen} onOpenChange={(v) => { if (!v) setDialogOpen(false); }}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(v) => {
+          if (!v) setDialogOpen(false);
+        }}
+      >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base font-bold">
-              <div style={{ width:28,height:28,background:"hsl(var(--primary))",borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center" }}>
-                <Bell size={15} style={{ color:"hsl(var(--primary-foreground))" }} />
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  background: "hsl(var(--primary))",
+                  borderRadius: 7,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Bell
+                  size={15}
+                  style={{ color: "hsl(var(--primary-foreground))" }}
+                />
               </div>
               {editId ? "Edit Possession Notice" : "New Possession Notice"}
             </DialogTitle>
             <DialogDescription>
-              {editId ? "Update the notice details below." : "Fill in the details to create a new possession notice."}
+              {editId
+                ? "Update the notice details below."
+                : "Fill in the details to create a new possession notice."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-1">
             {/* Applicant */}
             <div className="space-y-2">
-              <Label>Applicant <span className="text-destructive">*</span></Label>
-              <Combobox value={form.ApplicantId} onChange={(v) => set("ApplicantId", v)} items={applicantItems} placeholder="Select applicant…" />
+              <Label>
+                Applicant <span className="text-destructive">*</span>
+              </Label>
+              <Combobox
+                value={form.ApplicantId}
+                onChange={(v) => set("ApplicantId", v)}
+                items={applicantItems}
+                placeholder="Select applicant…"
+              />
             </div>
 
             {/* Unit + Handover */}
             <div className="pn-form-grid">
               <div className="space-y-2">
                 <Label>Unit Selection</Label>
-                <Combobox value={form.UnitSelectionId} onChange={(v) => set("UnitSelectionId", v)} items={unitItems} placeholder="Select unit…" disabled={!form.ApplicantId} />
+                <Combobox
+                  value={form.UnitSelectionId}
+                  onChange={(v) => set("UnitSelectionId", v)}
+                  items={unitItems}
+                  placeholder="Select unit…"
+                  disabled={!form.ApplicantId}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Linked Handover</Label>
-                <Combobox value={form.HandoverId} onChange={(v) => set("HandoverId", v)} items={handoverItems} placeholder="Select handover…" disabled={!form.ApplicantId} />
+                <Combobox
+                  value={form.HandoverId}
+                  onChange={(v) => set("HandoverId", v)}
+                  items={handoverItems}
+                  placeholder="Select handover…"
+                  disabled={!form.ApplicantId}
+                />
               </div>
             </div>
 
@@ -849,17 +1285,33 @@ export function PossessionNoticePage() {
             <div className="pn-form-grid">
               <div className="space-y-2">
                 <Label>Pre-Possession Clearance</Label>
-                <Combobox value={form.PrePossessionId} onChange={(v) => set("PrePossessionId", v)} items={prePossessionItems} placeholder="Select clearance…" disabled={!form.ApplicantId} />
+                <Combobox
+                  value={form.PrePossessionId}
+                  onChange={(v) => set("PrePossessionId", v)}
+                  items={prePossessionItems}
+                  placeholder="Select clearance…"
+                  disabled={!form.ApplicantId}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Project</Label>
-                <Combobox value={form.ProjectId} onChange={(v) => set("ProjectId", v)} items={projectItems} placeholder="Select project…" />
+                <Combobox
+                  value={form.ProjectId}
+                  onChange={(v) => set("ProjectId", v)}
+                  items={projectItems}
+                  placeholder="Select project…"
+                />
               </div>
             </div>
 
             <div className="space-y-2">
               <Label>Company</Label>
-              <Combobox value={form.CompanyId} onChange={(v) => set("CompanyId", v)} items={companyItems} placeholder="Select company…" />
+              <Combobox
+                value={form.CompanyId}
+                onChange={(v) => set("CompanyId", v)}
+                items={companyItems}
+                placeholder="Select company…"
+              />
             </div>
 
             <div className="pn-form-section">Notice Details</div>
@@ -868,17 +1320,36 @@ export function PossessionNoticePage() {
             <div className="pn-form-grid">
               <div className="space-y-2">
                 <Label>Notice Type</Label>
-                <select className="pn-status-select" value={form.NoticeType} onChange={(e) => set("NoticeType", e.target.value as NoticeType)}>
-                  {(meta?.noticeTypeOptions ?? (["30-day","60-day","Final"] as NoticeType[])).map((t) => (
-                    <option key={t} value={t}>{t}</option>
+                <select
+                  className="pn-status-select"
+                  value={form.NoticeType}
+                  onChange={(e) =>
+                    set("NoticeType", e.target.value as NoticeType)
+                  }
+                >
+                  {(
+                    meta?.noticeTypeOptions ??
+                    (["30-day", "60-day", "Final"] as NoticeType[])
+                  ).map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
                   ))}
                 </select>
               </div>
               <div className="space-y-2">
                 <Label>Notice Date</Label>
                 <div className="relative">
-                  <CalendarDays size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                  <Input type="date" value={form.NoticeDate} onChange={(e) => set("NoticeDate", e.target.value)} className="pl-8" />
+                  <CalendarDays
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <Input
+                    type="date"
+                    value={form.NoticeDate}
+                    onChange={(e) => set("NoticeDate", e.target.value)}
+                    className="pl-8"
+                  />
                 </div>
               </div>
             </div>
@@ -888,15 +1359,31 @@ export function PossessionNoticePage() {
               <div className="space-y-2">
                 <Label>Scheduled Possession Date</Label>
                 <div className="relative">
-                  <CalendarDays size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                  <Input type="date" value={form.ScheduledPossDate} onChange={(e) => set("ScheduledPossDate", e.target.value)} className="pl-8" />
+                  <CalendarDays
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <Input
+                    type="date"
+                    value={form.ScheduledPossDate}
+                    onChange={(e) => set("ScheduledPossDate", e.target.value)}
+                    className="pl-8"
+                  />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label>Actual Possession Date</Label>
                 <div className="relative">
-                  <CalendarDays size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                  <Input type="date" value={form.ActualPossDate} onChange={(e) => set("ActualPossDate", e.target.value)} className="pl-8" />
+                  <CalendarDays
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <Input
+                    type="date"
+                    value={form.ActualPossDate}
+                    onChange={(e) => set("ActualPossDate", e.target.value)}
+                    className="pl-8"
+                  />
                 </div>
               </div>
             </div>
@@ -904,9 +1391,17 @@ export function PossessionNoticePage() {
             {/* Sent Via */}
             <div className="space-y-2">
               <Label>Sent Via</Label>
-              <select className="pn-status-select" value={form.SentVia} onChange={(e) => set("SentVia", e.target.value)}>
+              <select
+                className="pn-status-select"
+                value={form.SentVia}
+                onChange={(e) => set("SentVia", e.target.value)}
+              >
                 <option value="">— Select —</option>
-                {SENT_VIA_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                {SENT_VIA_OPTIONS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -916,13 +1411,25 @@ export function PossessionNoticePage() {
               <div className="space-y-2">
                 <Label>Acknowledged Date</Label>
                 <div className="relative">
-                  <CalendarDays size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                  <Input type="date" value={form.AcknowledgedDate} onChange={(e) => set("AcknowledgedDate", e.target.value)} className="pl-8" />
+                  <CalendarDays
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <Input
+                    type="date"
+                    value={form.AcknowledgedDate}
+                    onChange={(e) => set("AcknowledgedDate", e.target.value)}
+                    className="pl-8"
+                  />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label>Acknowledged By</Label>
-                <Input value={form.AcknowledgedBy} onChange={(e) => set("AcknowledgedBy", e.target.value)} placeholder="Person who acknowledged…" />
+                <Input
+                  value={form.AcknowledgedBy}
+                  onChange={(e) => set("AcknowledgedBy", e.target.value)}
+                  placeholder="Person who acknowledged…"
+                />
               </div>
             </div>
 
@@ -930,38 +1437,71 @@ export function PossessionNoticePage() {
 
             <div className="space-y-2">
               <Label>Status</Label>
-              <select className="pn-status-select" value={form.Status} onChange={(e) => set("Status", e.target.value as PNStatus)}>
-                {(meta?.statusOptions ?? (["Sent","Acknowledged","Overdue","Cancelled"] as PNStatus[])).map((s) => (
-                  <option key={s} value={s}>{s}</option>
+              <select
+                className="pn-status-select"
+                value={form.Status}
+                onChange={(e) => set("Status", e.target.value as PNStatus)}
+              >
+                {(
+                  meta?.statusOptions ??
+                  ([
+                    "Sent",
+                    "Acknowledged",
+                    "Overdue",
+                    "Cancelled",
+                  ] as PNStatus[])
+                ).map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
                 ))}
               </select>
             </div>
 
             <div className="space-y-2">
               <Label>Notes</Label>
-              <Textarea value={form.Notes} onChange={(e) => set("Notes", e.target.value)} placeholder="Additional remarks…" rows={2} />
+              <Textarea
+                value={form.Notes}
+                onChange={(e) => set("Notes", e.target.value)}
+                placeholder="Additional remarks…"
+                rows={2}
+              />
             </div>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+              Cancel
+            </Button>
             <Button
               disabled={!form.ApplicantId || isSaving}
               onClick={() => (editId ? updateMut.mutate() : createMut.mutate())}
               className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
-              {isSaving ? "Saving…" : editId ? "Update Notice" : "Create Notice"}
+              {isSaving
+                ? "Saving…"
+                : editId
+                  ? "Update Notice"
+                  : "Create Notice"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* ── Delete confirm ── */}
-      <AlertDialog open={!!deleteId} onOpenChange={(v) => { if (!v) setDeleteId(null); }}>
+      <AlertDialog
+        open={!!deleteId}
+        onOpenChange={(v) => {
+          if (!v) setDeleteId(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this Possession Notice?</AlertDialogTitle>
-            <AlertDialogDescription>This record will be permanently removed. This action cannot be undone.</AlertDialogDescription>
+            <AlertDialogDescription>
+              This record will be permanently removed. This action cannot be
+              undone.
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>

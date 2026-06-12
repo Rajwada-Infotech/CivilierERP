@@ -57,6 +57,80 @@ function toNumber(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
+/**
+ * Apply billing terms (EBillingTermsData or EDiscountData) to a gross amount.
+ * Mirrors the frontend computeBreakdown logic for post-GST terms only
+ * (GRN netAmount is already incl-GST, so all terms apply post-GST on top of it).
+ * Returns the rounded net amount after applying all active terms.
+ *
+ * @param {number} grossAmount - incl-GST amount (grnGst.totals.netAmount)
+ * @param {number} basicAmount - pre-GST taxable amount (grnGst.totals.taxableAmount)
+ * @param {number} cgstRate - effective CGST %
+ * @param {number} sgstRate - effective SGST %
+ * @param {any} billingTermsRaw - EBillingTermsData (array or JSON string)
+ * @param {any} discountRaw     - EDiscountData (object or JSON string) fallback
+ */
+function applyBillingTermsToAmount(
+  grossAmount,
+  basicAmount,
+  cgstRate,
+  sgstRate,
+  billingTermsRaw,
+  discountRaw,
+) {
+  const terms = parseJsonArray(billingTermsRaw);
+  let activeTerms = terms.filter((t) => t.applicable);
+
+  // Legacy single-discount fallback
+  if (activeTerms.length === 0 && discountRaw) {
+    try {
+      const d =
+        typeof discountRaw === "string" ? JSON.parse(discountRaw) : discountRaw;
+      if (d && d.applicable) activeTerms = [d];
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (activeTerms.length === 0) return Math.round(grossAmount);
+
+  // Split terms into pre-GST and post-GST
+  const preGstTerms = activeTerms.filter((t) => t.appliedOn !== "post-gst");
+  const postGstTerms = activeTerms.filter((t) => t.appliedOn === "post-gst");
+
+  // Apply pre-GST terms to basicAmount then recompute grossAmount
+  let runningBase = toNumber(basicAmount);
+  for (const t of preGstTerms) {
+    const amt =
+      t.type === "percentage"
+        ? (runningBase * toNumber(t.value)) / 100
+        : toNumber(t.value);
+    if (t.deductionType === "Addition") {
+      runningBase += amt;
+    } else {
+      runningBase = Math.max(0, runningBase - Math.min(amt, runningBase));
+    }
+  }
+  const cgstAmt = (runningBase * toNumber(cgstRate)) / 100;
+  const sgstAmt = (runningBase * toNumber(sgstRate)) / 100;
+  let running = roundMoney(runningBase + cgstAmt + sgstAmt);
+
+  // Apply post-GST terms on top of gross
+  for (const t of postGstTerms) {
+    const amt =
+      t.type === "percentage"
+        ? (running * toNumber(t.value)) / 100
+        : toNumber(t.value);
+    if (t.deductionType === "Addition") {
+      running += amt;
+    } else {
+      running = Math.max(0, running - Math.min(amt, running));
+    }
+  }
+
+  return Math.round(running);
+}
+
 async function buildGrnGstData(pool, grnId) {
   const headerResult = await pool.request().input("GRNID", sql.Int, grnId)
     .query(`
@@ -560,6 +634,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.ECreatedAt, eb.EUpdatedAt, eb.ECompanyId, eb.EDocTypeId,
           eb.EFinYear, eb.ECreatedBy, eb.ESourceType, eb.ESourceId,
           eb.EName, eb.EBillingTermsData, eb.EDiscountData, eb.EEmiData,
+          eb.EBillingTermId, eb.EBillingTermName,
           eb.ETCId, eb.ETCName, eb.ETCText,
           eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
           eb.EAdditionalCharges, eb.ECostCenter, eb.EGLAccount, eb.EWorkDoneRef,
@@ -582,6 +657,13 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
             WHEN eb.ESourceType = 'GRN' AND grn_list.GRNID IS NOT NULL THEN grn_supp_list.LHeadName
             ELSE eb.EName
           END AS ESupplierName,
+          -- Live GRN total (incl GST) for GRN-linked bookings; NULL otherwise.
+          -- Frontend uses this as the authoritative Net Amt for GRN rows.
+          CASE
+            WHEN eb.ESourceType = 'GRN' AND grn_list.TotalAmount IS NOT NULL AND grn_list.TotalAmount > 0
+            THEN grn_list.TotalAmount
+            ELSE NULL
+          END AS EGrnTotalAmount,
           COUNT(*) OVER() AS _total
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
@@ -1000,6 +1082,15 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
       bookingNetAmount = grnGst.totals.netAmount;
       bookingCgstRate = grnGst.cgstRate;
       bookingSgstRate = grnGst.sgstRate;
+      // Apply billing terms on top of the GRN gross amount
+      bookingNetAmount = applyBillingTermsToAmount(
+        bookingNetAmount,
+        bookingAmount,
+        bookingCgstRate,
+        bookingSgstRate,
+        EBillingTermsData,
+        EDiscountData,
+      );
     }
 
     if (EDocTypeId) {
@@ -1156,7 +1247,11 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
       .input(
         "EDiscountData",
         sql.NVarChar(sql.MAX),
-        EDiscountData ? JSON.stringify(EDiscountData) : null,
+        EDiscountData
+          ? typeof EDiscountData === "string"
+            ? EDiscountData
+            : JSON.stringify(EDiscountData)
+          : null,
       )
       .input("EDocNo", sql.NVarChar(100), finalDocNo)
       .input("EEmiPayment", sql.Bit, EEmiPayment ? 1 : 0)
@@ -1197,7 +1292,11 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
       .input(
         "EBillingTermsData",
         sql.NVarChar(sql.MAX),
-        EBillingTermsData || null,
+        EBillingTermsData
+          ? typeof EBillingTermsData === "string"
+            ? EBillingTermsData
+            : JSON.stringify(EBillingTermsData)
+          : null,
       )
       .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
       .input("ETCName", sql.NVarChar(200), ETCName || null)
@@ -1754,6 +1853,15 @@ router.put(
         bookingNetAmount = grnGst.totals.netAmount;
         bookingCgstRate = grnGst.cgstRate;
         bookingSgstRate = grnGst.sgstRate;
+        // Apply billing terms on top of the GRN gross amount
+        bookingNetAmount = applyBillingTermsToAmount(
+          bookingNetAmount,
+          bookingAmount,
+          bookingCgstRate,
+          bookingSgstRate,
+          EBillingTermsData,
+          EDiscountData,
+        );
       }
 
       const result = await pool
@@ -1782,7 +1890,11 @@ router.put(
         .input(
           "EDiscountData",
           sql.NVarChar(sql.MAX),
-          EDiscountData ? JSON.stringify(EDiscountData) : null,
+          EDiscountData
+            ? typeof EDiscountData === "string"
+              ? EDiscountData
+              : JSON.stringify(EDiscountData)
+            : null,
         )
         .input("EDocNo", sql.NVarChar(100), EDocNo || null)
         .input("EEmiPayment", sql.Bit, EEmiPayment ? 1 : 0)
@@ -1820,7 +1932,11 @@ router.put(
         .input(
           "EBillingTermsData",
           sql.NVarChar(sql.MAX),
-          EBillingTermsData || null,
+          EBillingTermsData
+            ? typeof EBillingTermsData === "string"
+              ? EBillingTermsData
+              : JSON.stringify(EBillingTermsData)
+            : null,
         )
         .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
         .input("ETCName", sql.NVarChar(200), ETCName || null)
