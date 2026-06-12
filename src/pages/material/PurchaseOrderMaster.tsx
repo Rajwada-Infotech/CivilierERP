@@ -31,7 +31,11 @@ import {
   getCompanies,
   getProjects,
   getUOMs,
+  getSupplierDetails,
+  getCompanyDetails,
   type CreatePOPayload,
+  type SupplierDetails,
+  type CompanyDetails,
 } from "@/api/purchaseOrdersApi";
 import {
   type MRPOPrefill,
@@ -404,6 +408,13 @@ const PurchaseOrderMaster: React.FC = () => {
     docNo: string;
   } | null>(null);
 
+  // ── Supplier & Company detail state (auto-fetched on selection) ────────────────────
+  const [supplierDetails, setSupplierDetails] =
+    useState<SupplierDetails | null>(null);
+  const [companyDetails, setCompanyDetails] = useState<CompanyDetails | null>(
+    null,
+  );
+
   // Must be declared after sourceMR, sourceWD, sourceWO — all used in `enabled`
   const { data: approvedMRs = [], isLoading: approvedMRsLoading } = useQuery({
     queryKey: ["approvedMRList", mrFilterCompanyId, mrFilterProjectId],
@@ -551,6 +562,21 @@ const PurchaseOrderMaster: React.FC = () => {
     const project =
       allProjects.find((p) => p.id === form.projectId)?.name ?? "—";
 
+    // Supplier & company detail snapshots for print
+    const supAddr = supplierDetails?.LHeadAddress ?? "";
+    const supContact = supplierDetails?.LHeadContactPerson ?? "";
+    const supGST = supplierDetails?.LGST ?? "";
+    const compAddr = [
+      companyDetails?.address,
+      companyDetails?.address_line2,
+      companyDetails?.city,
+      companyDetails?.state,
+      companyDetails?.pincode,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    const compGST = companyDetails?.gst_no ?? "";
+
     // Logo: if it's a base64 data URL embed it directly — Blob URL approach
     // keeps it same-origin so the popup's img src resolves.
     const logoHtml = enterpriseLogo
@@ -622,19 +648,23 @@ const PurchaseOrderMaster: React.FC = () => {
 
   <!-- Party details -->
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:24px;">
-    ${[
-      ["Supplier", supplier],
-      ["Company", company],
-      ["Project / Site", project],
-    ]
-      .map(
-        ([label, val]) => `
-      <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">${label}</div>
-        <div style="font-weight:600;font-size:13px;">${val}</div>
-      </div>`,
-      )
-      .join("")}
+    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Supplier</div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${supplier}</div>
+      ${supAddr ? `<div style="font-size:11px;color:#374151;margin-bottom:2px;">${supAddr}</div>` : ""}
+      ${supContact ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">Contact: <strong style="color:#111827;">${supContact}</strong></div>` : ""}
+      ${supGST ? `<div style="margin-top:5px;"><span style="font-family:monospace;font-size:10px;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:4px;display:inline-block;">GSTIN: ${supGST}</span></div>` : ""}
+    </div>
+    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Company</div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${company}</div>
+      ${compAddr ? `<div style="font-size:11px;color:#374151;margin-bottom:2px;">${compAddr}</div>` : ""}
+      ${compGST ? `<div style="margin-top:5px;"><span style="font-family:monospace;font-size:10px;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:4px;display:inline-block;">GSTIN: ${compGST}</span></div>` : ""}
+    </div>
+    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Project / Site</div>
+      <div style="font-weight:600;font-size:13px;">${project}</div>
+    </div>
   </div>
 
   <!-- Items table -->
@@ -1378,6 +1408,24 @@ const PurchaseOrderMaster: React.FC = () => {
     await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
   };
 
+  // ── Auto-fetch supplier details on supplierId change ────────────────────
+  useEffect(() => {
+    if (!form.supplierId) {
+      setSupplierDetails(null);
+      return;
+    }
+    getSupplierDetails(form.supplierId).then(setSupplierDetails);
+  }, [form.supplierId]);
+
+  // ── Auto-fetch company details on companyId change ────────────────────────
+  useEffect(() => {
+    if (!form.companyId) {
+      setCompanyDetails(null);
+      return;
+    }
+    getCompanyDetails(form.companyId).then(setCompanyDetails);
+  }, [form.companyId]);
+
   // ── Navigation ────────────────────────────────────────────────────────────
   const goToList = () => {
     setViewMode("list");
@@ -1389,6 +1437,8 @@ const PurchaseOrderMaster: React.FC = () => {
     setSourceMR(null);
     setSourceWD(null);
     setSourceWO(null);
+    setSupplierDetails(null);
+    setCompanyDetails(null);
     setMrDropdownValue("");
     setMrDropdownError(null);
   };
@@ -1401,6 +1451,8 @@ const PurchaseOrderMaster: React.FC = () => {
     setSourceMR(null);
     setSourceWD(null);
     setSourceWO(null);
+    setSupplierDetails(null);
+    setCompanyDetails(null);
     setMrDropdownValue("");
     setMrDropdownError(null);
     setViewMode("create");
@@ -1559,6 +1611,16 @@ const PurchaseOrderMaster: React.FC = () => {
     setEditingId(item._id);
     setSelectedTCs([]);
     setViewMode("edit");
+    // Explicitly fetch details here too, so view mode always has fresh data
+    // regardless of whether supplierId/companyId changed from prior state.
+    const resolvedSupplierId = supplier?.id ?? String(raw.SupplierID ?? "");
+    const resolvedCompanyId = company?.id ?? String(raw.CompanyId ?? "");
+    if (resolvedSupplierId)
+      getSupplierDetails(resolvedSupplierId).then(setSupplierDetails);
+    else setSupplierDetails(null);
+    if (resolvedCompanyId)
+      getCompanyDetails(resolvedCompanyId).then(setCompanyDetails);
+    else setCompanyDetails(null);
   };
 
   const goToView = async (item: POListItem) => {
@@ -2520,6 +2582,93 @@ const PurchaseOrderMaster: React.FC = () => {
             </div>
           </div>
         </div>
+        {/* ── Supplier & Company Info Panels (auto-fetched on selection) ──── */}
+        {(supplierDetails || companyDetails) && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Supplier info */}
+            {supplierDetails && (
+              <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                  <Truck size={11} className="text-primary" />
+                  Supplier Details
+                </h3>
+                <dl className="space-y-2 text-sm">
+                  {supplierDetails.LHeadAddress && (
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Address
+                      </dt>
+                      <dd className="text-foreground font-medium mt-0.5">
+                        {supplierDetails.LHeadAddress}
+                      </dd>
+                    </div>
+                  )}
+                  {supplierDetails.LHeadContactPerson && (
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Contact Person
+                      </dt>
+                      <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
+                        <User size={12} className="text-muted-foreground" />
+                        {supplierDetails.LHeadContactPerson}
+                      </dd>
+                    </div>
+                  )}
+                  {supplierDetails.LGST && (
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        GSTIN
+                      </dt>
+                      <dd className="font-mono text-xs font-semibold text-primary mt-0.5 bg-primary/5 px-2 py-1 rounded-md inline-block">
+                        {supplierDetails.LGST}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
+            )}
+
+            {/* Company info */}
+            {companyDetails && (
+              <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                  <CircleDollarSign size={11} className="text-primary" />
+                  Company Details
+                </h3>
+                <dl className="space-y-2 text-sm">
+                  {(companyDetails.address || companyDetails.city) && (
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Address
+                      </dt>
+                      <dd className="text-foreground font-medium mt-0.5">
+                        {[
+                          companyDetails.address,
+                          companyDetails.address_line2,
+                          companyDetails.city,
+                          companyDetails.state,
+                          companyDetails.pincode,
+                        ]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </dd>
+                    </div>
+                  )}
+                  {companyDetails.gst_no && (
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        GSTIN
+                      </dt>
+                      <dd className="font-mono text-xs font-semibold text-primary mt-0.5 bg-primary/5 px-2 py-1 rounded-md inline-block">
+                        {companyDetails.gst_no}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Line Items Card ───────────────────────────────────────────────── */}
         <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">

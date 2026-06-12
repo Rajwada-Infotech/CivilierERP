@@ -121,19 +121,14 @@ export function ExpenseBookingPreviewModal({
   const sgstAmt = rbd.sgstAmount;
   const igstAmt = rbd.igstAmount ?? 0;
 
-  // When GRN breakdown is available, use its exact totals for display.
-  // When billing terms are applied, always use the freshly computed rbd.netAmount
-  // so the total reflects all terms (not just the DB-stored value which may lag).
-  const displayNetAmount = grnBreakdown
-    ? grnBreakdown.totals.totalInclGST
-    : billingTerms.length > 0
-      ? rbd.netAmount
-      : (previewRecord.netAmount ?? rbd.netAmount);
+  // Always use rbd.netAmount — computeBreakdown applies all billing terms
+  // (pre-GST and post-GST) so this is always correct regardless of source type.
+  const displayNetAmount = rbd.netAmount;
 
-  // Recalculate remaining when we have a corrected net amount
-  const displayRemainingAmount = grnBreakdown
-    ? Math.max(0, displayNetAmount - (previewRecord.totalPaid ?? 0))
-    : (previewRecord.remainingAmount ?? 0);
+  const displayRemainingAmount = Math.max(
+    0,
+    displayNetAmount - (previewRecord.totalPaid ?? 0),
+  );
 
   return (
     <Dialog open={!!previewRecord} onOpenChange={(open) => !open && onClose()}>
@@ -395,13 +390,81 @@ export function ExpenseBookingPreviewModal({
                       ₹{fmt(grnBreakdown.totals.totalInclGST)}
                     </p>
                   </div>
+                  {/* Billing term rows (pre-GST) */}
+                  {(rbd.preGstTerms ?? []).map((t, i) => {
+                    const amt =
+                      t.type === "percentage"
+                        ? (grnBreakdown.totals.totalBase * t.value) / 100
+                        : t.value;
+                    const isAdd = t.termType === "Addition";
+                    return (
+                      <div
+                        key={t._key ?? i}
+                        className={`flex items-center justify-between px-4 py-2.5 ${isAdd ? "bg-emerald-500/5" : "bg-red-500/5"}`}
+                      >
+                        <p
+                          className={`text-xs flex items-center gap-1.5 ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
+                        >
+                          <TrendingUp size={10} />
+                          {t.masterTermName || `Term ${i + 1}`}
+                          <span className="font-mono text-[10px] opacity-70">
+                            {t.type === "percentage"
+                              ? `${t.value}%`
+                              : `₹${fmt(t.value)}`}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground/60">
+                            (pre-GST)
+                          </span>
+                        </p>
+                        <p
+                          className={`font-mono text-sm font-semibold ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}
+                        >
+                          {isAdd ? "+ " : "− "}₹{fmt(amt)}
+                        </p>
+                      </div>
+                    );
+                  })}
+                  {/* Billing term rows (post-GST) */}
+                  {(rbd.postGstTerms ?? []).map((t, i) => {
+                    const amt =
+                      t.type === "percentage"
+                        ? (grnBreakdown.totals.totalInclGST * t.value) / 100
+                        : t.value;
+                    const isAdd = t.termType === "Addition";
+                    return (
+                      <div
+                        key={t._key ?? `post-${i}`}
+                        className={`flex items-center justify-between px-4 py-2.5 ${isAdd ? "bg-emerald-500/5" : "bg-red-500/5"}`}
+                      >
+                        <p
+                          className={`text-xs flex items-center gap-1.5 ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
+                        >
+                          <TrendingUp size={10} />
+                          {t.masterTermName || `Term ${i + 1}`}
+                          <span className="font-mono text-[10px] opacity-70">
+                            {t.type === "percentage"
+                              ? `${t.value}%`
+                              : `₹${fmt(t.value)}`}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground/60">
+                            (post-GST)
+                          </span>
+                        </p>
+                        <p
+                          className={`font-mono text-sm font-semibold ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}
+                        >
+                          {isAdd ? "+ " : "− "}₹{fmt(amt)}
+                        </p>
+                      </div>
+                    );
+                  })}
                 </div>
                 <div className="flex items-center justify-between px-4 py-3 bg-primary/10 border border-primary/20 rounded-xl">
                   <p className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
                     Net Payable
                   </p>
                   <p className="font-mono text-base font-bold text-primary">
-                    ₹{fmt(grnBreakdown.totals.totalInclGST)}
+                    ₹{fmt(displayNetAmount)}
                   </p>
                 </div>
               </div>
