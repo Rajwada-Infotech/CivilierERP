@@ -179,6 +179,15 @@ const PO_SELECT = `
     po.ParentDocNo,
     po.RootExBDocNo,
     po.fy_id,
+    COALESCE(
+      fy.FName,
+      (SELECT TOP 1 fyWO.FName
+       FROM dbo.WorkOrderHeader woh
+       JOIN dbo.FinYear fyWO
+         ON woh.DocumentDate >= fyWO.FStartDate
+        AND woh.DocumentDate <= fyWO.FEndDate
+       WHERE woh.Id = po.SourceWOId)
+    )                     AS FinYearName,
     po.SequenceNo,
     po.POItems,
     po.Discount,
@@ -196,6 +205,7 @@ const PO_SELECT = `
   LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId    = po.SupplierID
   LEFT JOIN dbo.enterprise        co ON co.id         = po.CompanyId
   LEFT JOIN dbo.enterprise        pr ON pr.id         = po.ProjectId
+  LEFT JOIN dbo.FinYear           fy ON fy.FId        = po.fy_id
   LEFT JOIN dbo.TypeOfDoc         td ON td.TypeOfDocId = po.DocTypeId
 `;
 
