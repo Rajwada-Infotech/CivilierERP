@@ -446,6 +446,7 @@ router.get("/", cache("grns", 300), async (req, res) => {
         grn.CreatedDate,
         grn.DocTypeId,
         grn.DocNo,
+        grn.GRNItems,
         grn.TotalAmount,
         grn.DocYear,
         -- Derive a FinYear string so the expense-booking picker can filter correctly.
@@ -468,6 +469,9 @@ router.get("/", cache("grns", 300), async (req, res) => {
         p.SourceWDDocNo,
         p.ProjectId,
         p.CompanyId,
+        co.name AS CompanyName,
+        pr.name AS ProjectName,
+        fyGrn.FName AS FinYearName,
         p.TotalAmount    AS POTotalAmount,
         p.SubtotalAmount AS POSubtotalAmount,
         td.Prefix AS DocTypePrefix,
@@ -476,6 +480,9 @@ router.get("/", cache("grns", 300), async (req, res) => {
       FROM GoodsReceiptNotes grn
       LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
       LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
+      LEFT JOIN dbo.enterprise co ON co.id = p.CompanyId
+      LEFT JOIN dbo.enterprise pr ON pr.id = p.ProjectId
+      LEFT JOIN dbo.FinYear fyGrn ON grn.GRNDate >= fyGrn.FStartDate AND grn.GRNDate <= fyGrn.FEndDate
       LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = grn.DocTypeId
       WHERE (@finYear IS NULL OR (
         grn.DocYear IS NOT NULL AND (

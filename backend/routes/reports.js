@@ -279,8 +279,187 @@ router.get("/companies", async (req, res) => {
   }
 });
 
+// ── GET /api/reports/invoice-register ────────────────────────────────────────
+// Returns a paginated invoice register built from ExpenseBooking + linked data.
+// Columns: Company, Project, Supplier, Amount (Net Payable), Tax (from HSN),
+//          Method of Payment, Taxable Amt (Base Amt), Fin Year, Ref Doc,
+//          Date, Document Number.
+//
+// Query params:
+//   companyId   – filter by ECompanyId
+//   finYearId   – filter by FinYear.FId  (resolves to EFinYear label)
+//   finYear     – filter by EFinYear label directly (e.g. "2024-25")
+//   dateFrom    – YYYY-MM-DD  (applied to EDocDate)
+//   dateTo      – YYYY-MM-DD
+//   page        – default 1
+//   limit       – default 50, max 200
+router.get("/invoice-register", async (req, res) => {
+  try {
+    const pool = getPool();
+    const page = Math.max(parseInt(req.query.page || "1", 10), 1);
+    const limit = Math.min(
+      Math.max(parseInt(req.query.limit || "50", 10), 1),
+      200,
+    );
+    const offset = (page - 1) * limit;
+
+    const { companyId, finYearId, finYear, dateFrom, dateTo } = req.query;
+
+    // Resolve finYear label from FId when finYearId is given
+    let finYearLabel = finYear ? String(finYear).trim() : null;
+    if (finYearId && !finYearLabel) {
+      const fyRes = await pool
+        .request()
+        .input("FId", sql.Int, parseInt(finYearId, 10))
+        .query("SELECT FName FROM dbo.FinYear WHERE FId = @FId");
+      if (fyRes.recordset.length) finYearLabel = fyRes.recordset[0].FName;
+    }
+
+    // Build WHERE clauses
+    const whereParts = [
+      "ISNULL(eb.EStatus, '') NOT IN ('Draft')",
+      "ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'",
+    ];
+    const request = pool
+      .request()
+      .input("offset", sql.Int, offset)
+      .input("limit", sql.Int, limit);
+
+    if (companyId) {
+      whereParts.push("eb.ECompanyId = @CompanyId");
+      request.input("CompanyId", sql.Int, parseInt(companyId, 10));
+    }
+    if (finYearLabel) {
+      whereParts.push("eb.EFinYear = @FinYear");
+      request.input("FinYear", sql.NVarChar(20), finYearLabel);
+    }
+    if (dateFrom) {
+      whereParts.push("CAST(eb.EDocDate AS DATE) >= @DateFrom");
+      request.input("DateFrom", sql.Date, dateFrom);
+    }
+    if (dateTo) {
+      whereParts.push("CAST(eb.EDocDate AS DATE) <= @DateTo");
+      request.input("DateTo", sql.Date, dateTo);
+    }
+
+    const whereSQL = "WHERE " + whereParts.join(" AND ");
+
+    const result = await request.query(`
+      SELECT
+        -- ── Identity ────────────────────────────────────────────────────────
+        eb.Eid,
+        eb.EDocNo                                        AS DocumentNumber,
+        CONVERT(VARCHAR(10), eb.EDocDate, 23)            AS DocDate,
+        eb.EFinYear                                      AS FinYear,
+
+        -- ── Company ─────────────────────────────────────────────────────────
+        ISNULL(ec.name, '')                              AS Company,
+
+        -- ── Project ─────────────────────────────────────────────────────────
+        ISNULL(ep.name, eb.EProjectName)                AS Project,
+
+        -- ── Supplier (GRN → account head; others → EName) ───────────────────
+        CASE
+          WHEN eb.ESourceType = 'GRN' AND grn.GRNID IS NOT NULL
+            THEN ISNULL(ahm.LHeadName, ISNULL(eb.EName, ''))
+          ELSE ISNULL(eb.EName, '')
+        END                                              AS Supplier,
+
+        -- ── Amounts ─────────────────────────────────────────────────────────
+        -- Taxable (base) amount = EAmount which is pre-GST gross
+        ISNULL(eb.EAmount, 0)                           AS TaxableAmount,
+
+        -- Net payable = ENetAmount (post billing-terms) or fall back to EAmount
+        ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))   AS NetPayable,
+
+        -- Tax = Net Payable − Taxable Amount (derived; capped at ≥ 0)
+        -- For GRN bookings with a live GRN total we still use stored rates
+        -- so tax is always: netPayable - taxableAmount (they already include GST)
+        CASE
+          WHEN ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
+             > ISNULL(eb.EAmount, 0)
+          THEN ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
+             - ISNULL(eb.EAmount, 0)
+          ELSE 0
+        END                                              AS TaxAmount,
+
+        -- GST rates stored on the booking (for context / export)
+        ISNULL(eb.ECgstRate, 0)                         AS CgstRate,
+        ISNULL(eb.ESgstRate, 0)                         AS SgstRate,
+
+        -- ── Ref Doc type ────────────────────────────────────────────────────
+        -- Map ESourceType → Ref Doc label requested by product
+        CASE eb.ESourceType
+          WHEN 'PO'        THEN 'PO'
+          WHEN 'WO_PO'     THEN 'WO_PO'
+          WHEN 'GRN'       THEN 'PO'          -- GRN is always downstream of a PO
+          WHEN 'WORK_DONE' THEN 'WO'
+          ELSE ISNULL(NULLIF(LTRIM(RTRIM(eb.EDocumentType)), ''), 'Other Expenses')
+        END                                              AS RefDoc,
+
+        -- Raw type for transparency
+        eb.ESourceType                                   AS SourceType,
+        eb.EDocumentType                                 AS DocumentType,
+
+        -- ── Method of Payment ────────────────────────────────────────────────
+        -- Latest approved payment's PMode against this booking's EDocNo
+        ISNULL(
+          (SELECT TOP 1 np.PMode
+           FROM dbo.NewPayment np
+           WHERE np.PExpenseRef = eb.EDocNo
+             AND np.Status IN ('Approved', 'Cleared', 'Paid')
+           ORDER BY np.PPaymentID DESC),
+          (SELECT TOP 1 np2.PMode
+           FROM dbo.NewPayment np2
+           WHERE np2.PExpenseRef = eb.EDocNo
+           ORDER BY np2.PPaymentID DESC)
+        )                                                AS MethodOfPayment,
+
+        COUNT(*) OVER()                                  AS _total
+      FROM dbo.ExpenseBooking eb
+      LEFT JOIN dbo.enterprise  ec  ON ec.id = eb.ECompanyId
+      CROSS APPLY (SELECT TRY_CAST(eb.EProjectName AS INT) AS _projId) _p
+      LEFT JOIN dbo.enterprise  ep  ON ep.id = _p._projId
+      LEFT JOIN dbo.GoodsReceiptNotes grn
+        ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = grn.SupplierID
+      ${whereSQL}
+      ORDER BY eb.Eid DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `);
+
+    const rows = result.recordset;
+    const total = rows.length > 0 ? parseInt(rows[0]._total) : 0;
+
+    const data = rows.map(({ _total, ...r }) => ({
+      DocumentNumber: r.DocumentNumber ?? null,
+      Date: r.DocDate ?? null,
+      FinYear: r.FinYear ?? null,
+      Company: r.Company,
+      Project: r.Project ?? null,
+      Supplier: r.Supplier,
+      TaxableAmount: parseFloat(r.TaxableAmount) || 0,
+      TaxAmount: parseFloat(r.TaxAmount) || 0,
+      NetPayable: parseFloat(r.NetPayable) || 0,
+      CgstRate: parseFloat(r.CgstRate) || 0,
+      SgstRate: parseFloat(r.SgstRate) || 0,
+      RefDoc: r.RefDoc,
+      SourceType: r.SourceType ?? null,
+      DocumentType: r.DocumentType ?? null,
+      MethodOfPayment: r.MethodOfPayment ?? null,
+    }));
+
+    return res.json({
+      data,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    });
+  } catch (err) {
+    console.error("Invoice register error:", err.message);
+    return res.status(500).json({ error: "Failed to load invoice register" });
+  }
+});
+
 module.exports = router;
-
-
-
-

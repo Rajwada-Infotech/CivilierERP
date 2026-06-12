@@ -140,16 +140,48 @@ const ALL_REPORTS: ReportDef[] = [
       dateToParam: null,
     },
     columns: [
-      { header: "Doc No", accessor: "DocNo" },
+      {
+        header: "Company",
+        accessor: (r) => (r.PCompanyName ?? r.PCompany ?? "—") as string,
+      },
+      {
+        header: "Project",
+        accessor: (r) => (r.PProjectName ?? r.PProject ?? "—") as string,
+      },
+      {
+        header: "Supplier",
+        accessor: (r) => (r.PSupplierName ?? r.PPaymentName ?? "—") as string,
+      },
+      {
+        header: "Amount (Net Payable)",
+        accessor: (r) => fmt(r.PAmount as number),
+      },
+      {
+        header: "Tax",
+        accessor: (r) =>
+          r.TaxAmount != null && Number(r.TaxAmount) !== 0
+            ? fmt(r.TaxAmount as number)
+            : "—",
+      },
+      { header: "Method of Payment", accessor: "PMode" },
+      {
+        header: "Taxable Amt (Base Amt)",
+        accessor: (r) =>
+          r.TaxableAmount != null ? fmt(r.TaxableAmount as number) : "—",
+      },
+      {
+        header: "Fin Year",
+        accessor: (r) => (r.EBFinYear ?? "—") as string,
+      },
+      {
+        header: "Ref Doc",
+        accessor: (r) => (r.RefDoc ?? r.PExpenseRef ?? "—") as string,
+      },
       {
         header: "Date",
         accessor: (r) => (r.PDate ? String(r.PDate).slice(0, 10) : "—"),
       },
-      { header: "Party", accessor: "PPaymentName" },
-      { header: "Mode", accessor: "PMode" },
-      { header: "Amount", accessor: (r) => fmt(r.PAmount as number) },
-      { header: "Bank", accessor: "PBankName" },
-      { header: "Status", accessor: "Status" },
+      { header: "Document Number", accessor: "DocNo" },
     ],
   },
   {
@@ -339,18 +371,38 @@ const ALL_REPORTS: ReportDef[] = [
       dateToParam: null,
     },
     columns: [
+      { header: "Company", accessor: "CompanyName" },
+      { header: "Project", accessor: "ProjectName" },
       {
-        header: "PO No",
-        accessor: (r) => (r.PurchaseOrderNo ?? r.PONo ?? "—") as string,
-      },
-      {
-        header: "Date",
+        header: "Date of PO",
         accessor: (r) => (r.PODate ? String(r.PODate).slice(0, 10) : "—"),
       },
-      { header: "Vendor", accessor: "SupplierName" },
-      { header: "Project", accessor: "ProjectName" },
+      {
+        header: "Document Number",
+        accessor: (r) =>
+          (r.DocNo ?? r.PurchaseOrderNo ?? r.PONo ?? "—") as string,
+      },
+      { header: "Supplier", accessor: "SupplierName" },
+      { header: "Fin Year", accessor: "FinYearName" },
+      {
+        header: "Items in the PO",
+        accessor: (r) =>
+          Array.isArray(r.POItems)
+            ? r.POItems.map(
+                (it) =>
+                  (it as Record<string, unknown>)?.itemDescription ??
+                  (it as Record<string, unknown>)?.itemName ??
+                  "",
+              )
+                .filter(Boolean)
+                .join(", ")
+            : "—",
+      },
       { header: "Amount", accessor: (r) => fmt(r.TotalAmount as number) },
-      { header: "Status", accessor: "Status" },
+      {
+        header: "Ref Doc",
+        accessor: (r) => (r.SourceMRDocNo ?? r.SourceWODocNo ?? "—") as string,
+      },
     ],
   },
   {
@@ -368,15 +420,41 @@ const ALL_REPORTS: ReportDef[] = [
       dateToParam: null,
     },
     columns: [
-      { header: "GRN No", accessor: "GRNNo" },
+      { header: "Company", accessor: "CompanyName" },
+      { header: "Project", accessor: "ProjectName" },
       {
-        header: "Date",
+        header: "Date of GRN",
         accessor: (r) => (r.GRNDate ? String(r.GRNDate).slice(0, 10) : "—"),
       },
+      {
+        header: "Document Number",
+        accessor: (r) => (r.DocNo ?? r.GRNNo ?? "—") as string,
+      },
       { header: "Supplier", accessor: "SupplierName" },
-      { header: "Doc No", accessor: "DocNo" },
-      { header: "Status", accessor: "Status" },
-      { header: "Remarks", accessor: "Remarks" },
+      {
+        header: "Fin Year",
+        accessor: (r) => (r.FinYearName ?? r.FinYear ?? "—") as string,
+      },
+      {
+        header: "Items in the GRN",
+        accessor: (r) =>
+          Array.isArray(r.GRNItems)
+            ? r.GRNItems.map(
+                (it) =>
+                  (it as Record<string, unknown>)?.itemName ??
+                  (it as Record<string, unknown>)?.ItemName ??
+                  (it as Record<string, unknown>)?.name ??
+                  "",
+              )
+                .filter(Boolean)
+                .join(", ")
+            : "—",
+      },
+      { header: "Amount", accessor: (r) => fmt(r.TotalAmount as number) },
+      {
+        header: "Ref Doc",
+        accessor: (r) => (r.PONumber ?? "—") as string,
+      },
     ],
   },
   {
@@ -527,28 +605,35 @@ const ALL_REPORTS: ReportDef[] = [
     description: "Expense bookings & invoices across all projects",
     icon: Receipt,
     color: "#ec4899",
-    apiPath: "/api/expense-booking",
-    // expenseBooking GET / accepts ?finYear=<id>. No date range or company filter.
+    apiPath: "/api/reports/invoice-register",
     filterConfig: {
-      companyParam: null,
-      finYearParam: "finYear",
-      singleDateParam: null,
-      dateFromParam: null,
-      dateToParam: null,
+      companyParam: "companyId",
+      finYearParam: "finYearId",
+      singleDateParam: "dateFrom",
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
     },
     columns: [
-      { header: "Invoice No", accessor: "EDocNo" },
+      { header: "Doc No", accessor: "DocumentNumber" },
       {
         header: "Date",
-        accessor: (r) => (r.EDocDate ? String(r.EDocDate).slice(0, 10) : "—"),
+        accessor: (r) => (r.Date ? String(r.Date).slice(0, 10) : "—"),
       },
-      { header: "Project", accessor: "EProjectName" },
-      { header: "Amount", accessor: (r) => fmt(r.EAmount as number) },
+      { header: "Company", accessor: "Company" },
+      { header: "Project", accessor: (r) => r.Project ?? "—" },
+      { header: "Supplier", accessor: "Supplier" },
+      { header: "Ref Doc", accessor: "RefDoc" },
       {
-        header: "Net Amount",
-        accessor: (r) => fmt((r.ENetAmount ?? r.EAmount) as number),
+        header: "Taxable Amt",
+        accessor: (r) => fmt(r.TaxableAmount as number),
       },
-      { header: "Status", accessor: "EStatus" },
+      { header: "Tax", accessor: (r) => fmt(r.TaxAmount as number) },
+      { header: "Net Payable", accessor: (r) => fmt(r.NetPayable as number) },
+      {
+        header: "Method of Payment",
+        accessor: (r) => r.MethodOfPayment ?? "—",
+      },
+      { header: "Fin Year", accessor: (r) => r.FinYear ?? "—" },
     ],
   },
   {
