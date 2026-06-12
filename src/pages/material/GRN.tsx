@@ -42,7 +42,6 @@ import {
 import { Button } from "@/components/ui/button";
 import * as grnApi from "@/api/grnApi";
 import { getProjects } from "@/api/grnApi";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { getGodowns } from "@/api/godownsApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useFinYear } from "@/contexts/FinYearContext";
@@ -662,7 +661,6 @@ export default function GRN() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingGrn, setViewingGrn] = useState<any | null>(null);
   const [search, setSearch] = useState("");
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
   const [page, setPage] = useState(1);
   const [loadingPO, setLoadingPO] = useState(false);
   const [selectedFinYear, setSelectedFinYear] = useState<string>("");
@@ -774,38 +772,10 @@ export default function GRN() {
   });
   const godowns = (godownsData as any)?.data ?? [];
 
-  const filteredGodowns = useMemo(
-    () =>
-      (godowns as any[]).filter(
-        (g) =>
-          !g.IsMain &&
-          (formData.projectId === "" ||
-            g.ProjectID === null ||
-            String(g.ProjectID) === String(formData.projectId)),
-      ),
-    [godowns, formData.projectId],
-  );
-
   const { data: projectsData = [] } = useQuery({
     queryKey: ["grn-projects"],
     queryFn: getProjects,
   });
-
-  const { data: companiesData = [] } = useQuery({
-    queryKey: ["grn-companies"],
-    queryFn: () =>
-      fetch("/api/enterprises/options?business_type=C", {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
-        },
-      }).then((r) => r.json()),
-    staleTime: 120_000,
-  });
-
-  const filteredProjects = useMemo(
-    () => filterProjectsByCompany(projectsData as any[], selectedCompanyId),
-    [projectsData, selectedCompanyId],
-  );
 
   const pos = useMemo(
     () =>
@@ -1228,7 +1198,6 @@ export default function GRN() {
       poNumber: fullGrn.PONumber || "",
       poTotalAmount: Number(fullGrn.POTotalAmount ?? 0),
       poSubtotalAmount: Number(fullGrn.POSubtotalAmount ?? 0),
-      poReceivedAmount: Number(fullGrn.POReceivedAmount ?? 0),
       remarks: fullGrn.Remarks || "",
       status: (fullGrn.Status as any) || "Draft",
       items: parsedItems.length ? parsedItems : [createEmptyItem()],
@@ -1371,47 +1340,6 @@ export default function GRN() {
                   </div>
                 </div>
 
-                {/* Company */}
-                <div>
-                  <FieldLabel>
-                    <span className="inline-flex items-center gap-1">
-                      <Building2 size={9} />
-                      Company
-                    </span>
-                  </FieldLabel>
-                  <div className="relative">
-                    <select
-                      value={selectedCompanyId}
-                      onChange={(e) => {
-                        setSelectedCompanyId(e.target.value);
-                        setFormData((prev) => ({
-                          ...prev,
-                          projectId: "",
-                          poId: "",
-                          poNumber: "",
-                          supplierId: "",
-                          supplierName: "",
-                          items: [createEmptyItem()],
-                          parentDocNo: "",
-                          rootExBDocNo: "",
-                        }));
-                      }}
-                      className={inpSel}
-                    >
-                      <option value="">All Companies</option>
-                      {(companiesData as any[]).map((c: any) => (
-                        <option key={c.id} value={String(c.id)}>
-                          {c.label ?? c.name}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={12}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
-                </div>
-
                 {/* Project */}
                 <div>
                   <FieldLabel>
@@ -1427,7 +1355,6 @@ export default function GRN() {
                         setFormData((prev) => ({
                           ...prev,
                           projectId: e.target.value,
-                          godownId: "",
                           poId: "",
                           poNumber: "",
                           supplierId: "",
@@ -1440,7 +1367,7 @@ export default function GRN() {
                       className={inpSel}
                     >
                       <option value="">All Projects</option>
-                      {filteredProjects.map((p: any) => (
+                      {(projectsData as any[]).map((p: any) => (
                         <option key={p.id} value={String(p.id)}>
                           {p.name}
                         </option>
@@ -1473,11 +1400,13 @@ export default function GRN() {
                       className={inpSel}
                     >
                       <option value="">Main Godown</option>
-                      {filteredGodowns.map((g: any) => (
-                        <option key={g.GodownID} value={String(g.GodownID)}>
-                          {g.GodownName}
-                        </option>
-                      ))}
+                      {godowns
+                        .filter((g: any) => !g.IsMain)
+                        .map((g: any) => (
+                          <option key={g.GodownID} value={String(g.GodownID)}>
+                            {g.GodownName}
+                          </option>
+                        ))}
                     </select>
                     <ChevronDown
                       size={12}
