@@ -298,7 +298,7 @@ const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
   if (!res.ok) return [];
   const raw = await res.json();
   const items: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
-  return items.map((o: any) => ({
+  const mapped = items.map((o: any) => ({
     ...o,
     companyName:
       o.companyName ||
@@ -324,6 +324,30 @@ const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
       o.EName ||
       null,
   }));
+
+  // For booking-type options, fetch the authoritative amount from /:id
+  // (the /options endpoint stores ENetAmount which may be stale for GRN bookings)
+  const enriched = await Promise.all(
+    mapped.map(async (o) => {
+      if (o.type !== "booking") return o;
+      try {
+        const det = await fetchWithAuth(`/api/expense-booking/${o.id}`);
+        if (!det.ok) return o;
+        const d = await det.json();
+        const correctAmount = d.ENetAmount ?? d.EAmount ?? o.amount;
+        if (correctAmount == null || correctAmount === o.amount) return o;
+        const amountInt = Math.round(Number(correctAmount));
+        return {
+          ...o,
+          amount: Number(correctAmount),
+          label: `${o.docNo} — ${o.projectName ?? ""} (₹${amountInt.toLocaleString("en-IN")})`,
+        };
+      } catch {
+        return o;
+      }
+    })
+  );
+  return enriched;
 };
 
 const fetchExpenseDetail = async (
@@ -2032,6 +2056,8 @@ const Payment: React.FC = () => {
   const { data: expenseOptions = [] } = useQuery<ExpenseOption[]>({
     queryKey: ["expense-options-payment"],
     queryFn: fetchExpenseOptions,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   // ── Stats ──────────────────────────────────────────────────────────────────
