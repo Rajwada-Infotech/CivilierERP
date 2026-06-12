@@ -907,7 +907,10 @@ router.get("/:id", async (req, res) => {
                  WHEN eb.ESourceType = 'GRN' AND grn_det.TotalAmount IS NOT NULL AND grn_det.TotalAmount > 0
                  THEN grn_det.TotalAmount
                  ELSE NULL
-               END AS EGrnTotalAmount
+               END AS EGrnTotalAmount,
+               -- Pass through source info needed for fallback computation
+               eb.ESourceType AS _ESourceType,
+               eb.ESourceId   AS _ESourceId
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
         LEFT JOIN dbo.enterprise ec ON ec.id = eb.ECompanyId
@@ -925,7 +928,34 @@ router.get("/:id", async (req, res) => {
       `);
     if (!result.recordset.length)
       return res.status(404).json({ error: "Not found" });
-    res.json(result.recordset[0]);
+
+    const row = result.recordset[0];
+
+    // If EGrnTotalAmount is NULL (GRN.TotalAmount not populated for older records),
+    // compute it from buildGrnGstData so the frontend always has an authoritative total.
+    if (
+      !row.EGrnTotalAmount &&
+      row._ESourceType === "GRN" &&
+      row._ESourceId
+    ) {
+      try {
+        const grnId = parseInt(row._ESourceId, 10);
+        if (Number.isFinite(grnId) && grnId > 0) {
+          const grnData = await buildGrnGstData(pool, grnId);
+          if (grnData && grnData.totals.netAmount > 0) {
+            row.EGrnTotalAmount = grnData.totals.netAmount;
+          }
+        }
+      } catch {
+        /* non-fatal: frontend will fall back to standard breakdown */
+      }
+    }
+
+    // Strip internal fields before sending
+    delete row._ESourceType;
+    delete row._ESourceId;
+
+    res.json(row);
   } catch (err) {
     console.error("Get by id error:", err.message);
     res.status(500).json({ error: err.message });
