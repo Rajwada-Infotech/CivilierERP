@@ -195,7 +195,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     bookingName: "",
     bookingReference: "",
     docTypeName: "",
-    bookingDate: "",
+    bookingDate: new Date().toISOString().slice(0, 10),
     dueDate: "",
     financialYear: "",
     companyId: null,
@@ -317,6 +317,8 @@ export function dbToRecord(row: any): ExpenseRecord {
     projectName: row.EProjectDisplayName || row.projectName || "",
     materialCategory: row.EDocumentType ?? "",
     invoiceReference: row.EDocNo ?? "",
+    // For GRN-linked bookings, basicAmount = qty × rate (no GST) stored in EAmount.
+    // EGrnTotalAmount is the incl-GST total used only for netAmount display.
     basicAmount: parseFloat(row.EAmount) || 0,
     cgstRate: row.ECgstRate ? parseFloat(row.ECgstRate) : 0,
     sgstRate: row.ESgstRate ? parseFloat(row.ESgstRate) : 0,
