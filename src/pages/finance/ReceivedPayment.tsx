@@ -62,7 +62,6 @@ import {
   fetchNextDocNumber,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { formatINR } from "@/utils/formatCurrency";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -361,13 +360,7 @@ export default function ReceivedPaymentPage() {
     [],
   );
   const [projects, setProjects] = useState<
-    {
-      id: number;
-      label: string;
-      belongsTo: number | null;
-      company_id?: number | null;
-      company_ids?: string | null;
-    }[]
+    { id: number; label: string; belongsTo: number | null }[]
   >([]);
   const [banks, setBanks] = useState<BankRecord[]>([]);
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
@@ -399,8 +392,6 @@ export default function ReceivedPaymentPage() {
             id: p.id,
             label: p.label,
             belongsTo: p.belongs_to ?? null,
-            company_id: p.company_id ?? null,
-            company_ids: p.company_ids ?? null,
           })),
         ),
       )
@@ -444,10 +435,7 @@ export default function ReceivedPaymentPage() {
   }, [banks, selectedCompanyLabel]);
 
   // ── Projects — independent selection, show all ───────────────────────────────
-  const filteredProjects = useMemo(
-    () => filterProjectsByCompany(projects, form.companyId),
-    [projects, form.companyId],
-  );
+  const filteredProjects = projects;
 
   // ── Doc number preview ───────────────────────────────────────────────────────
   const refreshDocNo = useCallback(

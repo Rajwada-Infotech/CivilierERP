@@ -17,7 +17,6 @@ import {
 import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getInventoryMaster } from "@/api/inventoryMasterApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtNum = (n: number) =>
@@ -416,8 +415,9 @@ export default function Stock() {
   const [selectedCompany, setSelectedCompany] = useState<number | null>(null);
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
   const [selectedGodownId, setSelectedGodownId] = useState<number | null>(null);
+  const autoSelected = React.useRef(false);
 
-  // ── Load godowns ─────────────────────────────────────────────────────────
+  // ── Load data ─────────────────────────────────────────────────────────────
   const { data: godownsData, isLoading: godownsLoading } = useQuery({
     queryKey: ["godowns"],
     queryFn: getGodowns,
@@ -425,7 +425,21 @@ export default function Stock() {
   });
   const godowns: Godown[] = godownsData?.data ?? [];
 
-  // ── Load companies (business_type=C) ─────────────────────────────────────
+  // Auto-select first project godown on load (skip Main Godown)
+  React.useEffect(() => {
+    if (
+      !autoSelected.current &&
+      godowns.length > 0 &&
+      selectedGodownId === null
+    ) {
+      const firstProject = godowns.find((g) => !g.IsMain) ?? null;
+      if (firstProject) {
+        setSelectedGodownId(firstProject.GodownID);
+        autoSelected.current = true;
+      }
+    }
+  }, [godowns]);
+
   const { data: companiesData } = useQuery({
     queryKey: ["enterprises-companies"],
     queryFn: () =>
@@ -434,13 +448,8 @@ export default function Stock() {
         .catch(() => []),
     staleTime: 300_000,
   });
-  const companies: { id: number; label: string }[] = Array.isArray(
-    companiesData,
-  )
-    ? companiesData
-    : [];
+  const companies = Array.isArray(companiesData) ? companiesData : [];
 
-  // ── Load projects (business_type=P) ──────────────────────────────────────
   const { data: projectsData } = useQuery({
     queryKey: ["enterprises-projects"],
     queryFn: () =>
@@ -449,59 +458,48 @@ export default function Stock() {
         .catch(() => []),
     staleTime: 300_000,
   });
-  const allProjects: {
-    id: number;
-    label: string;
-    belongs_to?: string | number | null;
-    company_id?: number | null;
-    company_ids?: string | null;
-  }[] = Array.isArray(projectsData) ? projectsData : [];
+  const projects = Array.isArray(projectsData) ? projectsData : [];
 
-  // Projects filtered by selected company using the same belongs_to utility
-  const filteredProjects = useMemo(
-    () => filterProjectsByCompany(allProjects, selectedCompany),
-    [allProjects, selectedCompany],
-  );
-
-  // ── Godown cascade: Company → Project → Godown ────────────────────────────
-  // Step 1: filter by company using the derived CompanyID on each godown
-  // Step 2: further filter by project using ProjectID
-  // Main Godown is always excluded from this view
+  // Filter godowns: exclude Main Godown, then apply company/project filters
   const filteredGodowns = useMemo(() => {
     return godowns.filter((g) => {
-      if (g.IsMain) return false;
-      if (selectedCompany !== null && g.CompanyID !== selectedCompany)
-        return false;
-      if (selectedProject !== null && g.ProjectID !== selectedProject)
-        return false;
-      return true;
+      if (g.IsMain) return false; // project godowns only
+      const companyMatch = selectedCompany
+        ? g.EnterpriseID === selectedCompany
+        : true;
+      const projectMatch = selectedProject
+        ? g.ProjectID === selectedProject
+        : true;
+      return companyMatch && projectMatch;
     });
   }, [godowns, selectedCompany, selectedProject]);
 
-  // If the currently selected godown is no longer in the filtered list, reset to null
+  // If current selected godown is no longer in filtered list, reset to first project godown within filtered
   React.useEffect(() => {
-    if (selectedGodownId !== null) {
+    if (selectedGodownId !== null && filteredGodowns.length > 0) {
       const stillVisible = filteredGodowns.some(
         (g) => g.GodownID === selectedGodownId,
       );
       if (!stillVisible) {
-        setSelectedGodownId(null);
+        setSelectedGodownId(filteredGodowns[0]?.GodownID ?? null);
       }
     }
   }, [filteredGodowns]);
 
   const selectedGodown = godowns.find((g) => g.GodownID === selectedGodownId);
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
   const handleCompanyChange = (v: number | null) => {
     setSelectedCompany(v);
-    setSelectedProject(null); // reset project when company changes
-    setSelectedGodownId(null); // reset godown
+    // Do NOT clear project — both filters are independent
   };
 
   const handleProjectChange = (v: number | null) => {
     setSelectedProject(v);
-    setSelectedGodownId(null); // reset godown when project changes
+    // Do NOT clear company — both filters are independent
+  };
+
+  const handleGodownChange = (v: number | null) => {
+    setSelectedGodownId(v);
   };
 
   return (
@@ -516,101 +514,55 @@ export default function Stock() {
             Stock
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            View stock details for a specific godown. Filter by company, then
-            project, then godown.
+            View stock details for a specific godown. Filter by company or
+            project.
           </p>
         </div>
 
-        {/* Filter panel — Company → Project → Godown cascade */}
+        {/* Filter panel */}
         <div className="rounded-xl border border-border bg-card p-4">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
             Select Godown
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {/* 1. Company */}
             <SelectDropdown
               label="Company"
               value={selectedCompany}
               onChange={(v) => handleCompanyChange(v as number | null)}
-              options={companies.map((c) => ({
+              options={companies.map((c: any) => ({
                 value: c.id,
                 label: c.label,
               }))}
               placeholder="All Companies"
               icon={Building2}
             />
-
-            {/* 2. Project — filtered by company */}
             <SelectDropdown
               label="Project"
               value={selectedProject}
               onChange={(v) => handleProjectChange(v as number | null)}
-              options={filteredProjects.map((p) => ({
+              options={projects.map((p: any) => ({
                 value: p.id,
                 label: p.label,
               }))}
-              placeholder={selectedCompany ? "Select project…" : "All Projects"}
+              placeholder="All Projects"
               icon={FolderKanban}
-              disabled={
-                filteredProjects.length === 0 && selectedCompany !== null
-              }
             />
-
-            {/* 3. Godown — filtered by company + project */}
             <SelectDropdown
               label="Godown / Warehouse"
               value={selectedGodownId}
-              onChange={(v) => setSelectedGodownId(v as number | null)}
+              onChange={(v) => handleGodownChange(v as number | null)}
               options={filteredGodowns.map((g) => ({
                 value: g.GodownID,
                 label: g.GodownName,
                 badge: g.ProjectName ?? undefined,
               }))}
               placeholder={
-                godownsLoading
-                  ? "Loading…"
-                  : filteredGodowns.length === 0
-                    ? "No godowns available"
-                    : "Select Project Godown"
+                godownsLoading ? "Loading…" : "Select Project Godown"
               }
               icon={Warehouse}
-              disabled={godownsLoading || filteredGodowns.length === 0}
+              disabled={godownsLoading}
             />
           </div>
-
-          {/* Active filter chips */}
-          {(selectedCompany !== null || selectedProject !== null) && (
-            <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-border">
-              {selectedCompany !== null && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-blue-500/10 text-blue-600 border border-blue-400/20 font-medium">
-                  <Building2 size={10} />
-                  {companies.find((c) => c.id === selectedCompany)?.label}
-                  <button
-                    onClick={() => handleCompanyChange(null)}
-                    className="ml-0.5 hover:opacity-70 text-blue-600"
-                  >
-                    ×
-                  </button>
-                </span>
-              )}
-              {selectedProject !== null && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-violet-500/10 text-violet-600 border border-violet-400/20 font-medium">
-                  <FolderKanban size={10} />
-                  {allProjects.find((p) => p.id === selectedProject)?.label}
-                  <button
-                    onClick={() => handleProjectChange(null)}
-                    className="ml-0.5 hover:opacity-70 text-violet-600"
-                  >
-                    ×
-                  </button>
-                </span>
-              )}
-              <span className="text-[10px] text-muted-foreground">
-                {filteredGodowns.length} godown
-                {filteredGodowns.length !== 1 ? "s" : ""} available
-              </span>
-            </div>
-          )}
         </div>
 
         {/* Godown details + stock */}
@@ -626,15 +578,10 @@ export default function Stock() {
               className="text-muted-foreground/30 mx-auto mb-3"
             />
             <p className="text-sm text-muted-foreground">
-              {godownsLoading
-                ? "Loading godowns…"
-                : filteredGodowns.length === 0 &&
-                    (selectedCompany !== null || selectedProject !== null)
-                  ? "No godowns found for the selected filters"
-                  : "Select a project godown above to view its stock details"}
+              Select a project godown above to view its stock details
             </p>
             <p className="text-xs text-muted-foreground/60 mt-1">
-              Filter by company → project → godown
+              Filter by company or project to find the right godown
             </p>
           </div>
         )}

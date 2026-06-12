@@ -192,6 +192,17 @@ function fmtDate(d: string | null | undefined) {
   return `${day}/${m}/${y}`;
 }
 
+// ── Helper ─────────────────────────────────────────────────────────────────────
+function filterProjectsByCompany(
+  projects: OptionItem[],
+  companyId: string | undefined,
+): OptionItem[] {
+  if (!companyId) return projects;
+  return projects.filter(
+    (p) => String((p as Record<string, unknown>).CompanyId) === companyId,
+  );
+}
+
 // ── Progress bar ───────────────────────────────────────────────────────────────
 function ProgressBar({ record }: { record: WorkflowRecord }) {
   const completed = STEPS.filter(
@@ -1057,7 +1068,10 @@ export default function AgreementWorkflowPage() {
                   <SelectValue placeholder="Select…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map((p: any) => (
+                  {filterProjectsByCompany(
+                    meta?.projects ?? [],
+                    form.CompanyId,
+                  ).map((p: OptionItem) => (
                     <SelectItem key={p.Id} value={String(p.Id)}>
                       {p.Name}
                     </SelectItem>
@@ -1071,7 +1085,7 @@ export default function AgreementWorkflowPage() {
               <Label className="text-xs">Company</Label>
               <Select
                 value={form.CompanyId || ""}
-                onValueChange={(v) => setForm((f) => ({ ...f, CompanyId: v, ProjectId: "" }))}
+                onValueChange={(v) => setForm((f) => ({ ...f, CompanyId: v }))}
               >
                 <SelectTrigger className="rounded-[9px]">
                   <SelectValue placeholder="Select…" />

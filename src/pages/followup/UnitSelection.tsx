@@ -18,7 +18,6 @@ import { toast } from "sonner";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -442,11 +441,6 @@ function FormDialog({
   const set = (key: keyof FormState, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
 
-  const filteredProjects = useMemo(
-    () => filterProjectsByCompany(options.projects as any[], form.CompanyId),
-    [options.projects, form.CompanyId],
-  );
-
   const computed = computedValue(form);
 
   return (
@@ -482,33 +476,8 @@ function FormDialog({
             </Select>
           </div>
 
-          {/* Company + Project */}
+          {/* Project + Company */}
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Company</Label>
-              <Select
-                value={form.CompanyId || NONE}
-                onValueChange={(v) => {
-                  setForm((f) => ({
-                    ...f,
-                    CompanyId: v === NONE ? "" : v,
-                    ProjectId: "",
-                  }));
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select company" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NONE}>None</SelectItem>
-                  {options.companies.map((c) => (
-                    <SelectItem key={c.Id} value={String(c.Id)}>
-                      {c.Name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             <div className="space-y-2">
               <Label>Project</Label>
               <Select
@@ -520,9 +489,28 @@ function FormDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NONE}>None</SelectItem>
-                  {filteredProjects.map((p: any) => (
+                  {options.projects.map((p) => (
                     <SelectItem key={p.Id} value={String(p.Id)}>
                       {p.Name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Company</Label>
+              <Select
+                value={form.CompanyId || NONE}
+                onValueChange={(v) => set("CompanyId", v === NONE ? "" : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select company" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>None</SelectItem>
+                  {options.companies.map((c) => (
+                    <SelectItem key={c.Id} value={String(c.Id)}>
+                      {c.Name}
                     </SelectItem>
                   ))}
                 </SelectContent>
