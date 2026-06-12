@@ -89,9 +89,62 @@ export function ExpenseBookingPreviewModal({
       fetchWithAuth(`/api/grns/${previewRecord.eSourceId}/gst-breakdown`)
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
-          if (data?.totals?.totalInclGST > 0) setGrnBreakdown(data);
+          if (data?.totals?.totalInclGST > 0) {
+            setGrnBreakdown(data);
+          } else {
+            // API returned wrong shape or zero — synthesize from the live GRN total
+            // already on the record (returned by GET /api/expense-booking/:id).
+            const inclGST =
+              previewRecord.grnTotalAmount ?? previewRecord.basicAmount ?? 0;
+            if (inclGST > 0) {
+              const cgstRate = previewRecord.cgstRate ?? 0;
+              const sgstRate = previewRecord.sgstRate ?? 0;
+              const totalGstRate = cgstRate + sgstRate;
+              const base =
+                totalGstRate > 0
+                  ? Math.round((inclGST / (1 + totalGstRate / 100)) * 100) / 100
+                  : inclGST;
+              const cgst = Math.round(((base * cgstRate) / 100) * 100) / 100;
+              const sgst = Math.round(((base * sgstRate) / 100) * 100) / 100;
+              setGrnBreakdown({
+                items: [],
+                totals: {
+                  totalBase: base,
+                  totalCGST: cgst,
+                  totalSGST: sgst,
+                  totalGST: cgst + sgst,
+                  totalInclGST: inclGST,
+                },
+              });
+            }
+          }
         })
-        .catch(() => {});
+        .catch(() => {
+          // Network failure — still synthesize so breakdown renders correctly
+          const inclGST =
+            previewRecord.grnTotalAmount ?? previewRecord.basicAmount ?? 0;
+          if (inclGST > 0) {
+            const cgstRate = previewRecord.cgstRate ?? 0;
+            const sgstRate = previewRecord.sgstRate ?? 0;
+            const totalGstRate = cgstRate + sgstRate;
+            const base =
+              totalGstRate > 0
+                ? Math.round((inclGST / (1 + totalGstRate / 100)) * 100) / 100
+                : inclGST;
+            const cgst = Math.round(((base * cgstRate) / 100) * 100) / 100;
+            const sgst = Math.round(((base * sgstRate) / 100) * 100) / 100;
+            setGrnBreakdown({
+              items: [],
+              totals: {
+                totalBase: base,
+                totalCGST: cgst,
+                totalSGST: sgst,
+                totalGST: cgst + sgst,
+                totalInclGST: inclGST,
+              },
+            });
+          }
+        });
     }
     // Fetch billing terms master to hydrate terms when EBillingTermsData is missing
     fetchWithAuth("/api/billing-terms")
@@ -338,7 +391,8 @@ export function ExpenseBookingPreviewModal({
                       GST Breakdown by Item
                     </span>
                   </div>
-                  <div className="overflow-x-auto">
+                  {grnBreakdown.items.length === 0 && null}
+                  <div className="overflow-x-auto" style={{ display: grnBreakdown.items.length === 0 ? 'none' : undefined }}>
                     <table className="w-full text-[11px]">
                       <thead>
                         <tr className="border-b border-blue-500/10 bg-muted/10">
@@ -457,9 +511,11 @@ export function ExpenseBookingPreviewModal({
                       Amounts use the actual GRN totals as the base. */}
                   {billingTerms.map((t: any, i: number) => {
                     const isPreGst = t.appliedOn !== "post-gst";
-                    const base = isPreGst
-                      ? grnBreakdown.totals.totalBase
-                      : grnBreakdown.totals.totalInclGST;
+                    // For GRN bookings GST is already baked into the GRN total.
+                    // Always apply billing terms on totalInclGST — pre-GST vs post-GST
+                    // distinction is irrelevant here. This keeps displayed amounts
+                    // in sync with grnNetPayable (which also runs on totalInclGST).
+                    const base = grnBreakdown.totals.totalInclGST;
                     const amt =
                       t.type === "percentage"
                         ? (base * (t.value ?? 0)) / 100
