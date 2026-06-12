@@ -92,6 +92,7 @@ interface WorkDoneEntry {
 interface DropdownOption {
   id: number;
   name: string;
+  company_id?: number | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
