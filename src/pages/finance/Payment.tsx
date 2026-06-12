@@ -335,7 +335,7 @@ const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
         if (!det.ok) return o;
         const d = await det.json();
         const correctAmount = d.ENetAmount ?? d.EAmount ?? o.amount;
-        if (correctAmount == null || correctAmount === o.amount) return o;
+        if (correctAmount == null) return o;
         const amountInt = Math.round(Number(correctAmount));
         return {
           ...o,
@@ -345,7 +345,7 @@ const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
       } catch {
         return o;
       }
-    })
+    }),
   );
   return enriched;
 };
