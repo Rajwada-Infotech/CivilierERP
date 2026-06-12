@@ -3014,22 +3014,14 @@ const Payment: React.FC = () => {
                         ? grnGstBreakdown.totals.totalInclGST
                         : taxable + cgst + sgst + igst;
 
+                      // Net Payable = Gross Amount (no post-GST deductions, no round-off adjustment)
                       const postGstRows: {
                         term: (typeof postGst)[0];
                         amt: number;
                       }[] = [];
-                      for (const t of postGst) {
-                        const amt =
-                          t.type === "percentage"
-                            ? (gross * t.value) / 100
-                            : t.value;
-                        postGstRows.push({ term: t, amt });
-                        if (t.deductionType === "Addition") gross += amt;
-                        else gross = Math.max(0, gross - amt);
-                      }
 
-                      const roundOff = Math.round(gross) - gross;
-                      const net = Math.round(gross);
+                      const roundOff = 0;
+                      const net = gross;
 
                       const hasGst = cgst + sgst + igst > 0;
                       const hasTerms =

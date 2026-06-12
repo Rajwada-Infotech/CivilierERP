@@ -1633,7 +1633,7 @@ export default function MaterialExpenseBooking() {
                 setForm((prev) => ({
                   ...prev,
                   bookingReference: canonicalDocNo,
-                  basicAmount: Math.round(t.totalBase * 100) / 100,
+                  basicAmount: cleanTotal,
                   cgstRate: Math.round(avgCGST * 100) / 100,
                   sgstRate: Math.round(avgSGST * 100) / 100,
                 }));
