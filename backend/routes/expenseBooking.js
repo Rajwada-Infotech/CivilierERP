@@ -431,18 +431,16 @@ async function handleChainStatus(req, res) {
 }
 
 // ─── GET /options ─────────────────────────────────────────────────────────────
-router.get(
-  "/options",
-  async (req, res) => {
-    try {
-      const pool = getPool();
-      const finYear = (req.query.finYear || "").toString().trim() || null;
+router.get("/options", async (req, res) => {
+  try {
+    const pool = getPool();
+    const finYear = (req.query.finYear || "").toString().trim() || null;
 
-      // Regular bookings: exclude EMI-enabled ones (they are paid via installments)
-      // and exclude any already linked to an active DebitNote
-      const bookingsResult = await pool
-        .request()
-        .input("FinYear", sql.NVarChar(20), finYear).query(`
+    // Regular bookings: exclude EMI-enabled ones (they are paid via installments)
+    // and exclude any already linked to an active DebitNote
+    const bookingsResult = await pool
+      .request()
+      .input("FinYear", sql.NVarChar(20), finYear).query(`
         SELECT
           eb.Eid                          AS id,
           eb.Eid                          AS value,
@@ -484,10 +482,10 @@ router.get(
         ORDER BY eb.Eid DESC
       `);
 
-      // EMI installments: only show Pending ones
-      const emiResult = await pool
-        .request()
-        .input("FinYear", sql.NVarChar(20), finYear).query(`
+    // EMI installments: only show Pending ones
+    const emiResult = await pool
+      .request()
+      .input("FinYear", sql.NVarChar(20), finYear).query(`
         SELECT
           ei.Id                        AS id,
           ei.ExpenseBookingId          AS expenseBookingId,
@@ -535,50 +533,49 @@ router.get(
         ORDER BY ei.ExpenseBookingId DESC, ei.InstallmentNo ASC
       `);
 
-      const bookingOptions = bookingsResult.recordset.map((r) => ({
-        id: String(r.id),
-        value: String(r.value),
-        label: r.label,
-        type: "booking",
-        expenseBookingId: r.id,
-        docNo: r.docNo,
-        projectName: r.projectName,
-        partyName: r.partyName || "",
-        supplierName: r.supplierName || "",
-        amount: parseFloat(r.amount) || 0,
-        companyId: r.companyId || null,
-        companyName: r.companyName || "",
-        financialYear: r.financialYear || "",
-      }));
+    const bookingOptions = bookingsResult.recordset.map((r) => ({
+      id: String(r.id),
+      value: String(r.value),
+      label: r.label,
+      type: "booking",
+      expenseBookingId: r.id,
+      docNo: r.docNo,
+      projectName: r.projectName,
+      partyName: r.partyName || "",
+      supplierName: r.supplierName || "",
+      amount: parseFloat(r.amount) || 0,
+      companyId: r.companyId || null,
+      companyName: r.companyName || "",
+      financialYear: r.financialYear || "",
+    }));
 
-      const emiOptions = emiResult.recordset.map((r) => ({
-        id: `emi-${r.expenseBookingId}-${r.installmentNo}`,
-        value: `emi-${r.expenseBookingId}-${r.installmentNo}`,
-        label: r.label,
-        type: "emi",
-        expenseBookingId: r.expenseBookingId,
-        installmentNo: r.installmentNo,
-        refNumber: r.refNumber,
-        dueDate: r.dueDate ? String(r.dueDate).slice(0, 10) : null,
-        docNo: r.refNumber || r.parentDocNo,
-        projectName: r.projectName,
-        partyName: r.partyName || "",
-        supplierName: r.supplierName || "",
-        amount: parseFloat(r.amount) || 0,
-        companyId: r.companyId || null,
-        companyName: r.companyName || "",
-        financialYear: r.financialYear || "",
-        status: r.status,
-        parentDocNo: r.parentDocNo,
-      }));
+    const emiOptions = emiResult.recordset.map((r) => ({
+      id: `emi-${r.expenseBookingId}-${r.installmentNo}`,
+      value: `emi-${r.expenseBookingId}-${r.installmentNo}`,
+      label: r.label,
+      type: "emi",
+      expenseBookingId: r.expenseBookingId,
+      installmentNo: r.installmentNo,
+      refNumber: r.refNumber,
+      dueDate: r.dueDate ? String(r.dueDate).slice(0, 10) : null,
+      docNo: r.refNumber || r.parentDocNo,
+      projectName: r.projectName,
+      partyName: r.partyName || "",
+      supplierName: r.supplierName || "",
+      amount: parseFloat(r.amount) || 0,
+      companyId: r.companyId || null,
+      companyName: r.companyName || "",
+      financialYear: r.financialYear || "",
+      status: r.status,
+      parentDocNo: r.parentDocNo,
+    }));
 
-      res.json([...bookingOptions, ...emiOptions]);
-    } catch (err) {
-      console.error("Options error:", err.message);
-      res.status(500).json({ error: err.message });
-    }
-  },
-);
+    res.json([...bookingOptions, ...emiOptions]);
+  } catch (err) {
+    console.error("Options error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ─── GET all (paginated) ──────────────────────────────────────────────────────
 router.get("/", cache("expense-booking", 60), async (req, res) => {
@@ -912,7 +909,29 @@ router.get("/:id", async (req, res) => {
       `);
     if (!result.recordset.length)
       return res.status(404).json({ error: "Not found" });
-    res.json(result.recordset[0]);
+
+    const raw = result.recordset[0];
+
+    // For GRN-linked bookings, recompute ENetAmount live from the GRN total + billing terms.
+    // The stored ENetAmount may be stale if the GRN was amended after the booking was created.
+    let row = { ...raw };
+    if (
+      raw.ESourceType === "GRN" &&
+      raw.EGrnTotalAmount != null &&
+      parseFloat(raw.EGrnTotalAmount) > 0
+    ) {
+      const liveNet = applyBillingTermsToAmount(
+        parseFloat(raw.EGrnTotalAmount),
+        parseFloat(raw.EAmount ?? 0),
+        parseFloat(raw.ECgstRate ?? 0),
+        parseFloat(raw.ESgstRate ?? 0),
+        raw.EBillingTermsData,
+        raw.EDiscountData,
+      );
+      row = { ...raw, ENetAmount: liveNet };
+    }
+
+    res.json(row);
   } catch (err) {
     console.error("Get by id error:", err.message);
     res.status(500).json({ error: err.message });
