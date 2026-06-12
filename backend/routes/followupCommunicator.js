@@ -18,7 +18,9 @@ const { checkPermissionForMethod } = require("../middleware/routePermission");
 const PERMISSION_MODULE = "Followup";
 const PERMISSION_SUBMODULE = "Communicator";
 
-const rateLimit=require('express-rate-limit');router.use(rateLimit({windowMs:15*60*1000,max:50,validate:false}));router.use(authMiddleware);
+const rateLimit = require("express-rate-limit");
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 50, validate: false }));
+router.use(authMiddleware);
 router.use(checkPermissionForMethod(PERMISSION_MODULE, PERMISSION_SUBMODULE));
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -418,33 +420,41 @@ router.get("/logs", async (req, res) => {
     page = 1,
     limit = 50,
   } = req.query;
-  const offset = (parseInt(page) - 1) * parseInt(limit);
+  const pageInt = Math.max(1, parseInt(page) || 1);
+  const limitInt = Math.max(1, parseInt(limit) || 50);
+  const offset = (pageInt - 1) * limitInt;
 
+  // Build a shared WHERE clause and bind the same inputs on both requests
   let where = "WHERE 1=1";
-  const req2 = pool.request();
-
+  const filters = {};
   if (applicantId) {
     where += " AND ApplicantId = @ApplicantId";
-    req2.input("ApplicantId", applicantId);
+    filters.ApplicantId = applicantId;
   }
   if (bookingId) {
     where += " AND BookingId = @BookingId";
-    req2.input("BookingId", bookingId);
+    filters.BookingId = bookingId;
   }
   if (channel) {
     where += " AND Channel = @Channel";
-    req2.input("Channel", channel);
+    filters.Channel = channel;
   }
   if (status) {
     where += " AND Status = @Status";
-    req2.input("Status", status);
+    filters.Status = status;
   }
 
-  req2.input("Limit", parseInt(limit));
-  req2.input("Offset", offset);
+  function bindFilters(request) {
+    for (const [key, val] of Object.entries(filters)) request.input(key, val);
+    return request;
+  }
 
   try {
-    const result = await req2.query(
+    // Data query
+    const dataReq = bindFilters(pool.request());
+    dataReq.input("Limit", limitInt);
+    dataReq.input("Offset", offset);
+    const result = await dataReq.query(
       `SELECT Id, ApplicantId, BookingId, Channel, Recipient, Subject,
               Body, Status, ErrorMessage, SentBy, SentAt
        FROM dbo.FollowupCommunicatorLog
@@ -453,23 +463,21 @@ router.get("/logs", async (req, res) => {
        OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY`,
     );
 
-    const countResult = await pool.request().query(
-      `SELECT COUNT(*) AS Total FROM dbo.FollowupCommunicatorLog ${where.replace(
-        /@\w+/g,
-        (m) => {
-          // re-bind not needed for count — just run separate simple count
-          return m;
-        },
-      )}`,
+    // Count query — separate request with the same filter inputs
+    const countReq = bindFilters(pool.request());
+    const countResult = await countReq.query(
+      `SELECT COUNT(*) AS Total FROM dbo.FollowupCommunicatorLog ${where}`,
     );
-    // Simple approach: just return the rows and let the frontend paginate
+    const total = countResult.recordset[0]?.Total ?? 0;
+
     res.json({
       data: result.recordset,
-      page: parseInt(page),
-      limit: parseInt(limit),
+      page: pageInt,
+      limit: limitInt,
+      total,
     });
   } catch (err) {
-    console.error("[followupCommunicator] logs error:", err.message);
+    console.error("[followupCommunicator] logs error:", err.message, err.stack);
     res.status(500).json({ error: err.message });
   }
 });

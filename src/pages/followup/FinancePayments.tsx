@@ -171,6 +171,7 @@ async function fetchPayments(p: {
   page: number;
   pageSize: number;
   search: string;
+  companyId: string;
   projectId: string;
   status: string;
 }) {
@@ -178,6 +179,7 @@ async function fetchPayments(p: {
     page: String(p.page),
     pageSize: String(p.pageSize),
     ...(p.search ? { search: p.search } : {}),
+    ...(p.companyId ? { companyId: p.companyId } : {}),
     ...(p.projectId ? { projectId: p.projectId } : {}),
     ...(p.status ? { status: p.status } : {}),
   });
@@ -386,6 +388,7 @@ export function FinancePaymentsPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [companyId, setCompanyId] = useState("");
   const [projectId, setProjectId] = useState("");
   const [status, setStatus] = useState("");
   const [recordRow, setRecordRow] = useState<PaymentRow | null>(null);
@@ -393,12 +396,36 @@ export function FinancePaymentsPage() {
   const [historyRow, setHistoryRow] = useState<PaymentRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Receipt | null>(null);
 
-  const queryKey = ["followup-payments", page, search, projectId, status];
+  const { data: companiesRaw = [] } = useQuery({
+    queryKey: ["followup-payment-companies"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/followup-payments/companies");
+      if (!res.ok) throw new Error("Failed to load companies");
+      return res.json() as Promise<{ id: number; label: string }[]>;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const queryKey = [
+    "followup-payments",
+    page,
+    search,
+    companyId,
+    projectId,
+    status,
+  ];
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey,
     queryFn: () =>
-      fetchPayments({ page, pageSize: PAGE_SIZE, search, projectId, status }),
+      fetchPayments({
+        page,
+        pageSize: PAGE_SIZE,
+        search,
+        companyId,
+        projectId,
+        status,
+      }),
     placeholderData: (prev) => prev,
   });
 
@@ -406,6 +433,10 @@ export function FinancePaymentsPage() {
     queryKey: ["followup-payment-projects"],
     queryFn: fetchProjects,
   });
+
+  // Projects don't carry a CompanyId in the API response, so show all.
+  // When the backend adds company linkage, filter here: projects.filter(p => !companyId || String(p.CompanyId) === companyId)
+  const filteredProjects = projects;
 
   const { data: receipts = [], isLoading: receiptsLoading } = useQuery({
     queryKey: ["followup-payment-receipts", historyRow?.TermId],
