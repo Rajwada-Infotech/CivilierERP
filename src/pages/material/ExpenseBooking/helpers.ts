@@ -125,19 +125,60 @@ export function computeBreakdown(
 export function computeGrnNetWithTerms(
   grnTotal: number,
   terms: DiscountConfig[],
+  basicAmount?: number,
 ): number {
-  let running = grnTotal;
-  for (const t of terms) {
+  // Split by pre/post-GST
+  const preTerms = terms.filter((t) => t.appliedOn !== "post-gst");
+  const postTerms = terms.filter((t) => t.appliedOn === "post-gst");
+
+  if (preTerms.length === 0) {
+    // No pre-GST terms — apply all post-GST terms on gross directly
+    let running = grnTotal;
+    for (const t of postTerms) {
+      const amt =
+        t.type === "percentage"
+          ? (running * (t.value ?? 0)) / 100
+          : (t.value ?? 0);
+      if (t.deductionType === "Addition") running += amt;
+      else running = Math.max(0, running - amt);
+    }
+    return Math.round(running);
+  }
+
+  // Derive effective GST rates from basicAmount (base) and grnTotal (incl-GST)
+  const base = basicAmount ?? 0;
+  const gst = grnTotal - base;
+  const effectiveGSTRate = base > 0 ? (gst / base) * 100 : 0;
+  // Split GST rate evenly for CGST/SGST (used for recomputation)
+  const effectiveCGSTRate = effectiveGSTRate / 2;
+  const effectiveSGSTRate = effectiveGSTRate / 2;
+
+  // Apply pre-GST terms on base
+  let runningBase = base;
+  for (const t of preTerms) {
+    const amt =
+      t.type === "percentage"
+        ? (runningBase * (t.value ?? 0)) / 100
+        : (t.value ?? 0);
+    if (t.deductionType === "Addition") runningBase += amt;
+    else runningBase = Math.max(0, runningBase - amt);
+  }
+
+  // Recompute GST on adjusted base
+  const adjCGST = (runningBase * effectiveCGSTRate) / 100;
+  const adjSGST = (runningBase * effectiveSGSTRate) / 100;
+  let running = runningBase + adjCGST + adjSGST;
+
+  // Apply post-GST terms on adjusted gross
+  for (const t of postTerms) {
     const amt =
       t.type === "percentage"
         ? (running * (t.value ?? 0)) / 100
         : (t.value ?? 0);
-    if (t.deductionType === "Addition") {
-      running += amt;
-    } else {
-      running = Math.max(0, running - amt);
-    }
+    if (t.deductionType === "Addition") running += amt;
+    else running = Math.max(0, running - amt);
   }
+
   return Math.round(running);
 }
 
@@ -195,7 +236,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     bookingName: "",
     bookingReference: "",
     docTypeName: "",
-    bookingDate: "",
+    bookingDate: new Date().toISOString().slice(0, 10),
     dueDate: "",
     financialYear: "",
     companyId: null,
@@ -317,25 +358,9 @@ export function dbToRecord(row: any): ExpenseRecord {
     projectName: row.EProjectDisplayName || row.projectName || "",
     materialCategory: row.EDocumentType ?? "",
     invoiceReference: row.EDocNo ?? "",
-    // For GRN-linked bookings: back-calculate the pre-tax base from the live
-    // GRN total (incl. GST) so the edit form shows Base + GST = Gross correctly.
-    // If stored rates are 0 (old records), basicAmount = inclGST (no GST rows shown).
-    // Falls back to stored EAmount for non-GRN bookings.
-    basicAmount: (() => {
-      const inclGST =
-        row.EGrnTotalAmount != null && parseFloat(row.EGrnTotalAmount) > 0
-          ? parseFloat(row.EGrnTotalAmount)
-          : null;
-      if (inclGST) {
-        const cgst = row.ECgstRate ? parseFloat(row.ECgstRate) : 0;
-        const sgst = row.ESgstRate ? parseFloat(row.ESgstRate) : 0;
-        const totalRate = cgst + sgst;
-        return totalRate > 0
-          ? Math.round((inclGST / (1 + totalRate / 100)) * 100) / 100
-          : inclGST; // rates not stored — treat full amount as base
-      }
-      return parseFloat(row.EAmount) || 0;
-    })(),
+    // For GRN-linked bookings, basicAmount = qty × rate (no GST) stored in EAmount.
+    // EGrnTotalAmount is the incl-GST total used only for netAmount display.
+    basicAmount: parseFloat(row.EAmount) || 0,
     cgstRate: row.ECgstRate ? parseFloat(row.ECgstRate) : 0,
     sgstRate: row.ESgstRate ? parseFloat(row.ESgstRate) : 0,
     discount,
