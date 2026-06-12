@@ -339,18 +339,38 @@ const ALL_REPORTS: ReportDef[] = [
       dateToParam: null,
     },
     columns: [
+      { header: "Company", accessor: "CompanyName" },
+      { header: "Project", accessor: "ProjectName" },
       {
-        header: "PO No",
-        accessor: (r) => (r.PurchaseOrderNo ?? r.PONo ?? "—") as string,
-      },
-      {
-        header: "Date",
+        header: "Date of PO",
         accessor: (r) => (r.PODate ? String(r.PODate).slice(0, 10) : "—"),
       },
-      { header: "Vendor", accessor: "SupplierName" },
-      { header: "Project", accessor: "ProjectName" },
+      {
+        header: "Document Number",
+        accessor: (r) =>
+          (r.DocNo ?? r.PurchaseOrderNo ?? r.PONo ?? "—") as string,
+      },
+      { header: "Supplier", accessor: "SupplierName" },
+      { header: "Fin Year", accessor: "FinYearName" },
+      {
+        header: "Items in the PO",
+        accessor: (r) =>
+          Array.isArray(r.POItems)
+            ? r.POItems.map(
+                (it) =>
+                  (it as Record<string, unknown>)?.itemDescription ??
+                  (it as Record<string, unknown>)?.itemName ??
+                  "",
+              )
+                .filter(Boolean)
+                .join(", ")
+            : "—",
+      },
       { header: "Amount", accessor: (r) => fmt(r.TotalAmount as number) },
-      { header: "Status", accessor: "Status" },
+      {
+        header: "Ref Doc",
+        accessor: (r) => (r.SourceMRDocNo ?? r.SourceWODocNo ?? "—") as string,
+      },
     ],
   },
   {
@@ -368,15 +388,41 @@ const ALL_REPORTS: ReportDef[] = [
       dateToParam: null,
     },
     columns: [
-      { header: "GRN No", accessor: "GRNNo" },
+      { header: "Company", accessor: "CompanyName" },
+      { header: "Project", accessor: "ProjectName" },
       {
-        header: "Date",
+        header: "Date of GRN",
         accessor: (r) => (r.GRNDate ? String(r.GRNDate).slice(0, 10) : "—"),
       },
+      {
+        header: "Document Number",
+        accessor: (r) => (r.DocNo ?? r.GRNNo ?? "—") as string,
+      },
       { header: "Supplier", accessor: "SupplierName" },
-      { header: "Doc No", accessor: "DocNo" },
-      { header: "Status", accessor: "Status" },
-      { header: "Remarks", accessor: "Remarks" },
+      {
+        header: "Fin Year",
+        accessor: (r) => (r.FinYearName ?? r.FinYear ?? "—") as string,
+      },
+      {
+        header: "Items in the GRN",
+        accessor: (r) =>
+          Array.isArray(r.GRNItems)
+            ? r.GRNItems.map(
+                (it) =>
+                  (it as Record<string, unknown>)?.itemName ??
+                  (it as Record<string, unknown>)?.ItemName ??
+                  (it as Record<string, unknown>)?.name ??
+                  "",
+              )
+                .filter(Boolean)
+                .join(", ")
+            : "—",
+      },
+      { header: "Amount", accessor: (r) => fmt(r.TotalAmount as number) },
+      {
+        header: "Ref Doc",
+        accessor: (r) => (r.PONumber ?? "—") as string,
+      },
     ],
   },
   {
