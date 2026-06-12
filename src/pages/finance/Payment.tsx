@@ -2203,17 +2203,27 @@ const Payment: React.FC = () => {
             );
             return matched?.label || String(detail.ECompanyId ?? "");
           })(),
-          // For GRN-linked bookings, amount = stored net (ENetAmount) which already
-          // reflects billing terms applied on the GRN total.
-          amount: detail.ENetAmount ?? detail.EAmount ?? null,
+          // Amount field = stored ENetAmount (net after billing terms on GRN total).
+          // Falls back to EGrnTotalAmount (incl-GST) if ENetAmount not set, then EAmount.
+          amount: detail.ENetAmount
+            ? parseFloat(String(detail.ENetAmount))
+            : (detail as any).EGrnTotalAmount
+              ? parseFloat((detail as any).EGrnTotalAmount)
+              : detail.EAmount ?? null,
           docType: detail.DocTypeName || detail.EDocumentType || "",
-          // baseAmount: for GRN records use live GRN total (incl. GST) as the base for breakdown display.
+          // For GRN: baseAmount = pre-tax base (totalBase), rates from DB.
+          // GST breakdown API will override these with precise per-item values.
+          // If EGrnTotalAmount is set but breakdown hasn't loaded yet,
+          // zero out GST rates to avoid double-counting on the incl-GST figure.
           baseAmount: (detail as any).EGrnTotalAmount
-            ? parseFloat((detail as any).EGrnTotalAmount)
+            ? parseFloat((detail as any).EGrnTotalAmount)  // will be overridden by GRN breakdown
             : (detail.EAmount ?? null),
-          cgstRate: detail.ECgstRate ?? null,
-          sgstRate: detail.ESgstRate ?? null,
-          igstRate: detail.EIgstRate ?? null,
+          // Zero out GST rates for GRN records — the GRN breakdown fetch below
+          // will set correct totalBase + rates. Without this, if the breakdown
+          // API fails, cgstRate applied on EGrnTotalAmount (incl-GST) would double-count GST.
+          cgstRate: (detail as any).EGrnTotalAmount ? 0 : (detail.ECgstRate ?? null),
+          sgstRate: (detail as any).EGrnTotalAmount ? 0 : (detail.ESgstRate ?? null),
+          igstRate: (detail as any).EGrnTotalAmount ? 0 : (detail.EIgstRate ?? null),
           billingTermsData:
             detail.EBillingTermsData ?? detail.EDiscountData ?? null,
         }));
@@ -2251,14 +2261,15 @@ const Payment: React.FC = () => {
               // This ensures the Amount field matches the Net Payable shown in the breakdown.
               if (bd?.totals?.totalInclGST > 0) {
                 const t = bd.totals;
-                const inclTotal = Math.round(t.totalInclGST * 100) / 100;
                 const avgCGST =
                   t.totalBase > 0 ? (t.totalCGST / t.totalBase) * 100 : 0;
                 const avgSGST =
                   t.totalBase > 0 ? (t.totalSGST / t.totalBase) * 100 : 0;
                 setForm((prev) => ({
                   ...prev,
-                  amount: inclTotal, // sync Amount field
+                  // Amount = stored ENetAmount (net after billing terms).
+                  // Keep whatever was loaded from the expense detail — don't override with raw GRN total.
+                  // The breakdown panel will show Gross = totalInclGST and Net = Gross (per requirement).
                   baseAmount: Math.round(t.totalBase * 100) / 100,
                   cgstRate: Math.round(avgCGST * 100) / 100,
                   sgstRate: Math.round(avgSGST * 100) / 100,
