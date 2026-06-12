@@ -1643,6 +1643,7 @@ export default function MaterialExpenseBooking() {
                 ...prev,
                 bookingReference: canonicalDocNo,
                 basicAmount: basicAmt,
+
               }));
             });
         })
@@ -2160,6 +2161,7 @@ export default function MaterialExpenseBooking() {
               ? form.billingTerms
               : form.discount,
           );
+
     let emiForSave = { ...form.emi };
     if (
       !isEditing &&
@@ -2241,6 +2243,7 @@ export default function MaterialExpenseBooking() {
             ? form.billingTerms
             : form.discount,
         );
+
   const filteredRecords =
     statusFilter && statusFilter !== "All"
       ? records.filter((r) => r.status === statusFilter)
@@ -2827,6 +2830,7 @@ export default function MaterialExpenseBooking() {
                             : 0
                           : form.sgstRate
                       }
+
                       hasDiscount={
                         form.billingTerms && form.billingTerms.length > 0
                           ? form.billingTerms.some((d) => d.applicable)
@@ -3136,8 +3140,8 @@ export default function MaterialExpenseBooking() {
                   onChange={(d) => set("discount", d)}
                   onChangeBillingTerms={(terms) => set("billingTerms", terms)}
                   grnNetAmount={
-                    isGRN && selectedDoc?.amount != null
-                      ? selectedDoc.amount
+                    isGRN
+                      ? (selectedDoc?.amount ?? form.grnTotalAmount ?? null)
                       : null
                   }
                   gstBreakdown={
