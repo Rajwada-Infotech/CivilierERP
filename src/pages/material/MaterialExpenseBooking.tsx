@@ -1636,12 +1636,16 @@ export default function MaterialExpenseBooking() {
                   basicAmount: Math.round(t.totalBase * 100) / 100,
                   cgstRate: Math.round(avgCGST * 100) / 100,
                   sgstRate: Math.round(avgSGST * 100) / 100,
+                  // Store incl-GST total so bd computation uses correct gross for Net Payable
+                  grnTotalAmount: cleanTotal,
                 }));
               } else {
+                // No per-item GST breakdown — treat full GRN total as base (rates already 0)
                 setForm((prev) => ({
                   ...prev,
                   bookingReference: canonicalDocNo,
                   basicAmount: grnTotal > 0 ? grnTotal : prev.basicAmount,
+                  grnTotalAmount: grnTotal > 0 ? grnTotal : prev.grnTotalAmount,
                 }));
               }
             })
@@ -1650,6 +1654,7 @@ export default function MaterialExpenseBooking() {
                 ...prev,
                 bookingReference: canonicalDocNo,
                 basicAmount: grnTotal > 0 ? grnTotal : prev.basicAmount,
+                grnTotalAmount: grnTotal > 0 ? grnTotal : prev.grnTotalAmount,
               }));
             });
         })
@@ -2167,7 +2172,15 @@ export default function MaterialExpenseBooking() {
   // For all other source types: standard computeBreakdown with CGST/SGST.
   const bd = (selectedDoc?.kind === "GRN")
     ? (() => {
-        const grnTotal = form.basicAmount; // = EGrnTotalAmount via dbToRecord
+        // For GRN-linked bookings:
+        //   form.basicAmount  = pre-tax base (back-calculated by dbToRecord, e.g. ₹90,000)
+        //   form.grnTotalAmount = live GRN incl-GST total (e.g. ₹1,06,200)
+        // The PriceBreakdownPanel shows basicAmount as "Pre-tax value" which is correct.
+        // Net Payable starts from the incl-GST total and billing terms reduce from there.
+        const grnTotal = (form.grnTotalAmount != null && form.grnTotalAmount > 0)
+          ? form.grnTotalAmount
+          : form.basicAmount; // fallback for new bookings before save
+        const grnBase = form.basicAmount; // pre-tax base for display in PriceBreakdownPanel
         const terms = form.billingTerms && form.billingTerms.length > 0
           ? form.billingTerms
           : [];
@@ -2181,9 +2194,9 @@ export default function MaterialExpenseBooking() {
         }
         const net = Math.round(running * 100) / 100;
         return {
-          basicAmount: grnTotal,
+          basicAmount: grnBase,
           discountAmount: grnTotal - net,
-          taxableAmount: grnTotal,
+          taxableAmount: grnBase,
           cgstAmount: 0,
           sgstAmount: 0,
           igstAmount: 0,
@@ -3054,8 +3067,8 @@ export default function MaterialExpenseBooking() {
                   onChange={(d) => set("discount", d)}
                   onChangeBillingTerms={(terms) => set("billingTerms", terms)}
                   grnNetAmount={
-                    isGRN && selectedDoc?.amount != null
-                      ? selectedDoc.amount
+                    isGRN
+                      ? (selectedDoc?.amount ?? form.grnTotalAmount ?? null)
                       : null
                   }
                 />
