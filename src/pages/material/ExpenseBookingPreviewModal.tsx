@@ -92,10 +92,11 @@ export function ExpenseBookingPreviewModal({
           if (data?.totals?.totalInclGST > 0) {
             setGrnBreakdown(data);
           } else {
-            // API returned wrong shape or zero — synthesize from the live GRN total
-            // already on the record (returned by GET /api/expense-booking/:id).
-            const inclGST =
-              previewRecord.grnTotalAmount ?? previewRecord.basicAmount ?? 0;
+            // API returned wrong shape or zero — synthesize ONLY from the live
+            // GRN total (grnTotalAmount) returned by GET /api/expense-booking/:id.
+            // Do NOT fall back to basicAmount: for old records basicAmount is the
+            // stale EAmount snapshot, which would produce a wrong breakdown.
+            const inclGST = previewRecord.grnTotalAmount ?? 0;
             if (inclGST > 0) {
               const cgstRate = previewRecord.cgstRate ?? 0;
               const sgstRate = previewRecord.sgstRate ?? 0;
@@ -117,12 +118,14 @@ export function ExpenseBookingPreviewModal({
                 },
               });
             }
+            // If inclGST is 0 (old record without EGrnTotalAmount), grnBreakdown stays
+            // null and the modal falls back to the standard non-GRN breakdown using
+            // the stored basicAmount / cgstRate / sgstRate fields.
           }
         })
         .catch(() => {
-          // Network failure — still synthesize so breakdown renders correctly
-          const inclGST =
-            previewRecord.grnTotalAmount ?? previewRecord.basicAmount ?? 0;
+          // Network failure — synthesize from live GRN total only (not basicAmount)
+          const inclGST = previewRecord.grnTotalAmount ?? 0;
           if (inclGST > 0) {
             const cgstRate = previewRecord.cgstRate ?? 0;
             const sgstRate = previewRecord.sgstRate ?? 0;

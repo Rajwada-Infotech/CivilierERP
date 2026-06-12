@@ -3002,7 +3002,12 @@ const Payment: React.FC = () => {
                       // Payment page: billing terms are display-only.
                       // taxable and gross are NOT modified by terms —
                       // net is always exactly equal to gross.
-                      let taxable = base;
+                      // For pre-GST terms: use grnBreakdown.totals.totalBase as base
+                      // (not form.baseAmount which may still hold inclGST figure).
+                      const displayBase = grnGstBreakdown
+                        ? grnGstBreakdown.totals.totalBase
+                        : base;
+                      let taxable = displayBase;
                       // Pre-GST rows: display amounts only, do NOT mutate taxable
                       const preGstRows: {
                         term: (typeof preGst)[0];
@@ -3011,7 +3016,7 @@ const Payment: React.FC = () => {
                       for (const t of preGst) {
                         const amt =
                           t.type === "percentage"
-                            ? (taxable * t.value) / 100
+                            ? (displayBase * t.value) / 100
                             : t.value;
                         preGstRows.push({ term: t, amt });
                       }
@@ -3184,11 +3189,17 @@ const Payment: React.FC = () => {
                             )}
 
                           <div className="space-y-1.5">
-                            {/* Base */}
+                            {/* Base — for GRN breakdown always show totalBase (pre-tax),
+                                not form.baseAmount which may still hold the incl-GST figure
+                                if the setForm override hasn't landed yet */}
                             <Row
                               label="Basic Amount"
                               sub={grnGstBreakdown ? "Excl. GST" : undefined}
-                              value={formatINR(base)}
+                              value={formatINR(
+                                grnGstBreakdown
+                                  ? grnGstBreakdown.totals.totalBase
+                                  : base,
+                              )}
                             />
 
                             {/* Pre-GST billing terms */}
@@ -3279,7 +3290,10 @@ const Payment: React.FC = () => {
                               </>
                             )}
 
-                            {/* Gross before post-GST */}
+                            {/* Gross before post-GST — use the pre-computed `gross`
+                                variable which equals totalInclGST when a GRN breakdown
+                                is available, avoiding the double-count from
+                                (inclGST base) + cgst + sgst */}
                             {(hasGst || hasTerms) && (
                               <>
                                 <div className="border-t border-border/40 pt-1" />
@@ -3290,9 +3304,7 @@ const Payment: React.FC = () => {
                                       ? "Taxable + GST"
                                       : "Before post-GST adjustments"
                                   }
-                                  value={formatINR(
-                                    taxable + cgst + sgst + igst,
-                                  )}
+                                  value={formatINR(gross)}
                                   bold
                                 />
                               </>
