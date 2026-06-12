@@ -197,6 +197,14 @@ router.post("/", async (req, res) => {
     const userName = requireUserName(req, res);
     if (!userName) return;
 
+    // ── Account Group is mandatory ─────────────────────────────────────────
+    if (!LBelongsTo) {
+      return res.status(400).json({
+        error: "Please select an Account Group before creating a Ledger Account.",
+        code: "MISSING_ACCOUNT_GROUP",
+      });
+    }
+
     const pool = getPool();
     const columnMeta = await getAccountHeadColumnMeta();
     const request = pool
@@ -486,6 +494,14 @@ router.put("/:id", async (req, res) => {
     if (!row) return res.status(404).json({ error: "Record not found" });
     if (row.Status === "Approved") {
       return res.status(400).json({ error: "Cannot edit an approved record" });
+    }
+
+    // ── Account Group is mandatory ─────────────────────────────────────────
+    if (!LBelongsTo) {
+      return res.status(400).json({
+        error: "Please select an Account Group before saving a Ledger Account.",
+        code: "MISSING_ACCOUNT_GROUP",
+      });
     }
 
     const columnMeta = await getAccountHeadColumnMeta();
