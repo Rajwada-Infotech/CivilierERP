@@ -511,6 +511,42 @@ router.get("/", cache("grns", 300), async (req, res) => {
   }
 });
 
+// -- GET /by-po/:poId --
+// Returns all GRNs created against a given PO, ordered newest-first.
+// Used by the Expense Booking preview modal to fetch the GST breakdown for
+// PO-linked bookings (eSourceType = 'PO' | 'WO_PO') \u2014 the GRN holds the
+// actual received quantities and item-level GST rates, which are the
+// authoritative source for the incl-GST amount shown in the breakdown.
+// Must be declared before /:id to avoid route collision.
+router.get("/by-po/:poId", async (req, res) => {
+  const poId = parseInt(req.params.poId, 10);
+  if (isNaN(poId) || poId <= 0)
+    return res.status(400).json({ error: "Invalid PO ID" });
+
+  try {
+    const pool = await getPool();
+    const result = await pool.request().input("POID", sql.Int, poId).query(`
+      SELECT
+        grn.GRNID,
+        grn.GRNNo,
+        grn.DocNo,
+        grn.GRNDate,
+        grn.Status,
+        grn.TotalAmount,
+        s.LHeadName AS SupplierName
+      FROM dbo.GoodsReceiptNotes grn
+      LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId = grn.SupplierID
+      WHERE grn.POID = @POID
+        AND (grn.Status IS NULL OR grn.Status != 'Rejected')
+      ORDER BY grn.GRNID DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("GET /by-po/:poId ERROR:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET single GRN by ID
 // This is the authoritative endpoint used by the expense booking form to load
 // GRN items. GRNItems is normalised to a parsed array before returning so the
