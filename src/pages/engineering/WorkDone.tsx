@@ -1,5 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -16,7 +15,6 @@ import {
 import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { Button } from "@/components/ui/button";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import {
   Hammer,
   Plus,
@@ -94,9 +92,6 @@ interface WorkDoneEntry {
 interface DropdownOption {
   id: number;
   name: string;
-  belongs_to?: string | number | null;
-  company_id?: number | null;
-  company_ids?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -293,17 +288,8 @@ function WorkDoneForm({
 
   const setField = useCallback(
     <K extends keyof FormState>(k: K, v: FormState[K]) =>
-      setForm((prev) => ({
-        ...prev,
-        [k]: v,
-        ...(k === "companyId" ? { projectId: "" } : {}),
-      })),
+      setForm((prev) => ({ ...prev, [k]: v })),
     [],
-  );
-
-  const filteredProjects = useMemo(
-    () => filterProjectsByCompany(projects, form.companyId),
-    [projects, form.companyId],
   );
 
   const gross =
@@ -421,10 +407,7 @@ function WorkDoneForm({
               </FieldLabel>
               {renderSelect(
                 form.companyId,
-                (v) => {
-                  setField("companyId", v);
-                  setField("projectId", ""); // clear project when company changes
-                },
+                (v) => setField("companyId", v),
                 companies,
                 "Select company…",
                 errors.companyId,
@@ -1022,7 +1005,6 @@ function WorkDoneForm({
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function WorkDone() {
   const { finYears } = useFinYear();
-  const navigate = useNavigate();
   const [view, setView] = useState<"list" | "form">("list");
   const [editRecord, setEditRecord] = useState<WorkDoneEntry | null>(null);
   const [viewRecord, setViewRecord] = useState<WorkDoneEntry | null>(null);
@@ -1113,19 +1095,8 @@ export default function WorkDone() {
   };
 
   const openEdit = (r: WorkDoneEntry) => {
-    navigate("/engineering/amendment-menu", {
-      state: {
-        prefill: {
-          tab: "WORK_DONE",
-          docId: r.ID,
-          docNo: r.DocNo,
-          supplierName: r.SupplierName || r.ContractorName,
-          projectName: r.ProjectName,
-          companyName: r.CompanyName,
-          totalAmount: r.CertifiedAmount,
-        },
-      },
-    });
+    setEditRecord(r);
+    setView("form");
   };
 
   const closeForm = () => {

@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
+import { computeGrnNetWithTerms } from "@/pages/material/ExpenseBooking/helpers";
 import {
   ClipboardCheck,
   ClipboardList,
@@ -41,6 +42,9 @@ interface InboxItem {
   RejectedBy: string | null;
   RejectionNote: string | null;
   LastModified: string | null;
+  // expense-booking only — null for all other modules
+  GrnTotalAmount: number | null;
+  BillingTermsData: string | null;
 }
 
 // ─── Module config ────────────────────────────────────────────────────────────
@@ -158,6 +162,33 @@ const fmtAmount = (n: number | null) => {
   return formatINR(n, { decimals: 2 });
 };
 
+/**
+ * For expense-booking rows, if the record is GRN-linked, compute net payable
+ * by applying billing terms on top of the live GRN total — same logic as the
+ * Expense Booking list page and preview modal.  Falls back to stored Amount for
+ * all other modules or non-GRN expense bookings.
+ */
+function getEffectiveAmount(item: InboxItem): number | null {
+  if (
+    item.Module === "expense-booking" &&
+    item.GrnTotalAmount != null &&
+    item.GrnTotalAmount > 0
+  ) {
+    let terms: any[] = [];
+    try {
+      if (item.BillingTermsData) {
+        let parsed = JSON.parse(item.BillingTermsData);
+        if (typeof parsed === "string") parsed = JSON.parse(parsed);
+        if (Array.isArray(parsed)) terms = parsed;
+      }
+    } catch {
+      /* ignore malformed JSON */
+    }
+    return computeGrnNetWithTerms(item.GrnTotalAmount, terms);
+  }
+  return item.Amount;
+}
+
 // ─── Module filter tab ────────────────────────────────────────────────────────
 
 const MODULE_TAB_COLORS: Record<string, { inactive: string; active: string }> =
@@ -269,6 +300,7 @@ const InboxRow: React.FC<{
   const rejectedBy = item.RejectedBy?.trim();
   const party =
     item.SupplierName || item.ContractorName || item.CreatedBy || "—";
+  const effectiveAmount = getEffectiveAmount(item);
 
   const actions = (
     <div className="flex items-center gap-2 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
@@ -328,7 +360,7 @@ const InboxRow: React.FC<{
         {/* Row 3: amount + approved/rejected by */}
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs font-mono font-semibold text-foreground">
-            {fmtAmount(item.Amount)}
+            {fmtAmount(effectiveAmount)}
           </p>
           <div className="flex items-center gap-1.5">
             {approvedBy && (
@@ -349,7 +381,7 @@ const InboxRow: React.FC<{
       </div>
 
       {/* ── Desktop row (≥ md) ─────────────────────────────────────────── */}
-      <div className="hidden md:grid grid-cols-[190px_100px_1fr_110px_150px_120px_1fr] items-center gap-2 px-4 py-3.5 border-b border-border last:border-0 hover:bg-muted/30 transition-colors group">
+      <div className="hidden md:grid grid-cols-[190px_100px_1fr_110px_150px_120px_1fr] items-center gap-2 px-4 py-3.5 border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
         {/* Col 1 — Module */}
         <div className="flex items-center gap-3 min-w-0">
           <div
@@ -375,7 +407,7 @@ const InboxRow: React.FC<{
 
         {/* Col 4 — Amount */}
         <p className="text-xs font-mono font-semibold text-foreground">
-          {fmtAmount(item.Amount)}
+          {fmtAmount(effectiveAmount)}
         </p>
 
         {/* Col 5 — Approved/Rejected By */}
@@ -398,7 +430,7 @@ const InboxRow: React.FC<{
         </div>
 
         {/* Col 7 — Actions */}
-        <div className="flex items-center gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity [&_button]:!filter-none [&_button]:!backdrop-filter-none">
+        <div className="flex items-center gap-2 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
           {actions}
         </div>
       </div>

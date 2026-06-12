@@ -17,14 +17,11 @@ import {
   Send,
   Clock,
   AlertCircle,
-  Building2,
-  TrendingUp,
   Calendar as CalendarIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { DashboardBackground } from "@/components/DashboardBackground";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import {
@@ -440,7 +437,12 @@ export function ConstructionUpdatesPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: result, isLoading, isFetching, refetch } = useQuery({
+  const {
+    data: result,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useQuery({
     queryKey: ["construction-updates", page, search, statusFilter],
     queryFn: () =>
       fetchUpdates({ page, pageSize: PAGE_SIZE, search, status: statusFilter }),
@@ -475,11 +477,13 @@ export function ConstructionUpdatesPage() {
 
   const projectItems: ComboItem[] = useMemo(
     () =>
-      filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map((p) => ({
-        value: String(p.Id),
-        label: p.Name,
-      })),
-    [meta],
+      filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map(
+        (p) => ({
+          value: String(p.Id),
+          label: p.Name,
+        }),
+      ),
+    [meta, form.CompanyId],
   );
 
   const companyItems: ComboItem[] = useMemo(
@@ -890,7 +894,10 @@ export function ConstructionUpdatesPage() {
           { label: "Updates", path: "/followup/construction/updates" },
         ]}
       />
-      <div className="cu-page relative space-y-8 mt-6" onClick={() => setOpenMenuId(null)}>
+      <div
+        className="cu-page relative space-y-8 mt-6"
+        onClick={() => setOpenMenuId(null)}
+      >
         {/* ── Header ── */}
         <div className="flex items-start justify-between gap-4">
           <div className="cu-title-row">
@@ -906,7 +913,10 @@ export function ConstructionUpdatesPage() {
               disabled={isFetching}
               className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
-              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              <RefreshCw
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
+              />
               Refresh
             </button>
             <Button
@@ -920,58 +930,58 @@ export function ConstructionUpdatesPage() {
 
         {/* Filter + search */}
         <div className="cu-filter-bar">
-            <div className="cu-search-wrap">
-              <Search size={14} />
-              <input
-                className="cu-search"
-                placeholder="Search by applicant, unit, stage, project…"
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
+          <div className="cu-search-wrap">
+            <Search size={14} />
+            <input
+              className="cu-search"
+              placeholder="Search by applicant, unit, stage, project…"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+            />
+            {search && (
+              <button
+                className="cu-search-clear"
+                onClick={() => {
+                  setSearch("");
                   setPage(1);
                 }}
-              />
-              {search && (
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+          <div className="cu-pills">
+            {statusOptions.map((s) => {
+              const isActive = statusFilter === s;
+              const pillClass = isActive
+                ? s === ""
+                  ? "cu-pill active"
+                  : s === "Draft"
+                    ? "cu-pill active-draft"
+                    : s === "Sent"
+                      ? "cu-pill active-sent"
+                      : s === "Acknowledged"
+                        ? "cu-pill active-ack"
+                        : "cu-pill active-disputed"
+                : "cu-pill";
+              return (
                 <button
-                  className="cu-search-clear"
+                  key={s}
+                  className={pillClass}
                   onClick={() => {
-                    setSearch("");
+                    setStatusFilter(s);
                     setPage(1);
                   }}
                 >
-                  <X size={13} />
+                  {s === "" ? "All" : s}
                 </button>
-              )}
-            </div>
-            <div className="cu-pills">
-              {statusOptions.map((s) => {
-                const isActive = statusFilter === s;
-                const pillClass = isActive
-                  ? s === ""
-                    ? "cu-pill active"
-                    : s === "Draft"
-                      ? "cu-pill active-draft"
-                      : s === "Sent"
-                        ? "cu-pill active-sent"
-                        : s === "Acknowledged"
-                          ? "cu-pill active-ack"
-                          : "cu-pill active-disputed"
-                  : "cu-pill";
-                return (
-                  <button
-                    key={s}
-                    className={pillClass}
-                    onClick={() => {
-                      setStatusFilter(s);
-                      setPage(1);
-                    }}
-                  >
-                    {s === "" ? "All" : s}
-                  </button>
-                );
-              })}
-            </div>
+              );
+            })}
           </div>
+        </div>
 
         {/* Stats bar */}
         <div className="cu-stats">
@@ -1348,7 +1358,7 @@ export function ConstructionUpdatesPage() {
               <Label>Company</Label>
               <Combobox
                 value={form.CompanyId}
-                onChange={(v) => { set("CompanyId", v); set("ProjectId", ""); }}
+                onChange={(v) => set("CompanyId", v)}
                 items={companyItems}
                 placeholder="Select company…"
               />
@@ -1361,7 +1371,10 @@ export function ConstructionUpdatesPage() {
               <div className="space-y-2">
                 <Label>Update Date</Label>
                 <div className="relative">
-                  <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={14} />
+                  <CalendarIcon
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    size={14}
+                  />
                   <input
                     type="date"
                     value={form.UpdateDate}
@@ -1424,7 +1437,10 @@ export function ConstructionUpdatesPage() {
               <div className="space-y-2">
                 <Label>Shared On</Label>
                 <div className="relative">
-                  <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" size={14} />
+                  <CalendarIcon
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    size={14}
+                  />
                   <input
                     type="date"
                     value={form.SharedOn}

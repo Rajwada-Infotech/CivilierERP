@@ -1,5 +1,4 @@
-import { useState, useMemo } from "react";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -276,7 +275,6 @@ export function FinanceDemandsPage() {
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [projectId, setProjectId] = useState("");
-  const [companyId, setCompanyId] = useState("");
   const [status, setStatus] = useState("");
 
   const [raiseRow, setRaiseRow] = useState<DemandRow | null>(null);
@@ -299,20 +297,6 @@ export function FinanceDemandsPage() {
     queryKey: ["followup-demand-projects"],
     queryFn: fetchProjects,
   });
-
-  const { data: companiesRaw = [] } = useQuery<{ id: number; label: string }[]>({
-    queryKey: ["companies-options"],
-    queryFn: async () => {
-      const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
-      if (!res.ok) throw new Error("Failed to load companies");
-      return res.json();
-    },
-  });
-
-  const filteredProjects = useMemo(
-    () => filterProjectsByCompany(projects as any[], companyId),
-    [projects, companyId],
-  );
 
   const raiseMutation = useMutation({
     mutationFn: ({
@@ -354,12 +338,11 @@ export function FinanceDemandsPage() {
     setSearch("");
     setSearchInput("");
     setProjectId("");
-    setCompanyId("");
     setStatus("");
     setPage(1);
   }
 
-  const hasFilters = search || projectId || companyId || status;
+  const hasFilters = search || projectId || status;
 
   return (
     <div className="min-h-screen bg-background">
@@ -485,27 +468,6 @@ export function FinanceDemandsPage() {
             </Button>
 
             <Select
-              value={companyId}
-              onValueChange={(v) => {
-                setCompanyId(v === "all" ? "" : v);
-                setProjectId("");
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="h-8 w-40 text-sm">
-                <SelectValue placeholder="All Companies" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Companies</SelectItem>
-                {companiesRaw.map((c) => (
-                  <SelectItem key={c.id} value={String(c.id)}>
-                    {c.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select
               value={projectId}
               onValueChange={(v) => {
                 setProjectId(v === "all" ? "" : v);
@@ -517,7 +479,7 @@ export function FinanceDemandsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Projects</SelectItem>
-                {filteredProjects.map((p: any) => (
+                {projects.map((p) => (
                   <SelectItem key={p.ProjectId} value={String(p.ProjectId)}>
                     {p.ProjectName}
                   </SelectItem>

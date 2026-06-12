@@ -54,9 +54,9 @@ function mapDbRow(row: any): BillingTerm {
     discountType: "percentage",
     discountValue: 0,
     paymentDueDays: 0,
-    status: Boolean(row.IsActive),
+    status: row.IsActive === 1 || row.IsActive === true,
     calculationType: row.CalculationType ?? undefined,
-    deductionType: row.DeductionType === "Deduction" ? "Deduction" : "Addition",
+    deductionType: row.DeductionType === "Addition" ? "Addition" : "Deduction",
     appliedOn: row.CalculationType === "After GST" ? "post-gst" : "pre-gst",
   };
 }
@@ -87,22 +87,20 @@ export const BillingTermsProvider: React.FC<{ children: React.ReactNode }> = ({
     let cancelled = false;
 
     fetchWithAuth("/api/billing-terms")
-      .then((r) => {
-        if (!r.ok) {
-          console.warn("[BillingTerms] fetch failed, status:", r.status);
-          return [];
-        }
-        return r.json();
-      })
+      .then((r) => (r.ok ? r.json() : []))
       .then((data: any[]) => {
         if (cancelled) return;
-        if (Array.isArray(data) && data.length > 0) {
+        if (Array.isArray(data)) {
           setBillingTermsState(data.map(mapDbRow));
         }
       })
       .catch((err) => {
+        // fetchWithAuth throws on network errors and 403.
+        // On 401 it returns a never-resolving promise, so this catch branch
+        // is not reached in that case — the redirect handles cleanup instead.
+        // For other errors, just leave billingTerms empty; no toast needed here.
         if (!cancelled) {
-          console.warn("[BillingTerms] fetch error:", err?.message ?? err);
+          console.warn("BillingTerms fetch failed:", err?.message ?? err);
         }
       })
       .finally(() => {

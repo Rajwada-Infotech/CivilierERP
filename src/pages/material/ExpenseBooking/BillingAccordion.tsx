@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -384,25 +384,6 @@ export function BillingAccordion({
     }
   };
 
-  // Sync initial terms into form.billingTerms on first render when isMulti and
-  // the parent form has no saved terms yet. Without this, form.billingTerms stays []
-  // on submit if the user never explicitly touched the accordion.
-  const mountSyncDone = useRef(false);
-  useEffect(() => {
-    if (!isMulti || !onChangeBillingTerms) return;
-    if (mountSyncDone.current) return;
-    mountSyncDone.current = true;
-    // Only write back if the parent has no terms — don't clobber a loaded record.
-    // And only if there is a real term to persist (not a blank unapplicable stub).
-    if (!billingTerms || billingTerms.length === 0) {
-      const hasRealTerm = terms.some(
-        (t) => t.applicable && (t.masterTermName || t.value > 0),
-      );
-      if (hasRealTerm) onChangeBillingTerms(terms);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const [pickerForIndex, setPickerForIndex] = useState<number | null>(null);
 
   const applyMasterTerm = (masterTerm: MasterBillingTerm, idx: number) => {
@@ -431,17 +412,11 @@ export function BillingAccordion({
     setTerms(terms.map((t, i) => (i === idx ? updated : t)));
 
   const bd = computeBreakdown(basicAmount, cgstRate, sgstRate, terms);
-  // For GRN bookings, snap Net Payable to the GRN's exact TotalAmount
-  if (grnNetAmount != null) {
-    bd.roundOff = grnNetAmount - bd.grossAmount;
-    bd.netAmount = grnNetAmount;
-  }
+
   const hasBase = basicAmount > 0;
   const activeCount = terms.filter((t) => t.applicable).length;
 
   // Running base amounts for per-row display
-  // Pre-GST terms: track against basic amount
-  // Post-GST terms: track against gross (taxable + cgst + sgst)
   const runningBases: number[] = [];
   let rb = basicAmount;
   const grossForPostGst = bd.taxableAmount + bd.cgstAmount + bd.sgstAmount;
@@ -656,7 +631,7 @@ export function BillingAccordion({
                     </p>
                   </div>
                 ) : gstBreakdown ? (
-                  /* GRN booking: show real per-item GST slabs */
+                  /* GRN booking: show real per-item GST slabs then billing term adjustments */
                   <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-xs">
                     {/* Basic */}
                     <div className="flex justify-between items-center px-3 py-2 bg-muted/20">
@@ -710,13 +685,92 @@ export function BillingAccordion({
                         ₹{fmt(gstBreakdown.totals.totalInclGST)}
                       </span>
                     </div>
-                    {/* Net Payable */}
+                    {/* Billing term adjustment rows */}
+                    {(bd.postGstTerms ?? []).map((term, i) => {
+                      const base = gstBreakdown.totals.totalInclGST;
+                      const amt =
+                        term.type === "percentage"
+                          ? (base * term.value) / 100
+                          : term.value;
+                      const isAdd = term.termType === "Addition";
+                      return (
+                        <div
+                          key={i}
+                          className="flex justify-between items-center px-3 py-1.5"
+                        >
+                          <span className="text-muted-foreground">
+                            {term.masterTermName ?? `Term ${i + 1}`}
+                            <span className="ml-1 text-[10px] opacity-60">
+                              · {isAdd ? "Addition" : "Deduction"} After GST
+                              {term.type === "percentage"
+                                ? ` · ${term.value}%`
+                                : ""}
+                            </span>
+                          </span>
+                          <span
+                            className={
+                              isAdd
+                                ? "text-green-500 tabular-nums"
+                                : "text-destructive tabular-nums"
+                            }
+                          >
+                            {isAdd ? "+ ₹" : "− ₹"}
+                            {fmt(amt)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {(bd.preGstTerms ?? []).map((term, i) => {
+                      const base = gstBreakdown.totals.totalBase;
+                      const amt =
+                        term.type === "percentage"
+                          ? (base * term.value) / 100
+                          : term.value;
+                      const isAdd = term.termType === "Addition";
+                      return (
+                        <div
+                          key={`pre-${i}`}
+                          className="flex justify-between items-center px-3 py-1.5"
+                        >
+                          <span className="text-muted-foreground">
+                            {term.masterTermName ?? `Term ${i + 1}`}
+                            <span className="ml-1 text-[10px] opacity-60">
+                              · {isAdd ? "Addition" : "Deduction"} Before GST
+                              {term.type === "percentage"
+                                ? ` · ${term.value}%`
+                                : ""}
+                            </span>
+                          </span>
+                          <span
+                            className={
+                              isAdd
+                                ? "text-green-500 tabular-nums"
+                                : "text-destructive tabular-nums"
+                            }
+                          >
+                            {isAdd ? "+ ₹" : "− ₹"}
+                            {fmt(amt)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {/* Round off */}
+                    {Math.abs(bd.roundOff) > 0.005 && (
+                      <div className="flex justify-between items-center px-3 py-1.5">
+                        <span className="text-muted-foreground">Round Off</span>
+                        <span className="tabular-nums">
+                          {bd.roundOff >= 0 ? "+ ₹" : "− ₹"}
+                          {fmt(Math.abs(bd.roundOff))}
+                        </span>
+                      </div>
+                    )}
+                    {/* Net Payable — always from bd */}
                     <div className="flex justify-between items-center px-3 py-2.5 bg-primary/[0.06]">
                       <span className="font-heading font-semibold text-foreground">
                         Net Payable
                       </span>
                       <span className="font-heading font-bold text-primary tabular-nums">
-                        ₹{fmt(gstBreakdown.totals.totalInclGST)}
+                        ₹{fmt(bd.netAmount)}
                       </span>
                     </div>
                   </div>

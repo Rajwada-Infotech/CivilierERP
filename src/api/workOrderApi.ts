@@ -88,16 +88,8 @@ export const fetchCompanies = async (): Promise<
   try {
     const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = safeArray<{
-      id: number;
-      label: string;
-      company_id?: number | null;
-    }>(await res.json());
-    return data.map((r) => ({
-      id: r.id,
-      name: r.label ?? "",
-      company_id: r.company_id ?? null,
-    }));
+    const data = safeArray<{ id: number; label: string }>(await res.json());
+    return data.map((r) => ({ id: r.id, name: r.label ?? "" }));
   } catch (err) {
     console.error("[workOrderApi] fetchCompanies failed:", err);
     return [];
