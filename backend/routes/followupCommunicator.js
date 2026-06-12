@@ -12,6 +12,7 @@ const router = express.Router();
 const nodemailer = require("nodemailer");
 const axios = require("axios");
 const sanitizeHtml = require("sanitize-html");
+const { getPool } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
@@ -161,7 +162,7 @@ async function dispatch(
   pool,
   { channel, recipient, subject, body, applicantId, bookingId, sentBy },
 ) {
-  const cfg = await getConfig(pool, `${channel}-api`);
+  const cfg = await getConfig(pool, channel);
   if (!cfg) {
     throw new Error(`Channel '${channel}' is not configured or inactive`);
   }
@@ -232,7 +233,7 @@ function buildWelcomeTemplates({
 // POST /api/followup-communicator/send
 // Body: { channel, recipient, subject?, body, applicantId?, bookingId? }
 router.post("/send", async (req, res) => {
-  const pool = req.app.locals.db;
+  const pool = getPool();
   const { channel, recipient, subject, body, applicantId, bookingId } =
     req.body;
 
@@ -279,7 +280,7 @@ router.post("/send", async (req, res) => {
 //         applicantName, email?, phone?, projectName?, unitNo?, bookingDate?,
 //         contactName?, contactPhone? }
 router.post("/trigger", async (req, res) => {
-  const pool = req.app.locals.db;
+  const pool = getPool();
   const {
     triggerType,
     applicantId,
@@ -409,7 +410,7 @@ router.post("/trigger", async (req, res) => {
 
 // GET /api/followup-communicator/logs?applicantId=&bookingId=&channel=&status=&page=&limit=
 router.get("/logs", async (req, res) => {
-  const pool = req.app.locals.db;
+  const pool = getPool();
   const {
     applicantId,
     bookingId,
@@ -453,18 +454,19 @@ router.get("/logs", async (req, res) => {
        OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY`,
     );
 
-    const countResult = await pool.request().query(
-      `SELECT COUNT(*) AS Total FROM dbo.FollowupCommunicatorLog ${where.replace(
-        /@\w+/g,
-        (m) => {
-          // re-bind not needed for count — just run separate simple count
-          return m;
-        },
-      )}`,
+    const countReq = pool.request();
+    if (applicantId) countReq.input("ApplicantId", applicantId);
+    if (bookingId)   countReq.input("BookingId",   bookingId);
+    if (channel)     countReq.input("Channel",     channel);
+    if (status)      countReq.input("Status",      status);
+
+    const countResult = await countReq.query(
+      `SELECT COUNT(*) AS Total FROM dbo.FollowupCommunicatorLog ${where}`,
     );
-    // Simple approach: just return the rows and let the frontend paginate
+
     res.json({
       data: result.recordset,
+      total: countResult.recordset[0].Total,
       page: parseInt(page),
       limit: parseInt(limit),
     });
@@ -476,7 +478,7 @@ router.get("/logs", async (req, res) => {
 
 // GET /api/followup-communicator/logs/:id
 router.get("/logs/:id", async (req, res) => {
-  const pool = req.app.locals.db;
+  const pool = getPool();
   try {
     const result = await pool
       .request()

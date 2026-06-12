@@ -235,7 +235,7 @@ export default function Communicator() {
           {/* Error */}
           {sendMutation.isError && (
             <p className="text-xs text-red-500 bg-red-500/10 border border-red-500/20 px-3 py-2 rounded-lg">
-              {(sendMutation.error as any)?.response?.data?.error ??
+              {(sendMutation.error as Error)?.message ??
                 "Send failed. Check channel configuration."}
             </p>
           )}

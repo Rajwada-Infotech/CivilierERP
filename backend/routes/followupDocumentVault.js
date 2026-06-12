@@ -157,7 +157,11 @@ router.get("/", async (req, res) => {
       OFFSET ${offset} ROWS FETCH NEXT ${pageSize} ROWS ONLY
     `);
 
-    const countResult = await pool.request().query(`
+    const countReq = pool.request();
+    if (search)      countReq.input("search",      sql.NVarChar(255), `%${search}%`);
+    if (category)    countReq.input("category",    sql.NVarChar(100), category);
+    if (applicantId) countReq.input("applicantId", sql.Int,           applicantId);
+    const countResult = await countReq.query(`
       SELECT COUNT(*) AS total
       FROM dbo.FollowupDocumentVault d
       LEFT JOIN dbo.FollowupApplications fa ON fa.Id = d.ApplicantId
@@ -194,15 +198,10 @@ router.post("/upload", upload.single("file"), async (req, res) => {
   try {
     const pool = getPool();
 
-    // Generate DocNo
-    const cntRes = await pool
-      .request()
-      .query(`SELECT COUNT(*) AS cnt FROM dbo.FollowupDocumentVault`);
-    const docNo = `DV${String(cntRes.recordset[0].cnt + 1).padStart(6, "0")}`;
-
+    // BUG-09 fix: DocNo is derived from SCOPE_IDENTITY() inside the same SQL
+    // batch — concurrent uploads never race on COUNT(*)+1 and collide.
     const result = await pool
       .request()
-      .input("DocNo", sql.NVarChar(50), docNo)
       .input("ApplicantId", sql.Int, parseInt(ApplicantId, 10))
       .input("Category", sql.NVarChar(100), normalizeText(Category) || "Other")
       .input(
@@ -220,13 +219,17 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         INSERT INTO dbo.FollowupDocumentVault
           (DocNo, ApplicantId, Category, DocName, FileName, FilePath,
            FileSize, MimeType, Notes, Tags, CreatedBy)
-        OUTPUT INSERTED.Id, INSERTED.DocNo
         VALUES
-          (@DocNo, @ApplicantId, @Category, @DocName, @FileName, @FilePath,
-           @FileSize, @MimeType, @Notes, @Tags, @CreatedBy)
+          ('DV000000', @ApplicantId, @Category, @DocName, @FileName, @FilePath,
+           @FileSize, @MimeType, @Notes, @Tags, @CreatedBy);
+        DECLARE @NewId INT = CAST(SCOPE_IDENTITY() AS INT);
+        DECLARE @DocNo NVARCHAR(50) = N'DV' + RIGHT('000000' + CAST(@NewId AS NVARCHAR(6)), 6);
+        UPDATE dbo.FollowupDocumentVault SET DocNo = @DocNo WHERE Id = @NewId;
+        SELECT @NewId AS Id, @DocNo AS DocNo;
       `);
 
-    res.status(201).json({ id: result.recordset[0].Id, docNo });
+    const { Id: newId, DocNo: docNo } = result.recordset[0];
+    res.status(201).json({ id: newId, docNo });
   } catch (err) {
     // Clean up uploaded file on DB error — path comes from multer (trusted),
     // but guard anyway for consistency

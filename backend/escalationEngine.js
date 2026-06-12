@@ -32,14 +32,14 @@ const REQUIRED_TABLES = [
   },
   {
     table: "FollowupAgreementWorkflows",
-    migration: "102-create-followup-agreement-workflows.sql",
+    migration: "104-create-followup-agreement-workflows.sql",
   },
   {
     table: "FollowupSalesDeeds",
     migration: "066-followup-salesdeed-table.sql",
   },
   { table: "FollowupBookings", migration: "080-create-followup-bookings.sql" },
-  { table: "FollowupAuditLog", migration: "101-create-followup-audit-log.sql" },
+  { table: "FollowupAuditLog", migration: "103-create-followup-audit-log.sql" },
 ];
 
 // ── Legal Milestone steps ────────────────────────────────────────────────────
