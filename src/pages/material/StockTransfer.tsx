@@ -28,7 +28,6 @@ import {
 } from "@/api/stockTransferApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
-import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(n ?? 0);
@@ -587,8 +586,6 @@ export default function StockTransfer() {
     id: number;
     label: string;
     belongs_to: string | null;
-    company_id?: number | null;
-    company_ids?: string | null;
   }[] = projectsData ?? [];
 
   const filteredGodowns = useMemo(() => {
@@ -603,7 +600,8 @@ export default function StockTransfer() {
   }, [allGodowns, filterCompanyId, filterProjectId]);
 
   const projectOptions = useMemo(() => {
-    return filterProjectsByCompany(allProjects, filterCompanyId);
+    if (!filterCompanyId) return allProjects;
+    return allProjects.filter((p) => String(p.belongs_to) === filterCompanyId);
   }, [allProjects, filterCompanyId]);
 
   const { data: fromStockData, isLoading: isLoadingStock } = useQuery({

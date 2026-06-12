@@ -322,7 +322,8 @@ function Combobox({
   React.useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -441,7 +442,12 @@ export function AgreementsPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: result, isLoading, isFetching, refetch } = useQuery({
+  const {
+    data: result,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useQuery({
     queryKey: ["agreements", page, search, statusFilter],
     queryFn: () =>
       fetchAgreements({
@@ -492,11 +498,13 @@ export function AgreementsPage() {
 
   const projectItems: ComboItem[] = useMemo(
     () =>
-      filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map((p) => ({
-        value: String(p.Id),
-        label: p.Name,
-      })),
-    [meta],
+      filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map(
+        (p) => ({
+          value: String(p.Id),
+          label: p.Name,
+        }),
+      ),
+    [meta, form.CompanyId],
   );
 
   const companyItems: ComboItem[] = useMemo(
@@ -934,7 +942,10 @@ export function AgreementsPage() {
           { label: "Agreements", path: "/followup/agreement/agreements" },
         ]}
       />
-      <div className="ag-page relative space-y-8 mt-6" onClick={() => setOpenMenuId(null)}>
+      <div
+        className="ag-page relative space-y-8 mt-6"
+        onClick={() => setOpenMenuId(null)}
+      >
         {/* ── Header ── */}
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -942,7 +953,9 @@ export function AgreementsPage() {
               Agreements
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {pagination ? `${pagination.total} agreement${pagination.total !== 1 ? "s" : ""}` : "Manage all agreements"}
+              {pagination
+                ? `${pagination.total} agreement${pagination.total !== 1 ? "s" : ""}`
+                : "Manage all agreements"}
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -951,7 +964,10 @@ export function AgreementsPage() {
               disabled={isFetching}
               className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
-              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              <RefreshCw
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
+              />
               Refresh
             </button>
             <Button
@@ -1428,7 +1444,7 @@ export function AgreementsPage() {
                 <Label>Company</Label>
                 <Combobox
                   value={form.CompanyId}
-                  onChange={(v) => { set("CompanyId", v); set("ProjectId", ""); }}
+                  onChange={(v) => set("CompanyId", v)}
                   items={companyItems}
                   placeholder="Select company…"
                 />
@@ -1557,7 +1573,14 @@ export function AgreementsPage() {
           </div>
 
           <DialogFooter style={{ marginTop: 8 }}>
-            <Button variant="outline" onClick={() => { setDialogOpen(false); setEditId(null); setForm(EMPTY_FORM); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDialogOpen(false);
+                setEditId(null);
+                setForm(EMPTY_FORM);
+              }}
+            >
               Cancel
             </Button>
             <Button

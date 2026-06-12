@@ -75,6 +75,7 @@ import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import {
   blankForm,
   computeBreakdown,
+  computeGrnNetWithTerms,
   dbToRecord,
   fmt,
   generateEmiSchedule,
@@ -135,7 +136,6 @@ interface CompanyOption {
 interface ProjectOption {
   id: number;
   label: string;
-  company_id?: number | null;
 }
 interface GSTConfig {
   applicable: boolean;
@@ -2048,14 +2048,6 @@ export default function MaterialExpenseBooking() {
       toast.error("Booking date is required.");
       return;
     }
-    if (form.bookingDate < today) {
-      toast.error("Booking date cannot be in the past.");
-      return;
-    }
-    if (form.dueDate && form.dueDate < form.bookingDate) {
-      toast.error("Due date cannot be before the booking date.");
-      return;
-    }
     if (!form.companyId) {
       toast.error("Please select a company.");
       return;
@@ -2079,12 +2071,6 @@ export default function MaterialExpenseBooking() {
         ? form.billingTerms
         : form.discount,
     );
-    if (selectedDoc?.kind === "GRN" && selectedDoc.amount != null) {
-      const exactGrnTotal = Math.round(selectedDoc.amount * 100) / 100;
-      bd.roundOff = exactGrnTotal - bd.grossAmount;
-      bd.netAmount = exactGrnTotal;
-    }
-
     let emiForSave = { ...form.emi };
     if (
       !isEditing &&
@@ -2161,21 +2147,25 @@ export default function MaterialExpenseBooking() {
       ? form.billingTerms
       : form.discount,
   );
-  if (selectedDoc?.kind === "GRN" && selectedDoc.amount != null) {
-    const grnTotal = Math.round(selectedDoc.amount * 100) / 100;
-    bd.roundOff = grnTotal - bd.grossAmount;
-    bd.netAmount = grnTotal;
-  }
   const filteredRecords =
     statusFilter && statusFilter !== "All"
       ? records.filter((r) => r.status === statusFilter)
       : records;
-  // Sum net amounts from visible filtered records so stat card always matches screen
-  const totalNet = filteredRecords.reduce(
-    (sum, r) => sum + (r.netAmount ?? r.basicAmount ?? 0),
-    0,
-  );
-  const today = new Date().toISOString().slice(0, 10);
+  const totalNet = records.reduce((sum, r) => {
+    if (r.status === "Draft") return sum;
+    if (r.grnTotalAmount != null) {
+      return (
+        sum + computeGrnNetWithTerms(r.grnTotalAmount, r.billingTerms ?? [])
+      );
+    }
+    const bd = computeBreakdown(
+      r.basicAmount,
+      r.cgstRate,
+      r.sgstRate,
+      r.billingTerms && r.billingTerms.length > 0 ? r.billingTerms : r.discount,
+    );
+    return sum + bd.netAmount;
+  }, 0);
   const approvedCount =
     statusCounts["Approved"] ??
     records.filter((r) => r.status === "Approved").length;
@@ -2281,16 +2271,15 @@ export default function MaterialExpenseBooking() {
               {/* ── 0. Booking Information ─────────────────────────────── */}
               <div className="space-y-4">
                 <SectionHeader label="Booking Information" />
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Company" required>
                     <Select
                       value={form.companyId ? String(form.companyId) : ""}
-                      onValueChange={(v) => {
-                        set("companyId", v ? parseInt(v, 10) : null);
-                        set("projectSite", "");
-                      }}
+                      onValueChange={(v) =>
+                        set("companyId", v ? parseInt(v, 10) : null)
+                      }
                     >
-                      <SelectTrigger className="h-9 text-sm">
+                      <SelectTrigger>
                         <div className="flex items-center gap-2">
                           <Building2
                             size={13}
@@ -2314,70 +2303,6 @@ export default function MaterialExpenseBooking() {
                     </Select>
                   </Field>
                   <Field
-                    label="Project / Site"
-                    hint={
-                      selectedDoc?.projectId
-                        ? "Pre-filled from linked order"
-                        : !form.companyId
-                          ? "Select a company first"
-                          : undefined
-                    }
-                  >
-                    <Select
-                      value={form.projectSite || ""}
-                      onValueChange={(v) => set("projectSite", v || "")}
-                      disabled={!form.companyId && !selectedDoc?.projectId}
-                    >
-                      <SelectTrigger className="h-9 text-sm">
-                        <div className="flex items-center gap-2">
-                          <FolderKanban
-                            size={13}
-                            className="text-muted-foreground shrink-0"
-                          />
-                          <SelectValue placeholder="Select project…" />
-                        </div>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(() => {
-                          const filtered = form.companyId
-                            ? projectOptions.filter(
-                                (p) =>
-                                  !p.company_id ||
-                                  p.company_id === form.companyId,
-                              )
-                            : projectOptions;
-                          return (
-                            <>
-                              {filtered.length === 0 && !form.projectSite && (
-                                <SelectItem value="__none__" disabled>
-                                  {form.companyId
-                                    ? "No projects for this company"
-                                    : "No projects found"}
-                                </SelectItem>
-                              )}
-                              {form.projectSite &&
-                                !filtered.some(
-                                  (p) => String(p.id) === form.projectSite,
-                                ) && (
-                                  <SelectItem
-                                    key="__current__"
-                                    value={form.projectSite}
-                                  >
-                                    {form.projectName || form.projectSite}
-                                  </SelectItem>
-                                )}
-                              {filtered.map((p) => (
-                                <SelectItem key={p.id} value={String(p.id)}>
-                                  {p.label}
-                                </SelectItem>
-                              ))}
-                            </>
-                          );
-                        })()}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field
                     label={vendorLabel}
                     hint={
                       selectedDoc?.vendorLabel
@@ -2395,7 +2320,7 @@ export default function MaterialExpenseBooking() {
                           value={form.supplier}
                           readOnly
                           placeholder="Auto-filled from linked order"
-                          className="pl-8 h-9 text-sm bg-muted/30 cursor-not-allowed"
+                          className="pl-8 bg-muted/30 cursor-not-allowed"
                         />
                       </div>
                     ) : (
@@ -2405,7 +2330,7 @@ export default function MaterialExpenseBooking() {
                           set("supplier", v === "__none__" ? "" : v)
                         }
                       >
-                        <SelectTrigger className="h-9 text-sm">
+                        <SelectTrigger>
                           <SelectValue placeholder="Select supplier…" />
                         </SelectTrigger>
                         <SelectContent>
@@ -2420,6 +2345,54 @@ export default function MaterialExpenseBooking() {
                     )}
                   </Field>
                 </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field
+                    label="Project / Site"
+                    hint={
+                      selectedDoc?.projectId
+                        ? "Pre-filled from linked order"
+                        : undefined
+                    }
+                  >
+                    <Select
+                      value={form.projectSite || ""}
+                      onValueChange={(v) => set("projectSite", v || "")}
+                    >
+                      <SelectTrigger>
+                        <div className="flex items-center gap-2">
+                          <FolderKanban
+                            size={13}
+                            className="text-muted-foreground shrink-0"
+                          />
+                          <SelectValue placeholder="Select project…" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {projectOptions.length === 0 && !form.projectSite && (
+                          <SelectItem value="__none__" disabled>
+                            No projects found
+                          </SelectItem>
+                        )}
+                        {form.projectSite &&
+                          !projectOptions.some(
+                            (p) => String(p.id) === form.projectSite,
+                          ) && (
+                            <SelectItem
+                              key="__current__"
+                              value={form.projectSite}
+                            >
+                              {form.projectName || form.projectSite}
+                            </SelectItem>
+                          )}
+                        {projectOptions.map((p) => (
+                          <SelectItem key={p.id} value={String(p.id)}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <Field label="Booking Date" required>
                     <div className="relative">
@@ -2430,7 +2403,6 @@ export default function MaterialExpenseBooking() {
                       <input
                         type="date"
                         value={form.bookingDate}
-                        min={today}
                         onChange={(e) => set("bookingDate", e.target.value)}
                         className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                       />
@@ -2445,36 +2417,9 @@ export default function MaterialExpenseBooking() {
                       <input
                         type="date"
                         value={form.dueDate}
-                        min={form.bookingDate || today}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (
-                            val &&
-                            form.bookingDate &&
-                            val < form.bookingDate
-                          ) {
-                            toast.error(
-                              "Due date cannot be before the booking date.",
-                            );
-                            return;
-                          }
-                          set("dueDate", val);
-                        }}
-                        className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${
-                          form.dueDate &&
-                          form.bookingDate &&
-                          form.dueDate < form.bookingDate
-                            ? "border-destructive ring-1 ring-destructive/30"
-                            : "border-border"
-                        }`}
+                        onChange={(e) => set("dueDate", e.target.value)}
+                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                       />
-                      {form.dueDate &&
-                        form.bookingDate &&
-                        form.dueDate < form.bookingDate && (
-                          <p className="mt-1 text-[11px] text-destructive flex items-center gap-1">
-                            ⚠ Due date is before the booking date
-                          </p>
-                        )}
                     </div>
                   </Field>
                   <Field
@@ -2742,69 +2687,16 @@ export default function MaterialExpenseBooking() {
                 </div>
                 {form.basicAmount > 0 && (
                   <>
-                    {isGRN && gstBreakdown ? (
-                      <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-sm">
-                        <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
-                          <div>
-                            <p className="text-xs font-medium">Basic Amount</p>
-                            <p className="text-[10px] text-muted-foreground">
-                              Pre-tax value (excl. GST)
-                            </p>
-                          </div>
-                          <p className="font-mono text-sm font-semibold">
-                            ₹{fmt(gstBreakdown.totals.totalBase)}
-                          </p>
-                        </div>
-                        {gstBreakdown.totals.totalCGST > 0 && (
-                          <div className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]">
-                            <div>
-                              <p className="text-xs text-muted-foreground">
-                                CGST
-                              </p>
-                              <p className="text-[10px] text-muted-foreground">
-                                Central GST
-                              </p>
-                            </div>
-                            <p className="font-mono text-sm text-foreground/80">
-                              + ₹{fmt(gstBreakdown.totals.totalCGST)}
-                            </p>
-                          </div>
-                        )}
-                        {gstBreakdown.totals.totalSGST > 0 && (
-                          <div className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]">
-                            <div>
-                              <p className="text-xs text-muted-foreground">
-                                SGST
-                              </p>
-                              <p className="text-[10px] text-muted-foreground">
-                                State GST
-                              </p>
-                            </div>
-                            <p className="font-mono text-sm text-foreground/80">
-                              + ₹{fmt(gstBreakdown.totals.totalSGST)}
-                            </p>
-                          </div>
-                        )}
-                        <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20">
-                          <div>
-                            <p className="text-xs font-medium">Gross Amount</p>
-                            <p className="text-[10px] text-muted-foreground">
-                              Basic + CGST + SGST
-                            </p>
-                          </div>
-                          <p className="font-mono text-sm font-semibold">
-                            ₹{fmt(gstBreakdown.totals.totalInclGST)}
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      <PriceBreakdownPanel
-                        bd={bd}
-                        cgstRate={form.cgstRate}
-                        sgstRate={form.sgstRate}
-                        hasDiscount={form.discount.applicable}
-                      />
-                    )}
+                    <PriceBreakdownPanel
+                      bd={bd}
+                      cgstRate={form.cgstRate}
+                      sgstRate={form.sgstRate}
+                      hasDiscount={
+                        form.billingTerms && form.billingTerms.length > 0
+                          ? form.billingTerms.some((d) => d.applicable)
+                          : form.discount.applicable
+                      }
+                    />
                     <div className="flex items-center justify-between rounded-xl bg-primary/8 border border-primary/20 px-5 py-4">
                       <div className="flex items-center gap-2">
                         <TrendingUp size={15} className="text-primary" />
@@ -2813,12 +2705,7 @@ export default function MaterialExpenseBooking() {
                         </span>
                       </div>
                       <span className="font-mono text-xl font-bold text-primary">
-                        ₹
-                        {fmt(
-                          isGRN && gstBreakdown
-                            ? gstBreakdown.totals.totalInclGST
-                            : bd.netAmount,
-                        )}
+                        ₹{fmt(bd.netAmount)}
                       </span>
                     </div>
                   </>
@@ -3377,14 +3264,26 @@ export default function MaterialExpenseBooking() {
                         </TableHeader>
                         <TableBody>
                           {filteredRecords.map((rec, index) => {
-                            const rbd = computeBreakdown(
-                              rec.basicAmount,
-                              rec.cgstRate,
-                              rec.sgstRate,
-                              rec.billingTerms && rec.billingTerms.length > 0
-                                ? rec.billingTerms
-                                : rec.discount,
-                            );
+                            // For GRN-linked records, net = live GRN total + billing terms applied.
+                            // For all others, use computeBreakdown on stored basicAmount.
+                            const effectiveNet =
+                              rec.grnTotalAmount != null
+                                ? computeGrnNetWithTerms(
+                                    rec.grnTotalAmount,
+                                    rec.billingTerms ?? [],
+                                  )
+                                : (() => {
+                                    const rbd = computeBreakdown(
+                                      rec.basicAmount,
+                                      rec.cgstRate,
+                                      rec.sgstRate,
+                                      rec.billingTerms &&
+                                        rec.billingTerms.length > 0
+                                        ? rec.billingTerms
+                                        : rec.discount,
+                                    );
+                                    return rec.netAmount ?? rbd.netAmount;
+                                  })();
                             return (
                               <TableRow
                                 key={
@@ -3452,10 +3351,10 @@ export default function MaterialExpenseBooking() {
                                 <TableCell className="font-mono text-xs font-semibold text-right py-3">
                                   {rec.status === "Draft" ? (
                                     <span className="text-amber-500 dark:text-amber-400">
-                                      ₹{fmt(rec.netAmount ?? rbd.netAmount)}
+                                      ₹{fmt(effectiveNet)}
                                     </span>
                                   ) : (
-                                    `₹${fmt(rec.netAmount ?? rbd.netAmount)}`
+                                    `₹${fmt(effectiveNet)}`
                                   )}
                                 </TableCell>
                                 <TableCell className="hidden lg:table-cell py-3 min-w-[100px]">
