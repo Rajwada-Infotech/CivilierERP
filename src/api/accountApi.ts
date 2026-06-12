@@ -42,7 +42,7 @@ export const deleteAccountGroup = async (id: string) => {
     method: "DELETE",
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "DELETE failed");
   }
   return res.json();
