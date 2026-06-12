@@ -389,18 +389,34 @@ const AccountGroupMaster: React.FC = () => {
 
   const handleDelete = async (id: string) => {
     if (getDescendants(id, allGroups).length > 0) {
-      toast.error("Remove sub-groups before deleting a parent group");
+      toast.error("Remove all sub-groups before deleting a parent group.");
       setDeleteConfirm(null);
       return;
     }
     try {
       await deleteAccountGroup(id);
-      toast.success("Deleted");
+      toast.success("Account group deleted.");
       setDeleteConfirm(null);
       if (editingId === id) resetForm();
       await queryClient.invalidateQueries({ queryKey: ["account-groups"] });
     } catch (err: any) {
-      toast.error(err.message || "Failed to delete");
+      // Surface specific backend validation messages for blocked deletions
+      const msg: string = err.message || "";
+      if (msg.includes("General Ledger")) {
+        toast.error(
+          "Cannot delete — this group is linked to one or more General Ledger Accounts. " +
+          "Please delete or reassign those accounts first.",
+          { duration: 6000 },
+        );
+      } else if (msg.includes("Sub Group") || msg.includes("sub-group") || msg.includes("HAS_SUBGROUPS")) {
+        toast.error(
+          "Cannot delete — this group still has sub-groups. Remove all sub-groups first.",
+          { duration: 5000 },
+        );
+      } else {
+        toast.error(msg || "Failed to delete account group.");
+      }
+      setDeleteConfirm(null);
     }
   };
 
