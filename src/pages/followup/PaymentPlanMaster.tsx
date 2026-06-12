@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { Button } from "@/components/ui/button";
 import {
   Landmark,
   Plus,
@@ -292,16 +293,17 @@ const PaymentPlanMaster: React.FC = () => {
             Define reusable payment milestone terms for bookings &amp; units
           </p>
         </div>
-        <button
+        <Button
+          size="sm"
           onClick={() => {
             setShowAddRow(true);
             setEditId(null);
           }}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg gradient-accent text-white text-sm font-semibold transition-all shadow-sm self-start sm:self-auto"
+          className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
         >
-          <Plus className="w-4 h-4" />
+          <Plus size={14} />
           Add Milestone
-        </button>
+        </Button>
       </div>
 
       {/* ── Summary chips ──────────────────────────────────────────────────── */}

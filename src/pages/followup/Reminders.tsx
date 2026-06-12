@@ -150,6 +150,7 @@ function StatCard({
   icon: Icon,
   iconClass,
   accent,
+  borderL,
   sublabel,
 }: {
   label: string;
@@ -157,10 +158,11 @@ function StatCard({
   icon: React.ElementType;
   iconClass: string;
   accent: string;
+  borderL: string;
   sublabel?: string;
 }) {
   return (
-    <div className="relative bg-card rounded-2xl border border-border p-5 overflow-hidden hover:border-border/80 hover:shadow-md transition-all duration-200">
+    <div className={`relative bg-card rounded-2xl border border-border p-5 overflow-hidden hover:border-border/80 hover:shadow-md transition-all duration-200 border-l-2 ${borderL}`}>
       <div
         className={`absolute top-0 right-0 w-24 h-24 rounded-full opacity-10 -translate-y-6 translate-x-6 ${accent}`}
       />
@@ -285,7 +287,7 @@ function ReminderRow({
 }) {
   const modColor = getModuleColor(reminder.module);
   return (
-    <div className="group grid grid-cols-[1fr_auto] gap-3 items-center px-5 py-4 border-b border-border hover:bg-muted/40 transition-colors duration-100 last:border-b-0">
+    <div className="group grid grid-cols-[1fr_96px] gap-3 items-center px-5 py-4 border-b border-border hover:bg-muted/40 transition-colors duration-100 last:border-b-0">
       {/* Left: main info */}
       <div className="grid grid-cols-[minmax(200px,2fr)_100px_130px_130px_90px] gap-4 items-center min-w-0">
         {/* Title + message */}
@@ -450,10 +452,11 @@ export default function FollowupReminders() {
               <RefreshCw className="w-3.5 h-3.5" /> Refresh
             </button>
             <Button
+              size="sm"
               onClick={() => setIsDialogOpen(true)}
-              className="gap-2 gradient-accent text-white font-semibold rounded-xl h-10 px-4"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
-              <Plus className="w-4 h-4" />
+              <Plus size={14} />
               New Reminder
             </Button>
           </div>
@@ -466,6 +469,7 @@ export default function FollowupReminders() {
             value={counts.total}
             icon={Bell}
             accent="bg-primary"
+            borderL="border-l-primary"
             iconClass="bg-primary/10 text-primary"
             sublabel="All reminders"
           />
@@ -474,6 +478,7 @@ export default function FollowupReminders() {
             value={counts.overdue}
             icon={AlertCircle}
             accent="bg-red-500"
+            borderL="border-l-red-500"
             iconClass="bg-red-500/10 text-red-500"
             sublabel="Needs attention"
           />
@@ -482,6 +487,7 @@ export default function FollowupReminders() {
             value={counts.scheduled}
             icon={Clock}
             accent="bg-amber-500"
+            borderL="border-l-amber-500"
             iconClass="bg-amber-500/10 text-amber-500"
             sublabel="Upcoming"
           />
@@ -490,6 +496,7 @@ export default function FollowupReminders() {
             value={counts.sent}
             icon={CheckCircle}
             accent="bg-emerald-500"
+            borderL="border-l-emerald-500"
             iconClass="bg-emerald-500/10 text-emerald-500"
             sublabel="Completed"
           />
@@ -541,7 +548,7 @@ export default function FollowupReminders() {
           </div>
 
           {/* Column headers */}
-          <div className="grid grid-cols-[1fr_auto] gap-3 px-5 py-3 border-b border-border bg-muted/30">
+          <div className="grid grid-cols-[1fr_96px] gap-3 px-5 py-3 border-b border-border bg-muted/30">
             <div className="grid grid-cols-[minmax(200px,2fr)_100px_130px_130px_90px] gap-4">
               {["Tenant / Title", "Module", "Amount", "Due Date", "Status"].map(
                 (h) => (

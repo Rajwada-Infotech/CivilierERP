@@ -28,9 +28,14 @@ router.get("/", cache("account-group", 300), async (req, res) => {
 router.post("/", async (req, res) => {
   const { Name, Code, ParentGroupId, Status } = req.body;
   try {
-    const userEmail = req.user?.name;
-    if (!userEmail) {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
       return res.status(401).json({ error: "User context missing" });
+    }
+
+    const parentId = ParentGroupId != null ? parseInt(ParentGroupId, 10) : null;
+    if (ParentGroupId != null && !Number.isFinite(parentId)) {
+      return res.status(400).json({ error: "ParentGroupId must be a valid integer" });
     }
 
     const pool = getPool();
@@ -38,9 +43,9 @@ router.post("/", async (req, res) => {
       .request()
       .input("Name", sql.NVarChar, Name || null)
       .input("Code", sql.NVarChar, Code || null)
-      .input("ParentGroupId", sql.Int, ParentGroupId || null)
+      .input("ParentGroupId", sql.Int, parentId)
       .input("Status", sql.Bit, Status ? 1 : 0)
-      .input("CreatedBy", sql.NVarChar(100), userEmail)
+      .input("CreatedBy", sql.Int, userId)
       .input("CreatedAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.AccountGroup (Name, Code, ParentGroupId, Status, CreatedBy, CreatedAt)
         VALUES (@Name, @Code, @ParentGroupId, @Status, @CreatedBy, @CreatedAt)
@@ -56,20 +61,30 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const { Name, Code, ParentGroupId, Status } = req.body;
   try {
-    const userEmail = req.user?.name;
-    if (!userEmail) {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
       return res.status(401).json({ error: "User context missing" });
+    }
+
+    const agId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(agId)) {
+      return res.status(400).json({ error: "Invalid account group ID" });
+    }
+
+    const parentId = ParentGroupId != null ? parseInt(ParentGroupId, 10) : null;
+    if (ParentGroupId != null && !Number.isFinite(parentId)) {
+      return res.status(400).json({ error: "ParentGroupId must be a valid integer" });
     }
 
     const pool = getPool();
     await pool
       .request()
-      .input("AGId", sql.Int, req.params.id)
+      .input("AGId", sql.Int, agId)
       .input("Name", sql.NVarChar, Name || null)
       .input("Code", sql.NVarChar, Code || null)
-      .input("ParentGroupId", sql.Int, ParentGroupId || null)
+      .input("ParentGroupId", sql.Int, parentId)
       .input("Status", sql.Bit, Status ? 1 : 0)
-      .input("UpdatedBy", sql.NVarChar(100), userEmail)
+      .input("UpdatedBy", sql.Int, userId)
       .input("UpdatedAt", sql.DateTime2, new Date()).query(`
         UPDATE dbo.AccountGroup SET
           Name=@Name, Code=@Code, ParentGroupId=@ParentGroupId,
@@ -86,10 +101,15 @@ router.put("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
+    const agId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(agId)) {
+      return res.status(400).json({ error: "Invalid account group ID" });
+    }
+
     const pool = getPool();
     await pool
       .request()
-      .input("AGId", sql.Int, req.params.id)
+      .input("AGId", sql.Int, agId)
       .query("DELETE FROM dbo.AccountGroup WHERE AGId=@AGId");
     await bumpCacheVersion("account-group");
 

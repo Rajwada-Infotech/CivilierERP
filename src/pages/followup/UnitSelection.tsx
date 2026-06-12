@@ -805,11 +805,12 @@ export function UnitSelectionPage() {
         {/* ── KPI strip ── */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {[
-            { label: "Total", value: stats.total, dot: "bg-blue-400" },
-            { label: "Confirmed", value: stats.confirmed, dot: "bg-emerald-500" },
-            { label: "Visible Value", value: `₹${stats.totalValue.toLocaleString("en-IN")}`, dot: "bg-amber-400" },
-          ].map(({ label, value, dot }) => (
-            <div key={label} className="rounded-xl border border-border bg-card p-4">
+            { label: "Total", value: stats.total, dot: "bg-blue-400", borderL: "border-l-blue-400" },
+            { label: "Confirmed", value: stats.confirmed, dot: "bg-emerald-500", borderL: "border-l-emerald-500" },
+            { label: "Visible Value", value: `₹${stats.totalValue.toLocaleString("en-IN")}`, dot: "bg-amber-400", borderL: "border-l-amber-400" },
+          ].map(({ label, value, dot, borderL }) => (
+            <div key={label} className={`relative rounded-xl border border-border bg-card p-4 overflow-hidden border-l-2 ${borderL}`}>
+              <div className={`absolute top-0 right-0 w-20 h-20 rounded-full opacity-10 -translate-y-4 translate-x-4 ${dot}`} />
               <div className={`w-2 h-2 rounded-full ${dot} mb-3`} />
               <p className="text-2xl font-bold font-heading text-foreground leading-none">{value}</p>
               <p className="text-[11px] text-muted-foreground mt-1">{label}</p>

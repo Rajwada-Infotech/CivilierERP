@@ -204,6 +204,15 @@
     }
 }
 
+@layer components {
+    .glass {
+        @apply bg-card/60 backdrop-blur-xl border border-border/50;
+    }
+    .surface {
+        background: hsl(var(--surface));
+    }
+}
+
 @layer utilities {
     .gradient-text {
         @apply bg-clip-text text-transparent;
@@ -226,12 +235,6 @@
             hsl(var(--accent-2)),
             hsl(var(--accent-1))
         );
-    }
-    .glass {
-        @apply bg-card/60 backdrop-blur-xl border border-border/50;
-    }
-    .surface {
-        background: hsl(var(--surface));
     }
 }
 
@@ -302,4 +305,17 @@
 }
 [data-theme="glass"] ::-webkit-scrollbar-thumb:hover {
     background: rgba(139, 92, 246, 0.6);
+}
+
+/* ── Calendar picker icon ─────────────────────────────────────────────────── */
+/* All dark-background themes (dark/midnight/root/glass): icon is inverted via
+   Tailwind class → white icon. Light theme needs a reset to keep the native
+   dark icon visible on its white background. */
+[data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator,
+[data-theme="light"] input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+[data-theme="light"] input[type="month"]::-webkit-calendar-picker-indicator,
+[data-theme="light"] input[type="week"]::-webkit-calendar-picker-indicator,
+[data-theme="light"] input[type="time"]::-webkit-calendar-picker-indicator {
+    filter: none !important;
+    opacity: 0.6;
 }

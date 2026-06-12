@@ -2512,6 +2512,8 @@ const Payment: React.FC = () => {
                 icon: Banknote,
                 ring: "ring-primary/20",
                 bg: "bg-primary/10",
+                blob: "bg-primary",
+                borderL: "border-l-primary",
                 color: "text-primary",
               },
               {
@@ -2520,6 +2522,8 @@ const Payment: React.FC = () => {
                 icon: Clock,
                 ring: "ring-amber-500/20",
                 bg: "bg-amber-500/10",
+                blob: "bg-amber-500",
+                borderL: "border-l-amber-500",
                 color: "text-amber-500",
               },
               {
@@ -2528,13 +2532,16 @@ const Payment: React.FC = () => {
                 icon: CheckCircle2,
                 ring: "ring-emerald-500/20",
                 bg: "bg-emerald-500/10",
+                blob: "bg-emerald-500",
+                borderL: "border-l-emerald-500",
                 color: "text-emerald-500",
               },
-            ].map(({ label, value, icon: Icon, ring, bg, color }) => (
+            ].map(({ label, value, icon: Icon, ring, bg, blob, borderL, color }) => (
               <div
                 key={label}
-                className={`glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 ${ring}`}
+                className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${ring} ${borderL}`}
               >
+                <div className={`absolute top-0 right-0 w-20 h-20 rounded-full opacity-10 -translate-y-4 translate-x-4 ${blob}`} />
                 <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
                   <Icon size={16} />
                 </div>

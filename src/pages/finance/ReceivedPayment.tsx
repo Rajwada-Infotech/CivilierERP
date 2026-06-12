@@ -681,6 +681,8 @@ export default function ReceivedPaymentPage() {
       icon: IndianRupee,
       ring: "ring-emerald-500/20",
       bg: "bg-emerald-500/10",
+      blob: "bg-emerald-500",
+      borderL: "border-l-emerald-500",
       color: "text-emerald-500",
     },
     {
@@ -690,6 +692,8 @@ export default function ReceivedPaymentPage() {
       icon: ArrowDownCircle,
       ring: "ring-primary/20",
       bg: "bg-primary/10",
+      blob: "bg-primary",
+      borderL: "border-l-primary",
       color: "text-primary",
     },
     {
@@ -699,6 +703,8 @@ export default function ReceivedPaymentPage() {
       icon: CheckCircle2,
       ring: "ring-emerald-500/20",
       bg: "bg-emerald-500/10",
+      blob: "bg-emerald-500",
+      borderL: "border-l-emerald-500",
       color: "text-emerald-500",
     },
     {
@@ -708,6 +714,8 @@ export default function ReceivedPaymentPage() {
       icon: Clock,
       ring: "ring-amber-500/20",
       bg: "bg-amber-500/10",
+      blob: "bg-amber-500",
+      borderL: "border-l-amber-500",
       color: "text-amber-500",
     },
   ];
@@ -831,12 +839,13 @@ export default function ReceivedPaymentPage() {
         </div>
 
         {/* ── Stats ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {stats.map((s) => (
             <div
               key={s.label}
-              className={`glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 ${s.ring}`}
+              className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${s.ring} ${s.borderL}`}
             >
+              <div className={`absolute top-0 right-0 w-20 h-20 rounded-full opacity-10 -translate-y-4 translate-x-4 ${s.blob}`} />
               <div className={`p-2 rounded-lg ${s.bg} ${s.color} shrink-0`}>
                 <s.icon size={16} />
               </div>
