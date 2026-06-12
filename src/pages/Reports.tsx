@@ -140,16 +140,48 @@ const ALL_REPORTS: ReportDef[] = [
       dateToParam: null,
     },
     columns: [
-      { header: "Doc No", accessor: "DocNo" },
+      {
+        header: "Company",
+        accessor: (r) => (r.PCompanyName ?? r.PCompany ?? "—") as string,
+      },
+      {
+        header: "Project",
+        accessor: (r) => (r.PProjectName ?? r.PProject ?? "—") as string,
+      },
+      {
+        header: "Supplier",
+        accessor: (r) => (r.PSupplierName ?? r.PPaymentName ?? "—") as string,
+      },
+      {
+        header: "Amount (Net Payable)",
+        accessor: (r) => fmt(r.PAmount as number),
+      },
+      {
+        header: "Tax",
+        accessor: (r) =>
+          r.TaxAmount != null && Number(r.TaxAmount) !== 0
+            ? fmt(r.TaxAmount as number)
+            : "—",
+      },
+      { header: "Method of Payment", accessor: "PMode" },
+      {
+        header: "Taxable Amt (Base Amt)",
+        accessor: (r) =>
+          r.TaxableAmount != null ? fmt(r.TaxableAmount as number) : "—",
+      },
+      {
+        header: "Fin Year",
+        accessor: (r) => (r.EBFinYear ?? "—") as string,
+      },
+      {
+        header: "Ref Doc",
+        accessor: (r) => (r.RefDoc ?? r.PExpenseRef ?? "—") as string,
+      },
       {
         header: "Date",
         accessor: (r) => (r.PDate ? String(r.PDate).slice(0, 10) : "—"),
       },
-      { header: "Party", accessor: "PPaymentName" },
-      { header: "Mode", accessor: "PMode" },
-      { header: "Amount", accessor: (r) => fmt(r.PAmount as number) },
-      { header: "Bank", accessor: "PBankName" },
-      { header: "Status", accessor: "Status" },
+      { header: "Document Number", accessor: "DocNo" },
     ],
   },
   {
@@ -573,28 +605,35 @@ const ALL_REPORTS: ReportDef[] = [
     description: "Expense bookings & invoices across all projects",
     icon: Receipt,
     color: "#ec4899",
-    apiPath: "/api/expense-booking",
-    // expenseBooking GET / accepts ?finYear=<id>. No date range or company filter.
+    apiPath: "/api/reports/invoice-register",
     filterConfig: {
-      companyParam: null,
-      finYearParam: "finYear",
-      singleDateParam: null,
-      dateFromParam: null,
-      dateToParam: null,
+      companyParam: "companyId",
+      finYearParam: "finYearId",
+      singleDateParam: "dateFrom",
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
     },
     columns: [
-      { header: "Invoice No", accessor: "EDocNo" },
+      { header: "Doc No", accessor: "DocumentNumber" },
       {
         header: "Date",
-        accessor: (r) => (r.EDocDate ? String(r.EDocDate).slice(0, 10) : "—"),
+        accessor: (r) => (r.Date ? String(r.Date).slice(0, 10) : "—"),
       },
-      { header: "Project", accessor: "EProjectName" },
-      { header: "Amount", accessor: (r) => fmt(r.EAmount as number) },
+      { header: "Company", accessor: "Company" },
+      { header: "Project", accessor: (r) => r.Project ?? "—" },
+      { header: "Supplier", accessor: "Supplier" },
+      { header: "Ref Doc", accessor: "RefDoc" },
       {
-        header: "Net Amount",
-        accessor: (r) => fmt((r.ENetAmount ?? r.EAmount) as number),
+        header: "Taxable Amt",
+        accessor: (r) => fmt(r.TaxableAmount as number),
       },
-      { header: "Status", accessor: "EStatus" },
+      { header: "Tax", accessor: (r) => fmt(r.TaxAmount as number) },
+      { header: "Net Payable", accessor: (r) => fmt(r.NetPayable as number) },
+      {
+        header: "Method of Payment",
+        accessor: (r) => r.MethodOfPayment ?? "—",
+      },
+      { header: "Fin Year", accessor: (r) => r.FinYear ?? "—" },
     ],
   },
   {
