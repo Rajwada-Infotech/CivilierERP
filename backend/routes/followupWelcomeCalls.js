@@ -75,13 +75,8 @@ function normalizeNumber(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-async function generateCallNo(pool) {
-  const result = await pool.request().query(`
-    SELECT ISNULL(MAX(Id), 0) AS maxId FROM dbo.FollowupWelcomeCalls
-  `);
-  const next = result.recordset[0].maxId + 1;
-  return `WC${String(next).padStart(5, "0")}`;
-}
+// BUG-19 fix: CallNo is derived from SCOPE_IDENTITY() after insert so that
+// concurrent POSTs never race on MAX(Id) and produce duplicate call numbers.
 
 // ── GET /meta/options ─────────────────────────────────────────────────────────
 router.get("/meta/options", async (req, res) => {
@@ -245,11 +240,9 @@ router.post("/", async (req, res) => {
 
   try {
     const pool = getPool();
-    const callNo = await generateCallNo(pool);
 
     const result = await pool
       .request()
-      .input("CallNo", sql.NVarChar(50), callNo)
       .input("BookingId", sql.Int, normalizeNumber(BookingId))
       .input("ApplicantId", sql.Int, normalizeNumber(ApplicantId))
       .input("CallDate", sql.Date, CallDate ? new Date(CallDate) : new Date())
@@ -273,17 +266,21 @@ router.post("/", async (req, res) => {
       .input("Status", sql.NVarChar(50), normalizeText(Status) || "Scheduled")
       .input("CreatedBy", sql.NVarChar(100), userName).query(`
         INSERT INTO dbo.FollowupWelcomeCalls
-          (CallNo, BookingId, ApplicantId, CallDate, CallTime, Duration,
+          (BookingId, ApplicantId, CallDate, CallTime, Duration,
            Outcome, BankSelected, LoanRequired, ExpectedLoanAmount,
            PreferredBanker, AssignedTo, Notes, Status, CreatedBy)
         VALUES
-          (@CallNo, @BookingId, @ApplicantId, @CallDate, @CallTime, @Duration,
+          (@BookingId, @ApplicantId, @CallDate, @CallTime, @Duration,
            @Outcome, @BankSelected, @LoanRequired, @ExpectedLoanAmount,
            @PreferredBanker, @AssignedTo, @Notes, @Status, @CreatedBy);
-        SELECT SCOPE_IDENTITY() AS Id, @CallNo AS CallNo;
+        DECLARE @NewId INT = CAST(SCOPE_IDENTITY() AS INT);
+        DECLARE @CallNo NVARCHAR(50) = N'WC' + RIGHT('00000' + CAST(@NewId AS NVARCHAR(5)), 5);
+        UPDATE dbo.FollowupWelcomeCalls SET CallNo = @CallNo WHERE Id = @NewId;
+        SELECT @NewId AS Id, @CallNo AS CallNo;
       `);
 
     const id = result.recordset[0].Id;
+    const callNo = result.recordset[0].CallNo;
 
     // ── Auto-draft Organisation NOC if bank was selected ────────────────────
     if (BankSelected) {
