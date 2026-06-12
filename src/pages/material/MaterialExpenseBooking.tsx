@@ -75,6 +75,7 @@ import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import {
   blankForm,
   computeBreakdown,
+  computeGrnGst,
   computeGrnNetWithTerms,
   dbToRecord,
   fmt,
@@ -1633,7 +1634,7 @@ export default function MaterialExpenseBooking() {
                 setForm((prev) => ({
                   ...prev,
                   bookingReference: canonicalDocNo,
-                  basicAmount: cleanTotal,
+                  basicAmount: Math.round(t.totalBase * 100) / 100,
                   cgstRate: Math.round(avgCGST * 100) / 100,
                   sgstRate: Math.round(avgSGST * 100) / 100,
                 }));
@@ -1789,6 +1790,13 @@ export default function MaterialExpenseBooking() {
               supplier: r.SupplierName ?? prev.supplier,
               projectSite: r.ProjectId ? String(r.ProjectId) : prev.projectSite,
             }));
+            // Fetch GST breakdown so the form's bd uses exact per-item totals,
+            // ensuring Net Payable = Gross Amount for existing GRN-linked records.
+            apiFetch(`/api/grns/${sourceId}/gst-breakdown`)
+              .then((bd: any) => {
+                setGstBreakdown(bd);
+              })
+              .catch(() => { /* non-fatal */ });
           })
           .catch((err) => {
             toast.error(
@@ -2139,14 +2147,21 @@ export default function MaterialExpenseBooking() {
     }
   };
 
-  const bd = computeBreakdown(
-    form.basicAmount,
-    form.cgstRate,
-    form.sgstRate,
-    form.billingTerms && form.billingTerms.length > 0
-      ? form.billingTerms
-      : form.discount,
-  );
+  // For GRN-linked bookings with a live GST breakdown, use exact per-item totals.
+  // Net Payable = Gross Amount (incl. GST) — no billing term additions on top.
+  const bd = (isGRN && gstBreakdown && gstBreakdown.totals.totalInclGST > 0)
+    ? (() => {
+        const base = computeGrnGst(gstBreakdown);
+        return { ...base, netAmount: base.grossAmount };
+      })()
+    : computeBreakdown(
+        form.basicAmount,
+        form.cgstRate,
+        form.sgstRate,
+        form.billingTerms && form.billingTerms.length > 0
+          ? form.billingTerms
+          : form.discount,
+      );
   const filteredRecords =
     statusFilter && statusFilter !== "All"
       ? records.filter((r) => r.status === statusFilter)
