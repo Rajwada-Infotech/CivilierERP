@@ -2673,6 +2673,69 @@ const Payment: React.FC = () => {
                     );
                   })()}
 
+                {!form.expenseRef && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-1">
+                    <Field label="Company">
+                      <div className="relative">
+                        <Building2 size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                        <select
+                          value={(() => {
+                            const asNum = parseInt(form.company, 10);
+                            if (!isNaN(asNum) && String(asNum) === form.company.trim()) return String(asNum);
+                            const matched = companyOptions.find(c => c.label === form.company);
+                            return matched ? String(matched.id) : "";
+                          })()}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            const label = companyOptions.find(c => String(c.id) === id)?.label || "";
+                            set("company", label);
+                            set("project", "");
+                            set("projectSite", "");
+                          }}
+                          className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Select company…</option>
+                          {companyOptions.map(c => (
+                            <option key={c.id} value={String(c.id)}>{c.label}</option>
+                          ))}
+                        </select>
+                        <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                      </div>
+                    </Field>
+                    <Field label="Project / Site">
+                      <div className="relative">
+                        <FolderKanban size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                        <select
+                          value={(() => {
+                            const matched = projectOptions.find(p => p.label === form.project || p.label === form.projectSite);
+                            return matched ? String(matched.id) : "";
+                          })()}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            const label = projectOptions.find(p => String(p.id) === id)?.label || "";
+                            set("project", label);
+                            set("projectSite", label);
+                          }}
+                          className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Select project…</option>
+                          {filterProjectsByCompany(
+                            projectOptions,
+                            (() => {
+                              const asNum = parseInt(form.company, 10);
+                              if (!isNaN(asNum) && String(asNum) === form.company.trim()) return String(asNum);
+                              return String(companyOptions.find(c => c.label === form.company)?.id ?? "");
+                            })()
+                          ).map(p => (
+                            <option key={p.id} value={String(p.id)}>{p.label}</option>
+                          ))}
+                        </select>
+                        <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                      </div>
+                    </Field>
+                  </div>
+                )}
+
                 {form.expenseRef && (
                   <AutoFillBanner
                     docNo={form.expenseRef}
