@@ -75,7 +75,6 @@ import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import {
   blankForm,
   computeBreakdown,
-  computeGrnGst,
   computeGrnNetWithTerms,
   dbToRecord,
   fmt,
@@ -2147,12 +2146,27 @@ export default function MaterialExpenseBooking() {
     }
   };
 
+  const isGRN = selectedDoc?.kind === "GRN";
   // For GRN-linked bookings with a live GST breakdown, use exact per-item totals.
   // Net Payable = Gross Amount (incl. GST) — no billing term additions on top.
-  const bd = (isGRN && gstBreakdown && gstBreakdown.totals.totalInclGST > 0)
+  const bd = (selectedDoc?.kind === "GRN" && gstBreakdown && gstBreakdown.totals.totalInclGST > 0)
     ? (() => {
-        const base = computeGrnGst(gstBreakdown);
-        return { ...base, netAmount: base.grossAmount };
+        const t = gstBreakdown.totals;
+        const gross = t.totalBase + t.totalCGST + t.totalSGST;
+        const rounded = Math.round(gross * 100) / 100;
+        return {
+          basicAmount: t.totalBase,
+          discountAmount: 0,
+          taxableAmount: t.totalBase,
+          cgstAmount: t.totalCGST,
+          sgstAmount: t.totalSGST,
+          igstAmount: 0,
+          grossAmount: rounded,
+          roundOff: 0,
+          netAmount: rounded,
+          preGstTerms: [],
+          postGstTerms: [],
+        };
       })()
     : computeBreakdown(
         form.basicAmount,
@@ -2194,7 +2208,6 @@ export default function MaterialExpenseBooking() {
     selectedDoc?.kind === "PO" ||
     selectedDoc?.kind === "WORK_DONE" ||
     selectedDoc?.kind === "WO_PO";
-  const isGRN = selectedDoc?.kind === "GRN";
   const hasParentGST = isPOorWO;
   const gstHighlighted = hasParentGST && !!selectedDoc?.gst?.applicable;
 
