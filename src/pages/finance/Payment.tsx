@@ -2203,9 +2203,14 @@ const Payment: React.FC = () => {
             );
             return matched?.label || String(detail.ECompanyId ?? "");
           })(),
+          // For GRN-linked bookings, amount = stored net (ENetAmount) which already
+          // reflects billing terms applied on the GRN total.
           amount: detail.ENetAmount ?? detail.EAmount ?? null,
           docType: detail.DocTypeName || detail.EDocumentType || "",
-          baseAmount: detail.EAmount ?? null,
+          // baseAmount: for GRN records use live GRN total (incl. GST) as the base for breakdown display.
+          baseAmount: (detail as any).EGrnTotalAmount
+            ? parseFloat((detail as any).EGrnTotalAmount)
+            : (detail.EAmount ?? null),
           cgstRate: detail.ECgstRate ?? null,
           sgstRate: detail.ESgstRate ?? null,
           igstRate: detail.EIgstRate ?? null,
@@ -2983,8 +2988,11 @@ const Payment: React.FC = () => {
                         (t) => t.appliedOn === "post-gst",
                       );
 
-                      // Compute taxable after pre-GST terms
+                      // Payment page: billing terms are display-only.
+                      // taxable and gross are NOT modified by terms —
+                      // net is always exactly equal to gross.
                       let taxable = base;
+                      // Pre-GST rows: display amounts only, do NOT mutate taxable
                       const preGstRows: {
                         term: (typeof preGst)[0];
                         amt: number;
@@ -2995,8 +3003,6 @@ const Payment: React.FC = () => {
                             ? (taxable * t.value) / 100
                             : t.value;
                         preGstRows.push({ term: t, amt });
-                        if (t.deductionType === "Addition") taxable += amt;
-                        else taxable = Math.max(0, taxable - amt);
                       }
 
                       // When a GRN breakdown is available, use its exact per-item sums
@@ -3010,16 +3016,24 @@ const Payment: React.FC = () => {
                       const igst = grnGstBreakdown
                         ? 0
                         : (taxable * igstRate) / 100;
-                      let gross = grnGstBreakdown
+                      const gross = grnGstBreakdown
                         ? grnGstBreakdown.totals.totalInclGST
                         : taxable + cgst + sgst + igst;
 
-                      // Net Payable = Gross Amount (no post-GST deductions, no round-off adjustment)
+                      // Post-GST rows: display amounts only, do NOT mutate gross
                       const postGstRows: {
                         term: (typeof postGst)[0];
                         amt: number;
                       }[] = [];
+                      for (const t of postGst) {
+                        const amt =
+                          t.type === "percentage"
+                            ? (gross * t.value) / 100
+                            : t.value;
+                        postGstRows.push({ term: t, amt });
+                      }
 
+                      // Net Payable = Gross Amount (billing terms are informational only)
                       const roundOff = 0;
                       const net = gross;
 
