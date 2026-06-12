@@ -191,23 +191,41 @@ export function ExpenseBookingPreviewModal({
     masterBillingTerms,
   ]);
 
-  // For GRN: compute Net Payable directly from fetched GRN gross + billing terms.
-  // This is the authoritative calculation — no stored amounts, no rbd recompute.
+  // For GRN: compute Net Payable from GRN totals + billing terms.
+  // pre-GST terms: apply on totalBase, then re-add GST on adjusted base.
+  // post-GST terms: apply on totalInclGST directly.
   const grnNetPayable = React.useMemo(() => {
     if (!grnBreakdown) return null;
-    let running = grnBreakdown.totals.totalInclGST;
+    const { totalBase, totalCGST, totalSGST, totalInclGST } = grnBreakdown.totals;
+    // Derive effective GST rates from the breakdown totals
+    const cgstRate = totalBase > 0 ? (totalCGST / totalBase) * 100 : 0;
+    const sgstRate = totalBase > 0 ? (totalSGST / totalBase) * 100 : 0;
+
+    let runningBase = totalBase;
+    let runningGross = totalInclGST;
+
     for (const t of billingTerms) {
-      const amt =
-        t.type === "percentage"
-          ? (running * (t.value ?? 0)) / 100
+      const isPreGst = (t.appliedOn ?? "pre-gst") !== "post-gst";
+      if (isPreGst) {
+        // Apply on pre-GST base, then recompute gross
+        const amt = t.type === "percentage"
+          ? (runningBase * (t.value ?? 0)) / 100
           : (t.value ?? 0);
-      if (t.deductionType === "Addition") {
-        running += amt;
+        if (t.deductionType === "Addition") runningBase += amt;
+        else runningBase = Math.max(0, runningBase - amt);
+        const newCgst = (runningBase * cgstRate) / 100;
+        const newSgst = (runningBase * sgstRate) / 100;
+        runningGross = runningBase + newCgst + newSgst;
       } else {
-        running = Math.max(0, running - amt);
+        // Apply directly on gross (post-GST)
+        const amt = t.type === "percentage"
+          ? (runningGross * (t.value ?? 0)) / 100
+          : (t.value ?? 0);
+        if (t.deductionType === "Addition") runningGross += amt;
+        else runningGross = Math.max(0, runningGross - amt);
       }
     }
-    return Math.round(running);
+    return Math.round(runningGross * 100) / 100;
   }, [grnBreakdown, billingTerms]);
 
   // ── Guard: nothing to render ───────────────────────────────────────────────
@@ -510,12 +528,12 @@ export function ExpenseBookingPreviewModal({
                       not rbd, so they always show regardless of applicable flag state.
                       Amounts use the actual GRN totals as the base. */}
                   {billingTerms.map((t: any, i: number) => {
-                    const isPreGst = t.appliedOn !== "post-gst";
-                    // For GRN bookings GST is already baked into the GRN total.
-                    // Always apply billing terms on totalInclGST — pre-GST vs post-GST
-                    // distinction is irrelevant here. This keeps displayed amounts
-                    // in sync with grnNetPayable (which also runs on totalInclGST).
-                    const base = grnBreakdown.totals.totalInclGST;
+                    const isPreGst = (t.appliedOn ?? "pre-gst") !== "post-gst";
+                    // pre-GST terms apply on the pre-tax base;
+                    // post-GST terms apply on the incl-GST total.
+                    const base = isPreGst
+                      ? grnBreakdown.totals.totalBase
+                      : grnBreakdown.totals.totalInclGST;
                     const amt =
                       t.type === "percentage"
                         ? (base * (t.value ?? 0)) / 100
