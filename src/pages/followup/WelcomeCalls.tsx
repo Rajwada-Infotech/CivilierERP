@@ -485,7 +485,7 @@ export function WelcomeCallsPage() {
 
   const handleSubmit = () => {
     if (!form.ApplicantId) {
-      toast.error("Please select a booking");
+      toast.error("Please select a booking first — ApplicantId is required");
       return;
     }
     createMutation.mutate({

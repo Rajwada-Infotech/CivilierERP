@@ -327,6 +327,8 @@ router.patch("/:id/step", async (req, res) => {
       .input("UpdatedBy", sql.NVarChar(100),     userName)
       .query(query);
 
+    if (!result.rowsAffected[0])
+      return res.status(404).json({ error: "Not found" });
     logAudit({ module: "LegalMilestone", recordId: id, action: "StepUpdated", stepName: stepField, newValue: status, changedBy: userName });
     res.json({ success: true });
   } catch (err) {
@@ -349,7 +351,7 @@ router.put("/:id", async (req, res) => {
     return res.status(400).json({ error: `OverallStatus must be one of: ${OVERALL_STATUS_OPTIONS.join(", ")}` });
 
   try {
-    await getPool().request()
+    const result = await getPool().request()
       .input("Id",            sql.Int,              id)
       .input("OverallStatus", sql.NVarChar(30),      overallStatus)
       .input("CurrentStep",   sql.Int,              normalizeNumber(b?.CurrentStep) || 1)
@@ -364,6 +366,8 @@ router.put("/:id", async (req, res) => {
             UpdatedAt     = SYSDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
       `);
+    if (!result.rowsAffected[0])
+      return res.status(404).json({ error: "Not found" });
     logAudit({ module: "LegalMilestone", recordId: id, action: "Updated", fieldName: "OverallStatus", newValue: overallStatus, changedBy: userName });
     res.json({ success: true });
   } catch (err) {
@@ -381,7 +385,7 @@ router.delete("/:id", async (req, res) => {
   if (!userName) return;
 
   try {
-    await getPool().request()
+    const result = await getPool().request()
       .input("Id",        sql.Int,         id)
       .input("UpdatedBy", sql.NVarChar(100), userName)
       .query(`
@@ -389,6 +393,8 @@ router.delete("/:id", async (req, res) => {
         SET IsDeleted = 1, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
       `);
+    if (!result.rowsAffected[0])
+      return res.status(404).json({ error: "Not found" });
     logAudit({ module: "LegalMilestone", recordId: id, action: "Deleted", changedBy: userName });
     res.json({ success: true });
   } catch (err) {
