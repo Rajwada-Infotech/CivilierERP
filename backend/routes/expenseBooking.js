@@ -98,22 +98,30 @@ function applyBillingTermsToAmount(
   const preGstTerms = activeTerms.filter((t) => t.appliedOn !== "post-gst");
   const postGstTerms = activeTerms.filter((t) => t.appliedOn === "post-gst");
 
-  // Apply pre-GST terms to basicAmount then recompute grossAmount
-  let runningBase = toNumber(basicAmount);
-  for (const t of preGstTerms) {
-    const amt =
-      t.type === "percentage"
-        ? (runningBase * toNumber(t.value)) / 100
-        : toNumber(t.value);
-    if (t.deductionType === "Addition") {
-      runningBase += amt;
-    } else {
-      runningBase = Math.max(0, runningBase - Math.min(amt, runningBase));
+  // Apply pre-GST terms to basicAmount then recompute grossAmount.
+  // If there are no pre-GST terms, use the passed grossAmount directly as the
+  // post-GST base — this avoids re-deriving gross from basicAmount which may be
+  // stale (e.g. EAmount stored before a GRN amendment).
+  let running;
+  if (preGstTerms.length === 0) {
+    running = roundMoney(toNumber(grossAmount));
+  } else {
+    let runningBase = toNumber(basicAmount);
+    for (const t of preGstTerms) {
+      const amt =
+        t.type === "percentage"
+          ? (runningBase * toNumber(t.value)) / 100
+          : toNumber(t.value);
+      if (t.deductionType === "Addition") {
+        runningBase += amt;
+      } else {
+        runningBase = Math.max(0, runningBase - Math.min(amt, runningBase));
+      }
     }
+    const cgstAmt = (runningBase * toNumber(cgstRate)) / 100;
+    const sgstAmt = (runningBase * toNumber(sgstRate)) / 100;
+    running = roundMoney(runningBase + cgstAmt + sgstAmt);
   }
-  const cgstAmt = (runningBase * toNumber(cgstRate)) / 100;
-  const sgstAmt = (runningBase * toNumber(sgstRate)) / 100;
-  let running = roundMoney(runningBase + cgstAmt + sgstAmt);
 
   // Apply post-GST terms on top of gross
   for (const t of postGstTerms) {
@@ -914,13 +922,13 @@ router.get("/:id", async (req, res) => {
 
     // For GRN-linked bookings, recompute ENetAmount live from the GRN total + billing terms.
     // The stored ENetAmount may be stale if the GRN was amended after the booking was created.
-    let row = { ...raw };
+    let liveENetAmount = raw.ENetAmount;
     if (
       raw.ESourceType === "GRN" &&
       raw.EGrnTotalAmount != null &&
       parseFloat(raw.EGrnTotalAmount) > 0
     ) {
-      const liveNet = applyBillingTermsToAmount(
+      liveENetAmount = applyBillingTermsToAmount(
         parseFloat(raw.EGrnTotalAmount),
         parseFloat(raw.EAmount ?? 0),
         parseFloat(raw.ECgstRate ?? 0),
@@ -928,10 +936,12 @@ router.get("/:id", async (req, res) => {
         raw.EBillingTermsData,
         raw.EDiscountData,
       );
-      row = { ...raw, ENetAmount: liveNet };
+      console.log(
+        `[/:id] Eid=${raw.Eid} ESourceType=${raw.ESourceType} EGrnTotalAmount=${raw.EGrnTotalAmount} stored=${raw.ENetAmount} live=${liveENetAmount} billingTerms=${JSON.stringify(raw.EBillingTermsData)}`,
+      );
     }
 
-    res.json(row);
+    res.json({ ...raw, ENetAmount: liveENetAmount });
   } catch (err) {
     console.error("Get by id error:", err.message);
     res.status(500).json({ error: err.message });
