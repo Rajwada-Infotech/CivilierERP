@@ -394,7 +394,9 @@ export function LegalMilestonesPage() {
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Overall Status
                 </th>
-                <th className="w-10" />
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -474,26 +476,31 @@ export function LegalMilestonesPage() {
                         </span>
                       </td>
                       <td
-                        className="px-3 py-3 text-center"
+                        className="px-3.5 py-2.5"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <button
-                          onClick={() => setDeleteTarget(rec)}
-                          className="p-1 rounded hover:bg-red-50 hover:text-red-500 text-muted-foreground transition-colors"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                        {/* FIX #8: stopPropagation on audit button so it doesn't toggle row */}
-                        <button
-                          title="History"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setAuditTarget({ id: rec.Id, no: rec.MilestoneNo ?? `#${rec.Id}` });
-                          }}
-                          className="p-1 rounded hover:bg-primary/10 hover:text-primary text-muted-foreground transition-colors"
-                        >
-                          <Clock size={13} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            title="History"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAuditTarget({ id: rec.Id, no: rec.MilestoneNo ?? `#${rec.Id}` });
+                            }}
+                            className="p-1 rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                          >
+                            <Clock size={14} />
+                          </button>
+                          <button
+                            title="Delete"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteTarget(rec);
+                            }}
+                            className="p-1 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
 
