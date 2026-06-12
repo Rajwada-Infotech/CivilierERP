@@ -115,8 +115,7 @@ router.get("/summary", async (req, res) => {
           WHEN 8 THEN lm.FinalExecutionDue
         END AS CurrentStepDue
       FROM dbo.FollowupLegalMilestones lm
-      INNER JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = lm.ApplicantId
-      WHERE lm.IsDeleted = 0 AND lm.OverallStatus NOT IN ('Completed','Cancelled')
+      INNER JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = lm.ApplicantId AND ahm.LHeadType = 'A'
       ORDER BY CurrentStepDue ASC, lm.CreatedAt ASC
     `);
 
@@ -140,7 +139,7 @@ router.get("/summary", async (req, res) => {
         pn.NoticeType, pn.Status,
         DATEDIFF(day, CAST(SYSDATETIME() AS DATE), pn.ScheduledPossDate) AS DaysRemaining
       FROM dbo.FollowupPossessionNotices pn
-      INNER JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = pn.ApplicantId
+      INNER JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = pn.ApplicantId AND ahm.LHeadType = 'A'
       LEFT JOIN dbo.FollowupUnitSelections fus ON fus.Id = pn.UnitSelectionId
       WHERE pn.IsDeleted = 0 AND pn.Status NOT IN ('Cancelled')
       ORDER BY pn.ScheduledPossDate ASC

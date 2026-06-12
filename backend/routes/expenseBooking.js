@@ -98,22 +98,30 @@ function applyBillingTermsToAmount(
   const preGstTerms = activeTerms.filter((t) => t.appliedOn !== "post-gst");
   const postGstTerms = activeTerms.filter((t) => t.appliedOn === "post-gst");
 
-  // Apply pre-GST terms to basicAmount then recompute grossAmount
-  let runningBase = toNumber(basicAmount);
-  for (const t of preGstTerms) {
-    const amt =
-      t.type === "percentage"
-        ? (runningBase * toNumber(t.value)) / 100
-        : toNumber(t.value);
-    if (t.deductionType === "Addition") {
-      runningBase += amt;
-    } else {
-      runningBase = Math.max(0, runningBase - Math.min(amt, runningBase));
+  // Apply pre-GST terms to basicAmount then recompute grossAmount.
+  // If there are no pre-GST terms, use the passed grossAmount directly as the
+  // post-GST base — this avoids re-deriving gross from basicAmount which may be
+  // stale (e.g. EAmount stored before a GRN amendment).
+  let running;
+  if (preGstTerms.length === 0) {
+    running = roundMoney(toNumber(grossAmount));
+  } else {
+    let runningBase = toNumber(basicAmount);
+    for (const t of preGstTerms) {
+      const amt =
+        t.type === "percentage"
+          ? (runningBase * toNumber(t.value)) / 100
+          : toNumber(t.value);
+      if (t.deductionType === "Addition") {
+        runningBase += amt;
+      } else {
+        runningBase = Math.max(0, runningBase - Math.min(amt, runningBase));
+      }
     }
+    const cgstAmt = (runningBase * toNumber(cgstRate)) / 100;
+    const sgstAmt = (runningBase * toNumber(sgstRate)) / 100;
+    running = roundMoney(runningBase + cgstAmt + sgstAmt);
   }
-  const cgstAmt = (runningBase * toNumber(cgstRate)) / 100;
-  const sgstAmt = (runningBase * toNumber(sgstRate)) / 100;
-  let running = roundMoney(runningBase + cgstAmt + sgstAmt);
 
   // Apply post-GST terms on top of gross
   for (const t of postGstTerms) {
@@ -431,19 +439,16 @@ async function handleChainStatus(req, res) {
 }
 
 // ─── GET /options ─────────────────────────────────────────────────────────────
-router.get(
-  "/options",
-  cache("expense-booking-options", 120),
-  async (req, res) => {
-    try {
-      const pool = getPool();
-      const finYear = (req.query.finYear || "").toString().trim() || null;
+router.get("/options", async (req, res) => {
+  try {
+    const pool = getPool();
+    const finYear = (req.query.finYear || "").toString().trim() || null;
 
-      // Regular bookings: exclude EMI-enabled ones (they are paid via installments)
-      // and exclude any already linked to an active DebitNote
-      const bookingsResult = await pool
-        .request()
-        .input("FinYear", sql.NVarChar(20), finYear).query(`
+    // Regular bookings: exclude EMI-enabled ones (they are paid via installments)
+    // and exclude any already linked to an active DebitNote
+    const bookingsResult = await pool
+      .request()
+      .input("FinYear", sql.NVarChar(20), finYear).query(`
         SELECT
           eb.Eid                          AS id,
           eb.Eid                          AS value,
@@ -456,13 +461,7 @@ router.get(
             WHEN eb.ESourceType IN ('PO','WO_PO','WORK_DONE') THEN ISNULL(eb.EName, '')
             ELSE ISNULL(eb.EName, '')
           END                             AS supplierName,
-          -- For GRN-linked bookings use the live GRN total (incl. GST);
-          -- it is always up-to-date whereas ENetAmount may be stale.
-          CASE
-            WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
-            THEN grn.TotalAmount
-            ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
-          END                             AS amount,
+          ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS amount,
           ISNULL(eb.ECompanyId, 0)        AS companyId,
           ISNULL(e.name, '')              AS companyName,
           ISNULL(eb.EFinYear, '')         AS financialYear,
@@ -472,13 +471,7 @@ router.get(
             N' — ',
             COALESCE(proj.name, eb.EProjectName, ''),
             N' (₹',
-            CAST(CAST(
-              CASE
-                WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
-                THEN grn.TotalAmount
-                ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
-              END
-            AS BIGINT) AS NVARCHAR(20)),
+            CAST(CAST(ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS BIGINT) AS NVARCHAR(20)),
             ')'
           ) AS label
         FROM dbo.ExpenseBooking eb
@@ -497,10 +490,10 @@ router.get(
         ORDER BY eb.Eid DESC
       `);
 
-      // EMI installments: only show Pending ones
-      const emiResult = await pool
-        .request()
-        .input("FinYear", sql.NVarChar(20), finYear).query(`
+    // EMI installments: only show Pending ones
+    const emiResult = await pool
+      .request()
+      .input("FinYear", sql.NVarChar(20), finYear).query(`
         SELECT
           ei.Id                        AS id,
           ei.ExpenseBookingId          AS expenseBookingId,
@@ -548,50 +541,49 @@ router.get(
         ORDER BY ei.ExpenseBookingId DESC, ei.InstallmentNo ASC
       `);
 
-      const bookingOptions = bookingsResult.recordset.map((r) => ({
-        id: String(r.id),
-        value: String(r.value),
-        label: r.label,
-        type: "booking",
-        expenseBookingId: r.id,
-        docNo: r.docNo,
-        projectName: r.projectName,
-        partyName: r.partyName || "",
-        supplierName: r.supplierName || "",
-        amount: parseFloat(r.amount) || 0,
-        companyId: r.companyId || null,
-        companyName: r.companyName || "",
-        financialYear: r.financialYear || "",
-      }));
+    const bookingOptions = bookingsResult.recordset.map((r) => ({
+      id: String(r.id),
+      value: String(r.value),
+      label: r.label,
+      type: "booking",
+      expenseBookingId: r.id,
+      docNo: r.docNo,
+      projectName: r.projectName,
+      partyName: r.partyName || "",
+      supplierName: r.supplierName || "",
+      amount: parseFloat(r.amount) || 0,
+      companyId: r.companyId || null,
+      companyName: r.companyName || "",
+      financialYear: r.financialYear || "",
+    }));
 
-      const emiOptions = emiResult.recordset.map((r) => ({
-        id: `emi-${r.expenseBookingId}-${r.installmentNo}`,
-        value: `emi-${r.expenseBookingId}-${r.installmentNo}`,
-        label: r.label,
-        type: "emi",
-        expenseBookingId: r.expenseBookingId,
-        installmentNo: r.installmentNo,
-        refNumber: r.refNumber,
-        dueDate: r.dueDate ? String(r.dueDate).slice(0, 10) : null,
-        docNo: r.refNumber || r.parentDocNo,
-        projectName: r.projectName,
-        partyName: r.partyName || "",
-        supplierName: r.supplierName || "",
-        amount: parseFloat(r.amount) || 0,
-        companyId: r.companyId || null,
-        companyName: r.companyName || "",
-        financialYear: r.financialYear || "",
-        status: r.status,
-        parentDocNo: r.parentDocNo,
-      }));
+    const emiOptions = emiResult.recordset.map((r) => ({
+      id: `emi-${r.expenseBookingId}-${r.installmentNo}`,
+      value: `emi-${r.expenseBookingId}-${r.installmentNo}`,
+      label: r.label,
+      type: "emi",
+      expenseBookingId: r.expenseBookingId,
+      installmentNo: r.installmentNo,
+      refNumber: r.refNumber,
+      dueDate: r.dueDate ? String(r.dueDate).slice(0, 10) : null,
+      docNo: r.refNumber || r.parentDocNo,
+      projectName: r.projectName,
+      partyName: r.partyName || "",
+      supplierName: r.supplierName || "",
+      amount: parseFloat(r.amount) || 0,
+      companyId: r.companyId || null,
+      companyName: r.companyName || "",
+      financialYear: r.financialYear || "",
+      status: r.status,
+      parentDocNo: r.parentDocNo,
+    }));
 
-      res.json([...bookingOptions, ...emiOptions]);
-    } catch (err) {
-      console.error("Options error:", err.message);
-      res.status(500).json({ error: err.message });
-    }
-  },
-);
+    res.json([...bookingOptions, ...emiOptions]);
+  } catch (err) {
+    console.error("Options error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ─── GET all (paginated) ──────────────────────────────────────────────────────
 router.get("/", cache("expense-booking", 60), async (req, res) => {
@@ -901,7 +893,13 @@ router.get("/:id", async (req, res) => {
                CASE
                  WHEN eb.ESourceType = 'GRN' AND grn_det.GRNID IS NOT NULL THEN grn_supp_det.LHeadName
                  ELSE eb.EName
-               END AS ESupplierName
+               END AS ESupplierName,
+               -- Live GRN total (incl. GST) so detail modal always shows current value
+               CASE
+                 WHEN eb.ESourceType = 'GRN' AND grn_det.TotalAmount IS NOT NULL AND grn_det.TotalAmount > 0
+                 THEN grn_det.TotalAmount
+                 ELSE NULL
+               END AS EGrnTotalAmount
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
         LEFT JOIN dbo.enterprise ec ON ec.id = eb.ECompanyId
@@ -919,7 +917,31 @@ router.get("/:id", async (req, res) => {
       `);
     if (!result.recordset.length)
       return res.status(404).json({ error: "Not found" });
-    res.json(result.recordset[0]);
+
+    const raw = result.recordset[0];
+
+    // For GRN-linked bookings, recompute ENetAmount live from the GRN total + billing terms.
+    // The stored ENetAmount may be stale if the GRN was amended after the booking was created.
+    let liveENetAmount = raw.ENetAmount;
+    if (
+      raw.ESourceType === "GRN" &&
+      raw.EGrnTotalAmount != null &&
+      parseFloat(raw.EGrnTotalAmount) > 0
+    ) {
+      liveENetAmount = applyBillingTermsToAmount(
+        parseFloat(raw.EGrnTotalAmount),
+        parseFloat(raw.EAmount ?? 0),
+        parseFloat(raw.ECgstRate ?? 0),
+        parseFloat(raw.ESgstRate ?? 0),
+        raw.EBillingTermsData,
+        raw.EDiscountData,
+      );
+      console.log(
+        `[/:id] Eid=${raw.Eid} ESourceType=${raw.ESourceType} EGrnTotalAmount=${raw.EGrnTotalAmount} stored=${raw.ENetAmount} live=${liveENetAmount} billingTerms=${JSON.stringify(raw.EBillingTermsData)}`,
+      );
+    }
+
+    res.json({ ...raw, ENetAmount: liveENetAmount });
   } catch (err) {
     console.error("Get by id error:", err.message);
     res.status(500).json({ error: err.message });

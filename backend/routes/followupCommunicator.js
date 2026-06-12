@@ -12,6 +12,7 @@ const router = express.Router();
 const nodemailer = require("nodemailer");
 const axios = require("axios");
 const sanitizeHtml = require("sanitize-html");
+const { getPool } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
@@ -163,7 +164,7 @@ async function dispatch(
   pool,
   { channel, recipient, subject, body, applicantId, bookingId, sentBy },
 ) {
-  const cfg = await getConfig(pool, `${channel}-api`);
+  const cfg = await getConfig(pool, channel);
   if (!cfg) {
     throw new Error(`Channel '${channel}' is not configured or inactive`);
   }
@@ -234,7 +235,7 @@ function buildWelcomeTemplates({
 // POST /api/followup-communicator/send
 // Body: { channel, recipient, subject?, body, applicantId?, bookingId? }
 router.post("/send", async (req, res) => {
-  const pool = req.app.locals.db;
+  const pool = getPool();
   const { channel, recipient, subject, body, applicantId, bookingId } =
     req.body;
 
@@ -281,7 +282,7 @@ router.post("/send", async (req, res) => {
 //         applicantName, email?, phone?, projectName?, unitNo?, bookingDate?,
 //         contactName?, contactPhone? }
 router.post("/trigger", async (req, res) => {
-  const pool = req.app.locals.db;
+  const pool = getPool();
   const {
     triggerType,
     applicantId,
@@ -411,7 +412,7 @@ router.post("/trigger", async (req, res) => {
 
 // GET /api/followup-communicator/logs?applicantId=&bookingId=&channel=&status=&page=&limit=
 router.get("/logs", async (req, res) => {
-  const pool = req.app.locals.db;
+  const pool = getPool();
   const {
     applicantId,
     bookingId,
@@ -484,7 +485,7 @@ router.get("/logs", async (req, res) => {
 
 // GET /api/followup-communicator/logs/:id
 router.get("/logs/:id", async (req, res) => {
-  const pool = req.app.locals.db;
+  const pool = getPool();
   try {
     const result = await pool
       .request()
