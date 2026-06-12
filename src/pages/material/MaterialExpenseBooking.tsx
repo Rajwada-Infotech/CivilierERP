@@ -75,6 +75,7 @@ import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import {
   blankForm,
   computeBreakdown,
+  computeGrnNetWithTerms,
   dbToRecord,
   fmt,
   generateEmiSchedule,
@@ -2150,7 +2151,21 @@ export default function MaterialExpenseBooking() {
     statusFilter && statusFilter !== "All"
       ? records.filter((r) => r.status === statusFilter)
       : records;
-  const totalNet = totalBookedAmount;
+  const totalNet = records.reduce((sum, r) => {
+    if (r.status === "Draft") return sum;
+    if (r.grnTotalAmount != null) {
+      return (
+        sum + computeGrnNetWithTerms(r.grnTotalAmount, r.billingTerms ?? [])
+      );
+    }
+    const bd = computeBreakdown(
+      r.basicAmount,
+      r.cgstRate,
+      r.sgstRate,
+      r.billingTerms && r.billingTerms.length > 0 ? r.billingTerms : r.discount,
+    );
+    return sum + bd.netAmount;
+  }, 0);
   const approvedCount =
     statusCounts["Approved"] ??
     records.filter((r) => r.status === "Approved").length;
@@ -3249,14 +3264,26 @@ export default function MaterialExpenseBooking() {
                         </TableHeader>
                         <TableBody>
                           {filteredRecords.map((rec, index) => {
-                            const rbd = computeBreakdown(
-                              rec.basicAmount,
-                              rec.cgstRate,
-                              rec.sgstRate,
-                              rec.billingTerms && rec.billingTerms.length > 0
-                                ? rec.billingTerms
-                                : rec.discount,
-                            );
+                            // For GRN-linked records, net = live GRN total + billing terms applied.
+                            // For all others, use computeBreakdown on stored basicAmount.
+                            const effectiveNet =
+                              rec.grnTotalAmount != null
+                                ? computeGrnNetWithTerms(
+                                    rec.grnTotalAmount,
+                                    rec.billingTerms ?? [],
+                                  )
+                                : (() => {
+                                    const rbd = computeBreakdown(
+                                      rec.basicAmount,
+                                      rec.cgstRate,
+                                      rec.sgstRate,
+                                      rec.billingTerms &&
+                                        rec.billingTerms.length > 0
+                                        ? rec.billingTerms
+                                        : rec.discount,
+                                    );
+                                    return rec.netAmount ?? rbd.netAmount;
+                                  })();
                             return (
                               <TableRow
                                 key={
@@ -3324,10 +3351,10 @@ export default function MaterialExpenseBooking() {
                                 <TableCell className="font-mono text-xs font-semibold text-right py-3">
                                   {rec.status === "Draft" ? (
                                     <span className="text-amber-500 dark:text-amber-400">
-                                      ₹{fmt(rec.netAmount ?? rbd.netAmount)}
+                                      ₹{fmt(effectiveNet)}
                                     </span>
                                   ) : (
-                                    `₹${fmt(rec.netAmount ?? rbd.netAmount)}`
+                                    `₹${fmt(effectiveNet)}`
                                   )}
                                 </TableCell>
                                 <TableCell className="hidden lg:table-cell py-3 min-w-[100px]">
