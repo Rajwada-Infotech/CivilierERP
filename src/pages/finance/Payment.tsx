@@ -331,7 +331,9 @@ const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
     mapped.map(async (o) => {
       if (o.type !== "booking") return o;
       try {
-        const det = await fetchWithAuth(`/api/expense-booking/${o.id}`);
+        const det = await fetchWithAuth(`/api/expense-booking/${o.id}`, {
+          cache: "no-store",
+        });
         if (!det.ok) return o;
         const d = await det.json();
         const correctAmount = d.ENetAmount ?? d.EAmount ?? o.amount;
