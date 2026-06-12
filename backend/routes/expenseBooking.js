@@ -433,7 +433,6 @@ async function handleChainStatus(req, res) {
 // ─── GET /options ─────────────────────────────────────────────────────────────
 router.get(
   "/options",
-  cache("expense-booking-options", 120),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -456,13 +455,7 @@ router.get(
             WHEN eb.ESourceType IN ('PO','WO_PO','WORK_DONE') THEN ISNULL(eb.EName, '')
             ELSE ISNULL(eb.EName, '')
           END                             AS supplierName,
-          -- For GRN-linked bookings use the live GRN total (incl. GST);
-          -- it is always up-to-date whereas ENetAmount may be stale.
-          CASE
-            WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
-            THEN grn.TotalAmount
-            ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
-          END                             AS amount,
+          ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS amount,
           ISNULL(eb.ECompanyId, 0)        AS companyId,
           ISNULL(e.name, '')              AS companyName,
           ISNULL(eb.EFinYear, '')         AS financialYear,
@@ -472,13 +465,7 @@ router.get(
             N' — ',
             COALESCE(proj.name, eb.EProjectName, ''),
             N' (₹',
-            CAST(CAST(
-              CASE
-                WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
-                THEN grn.TotalAmount
-                ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
-              END
-            AS BIGINT) AS NVARCHAR(20)),
+            CAST(CAST(ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS BIGINT) AS NVARCHAR(20)),
             ')'
           ) AS label
         FROM dbo.ExpenseBooking eb
