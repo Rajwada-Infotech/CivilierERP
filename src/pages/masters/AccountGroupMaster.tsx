@@ -215,14 +215,14 @@ function TreeRow({
           <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
               onClick={() => onView(node)}
-              className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 transition-colors"
+              className="w-7 h-7 flex items-center justify-center rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
               title="View details"
             >
               <Eye size={13} />
             </button>
             <button
               onClick={() => onEdit(node)}
-              className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              className="w-7 h-7 flex items-center justify-center rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
             >
               <Pencil size={13} />
             </button>
@@ -230,7 +230,7 @@ function TreeRow({
               <>
                 <button
                   onClick={() => onDelete(node._id)}
-                  className="w-7 h-7 flex items-center justify-center rounded text-red-500 hover:bg-red-50 transition-colors"
+                  className="w-7 h-7 flex items-center justify-center rounded text-destructive hover:bg-destructive/10 transition-colors"
                 >
                   <Check size={13} />
                 </button>
@@ -244,7 +244,7 @@ function TreeRow({
             ) : (
               <button
                 onClick={() => setDeleteConfirm(node._id)}
-                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
+                className="w-7 h-7 flex items-center justify-center rounded text-destructive hover:bg-destructive/10 transition-colors"
               >
                 <Trash2 size={13} />
               </button>
@@ -671,7 +671,9 @@ const AccountGroupMaster: React.FC = () => {
                   <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
                     Belongs To
                   </th>
-                  <th className="px-4 py-3 w-24" />
+                  <th className="px-4 py-3 w-24 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -732,14 +734,14 @@ const AccountGroupMaster: React.FC = () => {
                             <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button
                                 onClick={() => setViewRecord(g)}
-                                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 transition-colors"
+                                className="w-7 h-7 flex items-center justify-center rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
                                 title="View details"
                               >
                                 <Eye size={13} />
                               </button>
                               <button
                                 onClick={() => startEdit(g)}
-                                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                                className="w-7 h-7 flex items-center justify-center rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
                               >
                                 <Pencil size={13} />
                               </button>
@@ -747,7 +749,7 @@ const AccountGroupMaster: React.FC = () => {
                                 <>
                                   <button
                                     onClick={() => handleDelete(g._id)}
-                                    className="w-7 h-7 flex items-center justify-center rounded text-red-500 hover:bg-red-50"
+                                    className="w-7 h-7 flex items-center justify-center rounded text-destructive hover:bg-destructive/10"
                                   >
                                     <Check size={13} />
                                   </button>
@@ -761,7 +763,7 @@ const AccountGroupMaster: React.FC = () => {
                               ) : (
                                 <button
                                   onClick={() => setDeleteConfirm(g._id)}
-                                  className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
+                                  className="w-7 h-7 flex items-center justify-center rounded text-destructive hover:bg-destructive/10 transition-colors"
                                 >
                                   <Trash2 size={13} />
                                 </button>

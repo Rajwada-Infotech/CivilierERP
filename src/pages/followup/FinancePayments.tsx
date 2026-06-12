@@ -325,18 +325,21 @@ function SummaryCard({
     red: {
       ring: "ring-red-400",
       bar: "bg-red-400",
+      borderL: "border-l-red-400",
       num: "text-red-600 dark:text-red-400",
       bg: "bg-red-100 dark:bg-red-900/30",
     },
     blue: {
       ring: "ring-blue-400",
       bar: "bg-blue-400",
+      borderL: "border-l-blue-400",
       num: "text-blue-600 dark:text-blue-400",
       bg: "bg-blue-100 dark:bg-blue-900/30",
     },
     emerald: {
       ring: "ring-emerald-400",
       bar: "bg-emerald-400",
+      borderL: "border-l-emerald-400",
       num: "text-emerald-600 dark:text-emerald-400",
       bg: "bg-emerald-100 dark:bg-emerald-900/30",
     },
@@ -345,11 +348,12 @@ function SummaryCard({
   return (
     <button
       onClick={onClick}
-      className={`relative text-left w-full rounded-xl border bg-card p-5 transition-all duration-150 hover:shadow-md hover:-translate-y-0.5 ${active ? `ring-2 ${styles.ring} shadow-md -translate-y-0.5` : ""}`}
+      className={`relative text-left w-full rounded-xl border bg-card p-5 overflow-hidden transition-all duration-150 hover:shadow-md hover:-translate-y-0.5 border-l-2 ${styles.borderL} ${active ? `ring-2 ${styles.ring} shadow-md -translate-y-0.5` : ""}`}
     >
       <div
         className={`absolute top-0 left-0 h-0.5 w-full rounded-t-xl ${active ? styles.bar : "bg-transparent"}`}
       />
+      <div className={`absolute top-0 right-0 w-24 h-24 rounded-full opacity-10 -translate-y-6 translate-x-6 ${styles.bar}`} />
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">

@@ -79,6 +79,7 @@ function KPICard({
   icon: Icon,
   iconColor = "text-indigo-600",
   iconBg = "bg-indigo-500/10",
+  borderL = "border-l-indigo-500",
   trend,
   onClick,
   urgent,
@@ -89,6 +90,7 @@ function KPICard({
   icon: React.ElementType;
   iconColor?: string;
   iconBg?: string;
+  borderL?: string;
   trend?: "up" | "down" | "neutral";
   onClick?: () => void;
   urgent?: boolean;
@@ -96,7 +98,7 @@ function KPICard({
   return (
     <div
       onClick={onClick}
-      className={`rounded-xl border bg-card p-5 flex flex-col gap-3 transition-all duration-200 ${
+      className={`rounded-xl border bg-card p-5 flex flex-col gap-3 transition-all duration-200 border-l-2 ${borderL} ${
         onClick ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5" : ""
       } ${urgent ? "border-red-400/40" : "border-border hover:border-primary/20"}`}
     >
@@ -788,6 +790,7 @@ export default function FollowupDashboard() {
               icon={Users}
               iconColor="text-indigo-600"
               iconBg="bg-indigo-500/10"
+              borderL="border-l-indigo-500"
               onClick={() => navigate("/followup/sales/applications")}
             />
             <KPICard
@@ -797,6 +800,7 @@ export default function FollowupDashboard() {
               icon={CalendarCheck}
               iconColor="text-sky-600"
               iconBg="bg-sky-500/10"
+              borderL="border-l-sky-500"
               trend={confirmedBookings > 0 ? "up" : "neutral"}
               onClick={() => navigate("/followup/sales/bookings")}
             />
@@ -807,6 +811,7 @@ export default function FollowupDashboard() {
               icon={Home}
               iconColor="text-teal-600"
               iconBg="bg-teal-500/10"
+              borderL="border-l-teal-500"
               onClick={() => navigate("/followup/sales/unit-selection")}
             />
             <KPICard
@@ -816,6 +821,7 @@ export default function FollowupDashboard() {
               icon={HandshakeIcon}
               iconColor="text-violet-600"
               iconBg="bg-violet-500/10"
+              borderL="border-l-violet-500"
               trend={activeAgreements > 0 ? "up" : "neutral"}
               onClick={() => navigate("/followup/agreement/agreements")}
             />
@@ -826,6 +832,7 @@ export default function FollowupDashboard() {
               icon={ClipboardCheck}
               iconColor="text-amber-600"
               iconBg="bg-amber-500/10"
+              borderL="border-l-amber-500"
               trend={pendingNOCs > 0 ? "down" : "neutral"}
               urgent={pendingNOCs > 0}
               onClick={() => navigate("/followup/closure/noc")}
@@ -837,6 +844,7 @@ export default function FollowupDashboard() {
               icon={Banknote}
               iconColor="text-cyan-600"
               iconBg="bg-cyan-500/10"
+              borderL="border-l-cyan-500"
               trend={scheduledHandovers > 0 ? "up" : "neutral"}
               onClick={() => navigate("/followup/closure/handover")}
             />
@@ -856,6 +864,7 @@ export default function FollowupDashboard() {
               icon={AlertCircle}
               iconColor="text-red-600"
               iconBg="bg-red-500/10"
+              borderL="border-l-red-500"
               trend={overdueTasks.length > 0 ? "down" : "neutral"}
               urgent={overdueTasks.length > 0}
               onClick={() => navigate("/followup/follow-ups/tasks")}
@@ -867,6 +876,7 @@ export default function FollowupDashboard() {
               icon={Clock}
               iconColor="text-amber-600"
               iconBg="bg-amber-500/10"
+              borderL="border-l-amber-500"
               trend={dueSoonTasks.length > 0 ? "down" : "neutral"}
               onClick={() => navigate("/followup/follow-ups/tasks")}
             />
@@ -877,6 +887,7 @@ export default function FollowupDashboard() {
               icon={CheckCircle2}
               iconColor="text-emerald-600"
               iconBg="bg-emerald-500/10"
+              borderL="border-l-emerald-500"
               trend="up"
               onClick={() => navigate("/followup/follow-ups/tasks")}
             />
@@ -887,6 +898,7 @@ export default function FollowupDashboard() {
               icon={HardHat}
               iconColor="text-orange-600"
               iconBg="bg-orange-500/10"
+              borderL="border-l-orange-500"
               onClick={() => navigate("/followup/construction/updates")}
             />
           </div>

@@ -346,6 +346,8 @@ export default function Brs() {
       icon: CheckCircle2,
       ring: "ring-emerald-500/20",
       bg: "bg-emerald-500/10",
+      blob: "bg-emerald-500",
+      borderL: "border-l-emerald-500",
       color: "text-emerald-500",
     },
     {
@@ -355,6 +357,8 @@ export default function Brs() {
       icon: Clock,
       ring: "ring-amber-500/20",
       bg: "bg-amber-500/10",
+      blob: "bg-amber-500",
+      borderL: "border-l-amber-500",
       color: "text-amber-500",
     },
     {
@@ -364,6 +368,8 @@ export default function Brs() {
       icon: IndianRupee,
       ring: "ring-primary/20",
       bg: "bg-primary/10",
+      blob: "bg-primary",
+      borderL: "border-l-primary",
       color: "text-primary",
     },
     {
@@ -373,6 +379,8 @@ export default function Brs() {
       icon: Landmark,
       ring: "ring-blue-500/20",
       bg: "bg-blue-500/10",
+      blob: "bg-blue-500",
+      borderL: "border-l-blue-500",
       color: "text-blue-500",
     },
   ];
@@ -428,11 +436,12 @@ export default function Brs() {
 
         {/* ── Stats ──────────────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {stats.map(({ label, value, sub, icon: Icon, ring, bg, color }) => (
+          {stats.map(({ label, value, sub, icon: Icon, ring, bg, blob, borderL, color }) => (
             <div
               key={label}
-              className={`glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 ${ring}`}
+              className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${ring} ${borderL}`}
             >
+              <div className={`absolute top-0 right-0 w-20 h-20 rounded-full opacity-10 -translate-y-4 translate-x-4 ${blob}`} />
               <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
                 <Icon size={16} />
               </div>
@@ -536,7 +545,7 @@ export default function Brs() {
                 type="date"
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="h-8 pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer"
+                className="h-8 pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
               />
             </div>
 
@@ -552,7 +561,7 @@ export default function Brs() {
                 type="date"
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
-                className="h-8 pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer"
+                className="h-8 pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
               />
             </div>
 

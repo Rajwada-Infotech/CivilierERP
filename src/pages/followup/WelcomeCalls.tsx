@@ -661,24 +661,27 @@ export function WelcomeCallsPage() {
         {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           {[
-            { label: "Total", value: stats.total, dot: "bg-slate-400" },
+            { label: "Total", value: stats.total, dot: "bg-slate-400", borderL: "border-l-slate-400" },
             {
               label: "Connected",
               value: stats.connected,
               dot: "bg-emerald-500",
+              borderL: "border-l-emerald-500",
             },
-            { label: "No Answer", value: stats.noAnswer, dot: "bg-red-400" },
-            { label: "Callback", value: stats.callback, dot: "bg-blue-500" },
+            { label: "No Answer", value: stats.noAnswer, dot: "bg-red-400", borderL: "border-l-red-400" },
+            { label: "Callback", value: stats.callback, dot: "bg-blue-500", borderL: "border-l-blue-500" },
             {
               label: "Connect Rate",
               value: `${stats.rate}%`,
               dot: "bg-violet-500",
+              borderL: "border-l-violet-500",
             },
-          ].map(({ label, value, dot }) => (
+          ].map(({ label, value, dot, borderL }) => (
             <div
               key={label}
-              className="rounded-xl border border-border bg-card p-4"
+              className={`relative rounded-xl border border-border bg-card p-4 overflow-hidden border-l-2 ${borderL}`}
             >
+              <div className={`absolute top-0 right-0 w-20 h-20 rounded-full opacity-10 -translate-y-4 translate-x-4 ${dot}`} />
               <div className={`w-2 h-2 rounded-full ${dot} mb-3`} />
               <p className="text-2xl font-bold font-heading text-foreground leading-none">
                 {value}

@@ -167,6 +167,8 @@ function StatCard({
   icon: Icon,
   iconColor = "text-indigo-600",
   iconBg = "bg-indigo-500/10",
+  accent = "bg-indigo-500",
+  borderL = "border-l-indigo-500",
 }: {
   label: string;
   value: string;
@@ -174,9 +176,12 @@ function StatCard({
   icon: React.ElementType;
   iconColor?: string;
   iconBg?: string;
+  accent?: string;
+  borderL?: string;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-5 flex flex-col gap-3">
+    <div className={`relative rounded-xl border border-border bg-card p-5 flex flex-col gap-3 overflow-hidden border-l-2 ${borderL}`}>
+      <div className={`absolute top-0 right-0 w-24 h-24 rounded-full opacity-10 -translate-y-6 translate-x-6 ${accent}`} />
       <div className="flex items-start justify-between">
         <div className={`p-2 rounded-lg ${iconBg}`}>
           <Icon size={18} className={iconColor} />
@@ -448,6 +453,8 @@ export default function FollowupLog() {
             icon={Activity}
             iconColor="text-indigo-600"
             iconBg="bg-indigo-500/10"
+            accent="bg-indigo-500"
+            borderL="border-l-indigo-500"
           />
           <StatCard
             label="Communications"
@@ -456,6 +463,8 @@ export default function FollowupLog() {
             icon={Mail}
             iconColor="text-blue-600"
             iconBg="bg-blue-500/10"
+            accent="bg-blue-500"
+            borderL="border-l-blue-500"
           />
           <StatCard
             label="Payments Logged"
@@ -464,6 +473,8 @@ export default function FollowupLog() {
             icon={CheckCircle2}
             iconColor="text-emerald-600"
             iconBg="bg-emerald-500/10"
+            accent="bg-emerald-500"
+            borderL="border-l-emerald-500"
           />
           <StatCard
             label="Notes"
@@ -472,6 +483,8 @@ export default function FollowupLog() {
             icon={FileText}
             iconColor="text-purple-600"
             iconBg="bg-purple-500/10"
+            accent="bg-purple-500"
+            borderL="border-l-purple-500"
           />
         </div>
 

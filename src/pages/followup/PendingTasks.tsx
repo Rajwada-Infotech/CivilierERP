@@ -149,6 +149,7 @@ function StatCard({
   value,
   icon: Icon,
   accent,
+  borderL,
   iconClass,
   sublabel,
   active,
@@ -158,6 +159,7 @@ function StatCard({
   value: number;
   icon: React.ElementType;
   accent: string;
+  borderL: string;
   iconClass: string;
   sublabel?: string;
   active?: boolean;
@@ -166,7 +168,7 @@ function StatCard({
   return (
     <div
       onClick={onClick}
-      className={`relative bg-card rounded-xl border p-5 overflow-hidden transition-all duration-200 ${
+      className={`relative bg-card rounded-xl border p-5 overflow-hidden transition-all duration-200 border-l-2 ${borderL} ${
         onClick ? "cursor-pointer select-none" : ""
       } ${
         active
@@ -362,7 +364,7 @@ function TaskRow({
 
   return (
     <div
-      className={`group grid grid-cols-[1fr_auto] gap-3 items-center px-5 py-4 border-b border-border/60 last:border-b-0 transition-colors duration-100 ${
+      className={`group grid grid-cols-[1fr_144px] gap-3 items-center px-5 py-4 border-b border-border/60 last:border-b-0 transition-colors duration-100 ${
         overdue ? "bg-red-500/5 hover:bg-red-500/10" : "hover:bg-muted/40"
       }`}
     >
@@ -556,10 +558,11 @@ export default function PendingTasksPage() {
             </button>
             {canCreate && (
               <Button
+                size="sm"
                 onClick={() => setIsDialogOpen(true)}
-                className="gap-2 gradient-accent text-white font-semibold rounded-xl h-10 px-4"
+                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
               >
-                <Plus className="w-4 h-4" />
+                <Plus size={14} />
                 New Task
               </Button>
             )}
@@ -573,6 +576,7 @@ export default function PendingTasksPage() {
             value={counts.open}
             icon={ListTodo}
             accent="bg-slate-500"
+            borderL="border-l-slate-500"
             iconClass="bg-slate-500/10 text-slate-400"
             sublabel="Awaiting action"
             active={activeFilter === "open"}
@@ -585,6 +589,7 @@ export default function PendingTasksPage() {
             value={counts.inProgress}
             icon={Activity}
             accent="bg-primary"
+            borderL="border-l-primary"
             iconClass="bg-primary/10 text-primary"
             sublabel="Currently active"
             active={activeFilter === "in_progress"}
@@ -599,6 +604,7 @@ export default function PendingTasksPage() {
             value={counts.completed}
             icon={CheckCircle2}
             accent="bg-emerald-500"
+            borderL="border-l-emerald-500"
             iconClass="bg-emerald-500/10 text-emerald-500"
             sublabel="Closed + reviewed"
             active={activeFilter === "closed"}
@@ -611,6 +617,7 @@ export default function PendingTasksPage() {
             value={counts.overdue}
             icon={AlertCircle}
             accent="bg-red-500"
+            borderL="border-l-red-500"
             iconClass="bg-red-500/10 text-red-500"
             sublabel="Past due date"
           />
@@ -721,7 +728,7 @@ export default function PendingTasksPage() {
           </div>
 
           {/* Column headers */}
-          <div className="grid grid-cols-[1fr_auto] gap-3 px-5 py-3 border-b border-border bg-muted/40">
+          <div className="grid grid-cols-[1fr_144px] gap-3 px-5 py-3 border-b border-border bg-muted/40">
             <div className="grid grid-cols-[minmax(180px,2.5fr)_90px_130px_150px_100px] gap-4">
               {["Task", "Priority", "Assigned To", "Due Date", "Status"].map(
                 (h) => (
@@ -734,9 +741,7 @@ export default function PendingTasksPage() {
                 ),
               )}
             </div>
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider opacity-0 select-none">
-              Action
-            </span>
+            <span />
           </div>
 
           {/* Loading skeleton */}

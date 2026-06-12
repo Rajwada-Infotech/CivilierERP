@@ -215,7 +215,7 @@ interface SummaryCardProps {
   icon: React.ReactNode;
   active: boolean;
   onClick: () => void;
-  styles: { ring: string; bar: string; num: string; bg: string };
+  styles: { ring: string; bar: string; borderL: string; num: string; bg: string };
 }
 
 function SummaryCard({
@@ -230,7 +230,7 @@ function SummaryCard({
   return (
     <button
       onClick={onClick}
-      className={`relative text-left w-full rounded-xl border bg-card p-5 transition-all duration-150 hover:shadow-md hover:-translate-y-0.5 focus:outline-none ${
+      className={`relative text-left w-full rounded-xl border bg-card p-5 overflow-hidden transition-all duration-150 hover:shadow-md hover:-translate-y-0.5 focus:outline-none border-l-2 ${styles.borderL} ${
         active
           ? `ring-2 ${styles.ring} shadow-md -translate-y-0.5`
           : "border-border"
@@ -239,6 +239,7 @@ function SummaryCard({
       <div
         className={`absolute top-0 left-0 h-0.5 w-full rounded-t-xl ${active ? styles.bar : "bg-transparent"}`}
       />
+      <div className={`absolute top-0 right-0 w-24 h-24 rounded-full opacity-10 -translate-y-6 translate-x-6 ${styles.bar}`} />
       <div className="flex items-start justify-between">
         <div>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
@@ -388,6 +389,7 @@ export function FinanceDemandsPage() {
             styles={{
               ring: "ring-amber-400/60",
               bar: "bg-amber-400",
+              borderL: "border-l-amber-400",
               num: "text-amber-600 dark:text-amber-400",
               bg: "bg-amber-50 dark:bg-amber-950/30",
             }}
@@ -405,6 +407,7 @@ export function FinanceDemandsPage() {
             styles={{
               ring: "ring-primary/40",
               bar: "bg-primary",
+              borderL: "border-l-primary",
               num: "text-primary",
               bg: "bg-primary/10",
             }}
@@ -424,6 +427,7 @@ export function FinanceDemandsPage() {
             styles={{
               ring: "ring-emerald-400/60",
               bar: "bg-emerald-500",
+              borderL: "border-l-emerald-500",
               num: "text-emerald-600 dark:text-emerald-400",
               bg: "bg-emerald-50 dark:bg-emerald-950/30",
             }}

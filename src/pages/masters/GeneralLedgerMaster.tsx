@@ -114,7 +114,7 @@ function buildGLColumns(
     },
     {
       id: "actions",
-      header: "",
+      header: "Actions",
       enableSorting: false,
       cell: ({ row }) => {
         const id = row.original.LHeadId;
@@ -143,20 +143,20 @@ function buildGLColumns(
           <div className="flex items-center justify-end gap-1">
             <button
               onClick={() => onView(row.original)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10"
+              className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10"
               title="View details"
             >
               <Eye size={13} />
             </button>
             <button
               onClick={() => startEdit(row.original)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+              className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10"
             >
               <Pencil size={13} />
             </button>
             <button
               onClick={() => setDeleteConfirm(id)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10"
             >
               <Trash2 size={13} />
             </button>

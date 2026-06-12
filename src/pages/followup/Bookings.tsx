@@ -1635,15 +1635,18 @@ function KpiCard({
   icon,
   accent,
   bg,
+  borderL,
 }: {
   label: string;
   value: React.ReactNode;
   icon: React.ReactNode;
   accent: string;
   bg: string;
+  borderL: string;
 }) {
   return (
-    <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
+    <div className={`relative rounded-2xl border border-border bg-card p-4 flex items-center gap-3 overflow-hidden border-l-2 ${borderL}`}>
+      <div className={`absolute top-0 right-0 w-20 h-20 rounded-full opacity-10 -translate-y-4 translate-x-4 ${bg}`} />
       <div className={`p-2.5 rounded-xl ${bg} flex-shrink-0`}>
         <span className={accent}>{icon}</span>
       </div>
@@ -1940,6 +1943,7 @@ export default function BookingsPage() {
             icon={<BookOpen size={16} />}
             accent="text-blue-600 dark:text-blue-400"
             bg="bg-blue-50 dark:bg-blue-900/30"
+            borderL="border-l-blue-500"
           />
           <KpiCard
             label="Confirmed"
@@ -1947,6 +1951,7 @@ export default function BookingsPage() {
             icon={<CheckCircle size={16} />}
             accent="text-emerald-600 dark:text-emerald-400"
             bg="bg-emerald-50 dark:bg-emerald-900/30"
+            borderL="border-l-emerald-500"
           />
           <KpiCard
             label="Pending"
@@ -1954,6 +1959,7 @@ export default function BookingsPage() {
             icon={<AlertCircle size={16} />}
             accent="text-amber-600 dark:text-amber-400"
             bg="bg-amber-50 dark:bg-amber-900/30"
+            borderL="border-l-amber-500"
           />
           <KpiCard
             label="Confirmed Value"
@@ -1961,6 +1967,7 @@ export default function BookingsPage() {
             icon={<IndianRupee size={16} />}
             accent="text-violet-600 dark:text-violet-400"
             bg="bg-violet-50 dark:bg-violet-900/30"
+            borderL="border-l-violet-500"
           />
         </div>
 

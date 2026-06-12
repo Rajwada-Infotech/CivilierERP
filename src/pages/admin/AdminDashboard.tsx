@@ -200,28 +200,36 @@ export default function AdminDashboard() {
       value: stats.totalUsers,
       sub: "registered accounts",
       icon: Users,
-      color: "text-blue-500",
+      color: "text-blue-600",
+      bg: "bg-blue-500/10",
+      borderL: "border-l-blue-500",
     },
     {
       title: "Active Users",
       value: stats.activeUsers,
       sub: "currently enabled",
       icon: UserCheck,
-      color: "text-green-500",
+      color: "text-emerald-600",
+      bg: "bg-emerald-500/10",
+      borderL: "border-l-emerald-500",
     },
     {
       title: "Inactive Users",
       value: stats.inactiveUsers,
       sub: "discontinued accounts",
       icon: ShieldCheck,
-      color: "text-orange-500",
+      color: "text-amber-600",
+      bg: "bg-amber-500/10",
+      borderL: "border-l-amber-500",
     },
     {
       title: "Total Activity Logs",
       value: stats.recentActions,
       sub: "all time entries",
       icon: BarChart3,
-      color: "text-purple-500",
+      color: "text-violet-600",
+      bg: "bg-violet-500/10",
+      borderL: "border-l-violet-500",
     },
   ];
 
@@ -270,14 +278,16 @@ export default function AdminDashboard() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {statCards.map((stat) => (
             <Card
-              className="hover:shadow-xl transition-all border-primary/20"
+              className={`hover:shadow-xl transition-all border-primary/20 border-l-2 ${stat.borderL}`}
               key={stat.title}
             >
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-xs sm:text-sm font-medium line-clamp-2">
                   {stat.title}
                 </CardTitle>
-                <stat.icon className={`h-4 w-4 sm:h-5 sm:w-5 ${stat.color}`} />
+                <div className={`p-2 rounded-lg ${stat.bg}`}>
+                  <stat.icon className={`h-4 w-4 sm:h-5 sm:w-5 ${stat.color}`} />
+                </div>
               </CardHeader>
               <CardContent className="pt-1">
                 {loading ? (
