@@ -163,18 +163,70 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const result = await dataRequest.query(`
       SELECT
         np.*,
-        COALESCE(
-          ep.name,
-          po_proj.name
-        ) AS PProjectName
+        -- Company name (resolved from enterprise table via PCompany text match)
+        ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
+        -- Project name (resolved from EB → enterprise, or PO → enterprise)
+        COALESCE(ep.name, po_proj.name, np.PProject)       AS PProjectName,
+        -- Supplier name from ExpenseBooking resolved chain
+        CASE
+          WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
+          WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
+          ELSE grn2_sup.LHeadName
+        END                                                AS PSupplierName,
+        -- Net Payable (the payment amount already on np.PAmount, but also expose EB net for reference)
+        ISNULL(eb.ENetAmount, eb.EAmount)                  AS EBNetPayable,
+        -- Tax amount: computed as (ENetAmount - EAmount) when both are set, else 0
+        -- EAmount = taxable base, ENetAmount = amount after tax
+        CASE
+          WHEN eb.ENetAmount IS NOT NULL AND eb.EAmount IS NOT NULL
+          THEN ROUND(eb.ENetAmount - eb.EAmount, 2)
+          ELSE 0
+        END                                                AS TaxAmount,
+        -- Taxable / Base amount
+        ISNULL(eb.EAmount, 0)                              AS TaxableAmount,
+        -- HSN codes from GRN items (comma-separated, via scalar subquery)
+        (
+          SELECT STRING_AGG(ISNULL(j.hsnCode, j.HsnCode), ', ')
+          FROM dbo.GoodsReceiptNotes grn_hsn
+          CROSS APPLY OPENJSON(grn_hsn.GRNItems) WITH (
+            hsnCode NVARCHAR(50) '$.hsnCode',
+            HsnCode NVARCHAR(50) '$.HsnCode'
+          ) j
+          WHERE grn_hsn.GRNID = TRY_CAST(eb.ESourceId AS INT)
+            AND eb.ESourceType = 'GRN'
+        )                                                  AS HSNCodes,
+        -- Financial year from ExpenseBooking
+        ISNULL(eb.EFinYear, '')                            AS EBFinYear,
+        -- Ref Doc = the ExpenseBooking DocNo
+        eb.EDocNo                                          AS RefDoc,
+        -- EB DocDate for reference
+        eb.EDocDate                                        AS EBDocDate
       FROM dbo.NewPayment np
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      -- Resolve company
+      LEFT JOIN dbo.enterprise ec
+        ON ec.id = TRY_CAST(np.PCompany AS INT) AND ec.business_type = 'C'
+      -- Resolve project from EB
       LEFT JOIN dbo.enterprise ep
         ON ep.id = TRY_CAST(eb.EProjectName AS INT) AND ep.business_type = 'P'
+      -- Resolve project via PO when EB source is PO
       LEFT JOIN dbo.PurchaseOrders po
         ON eb.ESourceType = 'PO' AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
       LEFT JOIN dbo.enterprise po_proj
         ON po_proj.id = po.ProjectId AND po_proj.business_type = 'P'
+      -- Resolve supplier: GRN path
+      LEFT JOIN dbo.GoodsReceiptNotes grn_eb
+        ON eb.ESourceType = 'GRN' AND grn_eb.GRNID = TRY_CAST(eb.ESourceId AS INT)
+      LEFT JOIN dbo.LedgerHead grn_sup
+        ON grn_sup.LHeadId = grn_eb.SupplierID
+      -- Resolve supplier: PO path
+      LEFT JOIN dbo.LedgerHead po_sup
+        ON po_sup.LHeadId = po.SupplierID
+      -- Resolve supplier: fallback via GRN linked to PO
+      LEFT JOIN dbo.GoodsReceiptNotes grn2
+        ON eb.ESourceType NOT IN ('GRN','PO') AND grn2.POID = po.PurchaseOrderID
+      LEFT JOIN dbo.LedgerHead grn2_sup
+        ON grn2_sup.LHeadId = grn2.SupplierID
       ${whereClause}
       ORDER BY np.PPaymentID DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
