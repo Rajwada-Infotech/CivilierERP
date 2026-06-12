@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useNavigate } from "react-router-dom";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -7,9 +9,7 @@ import {
   Search,
   X,
   FileSignature,
-  Building2,
   CalendarDays,
-  IndianRupee,
   ChevronDown,
   Pencil,
   Trash2,
@@ -21,14 +21,11 @@ import {
   MoreHorizontal,
   ChevronLeft,
   ChevronRight,
-  StickyNote,
-  Home,
-  Landmark,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { DashboardBackground } from "@/components/DashboardBackground";
+
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import {
@@ -452,7 +449,10 @@ export function SalesDeedPage() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   const [signatureId, setSignatureId] = useState<number | null>(null);
-  const [auditTarget, setAuditTarget] = useState<{ id: number; no: string } | null>(null);
+  const [auditTarget, setAuditTarget] = useState<{
+    id: number;
+    no: string;
+  } | null>(null);
 
   const { data: meta } = useQuery({
     queryKey: ["sales-deed-meta"],
@@ -460,7 +460,12 @@ export function SalesDeedPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: result, isLoading, isFetching, refetch } = useQuery({
+  const {
+    data: result,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useQuery({
     queryKey: ["sales-deeds", page, search, statusFilter],
     queryFn: () =>
       fetchDeeds({ page, pageSize: PAGE_SIZE, search, status: statusFilter }),
@@ -515,11 +520,13 @@ export function SalesDeedPage() {
 
   const projectItems: ComboItem[] = useMemo(
     () =>
-      (meta?.projects ?? []).map((p) => ({
-        value: String(p.Id),
-        label: p.Name,
-      })),
-    [meta],
+      filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map(
+        (p) => ({
+          value: String(p.Id),
+          label: p.Name,
+        }),
+      ),
+    [meta, form.CompanyId],
   );
 
   const companyItems: ComboItem[] = useMemo(
@@ -946,7 +953,10 @@ export function SalesDeedPage() {
           { label: "Sales Deed", path: "/followup/closure/sales-deed" },
         ]}
       />
-      <div className="sd-page relative space-y-8 mt-6" onClick={() => setOpenMenuId(null)}>
+      <div
+        className="sd-page relative space-y-8 mt-6"
+        onClick={() => setOpenMenuId(null)}
+      >
         {/* ── Header ── */}
         <div className="flex items-start justify-between gap-4">
           <div className="sd-title-row">
@@ -962,7 +972,10 @@ export function SalesDeedPage() {
               disabled={isFetching}
               className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
-              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              <RefreshCw
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
+              />
               Refresh
             </button>
             <Button
@@ -977,60 +990,60 @@ export function SalesDeedPage() {
 
         {/* Filter + search */}
         <div className="sd-filter-bar">
-            <div className="sd-search-wrap">
-              <Search size={14} />
-              <input
-                className="sd-search"
-                placeholder="Search by applicant, deed no, unit, reg. no…"
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
+          <div className="sd-search-wrap">
+            <Search size={14} />
+            <input
+              className="sd-search"
+              placeholder="Search by applicant, deed no, unit, reg. no…"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+            />
+            {search && (
+              <button
+                className="sd-search-clear"
+                onClick={() => {
+                  setSearch("");
                   setPage(1);
                 }}
-              />
-              {search && (
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+          <div className="sd-pills">
+            {STATUS_FILTERS.map((s) => {
+              const isActive = statusFilter === s;
+              const pillClass = isActive
+                ? s === ""
+                  ? "sd-pill active"
+                  : s === "Draft"
+                    ? "sd-pill active-draft"
+                    : s === "Executed"
+                      ? "sd-pill active-executed"
+                      : s === "Registered"
+                        ? "sd-pill active-registered"
+                        : s === "Overdue"
+                          ? "sd-pill active-overdue"
+                          : "sd-pill active-cancelled"
+                : "sd-pill";
+              return (
                 <button
-                  className="sd-search-clear"
+                  key={s}
+                  className={pillClass}
                   onClick={() => {
-                    setSearch("");
+                    setStatusFilter(s);
                     setPage(1);
                   }}
                 >
-                  <X size={13} />
+                  {STATUS_LABELS[s]}
                 </button>
-              )}
-            </div>
-            <div className="sd-pills">
-              {STATUS_FILTERS.map((s) => {
-                const isActive = statusFilter === s;
-                const pillClass = isActive
-                  ? s === ""
-                    ? "sd-pill active"
-                    : s === "Draft"
-                      ? "sd-pill active-draft"
-                      : s === "Executed"
-                        ? "sd-pill active-executed"
-                    : s === "Registered"
-                      ? "sd-pill active-registered"
-                          : s === "Overdue"
-                            ? "sd-pill active-overdue"
-                            : "sd-pill active-cancelled"
-                  : "sd-pill";
-                return (
-                  <button
-                    key={s}
-                    className={pillClass}
-                    onClick={() => {
-                      setStatusFilter(s);
-                      setPage(1);
-                    }}
-                  >
-                    {STATUS_LABELS[s]}
-                  </button>
-                );
-              })}
-            </div>
+              );
+            })}
           </div>
+        </div>
 
         {/* Stats bar */}
         <div className="sd-stats">
@@ -1262,7 +1275,10 @@ export function SalesDeedPage() {
                                   <button
                                     className="sd-menu-item"
                                     onClick={() => {
-                                      setAuditTarget({ id: deed.Id, no: deed.DeedNo });
+                                      setAuditTarget({
+                                        id: deed.Id,
+                                        no: deed.DeedNo,
+                                      });
                                       setOpenMenuId(null);
                                     }}
                                   >
@@ -1628,10 +1644,7 @@ export function SalesDeedPage() {
             {/* Signature stamp */}
             <div className="space-y-2">
               <Label>Signature Stamp (optional)</Label>
-              <SignaturePicker
-                value={signatureId}
-                onChange={setSignatureId}
-              />
+              <SignaturePicker value={signatureId} onChange={setSignatureId} />
             </div>
           </div>
 

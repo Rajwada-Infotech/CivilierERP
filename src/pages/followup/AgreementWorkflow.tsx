@@ -4,7 +4,7 @@
  * Mobile: card list with expandable stepper
  */
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -190,6 +190,17 @@ function fmtDate(d: string | null | undefined) {
   if (!d) return "—";
   const [y, m, day] = d.split("-");
   return `${day}/${m}/${y}`;
+}
+
+// ── Helper ─────────────────────────────────────────────────────────────────────
+function filterProjectsByCompany(
+  projects: OptionItem[],
+  companyId: string | undefined,
+): OptionItem[] {
+  if (!companyId) return projects;
+  return projects.filter(
+    (p) => String((p as Record<string, unknown>).CompanyId) === companyId,
+  );
 }
 
 // ── Progress bar ───────────────────────────────────────────────────────────────
@@ -445,8 +456,8 @@ function MobileCard({
 }) {
   return (
     <div className="border border-border rounded-xl overflow-hidden bg-card mb-2">
-      <button
-        className="w-full text-left p-3.5 flex items-start gap-3 hover:bg-muted/30 transition-colors"
+      <div
+        className="w-full text-left p-3.5 flex items-start gap-3 hover:bg-muted/30 transition-colors cursor-pointer"
         onClick={onToggle}
       >
         <div className="mt-0.5 text-muted-foreground shrink-0">
@@ -493,7 +504,7 @@ function MobileCard({
             <Trash2 size={14} />
           </button>
         </div>
-      </button>
+      </div>
       {expanded && <WorkflowStepper record={row} onStepUpdate={onStepUpdate} />}
     </div>
   );
@@ -747,7 +758,7 @@ export default function AgreementWorkflowPage() {
                 rows.map((row) => {
                   const expanded = expandedIds.has(row.Id);
                   return (
-                    <>
+                    <React.Fragment key={row.Id}>
                       <tr
                         key={row.Id}
                         className="border-b border-border hover:bg-muted/30 cursor-pointer transition-colors"
@@ -848,7 +859,7 @@ export default function AgreementWorkflowPage() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </React.Fragment>
                   );
                 })
               )}
@@ -1057,7 +1068,10 @@ export default function AgreementWorkflowPage() {
                   <SelectValue placeholder="Select…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(meta?.projects ?? []).map((p: OptionItem) => (
+                  {filterProjectsByCompany(
+                    meta?.projects ?? [],
+                    form.CompanyId,
+                  ).map((p: OptionItem) => (
                     <SelectItem key={p.Id} value={String(p.Id)}>
                       {p.Name}
                     </SelectItem>

@@ -300,3 +300,67 @@ export const getItemsWithGST = (): Promise<POItemOption[]> =>
         hsnCode: i.hsnCode ?? null,
       })),
     );
+
+// ─── Supplier Details (address, contact person, GST) ──────────────────────────
+// Fetches full details for a single supplier from AccountHeadMaster
+export interface SupplierDetails {
+  LHeadId: number;
+  LHeadName: string;
+  LHeadAddress: string | null;
+  LHeadContactPerson: string | null;
+  LGST: string | null;
+  LHeadPhone: string | null;
+  LHeadEmail: string | null;
+}
+
+export const getSupplierDetails = (
+  id: string | number,
+): Promise<SupplierDetails | null> =>
+  fetchWithAuth(`/api/account-head/${id}`)
+    .then((r) => handleResponse<any>(r))
+    .then((data) => {
+      if (!data) return null;
+      return {
+        LHeadId: data.LHeadId,
+        LHeadName: data.LHeadName ?? "",
+        LHeadAddress: data.LHeadAddress ?? null,
+        LHeadContactPerson: data.LHeadContactPerson ?? null,
+        LGST: data.LGST ?? null,
+        LHeadPhone: data.LHeadPhone ?? null,
+        LHeadEmail: data.LHeadEmail ?? null,
+      };
+    })
+    .catch(() => null);
+
+// ─── Company Details (address, GST) ───────────────────────────────────────────
+// Fetches full details for a single company/enterprise by id
+export interface CompanyDetails {
+  id: number;
+  name: string;
+  address: string | null;
+  address_line2: string | null;
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+  gst_no: string | null;
+}
+
+export const getCompanyDetails = (
+  id: string | number,
+): Promise<CompanyDetails | null> =>
+  fetchWithAuth(`/api/enterprises/by-id/${id}`)
+    .then((r) => handleResponse<any>(r))
+    .then((data) => {
+      if (!data) return null;
+      return {
+        id: data.id,
+        name: data.name ?? "",
+        address: data.address ?? null,
+        address_line2: data.address_line2 ?? null,
+        city: data.city ?? null,
+        state: data.state ?? null,
+        pincode: data.pincode ?? null,
+        gst_no: data.gst_no ?? null,
+      };
+    })
+    .catch(() => null);

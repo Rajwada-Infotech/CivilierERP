@@ -5,9 +5,8 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
-const authenticateToken = require("../middleware/auth");
 
-router.get("/", authenticateToken, cache("billing-terms", 300, { shared: true }), async (req, res) => {
+router.get("/", cache("billing-terms", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool
@@ -97,8 +96,5 @@ router.delete("/:id", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-// Bust stale cache on startup so any cached empty-array from pre-auth era is cleared
-bumpCacheVersion("billing-terms").catch(() => {});
 
 module.exports = router;
