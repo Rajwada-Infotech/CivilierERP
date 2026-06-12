@@ -929,21 +929,21 @@ router.get("/:id", async (req, res) => {
     if (!result.recordset.length)
       return res.status(404).json({ error: "Not found" });
 
-    const row = result.recordset[0];
+    // Destructure to separate the internal _ESourceType/_ESourceId aliases
+    // from the rest. mssql recordset rows can be non-configurable so we must
+    // not mutate them in-place (delete/assignment throws in strict contexts).
+    const { _ESourceType, _ESourceId, ...row } = result.recordset[0];
 
-    // If EGrnTotalAmount is NULL (GRN.TotalAmount not populated for older records),
-    // compute it from buildGrnGstData so the frontend always has an authoritative total.
-    if (
-      !row.EGrnTotalAmount &&
-      row._ESourceType === "GRN" &&
-      row._ESourceId
-    ) {
+    // If EGrnTotalAmount is NULL (grn.TotalAmount not populated for older records),
+    // compute the authoritative total from buildGrnGstData (item qty x PO rate + GST).
+    let EGrnTotalAmount = row.EGrnTotalAmount ?? null;
+    if (!EGrnTotalAmount && _ESourceType === "GRN" && _ESourceId) {
       try {
-        const grnId = parseInt(row._ESourceId, 10);
+        const grnId = parseInt(String(_ESourceId), 10);
         if (Number.isFinite(grnId) && grnId > 0) {
           const grnData = await buildGrnGstData(pool, grnId);
           if (grnData && grnData.totals.netAmount > 0) {
-            row.EGrnTotalAmount = grnData.totals.netAmount;
+            EGrnTotalAmount = grnData.totals.netAmount;
           }
         }
       } catch {
@@ -951,11 +951,7 @@ router.get("/:id", async (req, res) => {
       }
     }
 
-    // Strip internal fields before sending
-    delete row._ESourceType;
-    delete row._ESourceId;
-
-    res.json(row);
+    res.json({ ...row, EGrnTotalAmount });
   } catch (err) {
     console.error("Get by id error:", err.message);
     res.status(500).json({ error: err.message });

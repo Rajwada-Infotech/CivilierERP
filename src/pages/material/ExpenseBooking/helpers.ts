@@ -317,23 +317,37 @@ export function dbToRecord(row: any): ExpenseRecord {
     projectName: row.EProjectDisplayName || row.projectName || "",
     materialCategory: row.EDocumentType ?? "",
     invoiceReference: row.EDocNo ?? "",
-    // For GRN-linked bookings use the live GRN total (incl. GST) as Basic Amount.
-    // This is the authoritative figure — EAmount is a stale snapshot from when the booking was created.
-    basicAmount:
-      row.EGrnTotalAmount != null && parseFloat(row.EGrnTotalAmount) > 0
-        ? parseFloat(row.EGrnTotalAmount)
-        : parseFloat(row.EAmount) || 0,
+    // For GRN-linked bookings: back-calculate the pre-tax base from the live
+    // GRN total (incl. GST) so the edit form shows Base + GST = Gross correctly.
+    // If stored rates are 0 (old records), basicAmount = inclGST (no GST rows shown).
+    // Falls back to stored EAmount for non-GRN bookings.
+    basicAmount: (() => {
+      const inclGST =
+        row.EGrnTotalAmount != null && parseFloat(row.EGrnTotalAmount) > 0
+          ? parseFloat(row.EGrnTotalAmount)
+          : null;
+      if (inclGST) {
+        const cgst = row.ECgstRate ? parseFloat(row.ECgstRate) : 0;
+        const sgst = row.ESgstRate ? parseFloat(row.ESgstRate) : 0;
+        const totalRate = cgst + sgst;
+        return totalRate > 0
+          ? Math.round((inclGST / (1 + totalRate / 100)) * 100) / 100
+          : inclGST; // rates not stored — treat full amount as base
+      }
+      return parseFloat(row.EAmount) || 0;
+    })(),
     cgstRate: row.ECgstRate ? parseFloat(row.ECgstRate) : 0,
     sgstRate: row.ESgstRate ? parseFloat(row.ESgstRate) : 0,
     discount,
     emi,
-    // For GRN-linked bookings, use the live GRN total (incl GST) returned by
-    // the backend as the authoritative net amount. Falls back to stored ENetAmount.
+    // For GRN-linked bookings, prefer the stored ENetAmount (net after billing terms).
+    // Fall back to EGrnTotalAmount (incl-GST, before terms) if ENetAmount not set,
+    // then fall back to EAmount for non-GRN / very old records.
     netAmount:
-      row.EGrnTotalAmount != null
-        ? parseFloat(row.EGrnTotalAmount)
-        : row.ENetAmount
-          ? parseFloat(row.ENetAmount)
+      row.ENetAmount
+        ? parseFloat(row.ENetAmount)
+        : row.EGrnTotalAmount != null
+          ? parseFloat(row.EGrnTotalAmount)
           : parseFloat(row.EAmount) || 0,
     grnTotalAmount:
       row.EGrnTotalAmount != null ? parseFloat(row.EGrnTotalAmount) : null,
