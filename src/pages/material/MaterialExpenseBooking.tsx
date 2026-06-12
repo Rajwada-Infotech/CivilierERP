@@ -2070,14 +2070,27 @@ export default function MaterialExpenseBooking() {
       toast.error("Basic amount is required and must be greater than 0.");
       return;
     }
-    const bd = computeBreakdown(
-      form.basicAmount,
-      form.cgstRate,
-      form.sgstRate,
-      form.billingTerms && form.billingTerms.length > 0
-        ? form.billingTerms
-        : form.discount,
-    );
+    // For GRN bookings: net = GRN total ± billing terms (no GST re-computation).
+    const bd = (selectedDoc?.kind === "GRN")
+      ? (() => {
+          const grnTotal = form.basicAmount;
+          const terms = form.billingTerms && form.billingTerms.length > 0 ? form.billingTerms : [];
+          let running = grnTotal;
+          for (const t of terms) {
+            const amt = t.type === "percentage" ? (running * (t.value ?? 0)) / 100 : (t.value ?? 0);
+            if (t.deductionType === "Addition") running += amt;
+            else running = Math.max(0, running - amt);
+          }
+          return { netAmount: Math.round(running * 100) / 100, basicAmount: grnTotal };
+        })()
+      : computeBreakdown(
+          form.basicAmount,
+          form.cgstRate,
+          form.sgstRate,
+          form.billingTerms && form.billingTerms.length > 0
+            ? form.billingTerms
+            : form.discount,
+        );
     let emiForSave = { ...form.emi };
     if (
       !isEditing &&
@@ -2149,21 +2162,34 @@ export default function MaterialExpenseBooking() {
   const isGRN = selectedDoc?.kind === "GRN";
   // For GRN-linked bookings with a live GST breakdown, use exact per-item totals.
   // Net Payable = Gross Amount (incl. GST) — no billing term additions on top.
-  const bd = (selectedDoc?.kind === "GRN" && gstBreakdown && gstBreakdown.totals.totalInclGST > 0)
+  // For GRN-linked bookings: basicAmount is already incl-GST (GRN total).
+  // Apply billing terms directly on the GRN total — no separate GST rows.
+  // For all other source types: standard computeBreakdown with CGST/SGST.
+  const bd = (selectedDoc?.kind === "GRN")
     ? (() => {
-        const t = gstBreakdown.totals;
-        const gross = t.totalBase + t.totalCGST + t.totalSGST;
-        const rounded = Math.round(gross * 100) / 100;
+        const grnTotal = form.basicAmount; // = EGrnTotalAmount via dbToRecord
+        const terms = form.billingTerms && form.billingTerms.length > 0
+          ? form.billingTerms
+          : [];
+        let running = grnTotal;
+        for (const t of terms) {
+          const amt = t.type === "percentage"
+            ? (running * (t.value ?? 0)) / 100
+            : (t.value ?? 0);
+          if (t.deductionType === "Addition") running += amt;
+          else running = Math.max(0, running - amt);
+        }
+        const net = Math.round(running * 100) / 100;
         return {
-          basicAmount: t.totalBase,
-          discountAmount: 0,
-          taxableAmount: t.totalBase,
-          cgstAmount: t.totalCGST,
-          sgstAmount: t.totalSGST,
+          basicAmount: grnTotal,
+          discountAmount: grnTotal - net,
+          taxableAmount: grnTotal,
+          cgstAmount: 0,
+          sgstAmount: 0,
           igstAmount: 0,
-          grossAmount: rounded,
+          grossAmount: grnTotal,
           roundOff: 0,
-          netAmount: rounded,
+          netAmount: net,
           preGstTerms: [],
           postGstTerms: [],
         };
@@ -2717,8 +2743,8 @@ export default function MaterialExpenseBooking() {
                   <>
                     <PriceBreakdownPanel
                       bd={bd}
-                      cgstRate={form.cgstRate}
-                      sgstRate={form.sgstRate}
+                      cgstRate={isGRN ? 0 : form.cgstRate}
+                      sgstRate={isGRN ? 0 : form.sgstRate}
                       hasDiscount={
                         form.billingTerms && form.billingTerms.length > 0
                           ? form.billingTerms.some((d) => d.applicable)
