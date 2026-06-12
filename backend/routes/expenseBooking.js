@@ -901,7 +901,13 @@ router.get("/:id", async (req, res) => {
                CASE
                  WHEN eb.ESourceType = 'GRN' AND grn_det.GRNID IS NOT NULL THEN grn_supp_det.LHeadName
                  ELSE eb.EName
-               END AS ESupplierName
+               END AS ESupplierName,
+               -- Live GRN total (incl. GST) so detail modal always shows current value
+               CASE
+                 WHEN eb.ESourceType = 'GRN' AND grn_det.TotalAmount IS NOT NULL AND grn_det.TotalAmount > 0
+                 THEN grn_det.TotalAmount
+                 ELSE NULL
+               END AS EGrnTotalAmount
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
         LEFT JOIN dbo.enterprise ec ON ec.id = eb.ECompanyId
