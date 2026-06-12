@@ -2716,16 +2716,18 @@ const Payment: React.FC = () => {
                           className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                         >
                           <option value="">Select project…</option>
-                          {filterProjectsByCompany(
-                            projectOptions,
-                            (() => {
+                          {(() => {
                               const asNum = parseInt(form.company, 10);
-                              if (!isNaN(asNum) && String(asNum) === form.company.trim()) return String(asNum);
-                              return String(companyOptions.find(c => c.label === form.company)?.id ?? "");
-                            })()
-                          ).map(p => (
-                            <option key={p.id} value={String(p.id)}>{p.label}</option>
-                          ))}
+                              const companyId = (!isNaN(asNum) && String(asNum) === form.company.trim())
+                                ? asNum
+                                : (companyOptions.find(c => c.label === form.company)?.id ?? null);
+                              return (companyId
+                                ? projectOptions.filter(p => p.company_id === companyId)
+                                : projectOptions
+                              ).map(p => (
+                                <option key={p.id} value={String(p.id)}>{p.label}</option>
+                              ));
+                            })()}
                         </select>
                         <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                       </div>
