@@ -2070,12 +2070,6 @@ export default function MaterialExpenseBooking() {
         ? form.billingTerms
         : form.discount,
     );
-    if (selectedDoc?.kind === "GRN" && selectedDoc.amount != null) {
-      const exactGrnTotal = Math.round(selectedDoc.amount * 100) / 100;
-      bd.roundOff = exactGrnTotal - bd.grossAmount;
-      bd.netAmount = exactGrnTotal;
-    }
-
     let emiForSave = { ...form.emi };
     if (
       !isEditing &&
@@ -2152,11 +2146,6 @@ export default function MaterialExpenseBooking() {
       ? form.billingTerms
       : form.discount,
   );
-  if (selectedDoc?.kind === "GRN" && selectedDoc.amount != null) {
-    const grnTotal = Math.round(selectedDoc.amount * 100) / 100;
-    bd.roundOff = grnTotal - bd.grossAmount;
-    bd.netAmount = grnTotal;
-  }
   const filteredRecords =
     statusFilter && statusFilter !== "All"
       ? records.filter((r) => r.status === statusFilter)
@@ -2683,69 +2672,16 @@ export default function MaterialExpenseBooking() {
                 </div>
                 {form.basicAmount > 0 && (
                   <>
-                    {isGRN && gstBreakdown ? (
-                      <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-sm">
-                        <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
-                          <div>
-                            <p className="text-xs font-medium">Basic Amount</p>
-                            <p className="text-[10px] text-muted-foreground">
-                              Pre-tax value (excl. GST)
-                            </p>
-                          </div>
-                          <p className="font-mono text-sm font-semibold">
-                            ₹{fmt(gstBreakdown.totals.totalBase)}
-                          </p>
-                        </div>
-                        {gstBreakdown.totals.totalCGST > 0 && (
-                          <div className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]">
-                            <div>
-                              <p className="text-xs text-muted-foreground">
-                                CGST
-                              </p>
-                              <p className="text-[10px] text-muted-foreground">
-                                Central GST
-                              </p>
-                            </div>
-                            <p className="font-mono text-sm text-foreground/80">
-                              + ₹{fmt(gstBreakdown.totals.totalCGST)}
-                            </p>
-                          </div>
-                        )}
-                        {gstBreakdown.totals.totalSGST > 0 && (
-                          <div className="flex items-center justify-between px-4 py-2 bg-amber-500/[0.03]">
-                            <div>
-                              <p className="text-xs text-muted-foreground">
-                                SGST
-                              </p>
-                              <p className="text-[10px] text-muted-foreground">
-                                State GST
-                              </p>
-                            </div>
-                            <p className="font-mono text-sm text-foreground/80">
-                              + ₹{fmt(gstBreakdown.totals.totalSGST)}
-                            </p>
-                          </div>
-                        )}
-                        <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20">
-                          <div>
-                            <p className="text-xs font-medium">Gross Amount</p>
-                            <p className="text-[10px] text-muted-foreground">
-                              Basic + CGST + SGST
-                            </p>
-                          </div>
-                          <p className="font-mono text-sm font-semibold">
-                            ₹{fmt(gstBreakdown.totals.totalInclGST)}
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      <PriceBreakdownPanel
-                        bd={bd}
-                        cgstRate={form.cgstRate}
-                        sgstRate={form.sgstRate}
-                        hasDiscount={form.discount.applicable}
-                      />
-                    )}
+                    <PriceBreakdownPanel
+                      bd={bd}
+                      cgstRate={form.cgstRate}
+                      sgstRate={form.sgstRate}
+                      hasDiscount={
+                        form.billingTerms && form.billingTerms.length > 0
+                          ? form.billingTerms.some((d) => d.applicable)
+                          : form.discount.applicable
+                      }
+                    />
                     <div className="flex items-center justify-between rounded-xl bg-primary/8 border border-primary/20 px-5 py-4">
                       <div className="flex items-center gap-2">
                         <TrendingUp size={15} className="text-primary" />
@@ -2754,12 +2690,7 @@ export default function MaterialExpenseBooking() {
                         </span>
                       </div>
                       <span className="font-mono text-xl font-bold text-primary">
-                        ₹
-                        {fmt(
-                          isGRN && gstBreakdown
-                            ? gstBreakdown.totals.totalInclGST
-                            : bd.netAmount,
-                        )}
+                        ₹{fmt(bd.netAmount)}
                       </span>
                     </div>
                   </>
