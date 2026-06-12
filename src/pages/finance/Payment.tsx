@@ -2248,18 +2248,17 @@ const Payment: React.FC = () => {
           }));
         }
 
-        // If this expense is linked to a GRN, fetch the per-item GST breakdown
-        if (detail.ESourceType === "GRN" && detail.ESourceId) {
+        // Helper: given a GRNID, fetch its item-level GST breakdown and populate
+        // grnGstBreakdown + form rates. Used by both GRN-direct and PO-indirect paths.
+        const applyGrnBreakdown = async (grnId: number | string) => {
           try {
             const bdRes = await fetchWithAuth(
-              `/api/grns/${detail.ESourceId}/gst-breakdown`,
+              `/api/grns/${grnId}/gst-breakdown`,
             );
             if (bdRes.ok) {
               const bd = await bdRes.json();
-              setGrnGstBreakdown(bd);
-              // Override form amounts with correct values from GRN item-level GST breakdown.
-              // This ensures the Amount field matches the Net Payable shown in the breakdown.
               if (bd?.totals?.totalInclGST > 0) {
+                setGrnGstBreakdown(bd);
                 const t = bd.totals;
                 const avgCGST =
                   t.totalBase > 0 ? (t.totalCGST / t.totalBase) * 100 : 0;
@@ -2267,9 +2266,6 @@ const Payment: React.FC = () => {
                   t.totalBase > 0 ? (t.totalSGST / t.totalBase) * 100 : 0;
                 setForm((prev) => ({
                   ...prev,
-                  // Amount = stored ENetAmount (net after billing terms).
-                  // Keep whatever was loaded from the expense detail — don't override with raw GRN total.
-                  // The breakdown panel will show Gross = totalInclGST and Net = Gross (per requirement).
                   baseAmount: Math.round(t.totalBase * 100) / 100,
                   cgstRate: Math.round(avgCGST * 100) / 100,
                   sgstRate: Math.round(avgSGST * 100) / 100,
@@ -2279,6 +2275,31 @@ const Payment: React.FC = () => {
             }
           } catch {
             /* non-fatal */
+          }
+        };
+
+        // If this expense is linked to a GRN directly, fetch the per-item GST breakdown.
+        // For PO/WO_PO-linked bookings, find the GRN created against that PO and use its breakdown —
+        // because the actual GST lives in the GRN items (PO stores rates but GRN stores received actuals).
+        if (detail.ESourceType === "GRN" && detail.ESourceId) {
+          await applyGrnBreakdown(detail.ESourceId);
+        } else if (
+          (detail.ESourceType === "PO" || detail.ESourceType === "WO_PO") &&
+          detail.ESourceId
+        ) {
+          try {
+            const poGrnsRes = await fetchWithAuth(
+              `/api/grns/by-po/${detail.ESourceId}`,
+            );
+            if (poGrnsRes.ok) {
+              const poGrns: { GRNID: number }[] = await poGrnsRes.json();
+              if (Array.isArray(poGrns) && poGrns.length > 0) {
+                // grns returned newest-first; use most recent GRN's breakdown
+                await applyGrnBreakdown(poGrns[0].GRNID);
+              }
+            }
+          } catch {
+            /* non-fatal — breakdown stays null, standard cgstRate/sgstRate used */
           }
         } else {
           setGrnGstBreakdown(null);
