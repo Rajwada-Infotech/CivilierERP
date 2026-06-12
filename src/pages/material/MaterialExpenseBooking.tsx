@@ -75,7 +75,6 @@ import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import {
   blankForm,
   computeBreakdown,
-  computeGrnNetWithTerms,
   dbToRecord,
   fmt,
   generateEmiSchedule,
@@ -1599,6 +1598,15 @@ export default function MaterialExpenseBooking() {
               ? rawDocNo
               : `GRN-${rawDocNo}`
             : rawDocNo;
+          // Basic amount = sum of (receivedQty * rate) per item — qty × rate only, no GST
+          const qtyRateTotal =
+            Math.round(
+              items.reduce(
+                (s, i) =>
+                  s + (Number(i.receivedQty) || 0) * (Number(i.rate) || 0),
+                0,
+              ) * 100,
+            ) / 100;
           const grnTotal =
             Math.round((parseFloat(r.TotalAmount) || 0) * 100) / 100;
           setSelectedDoc((prev) =>
@@ -1618,38 +1626,22 @@ export default function MaterialExpenseBooking() {
           return apiFetch(`/api/grns/${doc.sourceId}/gst-breakdown`)
             .then((bd: any) => {
               setGstBreakdown(bd);
-              const t = bd?.totals;
-              if (t && t.totalInclGST > 0) {
-                const avgCGST =
-                  t.totalBase > 0 ? (t.totalCGST / t.totalBase) * 100 : 0;
-                const avgSGST =
-                  t.totalBase > 0 ? (t.totalSGST / t.totalBase) * 100 : 0;
-                const cleanTotal = Math.round(t.totalInclGST * 100) / 100;
-                setSelectedDoc((prev) =>
-                  prev && prev.kind === "GRN"
-                    ? { ...prev, amount: cleanTotal }
-                    : prev,
-                );
-                setForm((prev) => ({
-                  ...prev,
-                  bookingReference: canonicalDocNo,
-                  basicAmount: Math.round(t.totalBase * 100) / 100,
-                  cgstRate: Math.round(avgCGST * 100) / 100,
-                  sgstRate: Math.round(avgSGST * 100) / 100,
-                }));
-              } else {
-                setForm((prev) => ({
-                  ...prev,
-                  bookingReference: canonicalDocNo,
-                  basicAmount: grnTotal > 0 ? grnTotal : prev.basicAmount,
-                }));
-              }
-            })
-            .catch(() => {
+              // Basic amount is always qty × rate (no GST), regardless of breakdown
+              const basicAmt =
+                qtyRateTotal > 0 ? qtyRateTotal : grnTotal > 0 ? grnTotal : 0;
               setForm((prev) => ({
                 ...prev,
                 bookingReference: canonicalDocNo,
-                basicAmount: grnTotal > 0 ? grnTotal : prev.basicAmount,
+                basicAmount: basicAmt,
+              }));
+            })
+            .catch(() => {
+              const basicAmt =
+                qtyRateTotal > 0 ? qtyRateTotal : grnTotal > 0 ? grnTotal : 0;
+              setForm((prev) => ({
+                ...prev,
+                bookingReference: canonicalDocNo,
+                basicAmount: basicAmt,
               }));
             });
         })
@@ -1795,7 +1787,9 @@ export default function MaterialExpenseBooking() {
               .then((bd: any) => {
                 setGstBreakdown(bd);
               })
-              .catch(() => { /* non-fatal */ });
+              .catch(() => {
+                /* non-fatal */
+              });
           })
           .catch((err) => {
             toast.error(
@@ -2044,6 +2038,65 @@ export default function MaterialExpenseBooking() {
     fetchBookedSources();
   };
 
+  // Shared GRN bd helper: base = qty*rate, real CGST/SGST from gstBreakdown,
+  // active billing terms applied (pre-GST on base, post-GST on gross).
+  const computeGrnBd = () => {
+    const base = form.basicAmount;
+    const cgstAmt = gstBreakdown?.totals.totalCGST ?? 0;
+    const sgstAmt = gstBreakdown?.totals.totalSGST ?? 0;
+    const rawGross =
+      gstBreakdown?.totals.totalInclGST ?? base + cgstAmt + sgstAmt;
+
+    const activeTerms = (form.billingTerms ?? [])
+      .filter((t) => t.applicable)
+      .map((t) => ({
+        ...t,
+        termType: (t.deductionType ?? "Deduction") as "Addition" | "Deduction",
+      }));
+    const preTerms = activeTerms.filter((t) => t.appliedOn !== "post-gst");
+    const postTerms = activeTerms.filter((t) => t.appliedOn === "post-gst");
+
+    // Pre-GST terms adjust the base before GST is added
+    let runningBase = base;
+    for (const t of preTerms) {
+      const amt =
+        t.type === "percentage"
+          ? (runningBase * (t.value ?? 0)) / 100
+          : (t.value ?? 0);
+      if (t.termType === "Addition") runningBase += amt;
+      else runningBase = Math.max(0, runningBase - amt);
+    }
+    const taxable = Math.round(runningBase * 100) / 100;
+    const gross = Math.round((taxable + cgstAmt + sgstAmt) * 100) / 100;
+    const effectiveGross = preTerms.length === 0 ? rawGross : gross;
+
+    // Post-GST terms adjust the gross
+    let running = effectiveGross;
+    for (const t of postTerms) {
+      const amt =
+        t.type === "percentage"
+          ? (running * (t.value ?? 0)) / 100
+          : (t.value ?? 0);
+      if (t.termType === "Addition") running += amt;
+      else running = Math.max(0, running - amt);
+    }
+    const net = Math.round(running * 100) / 100;
+
+    return {
+      basicAmount: base,
+      discountAmount: effectiveGross - net,
+      taxableAmount: taxable,
+      cgstAmount: cgstAmt,
+      sgstAmount: sgstAmt,
+      igstAmount: 0,
+      grossAmount: effectiveGross,
+      roundOff: 0,
+      netAmount: net,
+      preGstTerms: preTerms,
+      postGstTerms: postTerms,
+    };
+  };
+
   const handleSave = async () => {
     if (saveInFlight.current) return;
 
@@ -2053,6 +2106,10 @@ export default function MaterialExpenseBooking() {
     }
     if (!form.bookingDate) {
       toast.error("Booking date is required.");
+      return;
+    }
+    if (form.dueDate && form.bookingDate && form.dueDate < form.bookingDate) {
+      toast.error("Due date cannot be before the booking date.");
       return;
     }
     if (!form.companyId) {
@@ -2070,14 +2127,19 @@ export default function MaterialExpenseBooking() {
       toast.error("Basic amount is required and must be greater than 0.");
       return;
     }
-    const bd = computeBreakdown(
-      form.basicAmount,
-      form.cgstRate,
-      form.sgstRate,
-      form.billingTerms && form.billingTerms.length > 0
-        ? form.billingTerms
-        : form.discount,
-    );
+    // For GRN bookings: use the shared computeGrnBd() which handles active billing
+    // terms split by pre/post-GST, producing correct net with real GST amounts.
+    const bd =
+      selectedDoc?.kind === "GRN"
+        ? computeGrnBd()
+        : computeBreakdown(
+            form.basicAmount,
+            form.cgstRate,
+            form.sgstRate,
+            form.billingTerms && form.billingTerms.length > 0
+              ? form.billingTerms
+              : form.discount,
+          );
     let emiForSave = { ...form.emi };
     if (
       !isEditing &&
@@ -2147,46 +2209,24 @@ export default function MaterialExpenseBooking() {
   };
 
   const isGRN = selectedDoc?.kind === "GRN";
-  // For GRN-linked bookings with a live GST breakdown, use exact per-item totals.
-  // Net Payable = Gross Amount (incl. GST) — no billing term additions on top.
-  const bd = (selectedDoc?.kind === "GRN" && gstBreakdown && gstBreakdown.totals.totalInclGST > 0)
-    ? (() => {
-        const t = gstBreakdown.totals;
-        const gross = t.totalBase + t.totalCGST + t.totalSGST;
-        const rounded = Math.round(gross * 100) / 100;
-        return {
-          basicAmount: t.totalBase,
-          discountAmount: 0,
-          taxableAmount: t.totalBase,
-          cgstAmount: t.totalCGST,
-          sgstAmount: t.totalSGST,
-          igstAmount: 0,
-          grossAmount: rounded,
-          roundOff: 0,
-          netAmount: rounded,
-          preGstTerms: [],
-          postGstTerms: [],
-        };
-      })()
-    : computeBreakdown(
-        form.basicAmount,
-        form.cgstRate,
-        form.sgstRate,
-        form.billingTerms && form.billingTerms.length > 0
-          ? form.billingTerms
-          : form.discount,
-      );
+
+  const bd =
+    selectedDoc?.kind === "GRN"
+      ? computeGrnBd()
+      : computeBreakdown(
+          form.basicAmount,
+          form.cgstRate,
+          form.sgstRate,
+          form.billingTerms && form.billingTerms.length > 0
+            ? form.billingTerms
+            : form.discount,
+        );
   const filteredRecords =
     statusFilter && statusFilter !== "All"
       ? records.filter((r) => r.status === statusFilter)
       : records;
   const totalNet = records.reduce((sum, r) => {
     if (r.status === "Draft") return sum;
-    if (r.grnTotalAmount != null) {
-      return (
-        sum + computeGrnNetWithTerms(r.grnTotalAmount, r.billingTerms ?? [])
-      );
-    }
     const bd = computeBreakdown(
       r.basicAmount,
       r.cgstRate,
@@ -2224,7 +2264,7 @@ export default function MaterialExpenseBooking() {
     if (r.ESourceType === "GRN") bookedGRNIds.add(r.ESourceId);
   }
 
-  const showDocSection = !!(form.bookingDate || form.companyId);
+  const showDocSection = !!form.companyId;
 
   return (
     <>
@@ -2445,7 +2485,21 @@ export default function MaterialExpenseBooking() {
                       <input
                         type="date"
                         value={form.dueDate}
-                        onChange={(e) => set("dueDate", e.target.value)}
+                        min={form.bookingDate || undefined}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (
+                            form.bookingDate &&
+                            val &&
+                            val < form.bookingDate
+                          ) {
+                            toast.error(
+                              "Due date cannot be before the booking date.",
+                            );
+                            return;
+                          }
+                          set("dueDate", val);
+                        }}
                         className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                       />
                     </div>
@@ -2598,8 +2652,7 @@ export default function MaterialExpenseBooking() {
               ) : (
                 <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-dashed border-border/60 text-xs text-muted-foreground">
                   <FileText size={13} className="shrink-0 opacity-40" />
-                  Fill in the booking information above to see matching
-                  documents.
+                  Select a company above to see matching documents.
                 </div>
               )}
 
@@ -2717,8 +2770,30 @@ export default function MaterialExpenseBooking() {
                   <>
                     <PriceBreakdownPanel
                       bd={bd}
-                      cgstRate={form.cgstRate}
-                      sgstRate={form.sgstRate}
+                      cgstRate={
+                        isGRN
+                          ? gstBreakdown?.totals.totalBase
+                            ? Math.round(
+                                (gstBreakdown.totals.totalCGST /
+                                  gstBreakdown.totals.totalBase) *
+                                  100 *
+                                  100,
+                              ) / 100
+                            : 0
+                          : form.cgstRate
+                      }
+                      sgstRate={
+                        isGRN
+                          ? gstBreakdown?.totals.totalBase
+                            ? Math.round(
+                                (gstBreakdown.totals.totalSGST /
+                                  gstBreakdown.totals.totalBase) *
+                                  100 *
+                                  100,
+                              ) / 100
+                            : 0
+                          : form.sgstRate
+                      }
                       hasDiscount={
                         form.billingTerms && form.billingTerms.length > 0
                           ? form.billingTerms.some((d) => d.applicable)
@@ -3032,6 +3107,9 @@ export default function MaterialExpenseBooking() {
                       ? selectedDoc.amount
                       : null
                   }
+                  gstBreakdown={
+                    isGRN && gstBreakdown ? (gstBreakdown as any) : null
+                  }
                 />
               </div>
 
@@ -3294,24 +3372,17 @@ export default function MaterialExpenseBooking() {
                           {filteredRecords.map((rec, index) => {
                             // For GRN-linked records, net = live GRN total + billing terms applied.
                             // For all others, use computeBreakdown on stored basicAmount.
-                            const effectiveNet =
-                              rec.grnTotalAmount != null
-                                ? computeGrnNetWithTerms(
-                                    rec.grnTotalAmount,
-                                    rec.billingTerms ?? [],
-                                  )
-                                : (() => {
-                                    const rbd = computeBreakdown(
-                                      rec.basicAmount,
-                                      rec.cgstRate,
-                                      rec.sgstRate,
-                                      rec.billingTerms &&
-                                        rec.billingTerms.length > 0
-                                        ? rec.billingTerms
-                                        : rec.discount,
-                                    );
-                                    return rec.netAmount ?? rbd.netAmount;
-                                  })();
+                            const effectiveNet = (() => {
+                              const rbd = computeBreakdown(
+                                rec.basicAmount,
+                                rec.cgstRate,
+                                rec.sgstRate,
+                                rec.billingTerms && rec.billingTerms.length > 0
+                                  ? rec.billingTerms
+                                  : rec.discount,
+                              );
+                              return rec.netAmount ?? rbd.netAmount;
+                            })();
                             return (
                               <TableRow
                                 key={
