@@ -317,7 +317,12 @@ export function dbToRecord(row: any): ExpenseRecord {
     projectName: row.EProjectDisplayName || row.projectName || "",
     materialCategory: row.EDocumentType ?? "",
     invoiceReference: row.EDocNo ?? "",
-    basicAmount: parseFloat(row.EAmount) || 0,
+    // For GRN-linked bookings use the live GRN total (incl. GST) as Basic Amount.
+    // This is the authoritative figure — EAmount is a stale snapshot from when the booking was created.
+    basicAmount:
+      row.EGrnTotalAmount != null && parseFloat(row.EGrnTotalAmount) > 0
+        ? parseFloat(row.EGrnTotalAmount)
+        : parseFloat(row.EAmount) || 0,
     cgstRate: row.ECgstRate ? parseFloat(row.ECgstRate) : 0,
     sgstRate: row.ESgstRate ? parseFloat(row.ESgstRate) : 0,
     discount,
