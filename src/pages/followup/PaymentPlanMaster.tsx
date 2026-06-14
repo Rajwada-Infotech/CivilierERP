@@ -284,14 +284,12 @@ const PaymentPlanMaster: React.FC = () => {
         ]}
       />
 
+      <div className="space-y-8 mt-6">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-            <Landmark className="w-5 h-5 text-primary" />
-            Payment Plan Master
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <h1 className="text-xl font-heading font-bold text-foreground">Payment Plan Master</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
             Define reusable payment milestone terms for bookings &amp; units
           </p>
         </div>
@@ -309,7 +307,7 @@ const PaymentPlanMaster: React.FC = () => {
       </div>
 
       {/* ── Summary chips ──────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 mb-5 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap">
         <span className="px-3 py-1 rounded-full text-xs font-heading bg-primary/10 text-primary border border-primary/20">
           {activeCount} active
         </span>
@@ -805,6 +803,7 @@ const PaymentPlanMaster: React.FC = () => {
           </div>
         )}
       </div>
+      </div> {/* end space-y-8 */}
     </>
   );
 };

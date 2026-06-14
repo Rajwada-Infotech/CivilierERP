@@ -1089,42 +1089,27 @@ export default function ApplicationsPage() {
         ]}
       />
 
-      <div className="space-y-6 mt-4">
+      <div className="space-y-8 mt-6">
         {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="flex items-end justify-between gap-4">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2.5 mb-1">
-              <div className="w-1 h-5 rounded-full gradient-accent" />
-              <h1 className="text-[22px] font-heading font-bold text-foreground tracking-tight leading-none">
-                Applications
-              </h1>
-              {isFetching && (
-                <Loader2
-                  size={13}
-                  className="animate-spin text-muted-foreground"
-                />
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground pl-3.5">
-              Track and manage sales applications before unit selection and
-              booking.
+            <h1 className="text-xl font-heading font-bold text-foreground">Applications</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Track and manage sales applications before unit selection and booking.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-lg border border-border hover:bg-muted/60 transition-colors disabled:opacity-40 text-muted-foreground hover:text-foreground"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
-              <RefreshCw
-                size={12}
-                className={isFetching ? "animate-spin" : ""}
-              />{" "}
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
               Refresh
             </button>
             <Button
               onClick={resetAndOpen}
-              className="gradient-accent gap-1.5 font-semibold text-white text-sm h-9 px-4 rounded-xl shadow-lg shadow-primary/20"
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               <Plus size={14} /> New Application
             </Button>

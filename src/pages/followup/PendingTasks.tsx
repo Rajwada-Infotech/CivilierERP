@@ -1,13 +1,10 @@
 import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   AlertCircle,
-  ArrowLeft,
   CheckCircle2,
-  ChevronRight,
-  ClipboardList,
+  ChevronDown,
   Clock,
   Inbox,
   Plus,
@@ -18,12 +15,14 @@ import {
   UserCircle,
   Zap,
   CalendarClock,
+  CalendarDays,
   ListTodo,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -437,7 +436,6 @@ function TaskRow({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PendingTasksPage() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { currentUser, allUsers } = useAuth();
 
@@ -533,46 +531,30 @@ export default function PendingTasksPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-[1280px] mx-auto px-6 py-8 space-y-6">
+    <>
+      <Breadcrumbs items={["Follow-Up", "Pending Tasks"]} />
+      <div className="space-y-6 mt-6">
         {/* ── Header ── */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2 font-medium tracking-wide uppercase">
-              <button
-                onClick={() => navigate("/followup")}
-                className="hover:text-primary transition-colors flex items-center gap-1"
-              >
-                <ArrowLeft className="w-3 h-3" />
-                Follow-Up
-              </button>
-              <ChevronRight className="w-3 h-3" />
-              <span className="text-foreground">Pending Tasks</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 bg-primary/10 rounded-xl flex items-center justify-center">
-                <ClipboardList className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-foreground tracking-tight">
-                  Pending Tasks
-                </h1>
-                <p className="text-muted-foreground text-sm mt-0.5">
-                  All follow-up tasks — create, assign, and track to completion.
-                </p>
-              </div>
-            </div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Pending Tasks
+            </h1>
+            <p className="text-muted-foreground text-xs mt-0.5">
+              All follow-up tasks — create, assign, and track to completion.
+            </p>
           </div>
 
           <div className="flex items-center gap-2">
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="p-2 rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors disabled:opacity-50"
             >
               <RefreshCw
-                className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`}
+                className={`w-3.5 h-3.5 ${isFetching ? "animate-spin" : ""}`}
               />
+              Refresh
             </button>
             {canCreate && (
               <Button
@@ -713,18 +695,21 @@ export default function PendingTasksPage() {
                 {/* Priority filter */}
                 <div className="flex items-center gap-1.5">
                   <SlidersHorizontal className="w-3.5 h-3.5 text-muted-foreground" />
-                  <select
-                    value={priorityFilter}
-                    onChange={(e) =>
-                      setPriorityFilter(e.target.value as "all" | TaskPriority)
-                    }
-                    className="text-sm text-foreground bg-background border border-border rounded-lg px-2 py-1.5 outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/15 transition-all"
-                  >
-                    <option value="all">All priorities</option>
-                    <option value="high">High</option>
-                    <option value="medium">Medium</option>
-                    <option value="low">Low</option>
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={priorityFilter}
+                      onChange={(e) =>
+                        setPriorityFilter(e.target.value as "all" | TaskPriority)
+                      }
+                      className="appearance-none text-sm text-foreground bg-background border border-border rounded-lg pl-2 pr-7 py-1.5 outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/15 transition-all"
+                    >
+                      <option value="all">All priorities</option>
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                    <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  </div>
                 </div>
 
                 {/* Search */}
@@ -831,18 +816,11 @@ export default function PendingTasksPage() {
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="sm:max-w-md rounded-2xl">
           <DialogHeader>
-            <div className="flex items-center gap-3 mb-1">
-              <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center">
-                <ClipboardList className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <DialogTitle className="text-lg">New Task</DialogTitle>
-                <DialogDescription className="text-xs mt-0.5">
-                  Adds a task under{" "}
-                  <code className="font-mono">module=followup</code>.
-                </DialogDescription>
-              </div>
-            </div>
+            <DialogTitle className="text-lg">New Task</DialogTitle>
+            <DialogDescription className="text-xs mt-0.5">
+              Adds a task under{" "}
+              <code className="font-mono">module=followup</code>.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 mt-2">
@@ -901,14 +879,15 @@ export default function PendingTasksPage() {
                 <label className="text-sm font-medium text-foreground">
                   Due Date <span className="text-red-500">*</span>
                 </label>
-                <Input
-                  type="date"
-                  value={form.dueDate}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, dueDate: e.target.value }))
-                  }
-                  className="rounded-xl"
-                />
+                <div className="relative">
+                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                  <input
+                    type="date"
+                    value={form.dueDate}
+                    onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
+                    className="w-full pl-8 pr-3 py-2 rounded-xl text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
             </div>
 
@@ -966,6 +945,6 @@ export default function PendingTasksPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }
