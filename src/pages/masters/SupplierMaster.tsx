@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -24,6 +24,7 @@ import {
   Plus,
   Search,
   ChevronDown,
+  ChevronRight,
   AlertCircle,
   Eye,
   XCircle,
@@ -35,6 +36,8 @@ import {
   FileText,
   Printer,
   Layers,
+  Folder,
+  FolderOpen,
 } from "lucide-react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -177,7 +180,7 @@ function FlatDropdown({
         <ChevronDown size={14} className={`text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg">
           <div className="max-h-56 overflow-y-auto py-1">
             <div
               className={`px-3 py-2 text-sm cursor-pointer transition-colors ${!value ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted/60"}`}
@@ -194,6 +197,257 @@ function FlatDropdown({
               >
                 {o.label}
               </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── AccountGroup TreeNode ─────────────────────────────────────────────────────
+// ─── AGTreeNode — uses string keys to avoid number/string coercion bugs ────────
+interface AGTreeNode {
+  id: string;
+  AGId: number;
+  Name: string;
+  ParentGroupId: number | null;
+  children: AGTreeNode[];
+}
+
+function buildAGTree(items: AccountGroup[]): AGTreeNode[] {
+  // Normalize every id to string so Set/map lookups are always consistent
+  const map: Record<string, AGTreeNode> = {};
+  items.forEach((i) => {
+    map[String(i.AGId)] = {
+      id: String(i.AGId),
+      AGId: i.AGId,
+      Name: i.Name,
+      ParentGroupId: i.ParentGroupId,
+      children: [],
+    };
+  });
+  const roots: AGTreeNode[] = [];
+  items.forEach((i) => {
+    const pid = i.ParentGroupId != null ? String(i.ParentGroupId) : null;
+    if (pid && map[pid]) {
+      map[pid].children.push(map[String(i.AGId)]);
+    } else {
+      roots.push(map[String(i.AGId)]);
+    }
+  });
+  return roots;
+}
+
+// ─── Recursive dropdown node ──────────────────────────────────────────────────
+function AGTreeDropdownNode({
+  node,
+  depth,
+  openNodes,
+  onToggleNode,
+  selectedId,
+  onSelect,
+}: {
+  node: AGTreeNode;
+  depth: number;
+  openNodes: Set<string>;
+  onToggleNode: (id: string) => void;
+  selectedId: string;
+  onSelect: (id: number) => void;
+}) {
+  const hasChildren = node.children.length > 0;
+  const isOpen = openNodes.has(node.id);
+  const isSelected = selectedId === node.id;
+
+  return (
+    <>
+      <div
+        className={`flex items-center select-none cursor-pointer transition-colors rounded-md mx-1 my-0.5 ${
+          isSelected
+            ? "bg-primary/10 text-primary"
+            : "hover:bg-muted/60 text-foreground"
+        }`}
+        style={{ paddingLeft: `${depth * 16 + 4}px` }}
+        onClick={() => {
+          if (hasChildren) {
+            onToggleNode(node.id);
+          } else {
+            onSelect(node.AGId);
+          }
+        }}
+      >
+        <span className={`w-5 h-5 flex items-center justify-center shrink-0 ${hasChildren ? "text-muted-foreground" : "opacity-0"}`}>
+          {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </span>
+        <span className="mx-1.5 shrink-0">
+          {hasChildren ? (
+            <FolderOpen size={13} className="text-amber-500" />
+          ) : depth === 0 ? (
+            <Layers size={13} className="text-primary/60" />
+          ) : (
+            <Folder size={13} className="text-muted-foreground/50" />
+          )}
+        </span>
+        <span className={`text-sm flex-1 truncate py-2 ${depth === 0 ? "font-semibold" : "font-medium"}`}>
+          {node.Name}
+        </span>
+        {hasChildren && (
+          <span className="text-[10px] text-muted-foreground/50 shrink-0 mr-2">
+            {node.children.length}
+          </span>
+        )}
+        {hasChildren && (
+          <button
+            type="button"
+            className="mr-1 px-1.5 py-0.5 text-[10px] rounded border border-border/60 text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors shrink-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect(node.AGId);
+            }}
+          >
+            select
+          </button>
+        )}
+      </div>
+
+      {hasChildren && isOpen && (
+        <div>
+          {node.children.map((child) => (
+            <AGTreeDropdownNode
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              openNodes={openNodes}
+              onToggleNode={onToggleNode}
+              selectedId={selectedId}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── GroupedAccordionDropdown ─────────────────────────────────────────────────
+function GroupedAccordionDropdown({
+  value,
+  onChange,
+  allGroups,
+  placeholder = "— No Group —",
+  error,
+}: {
+  value: number | "";
+  onChange: (v: number | "") => void;
+  allGroups: AccountGroup[];
+  placeholder?: string;
+  error?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  // Use string-keyed Set to avoid number/string identity mismatches
+  const [openNodes, setOpenNodes] = useState<Set<string>>(new Set());
+  const dropRef = useRef<HTMLDivElement>(null);
+
+  const tree = useMemo(() => buildAGTree(allGroups), [allGroups]);
+
+  // Normalize selectedId to string for consistent comparisons
+  const selectedIdStr = value !== "" ? String(value) : "";
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropRef.current && !dropRef.current.contains(e.target as Node))
+        setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  // Auto-expand all ancestors of the selected value when the dropdown opens
+  useEffect(() => {
+    if (!open || value === "") return;
+    const ancestors = new Set<string>();
+    const walk = (id: string) => {
+      const group = allGroups.find((g) => String(g.AGId) === id);
+      if (group?.ParentGroupId != null) {
+        const pid = String(group.ParentGroupId);
+        ancestors.add(pid);
+        walk(pid);
+      }
+    };
+    walk(String(value));
+    if (ancestors.size > 0)
+      setOpenNodes((prev) => new Set([...prev, ...ancestors]));
+  }, [open, value, allGroups]);
+
+  const toggleNode = (id: string) => {
+    setOpenNodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectedGroup = value !== "" ? allGroups.find((g) => g.AGId === value) : null;
+  const selectedHasChildren = selectedGroup
+    ? allGroups.some((g) => String(g.ParentGroupId) === String(selectedGroup.AGId))
+    : false;
+
+  return (
+    <div className="relative" ref={dropRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left ${
+          error ? "border-red-400" : "border-border"
+        }`}
+      >
+        {selectedGroup ? (
+          selectedHasChildren ? (
+            <FolderOpen size={14} className="text-amber-500 shrink-0" />
+          ) : (
+            <Folder size={14} className="text-muted-foreground/60 shrink-0" />
+          )
+        ) : (
+          <Layers size={14} className="text-primary/50 shrink-0" />
+        )}
+        <span className={`flex-1 truncate ${selectedGroup ? "text-foreground font-medium" : "text-muted-foreground/70"}`}>
+          {selectedGroup ? selectedGroup.Name : placeholder}
+        </span>
+        <ChevronDown
+          size={14}
+          className={`text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg">
+          <div className="max-h-72 overflow-y-auto py-1">
+            {/* No Group */}
+            <div
+              className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer transition-colors border-b border-border/40 mb-1 ${
+                value === ""
+                  ? "bg-primary/10 text-primary font-medium"
+                  : "text-muted-foreground hover:bg-muted/60"
+              }`}
+              onClick={() => { onChange(""); setOpen(false); }}
+            >
+              <Layers size={13} className="shrink-0" />
+              <span>{placeholder}</span>
+            </div>
+
+            {/* Recursive tree */}
+            {tree.map((node) => (
+              <AGTreeDropdownNode
+                key={node.id}
+                node={node}
+                depth={0}
+                openNodes={openNodes}
+                onToggleNode={toggleNode}
+                selectedId={selectedIdStr}
+                onSelect={(id) => { onChange(id); setOpen(false); }}
+              />
             ))}
           </div>
         </div>
@@ -789,34 +1043,11 @@ const SupplierMaster: React.FC = () => {
                     <Layers size={11} className="text-primary" />
                     Group Name
                   </label>
-                  <div className="relative">
-                    <select
-                      value={form.LBelongsTo}
-                      onChange={(e) =>
-                        setForm((p) => ({
-                          ...p,
-                          LBelongsTo:
-                            e.target.value === "" ? "" : Number(e.target.value),
-                        }))
-                      }
-                      className={selectCls}
-                    >
-                      <option value="">— No Group —</option>
-                      {groupedAccountGroups.map(({ label, options }) => (
-                        <optgroup key={label} label={`── ${label}`}>
-                          {options.map((g) => (
-                            <option key={g.AGId} value={g.AGId}>
-                              {g.Name}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
+                  <GroupedAccordionDropdown
+                    value={form.LBelongsTo}
+                    onChange={(v) => setForm((p) => ({ ...p, LBelongsTo: v }))}
+                    allGroups={accountGroups}
+                  />
                 </div>
               </div>
             </div>
