@@ -117,7 +117,11 @@ function TreeDropdownNode({
     <>
       <div
         className={`flex items-center select-none transition-colors rounded-md ${
-          isDisabled ? "opacity-40" : isSelected ? "bg-primary/10 text-primary" : "hover:bg-muted/60 text-foreground"
+          isDisabled
+            ? "opacity-40"
+            : isSelected
+              ? "bg-primary/10 text-primary"
+              : "hover:bg-muted/60 text-foreground"
         }`}
         style={{ paddingLeft: `${depth * 16}px` }}
       >
@@ -154,7 +158,9 @@ function TreeDropdownNode({
           )}
 
           {/* Label */}
-          <span className={`text-sm flex-1 truncate ${depth === 0 ? "font-semibold" : "font-medium"}`}>
+          <span
+            className={`text-sm flex-1 truncate ${depth === 0 ? "font-semibold" : "font-medium"}`}
+          >
             {node.name}
           </span>
           <span className="font-mono text-[10px] text-muted-foreground shrink-0 ml-1">
@@ -204,7 +210,10 @@ function TreeDropdown({
   // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
         setOpen(false);
       }
     };
@@ -273,7 +282,10 @@ function TreeDropdown({
                 ? "bg-primary/10 text-primary"
                 : "text-muted-foreground hover:bg-muted/60"
             }`}
-            onClick={() => { onChange(""); setOpen(false); }}
+            onClick={() => {
+              onChange("");
+              setOpen(false);
+            }}
           >
             <Layers size={13} className="shrink-0" />
             <span>— Top-level group (no parent)</span>
@@ -290,7 +302,10 @@ function TreeDropdown({
                 openNodes={openNodes}
                 onToggleNode={toggleNode}
                 selectedId={value}
-                onSelect={(id) => { onChange(id); setOpen(false); }}
+                onSelect={(id) => {
+                  onChange(id);
+                  setOpen(false);
+                }}
                 invalidParents={invalidParents}
               />
             ))}
@@ -596,13 +611,24 @@ const AccountGroupMaster: React.FC = () => {
     } catch (err: any) {
       // Surface specific backend validation messages for blocked deletions
       const msg: string = err.message || "";
-      if (msg.includes("General Ledger")) {
+      if (
+        msg.includes("HAS_LINKED_ACCOUNTS") ||
+        /linked to a .* record/i.test(msg)
+      ) {
+        // Backend already returns a fully-formed, specific message naming
+        // the linked Supplier / Contractor / Bank / Customer / GL record.
+        toast.error(msg, { duration: 7000 });
+      } else if (msg.includes("General Ledger")) {
         toast.error(
           "Cannot delete — this group is linked to one or more General Ledger Accounts. " +
-          "Please delete or reassign those accounts first.",
+            "Please delete or reassign those accounts first.",
           { duration: 6000 },
         );
-      } else if (msg.includes("Sub Group") || msg.includes("sub-group") || msg.includes("HAS_SUBGROUPS")) {
+      } else if (
+        msg.includes("Sub Group") ||
+        msg.includes("sub-group") ||
+        msg.includes("HAS_SUBGROUPS")
+      ) {
         toast.error(
           "Cannot delete — this group still has sub-groups. Remove all sub-groups first.",
           { duration: 5000 },
@@ -729,79 +755,79 @@ const AccountGroupMaster: React.FC = () => {
                   Group Details
                 </p>
               </div>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-5">
-            {/* Group Name */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                Group Name <span className="text-destructive">*</span>
-              </label>
-              <input
-                value={form.name}
-                onChange={(e) => {
-                  setForm((p) => ({ ...p, name: e.target.value }));
-                  setErrors((p) => ({ ...p, name: false }));
-                }}
-                placeholder="e.g. Office Expenses"
-                className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
-                  errors.name ? "border-red-400" : "border-border"
-                }`}
-              />
-              {errors.name && (
-                <p className="text-xs text-red-500 mt-1">Required</p>
-              )}
-            </div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-5">
+                {/* Group Name */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    Group Name <span className="text-destructive">*</span>
+                  </label>
+                  <input
+                    value={form.name}
+                    onChange={(e) => {
+                      setForm((p) => ({ ...p, name: e.target.value }));
+                      setErrors((p) => ({ ...p, name: false }));
+                    }}
+                    placeholder="e.g. Office Expenses"
+                    className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
+                      errors.name ? "border-red-400" : "border-border"
+                    }`}
+                  />
+                  {errors.name && (
+                    <p className="text-xs text-red-500 mt-1">Required</p>
+                  )}
+                </div>
 
-            {/* Code */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                Code <span className="text-destructive">*</span>
-              </label>
-              <input
-                value={form.code}
-                onChange={(e) => {
-                  setForm((p) => ({
-                    ...p,
-                    code: e.target.value.toUpperCase(),
-                  }));
-                  setErrors((p) => ({ ...p, code: false }));
-                }}
-                placeholder="e.g. EXP-OFF"
-                className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
-                  errors.code ? "border-red-400" : "border-border"
-                }`}
-              />
-              {errors.code && (
-                <p className="text-xs text-red-500 mt-1">Required</p>
-              )}
-            </div>
+                {/* Code */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    Code <span className="text-destructive">*</span>
+                  </label>
+                  <input
+                    value={form.code}
+                    onChange={(e) => {
+                      setForm((p) => ({
+                        ...p,
+                        code: e.target.value.toUpperCase(),
+                      }));
+                      setErrors((p) => ({ ...p, code: false }));
+                    }}
+                    placeholder="e.g. EXP-OFF"
+                    className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
+                      errors.code ? "border-red-400" : "border-border"
+                    }`}
+                  />
+                  {errors.code && (
+                    <p className="text-xs text-red-500 mt-1">Required</p>
+                  )}
+                </div>
 
-            {/* Parent Group — hierarchical collapsible dropdown */}
-            <div className="space-y-1.5 col-span-2">
-              <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                Parent Group
-              </label>
-              <TreeDropdown
-                tree={filteredTree}
-                value={form.parentId}
-                onChange={(id) => setForm((p) => ({ ...p, parentId: id }))}
-                invalidParents={invalidParents}
-                allGroups={allGroups}
-              />
-              <p className="text-[11px] text-muted-foreground mt-1">
-                {selectedParentPath ? (
-                  <>
-                    Will nest under:{" "}
-                    <span className="font-medium text-foreground">
-                      {selectedParentPath}
-                    </span>
-                  </>
-                ) : (
-                  "Leave blank to create a top-level group"
-                )}
-              </p>
+                {/* Parent Group — hierarchical collapsible dropdown */}
+                <div className="space-y-1.5 col-span-2">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Parent Group
+                  </label>
+                  <TreeDropdown
+                    tree={filteredTree}
+                    value={form.parentId}
+                    onChange={(id) => setForm((p) => ({ ...p, parentId: id }))}
+                    invalidParents={invalidParents}
+                    allGroups={allGroups}
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    {selectedParentPath ? (
+                      <>
+                        Will nest under:{" "}
+                        <span className="font-medium text-foreground">
+                          {selectedParentPath}
+                        </span>
+                      </>
+                    ) : (
+                      "Leave blank to create a top-level group"
+                    )}
+                  </p>
+                </div>
+              </div>
             </div>
-          </div>
-          </div>
           </div>
         </div>
 
@@ -839,160 +865,161 @@ const AccountGroupMaster: React.FC = () => {
           </div>
 
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-          {isLoading ? (
-            <div className="text-center py-16 text-muted-foreground text-sm">
-              <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-              Loading groups…
-            </div>
-          ) : error ? (
-            <div className="text-center py-16 text-destructive text-sm">
-              Failed to load. Check backend connection.
-            </div>
-          ) : (
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="bg-muted/30 border-b border-border">
-                  <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
-                    Group Name
-                  </th>
-                  <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
-                    Code
-                  </th>
-                  <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
-                    Belongs To
-                  </th>
-                  <th className="px-4 py-3 w-24" />
-                </tr>
-              </thead>
-              <tbody>
-                {filteredFlat ? (
-                  filteredFlat.length === 0 ? (
+            {isLoading ? (
+              <div className="text-center py-16 text-muted-foreground text-sm">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                Loading groups…
+              </div>
+            ) : error ? (
+              <div className="text-center py-16 text-destructive text-sm">
+                Failed to load. Check backend connection.
+              </div>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="bg-muted/30 border-b border-border">
+                    <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+                      Group Name
+                    </th>
+                    <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+                      Code
+                    </th>
+                    <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+                      Belongs To
+                    </th>
+                    <th className="px-4 py-3 w-24" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredFlat ? (
+                    filteredFlat.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          className="py-10 text-center text-muted-foreground text-sm"
+                        >
+                          No results for "{search}"
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredFlat.map((g) => {
+                        const belongsTo = getBelongsTo(g._id, allGroups);
+                        return (
+                          <tr
+                            key={g._id}
+                            className={`group border-b border-border hover:bg-muted/30 transition-colors ${
+                              editingId === g._id ? "bg-primary/5" : ""
+                            }`}
+                          >
+                            <td className="py-2.5 px-4">
+                              <div className="flex items-center gap-2">
+                                <Folder
+                                  size={14}
+                                  className="text-muted-foreground/40 shrink-0"
+                                />
+                                <span className="text-sm font-medium text-foreground">
+                                  {g.name}
+                                </span>
+                                {g.parentId && (
+                                  <span className="text-[10px] text-muted-foreground bg-muted rounded-full px-1.5 py-0.5">
+                                    sub
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-4">
+                              <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
+                                <Hash size={10} />
+                                {g.code || "—"}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-4">
+                              {belongsTo ? (
+                                <span className="text-xs text-muted-foreground font-medium">
+                                  {belongsTo}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground/30">
+                                  —
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-4 text-right">
+                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                  onClick={() => setViewRecord(g)}
+                                  className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 transition-colors"
+                                  title="View details"
+                                >
+                                  <Eye size={13} />
+                                </button>
+                                <button
+                                  onClick={() => startEdit(g)}
+                                  className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                                >
+                                  <Pencil size={13} />
+                                </button>
+                                {deleteConfirm === g._id ? (
+                                  <>
+                                    <button
+                                      onClick={() => handleDelete(g._id)}
+                                      className="w-7 h-7 flex items-center justify-center rounded text-red-500 hover:bg-red-50"
+                                    >
+                                      <Check size={13} />
+                                    </button>
+                                    <button
+                                      onClick={() => setDeleteConfirm(null)}
+                                      className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:bg-muted"
+                                    >
+                                      <X size={13} />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    onClick={() => setDeleteConfirm(g._id)}
+                                    className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )
+                  ) : tree.length === 0 ? (
                     <tr>
                       <td
                         colSpan={4}
-                        className="py-10 text-center text-muted-foreground text-sm"
+                        className="text-center py-14 text-muted-foreground text-sm"
                       >
-                        No results for "{search}"
+                        <Layers size={18} className="mx-auto mb-2 opacity-30" />
+                        No account groups yet. Use the form above to create your
+                        first group.
                       </td>
                     </tr>
                   ) : (
-                    filteredFlat.map((g) => {
-                      const belongsTo = getBelongsTo(g._id, allGroups);
-                      return (
-                        <tr
-                          key={g._id}
-                          className={`group border-b border-border hover:bg-muted/30 transition-colors ${
-                            editingId === g._id ? "bg-primary/5" : ""
-                          }`}
-                        >
-                          <td className="py-2.5 px-4">
-                            <div className="flex items-center gap-2">
-                              <Folder
-                                size={14}
-                                className="text-muted-foreground/40 shrink-0"
-                              />
-                              <span className="text-sm font-medium text-foreground">
-                                {g.name}
-                              </span>
-                              {g.parentId && (
-                                <span className="text-[10px] text-muted-foreground bg-muted rounded-full px-1.5 py-0.5">
-                                  sub
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-2.5 px-4">
-                            <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
-                              <Hash size={10} />
-                              {g.code || "—"}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-4">
-                            {belongsTo ? (
-                              <span className="text-xs text-muted-foreground font-medium">
-                                {belongsTo}
-                              </span>
-                            ) : (
-                              <span className="text-xs text-muted-foreground/30">
-                                —
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-2.5 px-4 text-right">
-                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button
-                                onClick={() => setViewRecord(g)}
-                                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 transition-colors"
-                                title="View details"
-                              >
-                                <Eye size={13} />
-                              </button>
-                              <button
-                                onClick={() => startEdit(g)}
-                                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-                              >
-                                <Pencil size={13} />
-                              </button>
-                              {deleteConfirm === g._id ? (
-                                <>
-                                  <button
-                                    onClick={() => handleDelete(g._id)}
-                                    className="w-7 h-7 flex items-center justify-center rounded text-red-500 hover:bg-red-50"
-                                  >
-                                    <Check size={13} />
-                                  </button>
-                                  <button
-                                    onClick={() => setDeleteConfirm(null)}
-                                    className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:bg-muted"
-                                  >
-                                    <X size={13} />
-                                  </button>
-                                </>
-                              ) : (
-                                <button
-                                  onClick={() => setDeleteConfirm(g._id)}
-                                  className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )
-                ) : tree.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="text-center py-14 text-muted-foreground text-sm">
-                      <Layers
-                        size={18}
-                        className="mx-auto mb-2 opacity-30"
+                    tree.map((node) => (
+                      <TreeRow
+                        key={node._id}
+                        node={node}
+                        depth={0}
+                        expanded={expanded}
+                        onToggle={toggleExpand}
+                        onEdit={startEdit}
+                        onDelete={handleDelete}
+                        deleteConfirm={deleteConfirm}
+                        setDeleteConfirm={setDeleteConfirm}
+                        activeEditId={editingId}
+                        allGroups={allGroups}
+                        onView={setViewRecord}
                       />
-                      No account groups yet. Use the form above to create your first group.
-                    </td>
-                  </tr>
-                ) : (
-                  tree.map((node) => (
-                    <TreeRow
-                      key={node._id}
-                      node={node}
-                      depth={0}
-                      expanded={expanded}
-                      onToggle={toggleExpand}
-                      onEdit={startEdit}
-                      onDelete={handleDelete}
-                      deleteConfirm={deleteConfirm}
-                      setDeleteConfirm={setDeleteConfirm}
-                      activeEditId={editingId}
-                      allGroups={allGroups}
-                      onView={setViewRecord}
-                    />
-                  ))
-                )}
-              </tbody>
-            </table>
-          )}
+                    ))
+                  )}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       </div>
