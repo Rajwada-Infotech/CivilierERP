@@ -154,10 +154,24 @@ function AnimatedCounter({
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2.5 mb-5">
-      <div className="w-1 h-3.5 rounded-full bg-primary/70" />
+      <motion.div
+        className="w-1 h-3.5 rounded-full bg-primary/70"
+        animate={{ scaleY: [1, 1.3, 1] }}
+        transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+        style={{ originY: 0.5 }}
+      />
       <span className="font-heading text-[10px] font-bold uppercase tracking-[0.22em] text-muted-foreground">
         {children}
       </span>
+      {/* level-bubble accent */}
+      <div className="flex-1 h-px bg-border/40 ml-2 relative max-w-[120px] hidden sm:block">
+        <motion.div
+          className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-primary/40"
+          animate={{ left: ["0%", "100%", "0%"] }}
+          transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+          style={{ marginLeft: -3 }}
+        />
+      </div>
     </div>
   );
 }
@@ -371,6 +385,141 @@ function BgGrid() {
       </svg>
       <div className="absolute -top-32 -left-24 w-[50%] h-[50%] bg-primary/6 blur-[180px] rounded-full" />
       <div className="absolute bottom-0 right-0 w-[35%] h-[40%] bg-violet-500/5 blur-[150px] rounded-full" />
+
+      {/* ── Drafting compass — far bottom-right corner, out of content flow ── */}
+      <motion.svg
+        className="absolute opacity-[0.07] hidden xl:block"
+        style={{ bottom: "4%", right: "3%" }}
+        width="110"
+        height="110"
+        viewBox="0 0 90 90"
+        fill="none"
+        animate={{ rotate: 360 }}
+        transition={{ duration: 70, repeat: Infinity, ease: "linear" }}
+      >
+        <circle
+          cx="45"
+          cy="45"
+          r="3"
+          fill="currentColor"
+          className="text-primary"
+        />
+        <line
+          x1="45"
+          y1="45"
+          x2="78"
+          y2="20"
+          stroke="currentColor"
+          className="text-primary"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+        <line
+          x1="45"
+          y1="45"
+          x2="20"
+          y2="80"
+          stroke="currentColor"
+          className="text-primary"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+        <circle
+          cx="20"
+          cy="80"
+          r="2"
+          fill="currentColor"
+          className="text-primary"
+        />
+      </motion.svg>
+
+      {/* ── Small crane silhouette — far bottom-left corner ── */}
+      <div
+        className="absolute opacity-[0.07] hidden xl:block"
+        style={{ bottom: "2%", left: "2%", width: 170, height: 110 }}
+      >
+        <svg width="170" height="110" viewBox="0 0 170 110" fill="none">
+          <line
+            x1="20"
+            y1="8"
+            x2="20"
+            y2="105"
+            stroke="currentColor"
+            className="text-primary"
+            strokeWidth="2"
+          />
+          <line
+            x1="20"
+            y1="12"
+            x2="160"
+            y2="12"
+            stroke="currentColor"
+            className="text-primary"
+            strokeWidth="2"
+          />
+          <line
+            x1="20"
+            y1="12"
+            x2="4"
+            y2="20"
+            stroke="currentColor"
+            className="text-primary"
+            strokeWidth="2"
+          />
+          <line
+            x1="20"
+            y1="30"
+            x2="120"
+            y2="12"
+            stroke="currentColor"
+            className="text-primary"
+            strokeWidth="1"
+          />
+          <motion.g
+            initial={{ x: 145 }}
+            animate={{ x: [145, 75, 145] }}
+            transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
+          >
+            <line
+              x1="0"
+              y1="12"
+              x2="0"
+              y2="58"
+              stroke="currentColor"
+              className="text-primary"
+              strokeWidth="1.5"
+            />
+            <motion.rect
+              x="-8"
+              y="58"
+              width="16"
+              height="16"
+              rx="3"
+              fill="currentColor"
+              className="text-primary"
+              animate={{ y: [58, 64, 58] }}
+              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+            />
+          </motion.g>
+        </svg>
+      </div>
+
+      {/* ── Subtle blueprint scan line, full width, slow ── */}
+      <motion.div
+        className="absolute left-0 right-0 h-48"
+        style={{
+          background:
+            "linear-gradient(to bottom, transparent, hsl(var(--primary) / 0.025), transparent)",
+        }}
+        initial={{ top: "-20%" }}
+        animate={{ top: "120%" }}
+        transition={{
+          duration: 18,
+          repeat: Infinity,
+          ease: "linear",
+          repeatDelay: 6,
+        }}
+      />
     </div>
   );
 }
