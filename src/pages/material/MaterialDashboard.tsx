@@ -147,6 +147,7 @@ function StatCard({
   icon: Icon,
   iconColor = "text-emerald-600",
   iconBg = "bg-emerald-500/10",
+  borderL = "border-l-emerald-500",
   trend,
   onClick,
 }: {
@@ -156,13 +157,14 @@ function StatCard({
   icon: React.ElementType;
   iconColor?: string;
   iconBg?: string;
+  borderL?: string;
   trend?: "up" | "down" | "neutral";
   onClick?: () => void;
 }) {
   return (
     <div
       onClick={onClick}
-      className={`rounded-2xl border border-border bg-card p-5 flex flex-col gap-4 transition-all duration-200 ${
+      className={`rounded-2xl border border-border bg-card p-5 flex flex-col gap-4 transition-all duration-200 border-l-2 ${borderL} ${
         onClick
           ? "cursor-pointer hover:shadow-lg hover:-translate-y-0.5 hover:border-primary/20"
           : ""
@@ -762,6 +764,7 @@ export default function MaterialDashboard() {
           icon: Package,
           iconColor: "text-emerald-600",
           iconBg: "bg-emerald-500/10",
+          borderL: "border-l-emerald-500",
           trend: "neutral" as const,
           onClick: () => open("items"),
         },
@@ -772,6 +775,7 @@ export default function MaterialDashboard() {
           icon: Truck,
           iconColor: "text-blue-600",
           iconBg: "bg-blue-500/10",
+          borderL: "border-l-blue-500",
           trend: "up" as const,
           onClick: () => open("grns"),
         },
@@ -782,6 +786,7 @@ export default function MaterialDashboard() {
           icon: ShoppingCart,
           iconColor: "text-amber-600",
           iconBg: "bg-amber-500/10",
+          borderL: "border-l-amber-500",
           trend:
             data.purchaseOrders.open > 0
               ? ("down" as const)
@@ -795,6 +800,7 @@ export default function MaterialDashboard() {
           icon: Receipt,
           iconColor: "text-red-600",
           iconBg: "bg-red-500/10",
+          borderL: "border-l-red-500",
           trend:
             data.expenses.pending > 0
               ? ("down" as const)
@@ -808,6 +814,7 @@ export default function MaterialDashboard() {
           icon: Layers,
           iconColor: "text-teal-600",
           iconBg: "bg-teal-500/10",
+          borderL: "border-l-teal-500",
           trend:
             data.stock.totalIn > data.stock.totalOut
               ? ("up" as const)
@@ -821,6 +828,7 @@ export default function MaterialDashboard() {
           icon: PackageCheck,
           iconColor: "text-orange-600",
           iconBg: "bg-orange-500/10",
+          borderL: "border-l-orange-500",
           trend: "neutral" as const,
           onClick: () => open("issues"),
         },
@@ -831,6 +839,7 @@ export default function MaterialDashboard() {
           icon: Send,
           iconColor: "text-indigo-600",
           iconBg: "bg-indigo-500/10",
+          borderL: "border-l-indigo-500",
           trend:
             data.materialRequests.total > 0
               ? ("down" as const)
@@ -892,6 +901,7 @@ export default function MaterialDashboard() {
                 icon: TrendingUp,
                 color: "text-emerald-600",
                 bg: "bg-emerald-500/10",
+                borderL: "border-l-emerald-500",
               },
               {
                 label: "Total PO Value",
@@ -899,6 +909,7 @@ export default function MaterialDashboard() {
                 icon: FileText,
                 color: "text-blue-600",
                 bg: "bg-blue-500/10",
+                borderL: "border-l-blue-500",
               },
               {
                 label: "Total Expense Amount",
@@ -906,11 +917,12 @@ export default function MaterialDashboard() {
                 icon: Receipt,
                 color: "text-amber-600",
                 bg: "bg-amber-500/10",
+                borderL: "border-l-amber-500",
               },
             ].map((s) => (
               <div
                 key={s.label}
-                className="rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4"
+                className={`rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4 border-l-2 ${s.borderL}`}
               >
                 <div
                   className={`w-10 h-10 rounded-xl ${s.bg} flex items-center justify-center shrink-0`}

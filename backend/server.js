@@ -99,6 +99,7 @@ const ALL_ROUTES = [
   { path: "/api/debit-note", file: "./routes/debitNote" },
   { path: "/api/tc-master", file: "./routes/tcMaster" },
   { path: "/api/transactions", file: "./routes/transactions" },
+  { path: "/api/trial-balance", file: "./routes/trialBalance" },
   { path: "/api/grns", file: "./routes/grns" },
   { path: "/api/stock-ledger", file: "./routes/stockLedger" },
   { path: "/api/inventory-master", file: "./routes/inventoryMaster" },

@@ -426,6 +426,7 @@ export function AgreementsPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
 
   // computed balance
   const balanceAmount = useMemo(() => {
@@ -1239,16 +1240,21 @@ export function AgreementsPage() {
                           >
                             <button
                               className="ag-menu-btn"
-                              onClick={() =>
-                                setOpenMenuId(
-                                  openMenuId === ag.Id ? null : ag.Id,
-                                )
-                              }
+                              onClick={(e) => {
+                                if (openMenuId === ag.Id) { setOpenMenuId(null); return; }
+                                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                const menuH = canDeleteRecords ? 82 : 42;
+                                const top = window.innerHeight - rect.bottom < menuH + 8
+                                  ? rect.top - menuH - 4
+                                  : rect.bottom + 4;
+                                setMenuPos({ top, right: window.innerWidth - rect.right });
+                                setOpenMenuId(ag.Id);
+                              }}
                             >
                               <MoreHorizontal size={15} />
                             </button>
                             {openMenuId === ag.Id && (
-                              <div className="ag-menu">
+                              <div className="ag-menu" style={{ position: "fixed", top: menuPos.top, right: menuPos.right, zIndex: 200 }}>
                                 <button
                                   className="ag-menu-item"
                                   onClick={() => {
@@ -1505,7 +1511,7 @@ export function AgreementsPage() {
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
                   />
                   <input
                     type="date"
@@ -1520,7 +1526,7 @@ export function AgreementsPage() {
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
                   />
                   <input
                     type="date"

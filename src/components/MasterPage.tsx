@@ -7,9 +7,10 @@ import {
   Check,
   X,
   Plus,
-  RotateCcw,
   Eye,
   Printer,
+  ChevronDown,
+  CalendarDays,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -392,6 +393,14 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     setErrors({});
   };
 
+  const canSave = fields.every(
+    (f) =>
+      !f.required ||
+      (form[f.name] &&
+        (typeof form[f.name] !== "string" ||
+          (form[f.name] as string).trim() !== "")),
+  );
+
   const filtered = data.filter((row) => {
     if (!search) return true;
     return Object.values(row).some((v) =>
@@ -405,8 +414,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   return (
     <div className="space-y-5">
       {/* ── FORM CARD ── */}
-      <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-visible">
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60 rounded-t-xl">
+      <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
+        {/* Header — title only */}
+        <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20 rounded-t-xl">
           <div>
             <h2 className="font-heading font-semibold text-foreground text-sm">
               {editingId !== null ? `Edit ${title}` : `Add ${title}`}
@@ -414,14 +424,11 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             <p className="text-[11px] text-muted-foreground mt-0.5">
               {editingId !== null
                 ? "Modify the details below and save."
-                : "Fill in the details to create a new record."}
+                : fields.some((f) => f.required)
+                  ? <>Fields marked <span className="text-destructive">*</span> are required</>
+                  : "Fill in the details to create a new record."}
             </p>
           </div>
-          {editingId !== null && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-primary/10 text-primary border border-primary/20">
-              Editing
-            </span>
-          )}
         </div>
 
         <div className="p-5">
@@ -433,12 +440,14 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   key={field.name}
                   className={isFullWidth ? "md:col-span-2" : ""}
                 >
-                  <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                    {field.label}
-                    {field.required && (
-                      <span className="text-destructive ml-0.5">*</span>
-                    )}
-                  </label>
+                  {field.type !== "toggle" && (
+                    <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                      {field.label}
+                      {field.required && (
+                        <span className="text-destructive ml-0.5">*</span>
+                      )}
+                    </label>
+                  )}
 
                   {field.type === "custom" && field.render ? (
                     field.render({
@@ -465,49 +474,61 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                       />
                     </div>
                   ) : field.type === "date" ? (
-                    <input
-                      type="date"
-                      value={(form[field.name] as string) || ""}
-                      onChange={(e) =>
-                        updateField(field.name, e.target.value, field)
-                      }
-                      className={`${inputBase} ${errors[field.name] ? "border-destructive" : "border-border"}`}
-                    />
-                  ) : field.type === "select" ? (
-                    <select
-                      value={(form[field.name] as string) || ""}
-                      onChange={(e) =>
-                        updateField(field.name, e.target.value, field)
-                      }
-                      className={`${inputBase} ${errors[field.name] ? "border-destructive" : "border-border"}`}
-                    >
-                      <option value="">Select...</option>
-                      {(() => {
-                        let opts: { value: string; label: string }[] = [];
-                        const editingRow = editingId
-                          ? data.find((r) => r._id === editingId)
-                          : undefined;
-                        if (field.optionsProvider) {
-                          opts = field.optionsProvider(
-                            data,
-                            editingRow?._id,
-                            form,
-                          );
-                        } else if (asyncOptionsCache[field.name]) {
-                          opts = asyncOptionsCache[field.name];
-                        } else if (field.options) {
-                          opts = field.options.map((o) => ({
-                            value: o,
-                            label: o,
-                          }));
+                    <div className="relative">
+                      <CalendarDays
+                        size={14}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
+                      />
+                      <input
+                        type="date"
+                        value={(form[field.name] as string) || ""}
+                        onChange={(e) =>
+                          updateField(field.name, e.target.value, field)
                         }
-                        return opts.map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ));
-                      })()}
-                    </select>
+                        className={`${inputBase} pl-8 ${errors[field.name] ? "border-destructive" : "border-border"} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+                      />
+                    </div>
+                  ) : field.type === "select" ? (
+                    <div className="relative">
+                      <select
+                        value={(form[field.name] as string) || ""}
+                        onChange={(e) =>
+                          updateField(field.name, e.target.value, field)
+                        }
+                        className={`${inputBase} appearance-none pr-9 ${errors[field.name] ? "border-destructive" : "border-border"}`}
+                      >
+                        <option value="">Select...</option>
+                        {(() => {
+                          let opts: { value: string; label: string }[] = [];
+                          const editingRow = editingId
+                            ? data.find((r) => r._id === editingId)
+                            : undefined;
+                          if (field.optionsProvider) {
+                            opts = field.optionsProvider(
+                              data,
+                              editingRow?._id,
+                              form,
+                            );
+                          } else if (asyncOptionsCache[field.name]) {
+                            opts = asyncOptionsCache[field.name];
+                          } else if (field.options) {
+                            opts = field.options.map((o) => ({
+                              value: o,
+                              label: o,
+                            }));
+                          }
+                          return opts.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ));
+                        })()}
+                      </select>
+                      <ChevronDown
+                        size={14}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                    </div>
                   ) : field.type === "textarea" ? (
                     <textarea
                       value={(form[field.name] as string) || ""}
@@ -518,17 +539,25 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                       className={`${inputBase} ${errors[field.name] ? "border-destructive" : "border-border"}`}
                     />
                   ) : field.type === "toggle" ? (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateField(field.name, !form[field.name], field)
-                      }
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form[field.name] ? "bg-primary" : "bg-muted border border-border"}`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 rounded-full bg-primary-foreground transition-transform shadow-sm ${form[field.name] ? "translate-x-6" : "translate-x-1"}`}
-                      />
-                    </button>
+                    <div className="flex items-center gap-3 pt-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateField(field.name, !form[field.name], field)
+                        }
+                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${form[field.name] ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
+                      >
+                        <span
+                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form[field.name] ? "translate-x-4" : "translate-x-0.5"}`}
+                        />
+                      </button>
+                      <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                        {field.label} —{" "}
+                        <span className={form[field.name] ? "text-emerald-600" : "text-foreground"}>
+                          {form[field.name] ? "Active" : "Inactive"}
+                        </span>
+                      </span>
+                    </div>
                   ) : field.type === "multiselect" ? (
                     <div className="flex flex-wrap gap-2">
                       {field.options?.map((o) => {
@@ -566,20 +595,33 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             })}
           </div>
 
-          <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border">
+        </div>
+
+        {/* Footer — actions */}
+        <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
+          <p className="text-[11px] text-muted-foreground">
+            {canSave
+              ? <span className="text-emerald-500 font-medium">Ready to save</span>
+              : fields.some((f) => f.required)
+                ? "Fill in the required fields to save"
+                : ""}
+          </p>
+          <div className="flex items-center gap-2">
+            {editingId !== null && (
+              <button
+                onClick={handleReset}
+                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+            )}
             <button
               onClick={handleSave}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-primary/20 hover:-translate-y-0.5 transition-all"
+              disabled={!canSave}
+              className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
             >
-              <Plus size={15} />
-              {editingId !== null ? "Update" : "Save"}
-            </button>
-            <button
-              onClick={handleReset}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
-            >
-              <RotateCcw size={14} />
-              Reset
+              {editingId !== null ? <Check size={14} /> : <Plus size={14} />}
+              {editingId !== null ? `Update ${title}` : `Save ${title}`}
             </button>
           </div>
         </div>
@@ -730,7 +772,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                               )}
                               <button
                                 onClick={() => handleEdit(row._id)}
-                                className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors"
+                                className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10 transition-colors"
                                 title="Edit"
                               >
                                 <Edit2 size={13} />

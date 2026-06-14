@@ -201,8 +201,8 @@ const MetricsDashboard = () => {
         {/* ── Page header ─────────────────────────────────────────────── */}
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
-              <TrendingUp size={17} className="text-primary" />
+            <div className="w-9 h-9 rounded-xl bg-teal-500/10 flex items-center justify-center">
+              <TrendingUp size={17} className="text-teal-600" />
             </div>
             <div>
               <h1 className="text-xl font-heading font-bold text-foreground">
