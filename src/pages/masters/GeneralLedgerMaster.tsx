@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
+import TreeDropdown from "@/components/common/TreeDropdown";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccountGroups } from "@/api/accountApi";
 import {
@@ -20,7 +21,6 @@ import {
   Search,
   BookOpen,
   Hash,
-  ChevronDown,
   AlertCircle,
   Eye,
   XCircle,
@@ -30,6 +30,24 @@ import {
 interface AccountGroup {
   _id: string;
   name: string;
+  code: string;
+  parentId: string | null;
+}
+
+interface TreeNode extends AccountGroup {
+  children: TreeNode[];
+}
+
+function buildTree(items: AccountGroup[]): TreeNode[] {
+  const map: Record<string, TreeNode> = {};
+  items.forEach((i) => (map[i._id] = { ...i, children: [] }));
+  const roots: TreeNode[] = [];
+  items.forEach((i) => {
+    if (i.parentId && map[i.parentId])
+      map[i.parentId].children.push(map[i._id]);
+    else roots.push(map[i._id]);
+  });
+  return roots;
 }
 
 interface LedgerHead {
@@ -61,73 +79,6 @@ const EMPTY_FORM: LedgerForm = {
   LBelongsTo: "",
 };
 
-// ─── FlatDropdown ─────────────────────────────────────────────────────────────
-function FlatDropdown({
-  value,
-  onChange,
-  options,
-  placeholder = "Select\u2026",
-  icon,
-  error,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-  placeholder?: string;
-  icon?: React.ReactNode;
-  error?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const dropRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (dropRef.current && !dropRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const selected = options.find((o) => o.value === value);
-
-  return (
-    <div className="relative" ref={dropRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left ${error ? "border-red-400" : "border-border"}`}
-      >
-        {icon && <span className="shrink-0 text-muted-foreground">{icon}</span>}
-        <span className={`flex-1 truncate ${selected ? "text-foreground font-medium" : "text-muted-foreground/70"}`}>
-          {selected ? selected.label : placeholder}
-        </span>
-        <ChevronDown size={14} className={`text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
-          <div className="max-h-56 overflow-y-auto py-1">
-            <div
-              className={`px-3 py-2 text-sm cursor-pointer transition-colors ${!value ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted/60"}`}
-              onClick={() => { onChange(""); setOpen(false); }}
-            >
-              {placeholder}
-            </div>
-            <div className="border-t border-border/40 mb-1" />
-            {options.map((o) => (
-              <div
-                key={o.value}
-                className={`px-3 py-2 text-sm cursor-pointer transition-colors ${value === o.value ? "bg-primary/10 text-primary font-medium" : "text-foreground hover:bg-muted/60"}`}
-                onClick={() => { onChange(o.value); setOpen(false); }}
-              >
-                {o.label}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── Column builder ────────────────────────────────────────────────────────────
 function buildGLColumns(
@@ -282,8 +233,12 @@ const GeneralLedgerMaster: React.FC = () => {
       .map((item) => ({
         _id: String(item.AGId),
         name: item.Name as string,
+        code: item.Code || "",
+        parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
       }));
   }, [groupsData]);
+
+  const accountGroupTree = useMemo(() => buildTree(accountGroups), [accountGroups]);
 
   const ledgers: LedgerHead[] = useMemo(
     () => ledgersData?.data ?? [],
@@ -615,15 +570,15 @@ const GeneralLedgerMaster: React.FC = () => {
                     </div>
                   ) : (
                     <>
-                    <FlatDropdown
+                    <TreeDropdown
+                      variant="tree"
                       value={form.LBelongsTo}
                       onChange={(v) => {
                         setForm((p) => ({ ...p, LBelongsTo: v }));
                         setErrors((p) => ({ ...p, LBelongsTo: false }));
                       }}
-                      options={accountGroups.map((g) => ({ value: g._id, label: g.name }))}
-                      placeholder="Select group…"
-                      icon={<BookOpen size={13} />}
+                      items={accountGroupTree}
+                      allGroups={accountGroups}
                       error={errors.LBelongsTo}
                     />
                     {errors.LBelongsTo && (
@@ -656,7 +611,8 @@ const GeneralLedgerMaster: React.FC = () => {
               />
             </div>
 
-            <FlatDropdown
+            <TreeDropdown
+              variant="flat"
               value={filterGroup}
               onChange={(v) => setFilterGroup(v)}
               options={accountGroups.map((g) => ({ value: g._id, label: g.name }))}

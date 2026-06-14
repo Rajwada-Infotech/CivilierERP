@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, {useState, useMemo, useEffect} from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -7,18 +7,17 @@ import {
   updateRecord,
   deleteRecord,
 } from "@/api/accountHeadApi";
+import { getAccountGroups } from "@/api/accountApi";
 import { getContractorCategoryOptions } from "@/api/contractorCategoryApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { DataTable, type ColumnDef, type ExportColumn } from "@/components/ui/DataTable";
-import {
-  Pencil,
+import {Pencil,
   Trash2,
   X,
   Check,
   RotateCcw,
   Plus,
   Search,
-  ChevronDown,
   AlertCircle,
   Eye,
   XCircle,
@@ -30,8 +29,8 @@ import {
   FileText,
   Printer,
   HardHat,
-  CreditCard,
-} from "lucide-react";
+  CreditCard} from "lucide-react";
+import TreeDropdown from "@/components/common/TreeDropdown";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CONTRACTOR_TYPE = "C";
@@ -57,6 +56,31 @@ interface Contractor {
   LHeadPaymentTerms: string | null;
   LHeadAddress: string | null;
   LHeadStatus: boolean;
+  LBelongsTo: number | null;
+  GroupName: string | null;
+}
+
+interface AccountGroup {
+  _id: string;
+  name: string;
+  code: string;
+  parentId: string | null;
+}
+
+interface TreeNode extends AccountGroup {
+  children: TreeNode[];
+}
+
+function buildTree(items: AccountGroup[]): TreeNode[] {
+  const map: Record<string, TreeNode> = {};
+  items.forEach((i) => (map[i._id] = { ...i, children: [] }));
+  const roots: TreeNode[] = [];
+  items.forEach((i) => {
+    if (i.parentId && map[i.parentId])
+      map[i.parentId].children.push(map[i._id]);
+    else roots.push(map[i._id]);
+  });
+  return roots;
 }
 
 interface ContractorForm {
@@ -70,6 +94,7 @@ interface ContractorForm {
   LHeadPaymentTerms: string;
   LHeadAddress: string;
   LHeadStatus: boolean;
+  LBelongsTo: string;
 }
 
 const EMPTY_FORM: ContractorForm = {
@@ -83,75 +108,8 @@ const EMPTY_FORM: ContractorForm = {
   LHeadPaymentTerms: "",
   LHeadAddress: "",
   LHeadStatus: true,
+  LBelongsTo: "",
 };
-
-// ─── FlatDropdown ─────────────────────────────────────────────────────────────
-function FlatDropdown({
-  value,
-  onChange,
-  options,
-  placeholder = "Select\u2026",
-  icon,
-  error,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-  placeholder?: string;
-  icon?: React.ReactNode;
-  error?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const dropRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (dropRef.current && !dropRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const selected = options.find((o) => o.value === value);
-
-  return (
-    <div className="relative" ref={dropRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left ${error ? "border-red-400" : "border-border"}`}
-      >
-        {icon && <span className="shrink-0 text-muted-foreground">{icon}</span>}
-        <span className={`flex-1 truncate ${selected ? "text-foreground font-medium" : "text-muted-foreground/70"}`}>
-          {selected ? selected.label : placeholder}
-        </span>
-        <ChevronDown size={14} className={`text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
-          <div className="max-h-56 overflow-y-auto py-1">
-            <div
-              className={`px-3 py-2 text-sm cursor-pointer transition-colors ${!value ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted/60"}`}
-              onClick={() => { onChange(""); setOpen(false); }}
-            >
-              {placeholder}
-            </div>
-            <div className="border-t border-border/40 mb-1" />
-            {options.map((o) => (
-              <div
-                key={o.value}
-                className={`px-3 py-2 text-sm cursor-pointer transition-colors ${value === o.value ? "bg-primary/10 text-primary font-medium" : "text-foreground hover:bg-muted/60"}`}
-                onClick={() => { onChange(o.value); setOpen(false); }}
-              >
-                {o.label}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
 const EXPORT_COLUMNS: ExportColumn[] = [
@@ -348,6 +306,26 @@ const ContractorMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: groupsData } = useQuery({
+    queryKey: ["account-groups"],
+    queryFn: getAccountGroups,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const accountGroups: AccountGroup[] = useMemo(() => {
+    if (!Array.isArray(groupsData)) return [];
+    return (groupsData as any[])
+    .filter((item) => item.AGId != null && item.Name)
+    .map((item) => ({
+      _id: String(item.AGId),
+      name: item.Name as string,
+      code: item.Code || "",
+      parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
+    }));
+  }, [groupsData]);
+
+  const accountGroupTree = useMemo(() => buildTree(accountGroups), [accountGroups]);
+
   const contractorCategories: string[] = useMemo(
     () =>
       categoryOptions && categoryOptions.length > 0
@@ -370,6 +348,8 @@ const ContractorMaster: React.FC = () => {
       LHeadPaymentTerms: item.LHeadPaymentTerms || null,
       LHeadAddress: item.LHeadAddress || null,
       LHeadStatus: Boolean(item.LHeadStatus),
+      LBelongsTo: item.LBelongsTo ?? null,
+      GroupName: item.GroupName ?? null,
     }));
   }, [rawData]);
 
@@ -392,7 +372,7 @@ const ContractorMaster: React.FC = () => {
     LBranchName: null,
     LGSTState: null,
     LCountry: "India",
-    LBelongsTo: null,
+    LBelongsTo: f.LBelongsTo ? Number(f.LBelongsTo) : null,
     LDescription: null,
   });
 
@@ -444,6 +424,7 @@ const ContractorMaster: React.FC = () => {
       LHeadPaymentTerms: c.LHeadPaymentTerms ?? "",
       LHeadAddress: c.LHeadAddress ?? "",
       LHeadStatus: c.LHeadStatus,
+      LBelongsTo: c.LBelongsTo != null ? String(c.LBelongsTo) : "",
     });
     setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -690,11 +671,25 @@ const ContractorMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Contractor Type
                   </label>
-                  <FlatDropdown
+                  <TreeDropdown variant="flat"
                     value={form.contractorType}
                     onChange={(v) => setForm((p) => ({ ...p, contractorType: v }))}
                     options={contractorCategories.map((c) => ({ value: c, label: c }))}
-                    placeholder="Select type\u2026"
+                    placeholder="Select type…"
+                  />
+                </div>
+
+                {/* Account Group */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Account Group
+                  </label>
+                  <TreeDropdown
+                    variant="tree"
+                    value={form.LBelongsTo}
+                    onChange={(v) => setForm((p) => ({ ...p, LBelongsTo: v }))}
+                    items={accountGroupTree}
+                    allGroups={accountGroups}
                   />
                 </div>
               </div>
@@ -905,14 +900,14 @@ const ContractorMaster: React.FC = () => {
               />
             </div>
 
-            <FlatDropdown
+            <TreeDropdown variant="flat"
               value={filterCategory}
               onChange={(v) => setFilterCategory(v)}
               options={contractorCategories.map((c) => ({ value: c, label: c }))}
               placeholder="All Types"
             />
 
-            <FlatDropdown
+            <TreeDropdown variant="flat"
               value={filterStatus}
               onChange={(v) => setFilterStatus(v)}
               options={[{ value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }]}
