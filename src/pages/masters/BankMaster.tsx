@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -20,11 +20,10 @@ import {
   Eye,
   Printer,
   Search,
-  ChevronDown,
   AlertCircle,
   XCircle,
-  Layers,
 } from "lucide-react";
+import TreeDropdown from "@/components/common/TreeDropdown";
 
 import {
   getBanks,
@@ -36,7 +35,7 @@ import {
   type CompanyOption,
 } from "@/api/bankMasterApi";
 
-import { getAccountGroups, type AccountGroup } from "@/api/accountHeadApi";
+import { getAccountGroups } from "@/api/accountApi";
 
 import {
   DataTable,
@@ -44,70 +43,28 @@ import {
   type ExportColumn,
 } from "@/components/ui/DataTable";
 
-// ─── FlatDropdown ─────────────────────────────────────────────────────────────
-function FlatDropdown({
-  value,
-  onChange,
-  options,
-  placeholder = "Select\u2026",
-  icon,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-  placeholder?: string;
-  icon?: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const dropRef = useRef<HTMLDivElement>(null);
+// ─── Types ───────────────────────────────────────────────────────────────────
+interface AccountGroup {
+  _id: string;
+  name: string;
+  code: string;
+  parentId: string | null;
+}
 
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (dropRef.current && !dropRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
+interface TreeNode extends AccountGroup {
+  children: TreeNode[];
+}
 
-  const selected = options.find((o) => o.value === value);
-
-  return (
-    <div className="relative" ref={dropRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left"
-      >
-        {icon && <span className="shrink-0 text-muted-foreground">{icon}</span>}
-        <span className={`flex-1 truncate ${selected ? "text-foreground font-medium" : "text-muted-foreground/70"}`}>
-          {selected ? selected.label : placeholder}
-        </span>
-        <ChevronDown size={14} className={`text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
-          <div className="max-h-56 overflow-y-auto py-1">
-            <div
-              className={`px-3 py-2 text-sm cursor-pointer transition-colors ${!value ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted/60"}`}
-              onClick={() => { onChange(""); setOpen(false); }}
-            >
-              {placeholder}
-            </div>
-            <div className="border-t border-border/40 mb-1" />
-            {options.map((o) => (
-              <div
-                key={o.value}
-                className={`px-3 py-2 text-sm cursor-pointer transition-colors ${value === o.value ? "bg-primary/10 text-primary font-medium" : "text-foreground hover:bg-muted/60"}`}
-                onClick={() => { onChange(o.value); setOpen(false); }}
-              >
-                {o.label}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+function buildTree(items: AccountGroup[]): TreeNode[] {
+  const map: Record<string, TreeNode> = {};
+  items.forEach((i) => (map[i._id] = { ...i, children: [] }));
+  const roots: TreeNode[] = [];
+  items.forEach((i) => {
+    if (i.parentId && map[i.parentId])
+      map[i.parentId].children.push(map[i._id]);
+    else roots.push(map[i._id]);
+  });
+  return roots;
 }
 
 // ─── Zod Schema ─────────────────────────────────────────────────────────────
@@ -140,6 +97,7 @@ const bankFormSchema = z.object({
   address: z.string(),
   groupId: z.number().nullable(),
   status: z.boolean(),
+  accountGroupId: z.string(),
 });
 
 type FormState = z.infer<typeof bankFormSchema>;
@@ -158,6 +116,7 @@ const EMPTY: FormState = {
   address: "",
   groupId: null,
   status: true,
+  accountGroupId: "",
 };
 
 // ─── Export Columns ─────────────────────────────────────────────────────────
@@ -400,51 +359,28 @@ const BankMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  // ── Account Groups ──────────────────────────────────────────────────────────
-  const { data: accountGroups = [] } = useQuery<AccountGroup[]>({
+  const { data: groupsData } = useQuery({
     queryKey: ["account-groups"],
     queryFn: getAccountGroups,
     staleTime: 10 * 60 * 1000,
   });
 
-  const groupNameById = useMemo(
-    () => new Map<number, string>(accountGroups.map((g) => [g.AGId, g.Name])),
+  const accountGroups: AccountGroup[] = useMemo(() => {
+    if (!Array.isArray(groupsData)) return [];
+    return (groupsData as any[])
+      .filter((item) => item.AGId != null && item.Name)
+      .map((item) => ({
+        _id: String(item.AGId),
+        name: item.Name as string,
+        code: item.Code || "",
+        parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
+      }));
+  }, [groupsData]);
+
+  const accountGroupTree = useMemo(
+    () => buildTree(accountGroups),
     [accountGroups],
   );
-
-  const groupedAccountGroups = useMemo(() => {
-    const byId = new Map<number, AccountGroup>(
-      accountGroups.map((g) => [g.AGId, g]),
-    );
-    const childrenOf = new Map<number, AccountGroup[]>();
-    const roots: AccountGroup[] = [];
-    for (const g of accountGroups) {
-      if (g.ParentGroupId === null) {
-        roots.push(g);
-      } else {
-        const list = childrenOf.get(g.ParentGroupId) ?? [];
-        list.push(g);
-        childrenOf.set(g.ParentGroupId, list);
-      }
-    }
-    const result: { label: string; options: AccountGroup[] }[] = [];
-    for (const root of roots) {
-      const kids = childrenOf.get(root.AGId);
-      if (kids && kids.length > 0) {
-        result.push({ label: root.Name, options: kids });
-      }
-    }
-    const uncategorised = [
-      ...roots.filter((r) => !childrenOf.has(r.AGId)),
-      ...accountGroups.filter(
-        (g) => g.ParentGroupId !== null && !byId.has(g.ParentGroupId),
-      ),
-    ];
-    if (uncategorised.length > 0) {
-      result.push({ label: "Other", options: uncategorised });
-    }
-    return result;
-  }, [accountGroups]);
 
   const dbBanks: BankRecord[] = Array.isArray(dbData) ? dbData : [];
 
@@ -511,7 +447,7 @@ const BankMaster: React.FC = () => {
     BAddress: f.address.trim() || null,
     BStatus: f.status,
     BCompanyName: f.companyName.trim() || null,
-    BLBelongsTo: f.groupId ?? null,
+    LBelongsTo: f.accountGroupId ? Number(f.accountGroupId) : null,
   });
 
   const handleSave = async (values: FormState) => {
@@ -546,6 +482,10 @@ const BankMaster: React.FC = () => {
       address: item.BAddress || "",
       groupId: item.BLBelongsTo ?? null,
       status: Boolean(item.BStatus),
+      accountGroupId:
+        (item as any).LBelongsTo != null
+          ? String((item as any).LBelongsTo)
+          : "",
     });
     setEditingId(String(item.BId));
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -589,7 +529,7 @@ const BankMaster: React.FC = () => {
         <tr><td>Bank Type</td><td>${bank.BBankType || "—"}</td></tr>
         <tr><td>Account Holder</td><td>${bank.BAccountHolderName || "—"}</td></tr>
         <tr><td>Opening Balance</td><td>₹ ${Number(bank.BOpeningBalance || 0).toLocaleString("en-IN")}</td></tr>
-        <tr><td>Group</td><td>${bank.BLBelongsTo != null ? (groupNameById.get(bank.BLBelongsTo) ?? "—") : "—"}</td></tr>
+        <tr><td>Group</td><td>${bank.BLBelongsTo != null ? (accountGroups.find((g) => g._id === String(bank.BLBelongsTo))?.name ?? "—") : "—"}</td></tr>
         <tr><td>Address</td><td>${bank.BAddress || "—"}</td></tr>
         <tr><td>Status</td><td>${bank.BStatus ? "Active" : "Inactive"}</td></tr>
       </table>
@@ -648,7 +588,8 @@ const BankMaster: React.FC = () => {
                 {editingId ? "Edit Bank" : "Add Bank"}
               </h2>
               <p className="text-[11px] text-muted-foreground mt-0.5">
-                Fields marked <span className="text-destructive">*</span> are required
+                Fields marked <span className="text-destructive">*</span> are
+                required
               </p>
             </div>
           </div>
@@ -670,11 +611,17 @@ const BankMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Company Name
                   </label>
-                  <FlatDropdown
+                  <TreeDropdown
+                    variant="flat"
                     value={form.companyName}
-                    onChange={(v) => setValue("companyName", v, { shouldValidate: true })}
-                    options={companies.map((c) => ({ value: c.label, label: c.label }))}
-                    placeholder="Select Company\u2026"
+                    onChange={(v) =>
+                      setValue("companyName", v, { shouldValidate: true })
+                    }
+                    options={companies.map((c) => ({
+                      value: c.label,
+                      label: c.label,
+                    }))}
+                    placeholder="Select Company…"
                     icon={<Building2 size={13} />}
                   />
                 </div>
@@ -714,41 +661,6 @@ const BankMaster: React.FC = () => {
                     placeholder="e.g. Park Street Branch"
                     className={inputCls}
                   />
-                </div>
-
-                {/* Account Group */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                    <Layers size={11} className="text-primary" />
-                    Group Name
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={form.groupId ?? ""}
-                      onChange={(e) =>
-                        setValue(
-                          "groupId",
-                          e.target.value === "" ? null : Number(e.target.value),
-                        )
-                      }
-                      className={selectCls}
-                    >
-                      <option value="">— No Group —</option>
-                      {groupedAccountGroups.map(({ label, options }) => (
-                        <optgroup key={label} label={`── ${label}`}>
-                          {options.map((g) => (
-                            <option key={g.AGId} value={g.AGId}>
-                              {g.Name}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
                 </div>
               </div>
             </div>
@@ -850,11 +762,14 @@ const BankMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Account Type
                   </label>
-                  <FlatDropdown
+                  <TreeDropdown
+                    variant="flat"
                     value={form.accountType}
-                    onChange={(v) => setValue("accountType", v, { shouldValidate: true })}
+                    onChange={(v) =>
+                      setValue("accountType", v, { shouldValidate: true })
+                    }
                     options={ACCOUNT_TYPES.map((t) => ({ value: t, label: t }))}
-                    placeholder="Select Account Type\u2026"
+                    placeholder="Select Account Type…"
                   />
                 </div>
 
@@ -863,11 +778,30 @@ const BankMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Bank Type
                   </label>
-                  <FlatDropdown
+                  <TreeDropdown
+                    variant="flat"
                     value={form.bankType}
-                    onChange={(v) => setValue("bankType", v, { shouldValidate: true })}
+                    onChange={(v) =>
+                      setValue("bankType", v, { shouldValidate: true })
+                    }
                     options={BANK_TYPES.map((t) => ({ value: t, label: t }))}
-                    placeholder="Select Bank Type\u2026"
+                    placeholder="Select Bank Type…"
+                  />
+                </div>
+
+                {/* Account Group */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Account Group
+                  </label>
+                  <TreeDropdown
+                    variant="tree"
+                    value={form.accountGroupId}
+                    onChange={(v) =>
+                      setValue("accountGroupId", v, { shouldValidate: true })
+                    }
+                    items={accountGroupTree}
+                    allGroups={accountGroups}
                   />
                 </div>
 
@@ -954,9 +888,13 @@ const BankMaster: React.FC = () => {
           {/* Card footer — actions */}
           <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
             <p className="text-[11px] text-muted-foreground">
-              {canSave
-                ? <span className="text-emerald-500 font-medium">Ready to save</span>
-                : "Fill in the required fields to save"}
+              {canSave ? (
+                <span className="text-emerald-500 font-medium">
+                  Ready to save
+                </span>
+              ) : (
+                "Fill in the required fields to save"
+              )}
             </p>
             <div className="flex items-center gap-2">
               {editingId && (
@@ -998,17 +936,22 @@ const BankMaster: React.FC = () => {
               />
             </div>
 
-            <FlatDropdown
+            <TreeDropdown
+              variant="flat"
               value={filterBankType}
               onChange={(v) => setFilterBankType(v)}
               options={BANK_TYPES.map((t) => ({ value: t, label: t }))}
               placeholder="All Types"
             />
 
-            <FlatDropdown
+            <TreeDropdown
+              variant="flat"
               value={filterStatus}
               onChange={(v) => setFilterStatus(v)}
-              options={[{ value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }]}
+              options={[
+                { value: "active", label: "Active" },
+                { value: "inactive", label: "Inactive" },
+              ]}
               placeholder="All Status"
             />
 
@@ -1114,7 +1057,9 @@ const BankMaster: React.FC = () => {
                   label: "Group Name",
                   value:
                     viewRow.BLBelongsTo != null
-                      ? (groupNameById.get(viewRow.BLBelongsTo) ?? "—")
+                      ? (accountGroups.find(
+                          (g) => g._id === String(viewRow.BLBelongsTo),
+                        )?.name ?? "—")
                       : "—",
                 },
               ].map(({ label, value, mono }) => (
