@@ -102,6 +102,7 @@ const Payment = lazy(() => import("./pages/finance/Payment"));
 const Brs = lazy(() => import("./pages/finance/Brs"));
 const Records = lazy(() => import("./pages/finance/Records"));
 const ReceivedPayment = lazy(() => import("./pages/finance/ReceivedPayment"));
+const TrialBalance = lazy(() => import("./pages/finance/TrialBalance"));
 
 // Task Detail
 const TaskDetail = lazy(() => import("./pages/tasks/TaskDetail"));
@@ -514,7 +515,7 @@ function AppRoutes() {
         path="/transactions"
         element={
           <ProtectedRoute>
-            <Transactions />
+            <TrialBalance />
           </ProtectedRoute>
         }
       />

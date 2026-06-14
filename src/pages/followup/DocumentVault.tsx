@@ -381,7 +381,7 @@ export default function DocumentVaultPage() {
         .dv-search-wrap svg { position: absolute; left: .625rem; top: 50%; transform: translateY(-50%); opacity: .4; pointer-events: none; }
         .dv-search { height: 2.25rem; padding: 0 .75rem 0 2rem; border-radius: 9px; font-size: .8125rem; width: 220px; background: hsl(var(--background)); border: 1px solid hsl(var(--border)); color: hsl(var(--foreground)); }
         .dv-search:focus { outline: none; box-shadow: 0 0 0 2px hsl(var(--primary)/.25); }
-        .dv-select { height: 2.25rem; padding: 0 .75rem; border-radius: 9px; font-size: .8125rem; background: hsl(var(--background)); border: 1px solid hsl(var(--border)); color: hsl(var(--foreground)); cursor: pointer; }
+        .dv-select { height: 2.25rem; padding: 0 2rem 0 .75rem; border-radius: 9px; font-size: .8125rem; background: hsl(var(--background)); border: 1px solid hsl(var(--border)); color: hsl(var(--foreground)); cursor: pointer; appearance: none; -webkit-appearance: none; }
         .dv-select:focus { outline: none; }
 
         .dv-table-wrap { flex: 1; overflow: auto; padding: 0 1.5rem 1.5rem; margin-top: .75rem; }
@@ -434,36 +434,36 @@ export default function DocumentVaultPage() {
         .dv-preview-frame { width: 100%; height: 60vh; border: none; border-radius: 8px; background: hsl(var(--muted)); }
       `}</style>
 
-      <div className="dv-page">
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Document Vault" },
+        ]}
+      />
+
+      <div className="space-y-8 mt-6">
         {/* Header */}
-        <div className="dv-header">
-          <Breadcrumbs
-            items={[
-              { label: "Followup", href: "/followup" },
-              { label: "Document Vault" },
-            ]}
-          />
-          <div className="flex items-center justify-between mt-2 mb-3">
-            <div>
-              <h1 className="text-xl font-semibold tracking-tight">
-                Document Vault
-              </h1>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Centralized document storage per applicant
-              </p>
-            </div>
-            <Button
-              onClick={() => {
-                setForm(EMPTY_UPLOAD);
-                setUploadOpen(true);
-              }}
-              className="gradient-accent gap-1.5 font-semibold text-white text-sm px-4 py-2 h-auto"
-            >
-              <Upload className="w-4 h-4" /> Upload Document
-            </Button>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Document Vault
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Centralized document storage per applicant
+            </p>
           </div>
+          <Button
+            onClick={() => {
+              setForm(EMPTY_UPLOAD);
+              setUploadOpen(true);
+            }}
+            className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto"
+          >
+            <Upload className="w-4 h-4" /> Upload Document
+          </Button>
         </div>
 
+      <div className="dv-page">
         {/* Toolbar */}
         <div className="dv-toolbar">
           <div className="dv-search-wrap">
@@ -487,38 +487,40 @@ export default function DocumentVaultPage() {
             )}
           </div>
 
-          <select
-            className="dv-select"
-            value={filterCat}
-            onChange={(e) => {
-              setFilterCat(e.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="">All Categories</option>
-            {(meta?.categories ?? []).map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
+          <div className="relative">
+            <select
+              className="dv-select"
+              value={filterCat}
+              onChange={(e) => {
+                setFilterCat(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">All Categories</option>
+              {(meta?.categories ?? []).map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          </div>
 
-          <select
-            className="dv-select"
-            value={filterApp}
-            onChange={(e) => {
-              setFilterApp(e.target.value);
-              setPage(1);
-            }}
-            style={{ maxWidth: 200 }}
-          >
-            <option value="">All Applicants</option>
-            {(meta?.applicants ?? []).map((a) => (
-              <option key={a.Id} value={a.Id}>
-                {a.ApplicantName}
-              </option>
-            ))}
-          </select>
+          <div className="relative">
+            <select
+              className="dv-select"
+              value={filterApp}
+              onChange={(e) => {
+                setFilterApp(e.target.value);
+                setPage(1);
+              }}
+              style={{ maxWidth: 200 }}
+            >
+              <option value="">All Applicants</option>
+              {(meta?.applicants ?? []).map((a) => (
+                <option key={a.Id} value={a.Id}>{a.ApplicantName}</option>
+              ))}
+            </select>
+            <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          </div>
 
           {(filterCat || filterApp) && (
             <button
@@ -541,7 +543,7 @@ export default function DocumentVaultPage() {
             </span>
             <button
               onClick={() => refetch()}
-              className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground transition-colors"
+              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors"
             >
               <RefreshCw
                 style={{ width: 14, height: 14 }}
@@ -713,6 +715,7 @@ export default function DocumentVaultPage() {
           </div>
         )}
       </div>
+      </div> {/* end space-y-8 */}
 
       {/* ── Upload Dialog ───────────────────────────────────────────────── */}
       <Dialog

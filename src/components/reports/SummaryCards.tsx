@@ -48,9 +48,13 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({ summary }) => {
       {cards.map((s) => (
         <div
           key={s.label}
-          className="rounded-xl bg-card border border-border p-4 flex items-center gap-4"
+          className="relative rounded-xl bg-card border border-border p-4 flex items-center gap-4 overflow-hidden"
           style={{ borderLeftWidth: 3, borderLeftColor: s.color }}
         >
+          <div
+            className="absolute top-0 right-0 w-20 h-20 rounded-full -translate-y-4 translate-x-4 opacity-10"
+            style={{ background: s.color }}
+          />
           <div className="p-2 rounded-lg" style={{ background: `${s.color}20` }}>
             <s.icon size={20} style={{ color: s.color }} />
           </div>

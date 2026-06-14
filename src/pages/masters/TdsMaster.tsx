@@ -134,9 +134,11 @@ const TdsMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Masters", "TDS Master"]} />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
+      <h1 className="text-xl font-heading font-bold text-foreground mt-6 mb-0">
         TDS Master
       </h1>
+      <p className="text-xs text-muted-foreground mt-0.5">Configure TDS natures, names and rates for tax deduction at source.</p>
+      <div className="mt-8">
       <MasterPage
         title="TDS"
         fields={[
@@ -159,6 +161,7 @@ const TdsMaster: React.FC = () => {
             label: "Status",
             type: "toggle",
             defaultValue: true,
+            fullWidth: true,
           },
         ]}
         columns={[
@@ -181,6 +184,7 @@ const TdsMaster: React.FC = () => {
           ],
         }}
       />
+      </div>
     </>
   );
 };
