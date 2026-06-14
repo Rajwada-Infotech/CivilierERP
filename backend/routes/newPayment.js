@@ -217,15 +217,15 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
       -- Resolve supplier: GRN path
       LEFT JOIN dbo.GoodsReceiptNotes grn_eb
         ON eb.ESourceType = 'GRN' AND grn_eb.GRNID = TRY_CAST(eb.ESourceId AS INT)
-      LEFT JOIN dbo.LedgerHead grn_sup
+      LEFT JOIN dbo.AccountHeadMaster grn_sup
         ON grn_sup.LHeadId = grn_eb.SupplierID
       -- Resolve supplier: PO path
-      LEFT JOIN dbo.LedgerHead po_sup
+      LEFT JOIN dbo.AccountHeadMaster po_sup
         ON po_sup.LHeadId = po.SupplierID
       -- Resolve supplier: fallback via GRN linked to PO
       LEFT JOIN dbo.GoodsReceiptNotes grn2
         ON eb.ESourceType NOT IN ('GRN','PO') AND grn2.POID = po.PurchaseOrderID
-      LEFT JOIN dbo.LedgerHead grn2_sup
+      LEFT JOIN dbo.AccountHeadMaster grn2_sup
         ON grn2_sup.LHeadId = grn2.SupplierID
       ${whereClause}
       ORDER BY np.PPaymentID DESC
