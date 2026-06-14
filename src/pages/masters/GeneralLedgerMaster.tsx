@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccountGroups } from "@/api/accountApi";
 import {
@@ -60,6 +60,74 @@ const EMPTY_FORM: LedgerForm = {
   LHeadCode: "",
   LBelongsTo: "",
 };
+
+// ─── FlatDropdown ─────────────────────────────────────────────────────────────
+function FlatDropdown({
+  value,
+  onChange,
+  options,
+  placeholder = "Select\u2026",
+  icon,
+  error,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+  icon?: React.ReactNode;
+  error?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const dropRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropRef.current && !dropRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const selected = options.find((o) => o.value === value);
+
+  return (
+    <div className="relative" ref={dropRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left ${error ? "border-red-400" : "border-border"}`}
+      >
+        {icon && <span className="shrink-0 text-muted-foreground">{icon}</span>}
+        <span className={`flex-1 truncate ${selected ? "text-foreground font-medium" : "text-muted-foreground/70"}`}>
+          {selected ? selected.label : placeholder}
+        </span>
+        <ChevronDown size={14} className={`text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+          <div className="max-h-56 overflow-y-auto py-1">
+            <div
+              className={`px-3 py-2 text-sm cursor-pointer transition-colors ${!value ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted/60"}`}
+              onClick={() => { onChange(""); setOpen(false); }}
+            >
+              {placeholder}
+            </div>
+            <div className="border-t border-border/40 mb-1" />
+            {options.map((o) => (
+              <div
+                key={o.value}
+                className={`px-3 py-2 text-sm cursor-pointer transition-colors ${value === o.value ? "bg-primary/10 text-primary font-medium" : "text-foreground hover:bg-muted/60"}`}
+                onClick={() => { onChange(o.value); setOpen(false); }}
+              >
+                {o.label}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Column builder ────────────────────────────────────────────────────────────
 function buildGLColumns(
@@ -547,33 +615,17 @@ const GeneralLedgerMaster: React.FC = () => {
                     </div>
                   ) : (
                     <>
-                    <div className="relative">
-                      <BookOpen
-                        size={13}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                      />
-                      <select
-                        value={form.LBelongsTo}
-                        onChange={(e) => {
-                          setForm((p) => ({ ...p, LBelongsTo: e.target.value }));
-                          setErrors((p) => ({ ...p, LBelongsTo: false }));
-                        }}
-                        className={`w-full appearance-none pl-8 pr-9 py-2.5 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
-                          errors.LBelongsTo ? "border-red-400" : "border-border"
-                        }`}
-                      >
-                        <option value="">Select group…</option>
-                        {accountGroups.map((g) => (
-                          <option key={g._id} value={g._id}>
-                            {g.name}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown
-                        size={13}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                      />
-                    </div>
+                    <FlatDropdown
+                      value={form.LBelongsTo}
+                      onChange={(v) => {
+                        setForm((p) => ({ ...p, LBelongsTo: v }));
+                        setErrors((p) => ({ ...p, LBelongsTo: false }));
+                      }}
+                      options={accountGroups.map((g) => ({ value: g._id, label: g.name }))}
+                      placeholder="Select group…"
+                      icon={<BookOpen size={13} />}
+                      error={errors.LBelongsTo}
+                    />
                     {errors.LBelongsTo && (
                       <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
                         <AlertCircle size={11} /> Please select an Account Group
@@ -604,28 +656,13 @@ const GeneralLedgerMaster: React.FC = () => {
               />
             </div>
 
-            <div className="relative">
-              <BookOpen
-                size={13}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-              <select
-                value={filterGroup}
-                onChange={(e) => setFilterGroup(e.target.value)}
-                className="appearance-none text-sm rounded-lg border border-border pl-8 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-              >
-                <option value="">All Groups</option>
-                {accountGroups.map((g) => (
-                  <option key={g._id} value={g._id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={12}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
+            <FlatDropdown
+              value={filterGroup}
+              onChange={(v) => setFilterGroup(v)}
+              options={accountGroups.map((g) => ({ value: g._id, label: g.name }))}
+              placeholder="All Groups"
+              icon={<BookOpen size={13} />}
+            />
 
             {(search || filterGroup) && (
               <button

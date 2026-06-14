@@ -127,7 +127,8 @@ router.delete("/:id", async (req, res) => {
     const childMap = new Map();
     for (const row of rows) {
       if (row.ParentGroupId != null) {
-        if (!childMap.has(row.ParentGroupId)) childMap.set(row.ParentGroupId, []);
+        if (!childMap.has(row.ParentGroupId))
+          childMap.set(row.ParentGroupId, []);
         childMap.get(row.ParentGroupId).push(row.AGId);
       }
     }
@@ -157,7 +158,8 @@ router.delete("/:id", async (req, res) => {
       });
     }
 
-    // ── 3. Check for GL accounts linked to this group or any descendant ───
+    // ── 3. Check for accounts (GL / Supplier / Contractor / Bank / Customer)
+    //      linked to this group or any descendant ────────────────────────────
     // Build a parameterised IN list for the subtree (always at least the id itself)
     const request = pool.request();
     const paramNames = subtreeIds.map((agId, i) => {
@@ -169,6 +171,7 @@ router.delete("/:id", async (req, res) => {
       SELECT TOP 1
         ah.LHeadId,
         ISNULL(ah.DisplayName, ah.LHeadName) AS LHeadName,
+        ah.LHeadType,
         ah.LBelongsTo
       FROM dbo.AccountHeadMaster ah
       WHERE ah.LBelongsTo IN (${paramNames.join(", ")})
@@ -176,15 +179,27 @@ router.delete("/:id", async (req, res) => {
 
     if (glCheckResult.recordset.length > 0) {
       const sample = glCheckResult.recordset[0];
+      const typeLabels = {
+        S: "Supplier",
+        C: "Contractor",
+        B: "Bank",
+        A: "Customer",
+        GL: "General Ledger",
+      };
+      const pageLabel = typeLabels[sample.LHeadType] || "General Ledger";
+
       console.warn(
         `[AccountGroup DELETE] Blocked: AGId=${id} (subtree: [${subtreeIds}]) ` +
-        `linked to GL account LHeadId=${sample.LHeadId} (${sample.LHeadName})`,
+          `linked to ${pageLabel} account LHeadId=${sample.LHeadId} (${sample.LHeadName})`,
       );
+
       return res.status(409).json({
         error:
-          "This Account Group cannot be deleted because it is currently linked to one or more " +
-          "General Ledger Accounts. Please delete or reassign the linked General Ledger Accounts first.",
-        code: "HAS_GL_ACCOUNTS",
+          `This Account Group cannot be deleted — it is linked to a ${pageLabel} record: ` +
+          `"${sample.LHeadName}". Please delete or reassign this ${pageLabel} record first.`,
+        code: "HAS_LINKED_ACCOUNTS",
+        linkedType: pageLabel,
+        linkedName: sample.LHeadName,
       });
     }
 

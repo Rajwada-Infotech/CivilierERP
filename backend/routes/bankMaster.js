@@ -105,6 +105,7 @@ router.get("/", cache("bank-master", 300), async (req, res) => {
       `${companyColumn} AS BCompanyName`,
       "LBankDetails AS BBankDetails",
       "LHeadCode AS BCode",
+      "LBelongsTo AS BLBelongsTo",
     ];
 
     if (hasColumn(columnMeta, "CreatedAt")) selectColumns.push("CreatedAt");
@@ -149,6 +150,7 @@ router.post("/", validateBody(bankMasterCreateSchema), async (req, res) => {
     BAddress,
     BStatus = true,
     BCompanyName,
+    BLBelongsTo,
   } = req.body;
 
   try {
@@ -201,7 +203,8 @@ router.post("/", validateBody(bankMasterCreateSchema), async (req, res) => {
       .input("LHeadEmail", sql.NVarChar(100), null)
       .input("LHeadStatus", sql.Bit, Boolean(BStatus) ? 1 : 0)
       .input("LHeadPaymentTerms", sql.NVarChar(100), "N/A")
-      .input("LHeadCreditLimit", sql.Decimal(18, 2), 0);
+      .input("LHeadCreditLimit", sql.Decimal(18, 2), 0)
+      .input("LBelongsTo", sql.Int, BLBelongsTo ?? null);
 
     if (companyColumn === "LDescription") {
       request.input(
@@ -243,6 +246,7 @@ router.post("/", validateBody(bankMasterCreateSchema), async (req, res) => {
       companyColumn,
       "LHeadPaymentTerms",
       "LHeadCreditLimit",
+      "LBelongsTo",
     ];
     const insertValues = insertColumns.map((col) => `@${col}`);
 
@@ -271,7 +275,8 @@ router.post("/", validateBody(bankMasterCreateSchema), async (req, res) => {
         INSERTED.BankOpeningBalance AS BOpeningBalance,
         INSERTED.LHeadAddress AS BAddress,
         INSERTED.LHeadStatus AS BStatus,
-        INSERTED.${companyColumn} AS BCompanyName
+        INSERTED.${companyColumn} AS BCompanyName,
+        INSERTED.LBelongsTo AS BLBelongsTo
       VALUES (
         ${insertValues.join(", ")}
       )
@@ -309,6 +314,7 @@ router.put("/:id", validateBody(bankMasterUpdateSchema), async (req, res) => {
     BAddress,
     BStatus,
     BCompanyName,
+    BLBelongsTo,
   } = req.body;
 
   try {
@@ -347,6 +353,11 @@ router.put("/:id", validateBody(bankMasterUpdateSchema), async (req, res) => {
         "LHeadStatus",
         sql.Bit,
         BStatus !== undefined ? (Boolean(BStatus) ? 1 : 0) : null,
+      )
+      .input(
+        "LBelongsTo",
+        sql.Int,
+        BLBelongsTo !== undefined ? (BLBelongsTo ?? null) : undefined,
       );
 
     if (companyColumn === "LDescription") {
@@ -375,6 +386,7 @@ router.put("/:id", validateBody(bankMasterUpdateSchema), async (req, res) => {
       "LHeadAddress      = COALESCE(@LHeadAddress, LHeadAddress)",
       `${companyColumn}  = COALESCE(@${companyColumn}, ${companyColumn})`,
       "LHeadStatus       = COALESCE(@LHeadStatus, LHeadStatus)",
+      "LBelongsTo        = COALESCE(@LBelongsTo, LBelongsTo)",
       "isEdited          = 1",
     ];
 
@@ -414,8 +426,7 @@ router.delete("/:id", async (req, res) => {
     const id = requireValidId(req, res);
     if (!id) return;
     const pool = await getPool();
-    const result = await pool.request().input("LHeadId", sql.Int, id)
-      .query(`
+    const result = await pool.request().input("LHeadId", sql.Int, id).query(`
         DELETE FROM dbo.AccountHeadMaster
         WHERE LHeadId = @LHeadId AND LHeadType = 'B'
       `);
@@ -432,7 +443,3 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-

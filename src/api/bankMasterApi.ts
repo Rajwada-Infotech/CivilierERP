@@ -32,6 +32,7 @@ export interface BankRecord {
   BAddress: string | null;
   BStatus: boolean;
   BCompanyName: string | null;
+  BLBelongsTo: number | null;
 }
 
 export interface BankPayload {
@@ -46,6 +47,7 @@ export interface BankPayload {
   BAddress?: string | null;
   BStatus: boolean;
   BCompanyName?: string | null;
+  BLBelongsTo?: number | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -92,6 +94,8 @@ export const addBank = async (
     BAddress: cleanStr(formData.BAddress as string),
     BStatus: formData.BStatus !== false,
     BCompanyName: cleanStr(formData.BCompanyName as string),
+    BLBelongsTo:
+      formData.BLBelongsTo != null ? Number(formData.BLBelongsTo) : null,
   };
 
   const res = await fetchWithAuth(BASE, {
@@ -120,6 +124,8 @@ export const updateBank = async (
     BAddress: cleanStr(formData.BAddress as string),
     BStatus: formData.BStatus !== false,
     BCompanyName: cleanStr(formData.BCompanyName as string),
+    BLBelongsTo:
+      formData.BLBelongsTo != null ? Number(formData.BLBelongsTo) : null,
   };
 
   const res = await fetchWithAuth(`${BASE}/${id}`, {
