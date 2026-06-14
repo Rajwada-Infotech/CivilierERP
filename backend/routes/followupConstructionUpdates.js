@@ -117,10 +117,10 @@ async function buildOptions() {
   const [applicantsR, unitSelectionsR, projectsR, companiesR] =
     await Promise.all([
       pool.request().query(`
-        SELECT Id, ApplicantNo, ApplicantName, ProjectId, CompanyId
-        FROM dbo.FollowupApplications
-        WHERE IsDeleted = 0
-        ORDER BY ApplicantName
+        SELECT LHeadId AS Id, ISNULL(DisplayName, LHeadName) AS ApplicantName, LHeadCode AS ApplicantNo
+        FROM dbo.AccountHeadMaster
+        WHERE LHeadType = 'A' AND LHeadStatus = 1
+        ORDER BY ISNULL(DisplayName, LHeadName)
       `),
       pool.request().query(`
         SELECT fus.Id, fus.SelectionNo, fus.UnitNo, fus.ApplicantId, fus.ProjectId, fus.CompanyId
@@ -152,8 +152,8 @@ const LIST_COLUMNS = `
   fcu.Id,
   fcu.UpdateNo,
   fcu.ApplicantId,
-  COALESCE(fa.ApplicantName, ISNULL(ahm.DisplayName, ahm.LHeadName)) AS ApplicantName,
-  COALESCE(fa.ApplicantNo,   ahm.LHeadCode)                         AS ApplicantNo,
+  ISNULL(ahm.DisplayName, ahm.LHeadName) AS ApplicantName,
+  ahm.LHeadCode                          AS ApplicantNo,
   fcu.UnitSelectionId,
   fus.SelectionNo,
   fus.UnitNo,
@@ -176,8 +176,7 @@ const LIST_COLUMNS = `
 
 const BASE_JOINS = `
   FROM dbo.FollowupConstructionUpdates fcu
-  LEFT JOIN  dbo.AccountHeadMaster ahm       ON ahm.LHeadId = fcu.ApplicantId AND ahm.LHeadType = 'A'
-  LEFT JOIN  dbo.FollowupApplications fa     ON fa.Id = fcu.ApplicantId AND fa.IsDeleted = 0 AND ahm.LHeadId IS NULL
+  INNER JOIN dbo.AccountHeadMaster ahm       ON ahm.LHeadId = fcu.ApplicantId AND ahm.LHeadType = 'A'
   LEFT JOIN  dbo.FollowupUnitSelections fus  ON fus.Id = fcu.UnitSelectionId
   LEFT JOIN  dbo.enterprise ep               ON ep.id  = fcu.ProjectId  AND ep.business_type = 'P'
   LEFT JOIN  dbo.enterprise ec               ON ec.id  = fcu.CompanyId  AND ec.business_type = 'C'
@@ -216,13 +215,13 @@ router.get("/", async (req, res) => {
     const filters = ["fcu.IsDeleted = 0"];
     if (search) {
       filters.push(`(
-        fcu.UpdateNo                                          LIKE @Search
-        OR COALESCE(fa.ApplicantName, ISNULL(ahm.DisplayName, ahm.LHeadName)) LIKE @Search
-        OR COALESCE(fa.ApplicantNo,   ahm.LHeadCode)          LIKE @Search
-        OR fus.UnitNo                                         LIKE @Search
-        OR ep.name                                            LIKE @Search
-        OR fcu.Stage                                          LIKE @Search
-        OR fcu.Description                                    LIKE @Search
+        fcu.UpdateNo                               LIKE @Search
+        OR ISNULL(ahm.DisplayName, ahm.LHeadName)  LIKE @Search
+        OR ahm.LHeadCode                            LIKE @Search
+        OR fus.UnitNo                               LIKE @Search
+        OR ep.name                                  LIKE @Search
+        OR fcu.Stage                                LIKE @Search
+        OR fcu.Description                          LIKE @Search
       )`);
     }
     if (status) filters.push("fcu.Status = @Status");
@@ -279,19 +278,17 @@ router.post("/", async (req, res) => {
   if (payload.error) return res.status(400).json({ error: payload.error });
 
   try {
-    // Verify applicant exists (FollowupApplications for new records, AccountHeadMaster for legacy)
+    // Verify applicant exists
     const applicantCheck = await getPool()
       .request()
       .input("ApplicantId", sql.Int, payload.ApplicantId)
-      .query(`
-        SELECT TOP 1 Id FROM dbo.FollowupApplications WHERE Id = @ApplicantId AND IsDeleted = 0
-        UNION ALL
-        SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadId = @ApplicantId AND LHeadType = 'A' AND LHeadStatus = 1
-      `);
+      .query(
+        `SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadId = @ApplicantId AND LHeadType = 'A' AND LHeadStatus = 1`,
+      );
     if (!applicantCheck.recordset[0])
       return res
         .status(404)
-        .json({ error: "Applicant not found" });
+        .json({ error: "Applicant not found in account master" });
 
     const transaction = new sql.Transaction(getPool());
     await transaction.begin();

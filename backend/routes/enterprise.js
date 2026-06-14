@@ -375,7 +375,7 @@ router.get("/by-id/:id", async (req, res) => {
       .request()
       .input("id", sql.Int, id)
       .query(
-        "SELECT id, name, short_name, logo, email, phone_number, address, city, state, gst_type FROM dbo.enterprise WHERE id = @id",
+        "SELECT id, name, short_name, logo, email, phone_number, address, address_line2, city, state, pincode, gst_no, gst_type FROM dbo.enterprise WHERE id = @id",
       );
     if (!result.recordset.length)
       return res.status(404).json({ error: "Not found" });

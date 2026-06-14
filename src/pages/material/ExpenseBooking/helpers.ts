@@ -114,6 +114,74 @@ export function computeBreakdown(
   };
 }
 
+/**
+ * Compute the net payable for a GRN-linked booking by applying billing terms
+ * on top of the live GRN gross (incl-GST) amount.  Mirrors the modal's
+ * grnNetPayable useMemo so the list table and summary card stay in sync.
+ *
+ * @param grnTotal  - GRN TotalAmount (incl. GST)
+ * @param terms     - billing terms array from the record (billingTerms)
+ */
+export function computeGrnNetWithTerms(
+  grnTotal: number,
+  terms: DiscountConfig[],
+  basicAmount?: number,
+): number {
+  // Split by pre/post-GST
+  const preTerms = terms.filter((t) => t.appliedOn !== "post-gst");
+  const postTerms = terms.filter((t) => t.appliedOn === "post-gst");
+
+  if (preTerms.length === 0) {
+    // No pre-GST terms — apply all post-GST terms on gross directly
+    let running = grnTotal;
+    for (const t of postTerms) {
+      const amt =
+        t.type === "percentage"
+          ? (running * (t.value ?? 0)) / 100
+          : (t.value ?? 0);
+      if (t.deductionType === "Addition") running += amt;
+      else running = Math.max(0, running - amt);
+    }
+    return Math.round(running);
+  }
+
+  // Derive effective GST rates from basicAmount (base) and grnTotal (incl-GST)
+  const base = basicAmount ?? 0;
+  const gst = grnTotal - base;
+  const effectiveGSTRate = base > 0 ? (gst / base) * 100 : 0;
+  // Split GST rate evenly for CGST/SGST (used for recomputation)
+  const effectiveCGSTRate = effectiveGSTRate / 2;
+  const effectiveSGSTRate = effectiveGSTRate / 2;
+
+  // Apply pre-GST terms on base
+  let runningBase = base;
+  for (const t of preTerms) {
+    const amt =
+      t.type === "percentage"
+        ? (runningBase * (t.value ?? 0)) / 100
+        : (t.value ?? 0);
+    if (t.deductionType === "Addition") runningBase += amt;
+    else runningBase = Math.max(0, runningBase - amt);
+  }
+
+  // Recompute GST on adjusted base
+  const adjCGST = (runningBase * effectiveCGSTRate) / 100;
+  const adjSGST = (runningBase * effectiveSGSTRate) / 100;
+  let running = runningBase + adjCGST + adjSGST;
+
+  // Apply post-GST terms on adjusted gross
+  for (const t of postTerms) {
+    const amt =
+      t.type === "percentage"
+        ? (running * (t.value ?? 0)) / 100
+        : (t.value ?? 0);
+    if (t.deductionType === "Addition") running += amt;
+    else running = Math.max(0, running - amt);
+  }
+
+  return Math.round(running);
+}
+
 export function computeGrnGst(grnGst: GrnGstData): PriceBreakdown {
   const grossAmount =
     grnGst.totals.taxableAmount +
@@ -168,7 +236,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     bookingName: "",
     bookingReference: "",
     docTypeName: "",
-    bookingDate: "",
+    bookingDate: new Date().toISOString().slice(0, 10),
     dueDate: "",
     financialYear: "",
     companyId: null,
@@ -185,6 +253,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     /** Default payment type for new bookings. */
     paymentType: "full",
     netAmount: null,
+    grnTotalAmount: null,
     status: "Draft",
     remarks: "",
     billingTermId: null,
@@ -232,7 +301,10 @@ export function dbToRecord(row: any): ExpenseRecord {
 
   try {
     if (row.EBillingTermsData) {
-      const parsed = JSON.parse(row.EBillingTermsData);
+      // Backend double-stringifies (JSON.stringify on an already-stringified string),
+      // so we may need two rounds of JSON.parse to get the actual array.
+      let parsed = JSON.parse(row.EBillingTermsData);
+      if (typeof parsed === "string") parsed = JSON.parse(parsed);
       if (Array.isArray(parsed) && parsed.length > 0) {
         billingTerms = parsed.map((t: any, i: number) => ({
           ...defaultDiscount(),
@@ -286,14 +358,24 @@ export function dbToRecord(row: any): ExpenseRecord {
     projectName: row.EProjectDisplayName || row.projectName || "",
     materialCategory: row.EDocumentType ?? "",
     invoiceReference: row.EDocNo ?? "",
+    // For GRN-linked bookings, basicAmount = qty × rate (no GST) stored in EAmount.
+    // EGrnTotalAmount is the incl-GST total used only for netAmount display.
     basicAmount: parseFloat(row.EAmount) || 0,
     cgstRate: row.ECgstRate ? parseFloat(row.ECgstRate) : 0,
     sgstRate: row.ESgstRate ? parseFloat(row.ESgstRate) : 0,
     discount,
     emi,
-    netAmount: row.ENetAmount
-      ? parseFloat(row.ENetAmount)
-      : parseFloat(row.EAmount) || 0,
+    // For GRN-linked bookings, prefer the stored ENetAmount (net after billing terms).
+    // Fall back to EGrnTotalAmount (incl-GST, before terms) if ENetAmount not set,
+    // then fall back to EAmount for non-GRN / very old records.
+    netAmount:
+      row.ENetAmount
+        ? parseFloat(row.ENetAmount)
+        : row.EGrnTotalAmount != null
+          ? parseFloat(row.EGrnTotalAmount)
+          : parseFloat(row.EAmount) || 0,
+    grnTotalAmount:
+      row.EGrnTotalAmount != null ? parseFloat(row.EGrnTotalAmount) : null,
     status: (row.EStatus ?? row.Status ?? "Draft") as any,
     remarks: row.ERemarks ?? "",
     billingTermId: row.EBillingTermId ? parseInt(row.EBillingTermId, 10) : null,

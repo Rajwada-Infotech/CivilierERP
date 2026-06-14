@@ -673,15 +673,14 @@ function QuickLogPanel({
                 <Label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block text-muted-foreground">
                   Date
                 </Label>
-                <div className="relative">
-                  <CalendarDays size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
-                  <input
-                    type="date"
-                    value={form.date}
-                    onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
-                    className="w-full pl-7 pr-2 py-1.5 rounded-lg text-[13px] bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                  />
-                </div>
+                <Input
+                  type="date"
+                  value={form.date}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, date: e.target.value }))
+                  }
+                  className="h-8 text-[13px]"
+                />
               </div>
               <div>
                 <Label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block text-muted-foreground">
@@ -756,13 +755,14 @@ function QuickLogPanel({
                   "Save Entry"
                 )}
               </Button>
-              <button
-                type="button"
-                className="px-3 py-1 rounded-lg border border-border bg-background text-foreground text-[12px] font-medium hover:bg-muted transition-colors"
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-[12px]"
                 onClick={() => setOpen(false)}
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         )}

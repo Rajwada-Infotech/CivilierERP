@@ -15,7 +15,6 @@ import {
   TrendingUp,
   Trash2,
   X,
-  CalendarDays,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -172,6 +171,7 @@ async function fetchPayments(p: {
   page: number;
   pageSize: number;
   search: string;
+  companyId: string;
   projectId: string;
   status: string;
 }) {
@@ -179,6 +179,7 @@ async function fetchPayments(p: {
     page: String(p.page),
     pageSize: String(p.pageSize),
     ...(p.search ? { search: p.search } : {}),
+    ...(p.companyId ? { companyId: p.companyId } : {}),
     ...(p.projectId ? { projectId: p.projectId } : {}),
     ...(p.status ? { status: p.status } : {}),
   });
@@ -391,6 +392,7 @@ export function FinancePaymentsPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [companyId, setCompanyId] = useState("");
   const [projectId, setProjectId] = useState("");
   const [status, setStatus] = useState("");
   const [recordRow, setRecordRow] = useState<PaymentRow | null>(null);
@@ -398,12 +400,36 @@ export function FinancePaymentsPage() {
   const [historyRow, setHistoryRow] = useState<PaymentRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Receipt | null>(null);
 
-  const queryKey = ["followup-payments", page, search, projectId, status];
+  const { data: companiesRaw = [] } = useQuery({
+    queryKey: ["followup-payment-companies"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/followup-payments/companies");
+      if (!res.ok) throw new Error("Failed to load companies");
+      return res.json() as Promise<{ id: number; label: string }[]>;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const queryKey = [
+    "followup-payments",
+    page,
+    search,
+    companyId,
+    projectId,
+    status,
+  ];
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey,
     queryFn: () =>
-      fetchPayments({ page, pageSize: PAGE_SIZE, search, projectId, status }),
+      fetchPayments({
+        page,
+        pageSize: PAGE_SIZE,
+        search,
+        companyId,
+        projectId,
+        status,
+      }),
     placeholderData: (prev) => prev,
   });
 
@@ -411,6 +437,10 @@ export function FinancePaymentsPage() {
     queryKey: ["followup-payment-projects"],
     queryFn: fetchProjects,
   });
+
+  // Projects don't carry a CompanyId in the API response, so show all.
+  // When the backend adds company linkage, filter here: projects.filter(p => !companyId || String(p.CompanyId) === companyId)
+  const filteredProjects = projects;
 
   const { data: receipts = [], isLoading: receiptsLoading } = useQuery({
     queryKey: ["followup-payment-receipts", historyRow?.TermId],
@@ -475,32 +505,40 @@ export function FinancePaymentsPage() {
     : 0;
 
   return (
-    <>
-      <Breadcrumbs
-        items={[
-          { label: "Follow-Up", path: "/followup" },
-          { label: "Finance" },
-          { label: "Payments" },
-        ]}
-      />
-      <div className="space-y-6 mt-6">
+    <div className="min-h-screen bg-background">
+      <div className="max-w-[1400px] mx-auto px-6 py-6 space-y-6">
         {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Payment Collections
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Record receipts and track collections against demanded milestones
-            </p>
+        <div>
+          <Breadcrumbs
+            items={[
+              { label: "Follow-Up", path: "/followup" },
+              { label: "Finance" },
+              { label: "Payments" },
+            ]}
+          />
+          <div className="flex items-center justify-between mt-2">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-foreground">
+                Payment Collections
+              </h1>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Record receipts and track collections against demanded
+                milestones
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="gap-2"
+            >
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${isFetching ? "animate-spin" : ""}`}
+              />
+              Refresh
+            </Button>
           </div>
-          <button
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors disabled:opacity-50 shrink-0"
-          >
-            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /> Refresh
-          </button>
         </div>
 
         {/* ── Summary tiles ───────────────────────────────────────────────── */}
@@ -540,83 +578,105 @@ export function FinancePaymentsPage() {
           />
         </div>
 
-        {/* ── Filters + Table ─────────────────────────────────────────────── */}
-        <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
-          {/* Filter bar */}
-          <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-border bg-muted/30">
-            <Filter className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-            <div className="relative flex-1 min-w-[200px]">
+        {/* ── Filters ─────────────────────────────────────────────────────── */}
+        <div className="flex flex-wrap gap-2 items-center">
+          <div className="flex gap-1.5 flex-1 min-w-[220px] max-w-sm">
+            <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input
                 placeholder="Search applicant, booking, milestone…"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && applySearch()}
-                className="pl-8 h-8 text-sm"
+                className="pl-8 h-9"
               />
             </div>
             <Button
               onClick={applySearch}
               size="sm"
               variant="outline"
-              className="h-8 px-3 text-sm"
+              className="h-9 px-3"
             >
               Search
             </Button>
-
-            <Select
-              value={projectId || "all"}
-              onValueChange={(v) => {
-                setProjectId(v === "all" ? "" : v);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="h-8 w-40 text-sm">
-                <SelectValue placeholder="All Projects" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Projects</SelectItem>
-                {projects.map((p) => (
-                  <SelectItem key={p.ProjectId} value={String(p.ProjectId)}>
-                    {p.ProjectName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={status || "all"}
-              onValueChange={(v) => {
-                setStatus(v === "all" ? "" : v);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="h-8 w-32 text-sm">
-                <SelectValue placeholder="All Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="Demanded">Outstanding</SelectItem>
-                <SelectItem value="Paid">Paid</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {hasFilters && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={clearFilters}
-                className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
-              >
-                <X className="w-3 h-3" /> Clear
-              </Button>
-            )}
-
-            <span className="ml-auto text-sm text-muted-foreground tabular-nums">
-              {total > 0 && `${total.toLocaleString("en-IN")} milestones`}
-            </span>
           </div>
 
+          <Select
+            value={companyId || "all"}
+            onValueChange={(v) => {
+              setCompanyId(v === "all" ? "" : v);
+              setProjectId("");
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-9 w-44 text-sm">
+              <SelectValue placeholder="All Companies" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Companies</SelectItem>
+              {companiesRaw.map((c) => (
+                <SelectItem key={c.id} value={String(c.id)}>
+                  {c.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={projectId || "all"}
+            onValueChange={(v) => {
+              setProjectId(v === "all" ? "" : v);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-9 w-44 text-sm">
+              <SelectValue placeholder="All Projects" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Projects</SelectItem>
+              {filteredProjects.map((p: any) => (
+                <SelectItem key={p.ProjectId} value={String(p.ProjectId)}>
+                  {p.ProjectName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={status || "all"}
+            onValueChange={(v) => {
+              setStatus(v === "all" ? "" : v);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-9 w-36 text-sm">
+              <SelectValue placeholder="All Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="Demanded">Outstanding</SelectItem>
+              <SelectItem value="Paid">Paid</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {hasFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearFilters}
+              className="h-9 gap-1.5 text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-3.5 h-3.5" /> Clear filters
+            </Button>
+          )}
+
+          <span className="ml-auto text-sm text-muted-foreground tabular-nums">
+            {total.toLocaleString("en-IN")} milestone{total !== 1 ? "s" : ""}
+          </span>
+        </div>
+
+        {/* ── Table ───────────────────────────────────────────────────────── */}
+        <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -965,15 +1025,16 @@ export function FinancePaymentsPage() {
                   <Label className="text-sm">
                     Payment Date <span className="text-destructive">*</span>
                   </Label>
-                  <div className="relative">
-                    <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
-                    <input
-                      type="date"
-                      value={recordForm.paymentDate}
-                      onChange={(e) => setRecordForm((f) => ({ ...f, paymentDate: e.target.value }))}
-                      className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                    />
-                  </div>
+                  <Input
+                    type="date"
+                    value={recordForm.paymentDate}
+                    onChange={(e) =>
+                      setRecordForm((f) => ({
+                        ...f,
+                        paymentDate: e.target.value,
+                      }))
+                    }
+                  />
                 </div>
               </div>
 
@@ -1059,9 +1120,9 @@ export function FinancePaymentsPage() {
           )}
 
           <DialogFooter className="gap-2">
-            <button type="button" className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={() => setRecordRow(null)}>
+            <Button variant="outline" onClick={() => setRecordRow(null)}>
               Cancel
-            </button>
+            </Button>
             <Button
               disabled={
                 recordMutation.isPending ||
@@ -1153,9 +1214,9 @@ export function FinancePaymentsPage() {
           </div>
 
           <DialogFooter>
-            <button type="button" className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={() => setHistoryRow(null)}>
+            <Button variant="outline" onClick={() => setHistoryRow(null)}>
               Close
-            </button>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1189,7 +1250,7 @@ export function FinancePaymentsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </>
+    </div>
   );
 }
 

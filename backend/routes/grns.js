@@ -446,6 +446,7 @@ router.get("/", cache("grns", 300), async (req, res) => {
         grn.CreatedDate,
         grn.DocTypeId,
         grn.DocNo,
+        grn.GRNItems,
         grn.TotalAmount,
         grn.DocYear,
         -- Derive a FinYear string so the expense-booking picker can filter correctly.
@@ -468,6 +469,9 @@ router.get("/", cache("grns", 300), async (req, res) => {
         p.SourceWDDocNo,
         p.ProjectId,
         p.CompanyId,
+        co.name AS CompanyName,
+        pr.name AS ProjectName,
+        fyGrn.FName AS FinYearName,
         p.TotalAmount    AS POTotalAmount,
         p.SubtotalAmount AS POSubtotalAmount,
         td.Prefix AS DocTypePrefix,
@@ -476,6 +480,9 @@ router.get("/", cache("grns", 300), async (req, res) => {
       FROM GoodsReceiptNotes grn
       LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
       LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
+      LEFT JOIN dbo.enterprise co ON co.id = p.CompanyId
+      LEFT JOIN dbo.enterprise pr ON pr.id = p.ProjectId
+      LEFT JOIN dbo.FinYear fyGrn ON grn.GRNDate >= fyGrn.FStartDate AND grn.GRNDate <= fyGrn.FEndDate
       LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = grn.DocTypeId
       WHERE (@finYear IS NULL OR (
         grn.DocYear IS NOT NULL AND (
@@ -508,6 +515,42 @@ router.get("/", cache("grns", 300), async (req, res) => {
       error: "Failed to fetch GRNs",
       message: err.message,
     });
+  }
+});
+
+// -- GET /by-po/:poId --
+// Returns all GRNs created against a given PO, ordered newest-first.
+// Used by the Expense Booking preview modal to fetch the GST breakdown for
+// PO-linked bookings (eSourceType = 'PO' | 'WO_PO') \u2014 the GRN holds the
+// actual received quantities and item-level GST rates, which are the
+// authoritative source for the incl-GST amount shown in the breakdown.
+// Must be declared before /:id to avoid route collision.
+router.get("/by-po/:poId", async (req, res) => {
+  const poId = parseInt(req.params.poId, 10);
+  if (isNaN(poId) || poId <= 0)
+    return res.status(400).json({ error: "Invalid PO ID" });
+
+  try {
+    const pool = await getPool();
+    const result = await pool.request().input("POID", sql.Int, poId).query(`
+      SELECT
+        grn.GRNID,
+        grn.GRNNo,
+        grn.DocNo,
+        grn.GRNDate,
+        grn.Status,
+        grn.TotalAmount,
+        s.LHeadName AS SupplierName
+      FROM dbo.GoodsReceiptNotes grn
+      LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId = grn.SupplierID
+      WHERE grn.POID = @POID
+        AND (grn.Status IS NULL OR grn.Status != 'Rejected')
+      ORDER BY grn.GRNID DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("GET /by-po/:poId ERROR:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1114,9 +1157,12 @@ router.get("/:id/gst-breakdown", async (req, res) => {
       return res.status(404).json({ error: "GRN not found" });
 
     const rawItems = parseGRNItems(grnResult.recordset[0].GRNItems);
-    const receivedItems = rawItems.filter(
-      (it) => Number(it.receivedQty || it.ReceivedQty || 0) > 0,
-    );
+    const receivedItems = rawItems.filter((it) => {
+      const receivedQty = Number(it.receivedQty || it.ReceivedQty || 0);
+      const billingQty = Number(it.quantity || it.Quantity || 0);
+      const amt = Number(it.totalAmount || 0);
+      return receivedQty > 0 || billingQty > 0 || amt > 0;
+    });
 
     if (receivedItems.length === 0)
       return res.json({
@@ -1156,7 +1202,6 @@ router.get("/:id/gst-breakdown", async (req, res) => {
       `);
 
       for (const row of masterRes.recordset) {
-        const gst = parseFloat(row.GSTPercent) || 0;
         masterMap[row.M_Id] = {
           hsnCode: row.M_HSN || "",
           cgstRate: parseFloat(row.M_CGST) || 0,
@@ -1174,26 +1219,42 @@ router.get("/:id/gst-breakdown", async (req, res) => {
       const itemId = String(it.itemId || it.ItemId || "");
       const receivedQty = Number(it.receivedQty || it.ReceivedQty || 0);
       const rate = Number(it.rate || it.Rate || 0);
-      // totalAmount stored in GRN = receivedQty × rate (inclusive of GST)
-      const inclGST =
+      // baseAmount stored in GRN = receivedQty × rate (GST-exclusive),
+      // mirroring computeGRNTotal's `base` for this line.
+      const baseAmount =
         Number(it.totalAmount) > 0
           ? Number(it.totalAmount)
-          : receivedQty * rate;
+          : rate * Number(it.quantity || it.Quantity || receivedQty || 0);
 
       const master = masterMap[itemId] || {
         hsnCode: "",
-        gstPercent: 0,
         cgstRate: 0,
         sgstRate: 0,
       };
-      const totalGSTRate = master.cgstRate + master.sgstRate;
 
-      // Back-calculate base from inclusive amount
-      const baseAmount =
-        totalGSTRate > 0 ? inclGST / (1 + totalGSTRate / 100) : inclGST;
-      const cgstAmount = (baseAmount * master.cgstRate) / 100;
-      const sgstAmount = (baseAmount * master.sgstRate) / 100;
-      const gstAmount = cgstAmount + sgstAmount;
+      // GST % for this line: prefer the rate carried on the GRN line itself
+      // (gstPct, same value computeGRNTotal uses) so totals stay consistent
+      // with GoodsReceiptNotes.TotalAmount. Fall back to master CGST+SGST
+      // only if the line has no gstPct recorded.
+      const lineGstPct = Number(it.gstPct ?? it.GstPct ?? NaN);
+      const masterGstPct = master.cgstRate + master.sgstRate;
+      const totalGSTRate = Number.isFinite(lineGstPct)
+        ? lineGstPct
+        : masterGstPct;
+
+      // Split the line's total GST rate between CGST/SGST using the master's
+      // ratio when available (defaults to a 50/50 split).
+      let cgstShare = 0.5,
+        sgstShare = 0.5;
+      if (masterGstPct > 0) {
+        cgstShare = master.cgstRate / masterGstPct;
+        sgstShare = master.sgstRate / masterGstPct;
+      }
+
+      const gstAmount = baseAmount * (totalGSTRate / 100);
+      const cgstAmount = gstAmount * cgstShare;
+      const sgstAmount = gstAmount * sgstShare;
+      const inclGST = baseAmount + gstAmount;
 
       totalBase += baseAmount;
       totalCGST += cgstAmount;
@@ -1210,8 +1271,8 @@ router.get("/:id/gst-breakdown", async (req, res) => {
         rate,
         totalAmountInclGST: Math.round(inclGST * 100) / 100,
         hsnCode: master.hsnCode,
-        cgstRate: master.cgstRate,
-        sgstRate: master.sgstRate,
+        cgstRate: Math.round(totalGSTRate * cgstShare * 100) / 100,
+        sgstRate: Math.round(totalGSTRate * sgstShare * 100) / 100,
         baseAmount: Math.round(baseAmount * 100) / 100,
         cgstAmount: Math.round(cgstAmount * 100) / 100,
         sgstAmount: Math.round(sgstAmount * 100) / 100,

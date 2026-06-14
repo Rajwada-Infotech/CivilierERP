@@ -277,19 +277,21 @@ const PaymentPlanMaster: React.FC = () => {
     <>
       <Breadcrumbs
         items={[
-          { label: "Follow-Up", path: "/followup" },
+          { label: "Dashboard" },
+          { label: "Follow-Up" },
           { label: "Setup" },
           { label: "Payment Plan Master" },
         ]}
       />
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-6 mb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
         <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
+          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+            <Landmark className="w-5 h-5 text-primary" />
             Payment Plan Master
           </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
+          <p className="text-sm text-muted-foreground mt-0.5">
             Define reusable payment milestone terms for bookings &amp; units
           </p>
         </div>

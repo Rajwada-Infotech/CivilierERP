@@ -19,7 +19,6 @@ import {
   IndianRupee,
   FileCheck,
   Banknote,
-  CalendarDays,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -629,7 +628,7 @@ export function BankNOCPage() {
 
         .bnoc-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
         .bnoc-form-section { font-size:10px; font-weight:700; color:hsl(var(--muted-foreground)); text-transform:uppercase; letter-spacing:1px; padding-top:8px; border-top:1px solid hsl(var(--border)); margin-top:4px; }
-        .bnoc-status-select { width:100%; padding:8px 32px 8px 12px; border:1.5px solid hsl(var(--border)); border-radius:9px; font-size:13.5px; color:hsl(var(--foreground)); background:hsl(var(--card)); outline:none; transition:border-color .15s; font-family:inherit; cursor:pointer; appearance:none; -webkit-appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 10px center; }
+        .bnoc-status-select { width:100%; padding:8px 12px; border:1.5px solid hsl(var(--border)); border-radius:9px; font-size:13.5px; color:hsl(var(--foreground)); background:hsl(var(--card)); outline:none; transition:border-color .15s; font-family:inherit; cursor:pointer; appearance:none; -webkit-appearance:none; }
         .bnoc-status-select:focus { border-color:hsl(var(--primary)); }
 
         @media (max-width:768px) {
@@ -1203,10 +1202,11 @@ export function BankNOCPage() {
             <div className="bnoc-form-grid">
               <div className="space-y-2">
                 <Label>Sanction Date</Label>
-                <div className="relative">
-                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
-                  <input type="date" value={form.LoanSanctionDate} onChange={(e) => set("LoanSanctionDate", e.target.value)} className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer" />
-                </div>
+                <Input
+                  type="date"
+                  value={form.LoanSanctionDate}
+                  onChange={(e) => set("LoanSanctionDate", e.target.value)}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Disbursement Status</Label>
@@ -1231,10 +1231,11 @@ export function BankNOCPage() {
             <div className="bnoc-form-grid">
               <div className="space-y-2">
                 <Label>Disbursement Date</Label>
-                <div className="relative">
-                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
-                  <input type="date" value={form.LoanDisbursementDate} onChange={(e) => set("LoanDisbursementDate", e.target.value)} className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer" />
-                </div>
+                <Input
+                  type="date"
+                  value={form.LoanDisbursementDate}
+                  onChange={(e) => set("LoanDisbursementDate", e.target.value)}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Bank NOC Status</Label>
@@ -1256,10 +1257,11 @@ export function BankNOCPage() {
             <div className="bnoc-form-grid">
               <div className="space-y-2">
                 <Label>Bank NOC Date</Label>
-                <div className="relative">
-                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
-                  <input type="date" value={form.BankNOCDate} onChange={(e) => set("BankNOCDate", e.target.value)} className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer" />
-                </div>
+                <Input
+                  type="date"
+                  value={form.BankNOCDate}
+                  onChange={(e) => set("BankNOCDate", e.target.value)}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Bank NOC Notes</Label>
@@ -1273,9 +1275,9 @@ export function BankNOCPage() {
           </div>
 
           <DialogFooter>
-            <button type="button" className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={() => { setDialogOpen(false); setEditId(null); setForm(EMPTY_FORM); }}>
+            <Button variant="outline" onClick={() => { setDialogOpen(false); setEditId(null); setForm(EMPTY_FORM); }}>
               Cancel
-            </button>
+            </Button>
             <Button
               disabled={updateMut.isPending}
               onClick={() => updateMut.mutate()}

@@ -57,6 +57,88 @@ function toNumber(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
+/**
+ * Apply billing terms (EBillingTermsData or EDiscountData) to a gross amount.
+ * Mirrors the frontend computeBreakdown logic for post-GST terms only
+ * (GRN netAmount is already incl-GST, so all terms apply post-GST on top of it).
+ * Returns the rounded net amount after applying all active terms.
+ *
+ * @param {number} grossAmount - incl-GST amount (grnGst.totals.netAmount)
+ * @param {number} basicAmount - pre-GST taxable amount (grnGst.totals.taxableAmount)
+ * @param {number} cgstRate - effective CGST %
+ * @param {number} sgstRate - effective SGST %
+ * @param {any} billingTermsRaw - EBillingTermsData (array or JSON string)
+ * @param {any} discountRaw     - EDiscountData (object or JSON string) fallback
+ */
+function applyBillingTermsToAmount(
+  grossAmount,
+  basicAmount,
+  cgstRate,
+  sgstRate,
+  billingTermsRaw,
+  discountRaw,
+) {
+  const terms = parseJsonArray(billingTermsRaw);
+  let activeTerms = terms.filter((t) => t.applicable);
+
+  // Legacy single-discount fallback
+  if (activeTerms.length === 0 && discountRaw) {
+    try {
+      const d =
+        typeof discountRaw === "string" ? JSON.parse(discountRaw) : discountRaw;
+      if (d && d.applicable) activeTerms = [d];
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (activeTerms.length === 0) return Math.round(grossAmount);
+
+  // Split terms into pre-GST and post-GST
+  const preGstTerms = activeTerms.filter((t) => t.appliedOn !== "post-gst");
+  const postGstTerms = activeTerms.filter((t) => t.appliedOn === "post-gst");
+
+  // Apply pre-GST terms to basicAmount then recompute grossAmount.
+  // If there are no pre-GST terms, use the passed grossAmount directly as the
+  // post-GST base — this avoids re-deriving gross from basicAmount which may be
+  // stale (e.g. EAmount stored before a GRN amendment).
+  let running;
+  if (preGstTerms.length === 0) {
+    running = roundMoney(toNumber(grossAmount));
+  } else {
+    let runningBase = toNumber(basicAmount);
+    for (const t of preGstTerms) {
+      const amt =
+        t.type === "percentage"
+          ? (runningBase * toNumber(t.value)) / 100
+          : toNumber(t.value);
+      if (t.deductionType === "Addition") {
+        runningBase += amt;
+      } else {
+        runningBase = Math.max(0, runningBase - Math.min(amt, runningBase));
+      }
+    }
+    const cgstAmt = (runningBase * toNumber(cgstRate)) / 100;
+    const sgstAmt = (runningBase * toNumber(sgstRate)) / 100;
+    running = roundMoney(runningBase + cgstAmt + sgstAmt);
+  }
+
+  // Apply post-GST terms on top of gross
+  for (const t of postGstTerms) {
+    const amt =
+      t.type === "percentage"
+        ? (running * toNumber(t.value)) / 100
+        : toNumber(t.value);
+    if (t.deductionType === "Addition") {
+      running += amt;
+    } else {
+      running = Math.max(0, running - Math.min(amt, running));
+    }
+  }
+
+  return Math.round(running);
+}
+
 async function buildGrnGstData(pool, grnId) {
   const headerResult = await pool.request().input("GRNID", sql.Int, grnId)
     .query(`
@@ -357,19 +439,16 @@ async function handleChainStatus(req, res) {
 }
 
 // ─── GET /options ─────────────────────────────────────────────────────────────
-router.get(
-  "/options",
-  cache("expense-booking-options", 120),
-  async (req, res) => {
-    try {
-      const pool = getPool();
-      const finYear = (req.query.finYear || "").toString().trim() || null;
+router.get("/options", async (req, res) => {
+  try {
+    const pool = getPool();
+    const finYear = (req.query.finYear || "").toString().trim() || null;
 
-      // Regular bookings: exclude EMI-enabled ones (they are paid via installments)
-      // and exclude any already linked to an active DebitNote
-      const bookingsResult = await pool
-        .request()
-        .input("FinYear", sql.NVarChar(20), finYear).query(`
+    // Regular bookings: exclude EMI-enabled ones (they are paid via installments)
+    // and exclude any already linked to an active DebitNote
+    const bookingsResult = await pool
+      .request()
+      .input("FinYear", sql.NVarChar(20), finYear).query(`
         SELECT
           eb.Eid                          AS id,
           eb.Eid                          AS value,
@@ -382,13 +461,7 @@ router.get(
             WHEN eb.ESourceType IN ('PO','WO_PO','WORK_DONE') THEN ISNULL(eb.EName, '')
             ELSE ISNULL(eb.EName, '')
           END                             AS supplierName,
-          -- For GRN-linked bookings use the live GRN total (incl. GST);
-          -- it is always up-to-date whereas ENetAmount may be stale.
-          CASE
-            WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
-            THEN grn.TotalAmount
-            ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
-          END                             AS amount,
+          ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS amount,
           ISNULL(eb.ECompanyId, 0)        AS companyId,
           ISNULL(e.name, '')              AS companyName,
           ISNULL(eb.EFinYear, '')         AS financialYear,
@@ -398,13 +471,7 @@ router.get(
             N' — ',
             COALESCE(proj.name, eb.EProjectName, ''),
             N' (₹',
-            CAST(CAST(
-              CASE
-                WHEN eb.ESourceType = 'GRN' AND grn.TotalAmount IS NOT NULL AND grn.TotalAmount > 0
-                THEN grn.TotalAmount
-                ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
-              END
-            AS BIGINT) AS NVARCHAR(20)),
+            CAST(CAST(ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS BIGINT) AS NVARCHAR(20)),
             ')'
           ) AS label
         FROM dbo.ExpenseBooking eb
@@ -423,10 +490,10 @@ router.get(
         ORDER BY eb.Eid DESC
       `);
 
-      // EMI installments: only show Pending ones
-      const emiResult = await pool
-        .request()
-        .input("FinYear", sql.NVarChar(20), finYear).query(`
+    // EMI installments: only show Pending ones
+    const emiResult = await pool
+      .request()
+      .input("FinYear", sql.NVarChar(20), finYear).query(`
         SELECT
           ei.Id                        AS id,
           ei.ExpenseBookingId          AS expenseBookingId,
@@ -474,50 +541,49 @@ router.get(
         ORDER BY ei.ExpenseBookingId DESC, ei.InstallmentNo ASC
       `);
 
-      const bookingOptions = bookingsResult.recordset.map((r) => ({
-        id: String(r.id),
-        value: String(r.value),
-        label: r.label,
-        type: "booking",
-        expenseBookingId: r.id,
-        docNo: r.docNo,
-        projectName: r.projectName,
-        partyName: r.partyName || "",
-        supplierName: r.supplierName || "",
-        amount: parseFloat(r.amount) || 0,
-        companyId: r.companyId || null,
-        companyName: r.companyName || "",
-        financialYear: r.financialYear || "",
-      }));
+    const bookingOptions = bookingsResult.recordset.map((r) => ({
+      id: String(r.id),
+      value: String(r.value),
+      label: r.label,
+      type: "booking",
+      expenseBookingId: r.id,
+      docNo: r.docNo,
+      projectName: r.projectName,
+      partyName: r.partyName || "",
+      supplierName: r.supplierName || "",
+      amount: parseFloat(r.amount) || 0,
+      companyId: r.companyId || null,
+      companyName: r.companyName || "",
+      financialYear: r.financialYear || "",
+    }));
 
-      const emiOptions = emiResult.recordset.map((r) => ({
-        id: `emi-${r.expenseBookingId}-${r.installmentNo}`,
-        value: `emi-${r.expenseBookingId}-${r.installmentNo}`,
-        label: r.label,
-        type: "emi",
-        expenseBookingId: r.expenseBookingId,
-        installmentNo: r.installmentNo,
-        refNumber: r.refNumber,
-        dueDate: r.dueDate ? String(r.dueDate).slice(0, 10) : null,
-        docNo: r.refNumber || r.parentDocNo,
-        projectName: r.projectName,
-        partyName: r.partyName || "",
-        supplierName: r.supplierName || "",
-        amount: parseFloat(r.amount) || 0,
-        companyId: r.companyId || null,
-        companyName: r.companyName || "",
-        financialYear: r.financialYear || "",
-        status: r.status,
-        parentDocNo: r.parentDocNo,
-      }));
+    const emiOptions = emiResult.recordset.map((r) => ({
+      id: `emi-${r.expenseBookingId}-${r.installmentNo}`,
+      value: `emi-${r.expenseBookingId}-${r.installmentNo}`,
+      label: r.label,
+      type: "emi",
+      expenseBookingId: r.expenseBookingId,
+      installmentNo: r.installmentNo,
+      refNumber: r.refNumber,
+      dueDate: r.dueDate ? String(r.dueDate).slice(0, 10) : null,
+      docNo: r.refNumber || r.parentDocNo,
+      projectName: r.projectName,
+      partyName: r.partyName || "",
+      supplierName: r.supplierName || "",
+      amount: parseFloat(r.amount) || 0,
+      companyId: r.companyId || null,
+      companyName: r.companyName || "",
+      financialYear: r.financialYear || "",
+      status: r.status,
+      parentDocNo: r.parentDocNo,
+    }));
 
-      res.json([...bookingOptions, ...emiOptions]);
-    } catch (err) {
-      console.error("Options error:", err.message);
-      res.status(500).json({ error: err.message });
-    }
-  },
-);
+    res.json([...bookingOptions, ...emiOptions]);
+  } catch (err) {
+    console.error("Options error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ─── GET all (paginated) ──────────────────────────────────────────────────────
 router.get("/", cache("expense-booking", 60), async (req, res) => {
@@ -560,6 +626,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.ECreatedAt, eb.EUpdatedAt, eb.ECompanyId, eb.EDocTypeId,
           eb.EFinYear, eb.ECreatedBy, eb.ESourceType, eb.ESourceId,
           eb.EName, eb.EBillingTermsData, eb.EDiscountData, eb.EEmiData,
+          eb.EBillingTermId, eb.EBillingTermName,
           eb.ETCId, eb.ETCName, eb.ETCText,
           eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
           eb.EAdditionalCharges, eb.ECostCenter, eb.EGLAccount, eb.EWorkDoneRef,
@@ -582,6 +649,13 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
             WHEN eb.ESourceType = 'GRN' AND grn_list.GRNID IS NOT NULL THEN grn_supp_list.LHeadName
             ELSE eb.EName
           END AS ESupplierName,
+          -- Live GRN total (incl GST) for GRN-linked bookings; NULL otherwise.
+          -- Frontend uses this as the authoritative Net Amt for GRN rows.
+          CASE
+            WHEN eb.ESourceType = 'GRN' AND grn_list.TotalAmount IS NOT NULL AND grn_list.TotalAmount > 0
+            THEN grn_list.TotalAmount
+            ELSE NULL
+          END AS EGrnTotalAmount,
           COUNT(*) OVER() AS _total
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
@@ -819,7 +893,16 @@ router.get("/:id", async (req, res) => {
                CASE
                  WHEN eb.ESourceType = 'GRN' AND grn_det.GRNID IS NOT NULL THEN grn_supp_det.LHeadName
                  ELSE eb.EName
-               END AS ESupplierName
+               END AS ESupplierName,
+               -- Live GRN total (incl. GST) so detail modal always shows current value
+               CASE
+                 WHEN eb.ESourceType = 'GRN' AND grn_det.TotalAmount IS NOT NULL AND grn_det.TotalAmount > 0
+                 THEN grn_det.TotalAmount
+                 ELSE NULL
+               END AS EGrnTotalAmount,
+               -- Pass through source info needed for fallback computation
+               eb.ESourceType AS _ESourceType,
+               eb.ESourceId   AS _ESourceId
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
         LEFT JOIN dbo.enterprise ec ON ec.id = eb.ECompanyId
@@ -837,7 +920,51 @@ router.get("/:id", async (req, res) => {
       `);
     if (!result.recordset.length)
       return res.status(404).json({ error: "Not found" });
-    res.json(result.recordset[0]);
+
+    // Destructure to separate the internal _ESourceType/_ESourceId aliases
+    // from the rest. mssql recordset rows can be non-configurable so we must
+    // not mutate them in-place (delete/assignment throws in strict contexts).
+    const { _ESourceType, _ESourceId, ...row } = result.recordset[0];
+
+    // If EGrnTotalAmount is NULL (grn.TotalAmount not populated for older records),
+    // compute the authoritative total from buildGrnGstData (item qty x PO rate + GST).
+    let EGrnTotalAmount = row.EGrnTotalAmount ?? null;
+    if (!EGrnTotalAmount && _ESourceType === "GRN" && _ESourceId) {
+      try {
+        const grnId = parseInt(String(_ESourceId), 10);
+        if (Number.isFinite(grnId) && grnId > 0) {
+          const grnData = await buildGrnGstData(pool, grnId);
+          if (grnData && grnData.totals.netAmount > 0) {
+            EGrnTotalAmount = grnData.totals.netAmount;
+          }
+        }
+      } catch {
+        /* non-fatal: frontend will fall back to standard breakdown */
+      }
+    }
+
+    // For GRN-linked bookings, recompute ENetAmount live from the GRN total + billing terms.
+    // The stored ENetAmount may be stale if the GRN was amended after the booking was created.
+    let liveENetAmount = row.ENetAmount;
+    if (
+      _ESourceType === "GRN" &&
+      EGrnTotalAmount != null &&
+      parseFloat(EGrnTotalAmount) > 0
+    ) {
+      liveENetAmount = applyBillingTermsToAmount(
+        parseFloat(EGrnTotalAmount),
+        parseFloat(row.EAmount ?? 0),
+        parseFloat(row.ECgstRate ?? 0),
+        parseFloat(row.ESgstRate ?? 0),
+        row.EBillingTermsData,
+        row.EDiscountData,
+      );
+      console.log(
+        `[/:id] Eid=${row.Eid} ESourceType=${_ESourceType} EGrnTotalAmount=${EGrnTotalAmount} stored=${row.ENetAmount} live=${liveENetAmount} billingTerms=${JSON.stringify(row.EBillingTermsData)}`,
+      );
+    }
+
+    res.json({ ...row, EGrnTotalAmount, ENetAmount: liveENetAmount });
   } catch (err) {
     console.error("Get by id error:", err.message);
     res.status(500).json({ error: err.message });
@@ -1000,6 +1127,15 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
       bookingNetAmount = grnGst.totals.netAmount;
       bookingCgstRate = grnGst.cgstRate;
       bookingSgstRate = grnGst.sgstRate;
+      // Apply billing terms on top of the GRN gross amount
+      bookingNetAmount = applyBillingTermsToAmount(
+        bookingNetAmount,
+        bookingAmount,
+        bookingCgstRate,
+        bookingSgstRate,
+        EBillingTermsData,
+        EDiscountData,
+      );
     }
 
     if (EDocTypeId) {
@@ -1156,7 +1292,11 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
       .input(
         "EDiscountData",
         sql.NVarChar(sql.MAX),
-        EDiscountData ? JSON.stringify(EDiscountData) : null,
+        EDiscountData
+          ? typeof EDiscountData === "string"
+            ? EDiscountData
+            : JSON.stringify(EDiscountData)
+          : null,
       )
       .input("EDocNo", sql.NVarChar(100), finalDocNo)
       .input("EEmiPayment", sql.Bit, EEmiPayment ? 1 : 0)
@@ -1197,7 +1337,11 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
       .input(
         "EBillingTermsData",
         sql.NVarChar(sql.MAX),
-        EBillingTermsData ? JSON.stringify(EBillingTermsData) : null,
+        EBillingTermsData
+          ? typeof EBillingTermsData === "string"
+            ? EBillingTermsData
+            : JSON.stringify(EBillingTermsData)
+          : null,
       )
       .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
       .input("ETCName", sql.NVarChar(200), ETCName || null)
@@ -1754,6 +1898,15 @@ router.put(
         bookingNetAmount = grnGst.totals.netAmount;
         bookingCgstRate = grnGst.cgstRate;
         bookingSgstRate = grnGst.sgstRate;
+        // Apply billing terms on top of the GRN gross amount
+        bookingNetAmount = applyBillingTermsToAmount(
+          bookingNetAmount,
+          bookingAmount,
+          bookingCgstRate,
+          bookingSgstRate,
+          EBillingTermsData,
+          EDiscountData,
+        );
       }
 
       const result = await pool
@@ -1782,7 +1935,11 @@ router.put(
         .input(
           "EDiscountData",
           sql.NVarChar(sql.MAX),
-          EDiscountData ? JSON.stringify(EDiscountData) : null,
+          EDiscountData
+            ? typeof EDiscountData === "string"
+              ? EDiscountData
+              : JSON.stringify(EDiscountData)
+            : null,
         )
         .input("EDocNo", sql.NVarChar(100), EDocNo || null)
         .input("EEmiPayment", sql.Bit, EEmiPayment ? 1 : 0)
@@ -1820,7 +1977,11 @@ router.put(
         .input(
           "EBillingTermsData",
           sql.NVarChar(sql.MAX),
-          EBillingTermsData ? JSON.stringify(EBillingTermsData) : null,
+          EBillingTermsData
+            ? typeof EBillingTermsData === "string"
+              ? EBillingTermsData
+              : JSON.stringify(EBillingTermsData)
+            : null,
         )
         .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
         .input("ETCName", sql.NVarChar(200), ETCName || null)

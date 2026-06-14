@@ -564,7 +564,7 @@ export default function FollowupLog() {
                 <div className="relative">
                   <CalendarDays
                     size={13}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
                   <input
                     type="date"
@@ -646,9 +646,9 @@ export default function FollowupLog() {
           </div>
 
           <DialogFooter>
-            <button type="button" className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={() => setIsDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
               Cancel
-            </button>
+            </Button>
             <Button
               onClick={() =>
                 createMutation.mutate({

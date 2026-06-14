@@ -1,4 +1,5 @@
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useMemo, useState } from "react";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -105,8 +106,14 @@ interface OptionHandover {
   HandoverNo: string;
   ApplicantId: number;
 }
-interface OptionProject { Id: number; Name: string; }
-interface OptionCompany { Id: number; Name: string; }
+interface OptionProject {
+  Id: number;
+  Name: string;
+}
+interface OptionCompany {
+  Id: number;
+  Name: string;
+}
 
 interface MetaOptions {
   applicants: OptionApplicant[];
@@ -164,14 +171,42 @@ const CLEARANCE_ITEMS: Array<{
   label: string;
   icon: React.ReactNode;
 }> = [
-  { field: "StructuralClearance",  label: "Structural Inspection",  icon: <ShieldCheck size={14} /> },
-  { field: "ElectricalClearance",  label: "Electrical Systems",     icon: <Zap size={14} /> },
-  { field: "PlumbingClearance",    label: "Plumbing & Drainage",    icon: <Droplets size={14} /> },
-  { field: "PaintingClearance",    label: "Painting & Finishes",    icon: <PaintBucket size={14} /> },
-  { field: "FlooringClearance",    label: "Flooring",               icon: <Layers size={14} /> },
-  { field: "FireClearance",        label: "Fire Safety",            icon: <FlameKindling size={14} /> },
-  { field: "OccupancyCertIssued",  label: "Occupancy Certificate",  icon: <FileCheck2 size={14} /> },
-  { field: "SnagListCleared",      label: "Snag List Cleared",      icon: <ListChecks size={14} /> },
+  {
+    field: "StructuralClearance",
+    label: "Structural Inspection",
+    icon: <ShieldCheck size={14} />,
+  },
+  {
+    field: "ElectricalClearance",
+    label: "Electrical Systems",
+    icon: <Zap size={14} />,
+  },
+  {
+    field: "PlumbingClearance",
+    label: "Plumbing & Drainage",
+    icon: <Droplets size={14} />,
+  },
+  {
+    field: "PaintingClearance",
+    label: "Painting & Finishes",
+    icon: <PaintBucket size={14} />,
+  },
+  { field: "FlooringClearance", label: "Flooring", icon: <Layers size={14} /> },
+  {
+    field: "FireClearance",
+    label: "Fire Safety",
+    icon: <FlameKindling size={14} />,
+  },
+  {
+    field: "OccupancyCertIssued",
+    label: "Occupancy Certificate",
+    icon: <FileCheck2 size={14} />,
+  },
+  {
+    field: "SnagListCleared",
+    label: "Snag List Cleared",
+    icon: <ListChecks size={14} />,
+  },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -183,31 +218,67 @@ function fmtDate(d: string | null | undefined): string {
 }
 
 function avatarColor(name: string): string {
-  const colors = ["#2563eb","#7c3aed","#0891b2","#059669","#d97706","#dc2626","#db2777","#65a30d"];
+  const colors = [
+    "#2563eb",
+    "#7c3aed",
+    "#0891b2",
+    "#059669",
+    "#d97706",
+    "#dc2626",
+    "#db2777",
+    "#65a30d",
+  ];
   let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffffffff;
+  for (let i = 0; i < name.length; i++)
+    h = (h * 31 + name.charCodeAt(i)) & 0xffffffff;
   return colors[Math.abs(h) % colors.length];
 }
 
 function initials(name: string): string {
-  return name.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
 }
 
 function countCleared(rec: PrePossession): number {
   return [
-    rec.StructuralClearance, rec.ElectricalClearance, rec.PlumbingClearance,
-    rec.PaintingClearance, rec.FlooringClearance, rec.FireClearance,
-    rec.OccupancyCertIssued, rec.SnagListCleared,
+    rec.StructuralClearance,
+    rec.ElectricalClearance,
+    rec.PlumbingClearance,
+    rec.PaintingClearance,
+    rec.FlooringClearance,
+    rec.FireClearance,
+    rec.OccupancyCertIssued,
+    rec.SnagListCleared,
   ].filter(Boolean).length;
 }
 
 // ─── Status config ────────────────────────────────────────────────────────────
 
-const STATUS_META: Record<PPStatus, { label: string; icon: React.ReactNode; cls: string }> = {
-  Pending:     { label: "Pending",     icon: <Clock size={11} />,       cls: "pp-badge-pending" },
-  "In Progress":{ label: "In Progress",icon: <AlertCircle size={11} />, cls: "pp-badge-inprogress" },
-  Cleared:     { label: "Cleared",     icon: <CheckCircle2 size={11} />,cls: "pp-badge-cleared" },
-  Failed:      { label: "Failed",      icon: <Ban size={11} />,         cls: "pp-badge-failed" },
+const STATUS_META: Record<
+  PPStatus,
+  { label: string; icon: React.ReactNode; cls: string }
+> = {
+  Pending: {
+    label: "Pending",
+    icon: <Clock size={11} />,
+    cls: "pp-badge-pending",
+  },
+  "In Progress": {
+    label: "In Progress",
+    icon: <AlertCircle size={11} />,
+    cls: "pp-badge-inprogress",
+  },
+  Cleared: {
+    label: "Cleared",
+    icon: <CheckCircle2 size={11} />,
+    cls: "pp-badge-cleared",
+  },
+  Failed: { label: "Failed", icon: <Ban size={11} />, cls: "pp-badge-failed" },
 };
 
 // ─── API ──────────────────────────────────────────────────────────────────────
@@ -218,7 +289,12 @@ async function fetchMeta(): Promise<MetaOptions> {
   return res.json();
 }
 
-async function fetchPPs(params: { page: number; pageSize: number; search: string; status: string }) {
+async function fetchPPs(params: {
+  page: number;
+  pageSize: number;
+  search: string;
+  status: string;
+}) {
   const q = new URLSearchParams({
     page: String(params.page),
     pageSize: String(params.pageSize),
@@ -227,7 +303,15 @@ async function fetchPPs(params: { page: number; pageSize: number; search: string
   });
   const res = await fetchWithAuth(`/api/followup-pre-possession?${q}`);
   if (!res.ok) throw new Error("Failed to load Pre-Possession records");
-  return res.json() as Promise<{ data: PrePossession[]; pagination: { page: number; pageSize: number; total: number; totalPages: number } }>;
+  return res.json() as Promise<{
+    data: PrePossession[];
+    pagination: {
+      page: number;
+      pageSize: number;
+      total: number;
+      totalPages: number;
+    };
+  }>;
 }
 
 async function createPP(payload: Record<string, unknown>) {
@@ -255,76 +339,118 @@ async function updatePP(id: number, payload: Record<string, unknown>) {
 }
 
 async function deletePP(id: number) {
-  const res = await fetchWithAuth(`/api/followup-pre-possession/${id}`, { method: "DELETE" });
+  const res = await fetchWithAuth(`/api/followup-pre-possession/${id}`, {
+    method: "DELETE",
+  });
   if (!res.ok) throw new Error("Failed to delete");
 }
 
 // ─── Combobox ─────────────────────────────────────────────────────────────────
 
-interface ComboItem { value: string; label: string; sub?: string; }
+interface ComboItem {
+  value: string;
+  label: string;
+  sub?: string;
+}
 
-function Combobox({ value, onChange, items, placeholder, disabled }: {
-  value: string; onChange: (v: string) => void;
-  items: ComboItem[]; placeholder: string; disabled?: boolean;
+function Combobox({
+  value,
+  onChange,
+  items,
+  placeholder,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  items: ComboItem[];
+  placeholder: string;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
   const selected = items.find((i) => i.value === value);
   const filtered = useMemo(() => {
     if (!q) return items;
     const lq = q.toLowerCase();
-    return items.filter((i) => i.label.toLowerCase().includes(lq) || (i.sub ?? "").toLowerCase().includes(lq));
+    return items.filter(
+      (i) =>
+        i.label.toLowerCase().includes(lq) ||
+        (i.sub ?? "").toLowerCase().includes(lq),
+    );
   }, [items, q]);
 
-  useEffect(() => {
-    if (!open) return;
-    function handle(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
-  }, [open]);
-
   return (
-    <div className="pp-combo" ref={ref}>
+    <div className="pp-combo">
       <button
         type="button"
         className={`pp-combo-trigger${open ? " open" : ""}${!value ? " empty" : ""}${disabled ? " disabled" : ""}`}
-        onClick={() => { if (!disabled) { setOpen((v) => !v); setQ(""); } }}
+        onClick={() => {
+          if (!disabled) {
+            setOpen((v) => !v);
+            setQ("");
+          }
+        }}
       >
         <span className="pp-combo-left">
-          {selected
-            ? <span className="pp-combo-val">{selected.label}</span>
-            : <span className="pp-combo-placeholder">{placeholder}</span>}
+          {selected ? (
+            <span className="pp-combo-val">{selected.label}</span>
+          ) : (
+            <span className="pp-combo-placeholder">{placeholder}</span>
+          )}
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
           {value && !disabled && (
-            <span className="pp-combo-clear" onClick={(e) => { e.stopPropagation(); onChange(""); setOpen(false); }}>
+            <span
+              className="pp-combo-clear"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange("");
+                setOpen(false);
+              }}
+            >
               <X size={12} />
             </span>
           )}
-          <ChevronDown size={13} className={`pp-combo-chevron${open ? " open" : ""}`} />
+          <ChevronDown
+            size={13}
+            className={`pp-combo-chevron${open ? " open" : ""}`}
+          />
         </span>
       </button>
       {open && (
         <div className="pp-combo-drop">
           <div className="pp-combo-search-wrap">
             <Search size={13} />
-            <input className="pp-combo-search" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+            <input
+              className="pp-combo-search"
+              placeholder="Search…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              autoFocus
+            />
           </div>
           <div className="pp-combo-list">
-            {filtered.length === 0
-              ? <div className="pp-combo-empty">No results</div>
-              : filtered.map((item) => (
-                  <button key={item.value} type="button"
-                    className={`pp-combo-item${value === item.value ? " selected" : ""}`}
-                    onClick={() => { onChange(item.value); setOpen(false); setQ(""); }}
-                  >
-                    <span className="pp-combo-item-label">{item.label}</span>
-                    {item.sub && <span className="pp-combo-item-sub">{item.sub}</span>}
-                  </button>
-                ))}
+            {filtered.length === 0 ? (
+              <div className="pp-combo-empty">No results</div>
+            ) : (
+              filtered.map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  className={`pp-combo-item${value === item.value ? " selected" : ""}`}
+                  onClick={() => {
+                    onChange(item.value);
+                    setOpen(false);
+                    setQ("");
+                  }}
+                >
+                  <span className="pp-combo-item-label">{item.label}</span>
+                  {item.sub && (
+                    <span className="pp-combo-item-sub">{item.sub}</span>
+                  )}
+                </button>
+              ))
+            )}
           </div>
         </div>
       )}
@@ -334,12 +460,23 @@ function Combobox({ value, onChange, items, placeholder, disabled }: {
 
 // ─── ChecklistToggle ──────────────────────────────────────────────────────────
 
-function ChecklistToggle({ checked, onChange, icon, label }: {
-  checked: boolean; onChange: (v: boolean) => void;
-  icon: React.ReactNode; label: string;
+function ChecklistToggle({
+  checked,
+  onChange,
+  icon,
+  label,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  icon: React.ReactNode;
+  label: string;
 }) {
   return (
-    <button type="button" className={`pp-checklist-item${checked ? " checked" : ""}`} onClick={() => onChange(!checked)}>
+    <button
+      type="button"
+      className={`pp-checklist-item${checked ? " checked" : ""}`}
+      onClick={() => onChange(!checked)}
+    >
       <span className="pp-checklist-icon">{icon}</span>
       <span className="pp-checklist-label">{label}</span>
       {checked && <CheckCircle2 size={14} className="pp-checklist-tick" />}
@@ -371,49 +508,86 @@ export function PrePossessionClearancePage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: result, isLoading, isFetching, refetch } = useQuery({
+  const {
+    data: result,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useQuery({
     queryKey: ["pre-possessions", page, search, statusFilter],
-    queryFn: () => fetchPPs({ page, pageSize: PAGE_SIZE, search, status: statusFilter }),
+    queryFn: () =>
+      fetchPPs({ page, pageSize: PAGE_SIZE, search, status: statusFilter }),
     placeholderData: (prev) => prev,
   });
 
   const records = result?.data ?? [];
   const pagination = result?.pagination;
 
-  const stats = useMemo(() => ({
-    total: pagination?.total ?? 0,
-    pending: records.filter((r) => r.Status === "Pending").length,
-    cleared: records.filter((r) => r.Status === "Cleared").length,
-    failed:  records.filter((r) => r.Status === "Failed").length,
-  }), [records, pagination]);
+  const stats = useMemo(
+    () => ({
+      total: pagination?.total ?? 0,
+      pending: records.filter((r) => r.Status === "Pending").length,
+      cleared: records.filter((r) => r.Status === "Cleared").length,
+      failed: records.filter((r) => r.Status === "Failed").length,
+    }),
+    [records, pagination],
+  );
 
   // Combobox items
-  const applicantItems: ComboItem[] = useMemo(() =>
-    (meta?.applicants ?? []).map((a) => ({ value: String(a.Id), label: a.ApplicantName, sub: a.ApplicantNo ?? undefined })),
-    [meta]);
+  const applicantItems: ComboItem[] = useMemo(
+    () =>
+      (meta?.applicants ?? []).map((a) => ({
+        value: String(a.Id),
+        label: a.ApplicantName,
+        sub: a.ApplicantNo ?? undefined,
+      })),
+    [meta],
+  );
 
   const unitItems: ComboItem[] = useMemo(() => {
     const all = meta?.unitSelections ?? [];
-    const filtered = form.ApplicantId ? all.filter((u) => String(u.ApplicantId) === form.ApplicantId) : all;
-    return filtered.map((u) => ({ value: String(u.Id), label: u.UnitNo, sub: u.SelectionNo }));
+    const filtered = form.ApplicantId
+      ? all.filter((u) => String(u.ApplicantId) === form.ApplicantId)
+      : all;
+    return filtered.map((u) => ({
+      value: String(u.Id),
+      label: u.UnitNo,
+      sub: u.SelectionNo,
+    }));
   }, [meta, form.ApplicantId]);
 
   const handoverItems: ComboItem[] = useMemo(() => {
     const all = meta?.handovers ?? [];
-    const filtered = form.ApplicantId ? all.filter((h) => String(h.ApplicantId) === form.ApplicantId) : all;
+    const filtered = form.ApplicantId
+      ? all.filter((h) => String(h.ApplicantId) === form.ApplicantId)
+      : all;
     return filtered.map((h) => ({ value: String(h.Id), label: h.HandoverNo }));
   }, [meta, form.ApplicantId]);
 
-  const projectItems: ComboItem[] = useMemo(() =>
-    (meta?.projects ?? []).map((p) => ({ value: String(p.Id), label: p.Name })), [meta]);
+  const projectItems: ComboItem[] = useMemo(
+    () =>
+      filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map(
+        (p) => ({ value: String(p.Id), label: p.Name }),
+      ),
+    [meta, form.CompanyId],
+  );
 
-  const companyItems: ComboItem[] = useMemo(() =>
-    (meta?.companies ?? []).map((c) => ({ value: String(c.Id), label: c.Name })), [meta]);
+  const companyItems: ComboItem[] = useMemo(
+    () =>
+      (meta?.companies ?? []).map((c) => ({
+        value: String(c.Id),
+        label: c.Name,
+      })),
+    [meta],
+  );
 
   function set(k: keyof FormState, v: string | boolean) {
     setForm((f) => {
       const next = { ...f, [k]: v } as FormState;
-      if (k === "ApplicantId") { next.UnitSelectionId = ""; next.HandoverId = ""; }
+      if (k === "ApplicantId") {
+        next.UnitSelectionId = "";
+        next.HandoverId = "";
+      }
       if (k === "UnitSelectionId" && typeof v === "string") {
         const us = meta?.unitSelections.find((u) => String(u.Id) === v);
         if (us) {
@@ -428,7 +602,11 @@ export function PrePossessionClearancePage() {
   // Auto-suggest "Cleared" when all 8 are ticked
   const allCleared = CLEARANCE_ITEMS.every((c) => form[c.field] === true);
 
-  function openCreate() { setEditId(null); setForm(EMPTY_FORM); setDialogOpen(true); }
+  function openCreate() {
+    setEditId(null);
+    setForm(EMPTY_FORM);
+    setDialogOpen(true);
+  }
 
   function openEdit(r: PrePossession) {
     setEditId(r.Id);
@@ -476,28 +654,53 @@ export function PrePossessionClearancePage() {
     };
   }
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["pre-possessions"] });
+  const invalidate = () =>
+    qc.invalidateQueries({ queryKey: ["pre-possessions"] });
 
   const createMut = useMutation({
     mutationFn: () => createPP(buildPayload()),
-    onSuccess: () => { toast.success("Pre-Possession record created"); invalidate(); setDialogOpen(false); },
+    onSuccess: () => {
+      toast.success("Pre-Possession record created");
+      invalidate();
+      setDialogOpen(false);
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const updateMut = useMutation({
     mutationFn: () => updatePP(editId!, buildPayload()),
-    onSuccess: () => { toast.success("Record updated"); invalidate(); setDialogOpen(false); },
+    onSuccess: () => {
+      toast.success("Record updated");
+      invalidate();
+      setDialogOpen(false);
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const deleteMut = useMutation({
     mutationFn: () => deletePP(deleteId!),
-    onSuccess: () => { toast.success("Record deleted"); invalidate(); setDeleteId(null); },
+    onSuccess: () => {
+      toast.success("Record deleted");
+      invalidate();
+      setDeleteId(null);
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const STATUS_FILTERS: Array<PPStatus | ""> = ["", "Pending", "In Progress", "Cleared", "Failed"];
-  const STATUS_LABELS: Record<string, string> = { "": "All", Pending: "Pending", "In Progress": "In Progress", Cleared: "Cleared", Failed: "Failed" };
+  const STATUS_FILTERS: Array<PPStatus | ""> = [
+    "",
+    "Pending",
+    "In Progress",
+    "Cleared",
+    "Failed",
+  ];
+  const STATUS_LABELS: Record<string, string> = {
+    "": "All",
+    Pending: "Pending",
+    "In Progress": "In Progress",
+    Cleared: "Cleared",
+    Failed: "Failed",
+  };
 
   const pageNums = useMemo(() => {
     if (!pagination) return [];
@@ -505,7 +708,8 @@ export function PrePossessionClearancePage() {
     const cur = pagination.page;
     if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
     if (cur <= 4) return [1, 2, 3, 4, 5, "…", total];
-    if (cur >= total - 3) return [1, "…", total - 4, total - 3, total - 2, total - 1, total];
+    if (cur >= total - 3)
+      return [1, "…", total - 4, total - 3, total - 2, total - 1, total];
     return [1, "…", cur - 1, cur, cur + 1, "…", total];
   }, [pagination]);
 
@@ -661,28 +865,47 @@ export function PrePossessionClearancePage() {
         }
       `}</style>
 
-      <Breadcrumbs items={[
-        { label: "Follow-Up",  path: "/followup" },
-        { label: "Closure",    path: "/followup/closure/pre-possession" },
-        { label: "Pre-Possession Clearance", path: "/followup/closure/pre-possession" },
-      ]} />
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Closure", path: "/followup/closure/pre-possession" },
+          {
+            label: "Pre-Possession Clearance",
+            path: "/followup/closure/pre-possession",
+          },
+        ]}
+      />
 
-      <div className="pp-page relative space-y-8 mt-6" onClick={() => setOpenMenuId(null)}>
-
+      <div
+        className="pp-page relative space-y-8 mt-6"
+        onClick={() => setOpenMenuId(null)}
+      >
         {/* ── Header ── */}
         <div className="flex items-start justify-between gap-4">
           <div className="pp-title-row">
-            <div className="pp-icon"><ClipboardCheck size={20} /></div>
+            <div className="pp-icon">
+              <ClipboardCheck size={20} />
+            </div>
             <span className="pp-title">Pre-Possession Clearance</span>
             <span className="pp-count">{pagination?.total ?? 0}</span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => refetch()} disabled={isFetching}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50">
-              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /> Refresh
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
+              />{" "}
+              Refresh
             </button>
-            <Button size="sm" onClick={openCreate}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto">
+            <Button
+              size="sm"
+              onClick={openCreate}
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+            >
               <Plus size={14} /> New Clearance
             </Button>
           </div>
@@ -692,24 +915,50 @@ export function PrePossessionClearancePage() {
         <div className="pp-filter-bar">
           <div className="pp-search-wrap">
             <Search size={14} />
-            <input className="pp-search" placeholder="Search by applicant, clearance no, unit…"
-              value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
+            <input
+              className="pp-search"
+              placeholder="Search by applicant, clearance no, unit…"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+            />
             {search && (
-              <button className="pp-search-clear" onClick={() => { setSearch(""); setPage(1); }}><X size={13} /></button>
+              <button
+                className="pp-search-clear"
+                onClick={() => {
+                  setSearch("");
+                  setPage(1);
+                }}
+              >
+                <X size={13} />
+              </button>
             )}
           </div>
           <div className="pp-pills">
             {STATUS_FILTERS.map((s) => {
               const isActive = statusFilter === s;
               const pillClass = isActive
-                ? s === "" ? "pp-pill active"
-                  : s === "Pending" ? "pp-pill active-pending"
-                  : s === "In Progress" ? "pp-pill active-inprogress"
-                  : s === "Cleared" ? "pp-pill active-cleared"
-                  : "pp-pill active-failed"
+                ? s === ""
+                  ? "pp-pill active"
+                  : s === "Pending"
+                    ? "pp-pill active-pending"
+                    : s === "In Progress"
+                      ? "pp-pill active-inprogress"
+                      : s === "Cleared"
+                        ? "pp-pill active-cleared"
+                        : "pp-pill active-failed"
                 : "pp-pill";
               return (
-                <button key={s} className={pillClass} onClick={() => { setStatusFilter(s as PPStatus | ""); setPage(1); }}>
+                <button
+                  key={s}
+                  className={pillClass}
+                  onClick={() => {
+                    setStatusFilter(s as PPStatus | "");
+                    setPage(1);
+                  }}
+                >
                   {STATUS_LABELS[s]}
                 </button>
               );
@@ -720,10 +969,10 @@ export function PrePossessionClearancePage() {
         {/* Stats bar */}
         <div className="pp-stats">
           {[
-            { label: "Total",   val: pagination?.total ?? 0, cls: "blue"  },
-            { label: "Pending", val: stats.pending,          cls: ""      },
-            { label: "Cleared", val: stats.cleared,          cls: "green" },
-            { label: "Failed",  val: stats.failed,           cls: "red"   },
+            { label: "Total", val: pagination?.total ?? 0, cls: "blue" },
+            { label: "Pending", val: stats.pending, cls: "" },
+            { label: "Cleared", val: stats.cleared, cls: "green" },
+            { label: "Failed", val: stats.failed, cls: "red" },
           ].map(({ label, val, cls }) => (
             <div key={label} className="pp-stat">
               <div className={`pp-stat-val ${cls}`}>{val}</div>
@@ -736,20 +985,53 @@ export function PrePossessionClearancePage() {
         <div className="pp-table-wrap">
           {isLoading ? (
             <table className="pp-table">
-              <thead><tr>{["Clearance No","Applicant","Unit","Clearance","Status",""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+              <thead>
+                <tr>
+                  {[
+                    "Clearance No",
+                    "Applicant",
+                    "Unit",
+                    "Clearance",
+                    "Status",
+                    "",
+                  ].map((h) => (
+                    <th key={h}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
               <tbody>
                 {Array.from({ length: 6 }).map((_, i) => (
-                  <tr key={i}>{[80,160,100,140,80,40].map((w, j) => (
-                    <td key={j}><div className="pp-skel" style={{ height:14, width:w }} /></td>
-                  ))}</tr>
+                  <tr key={i}>
+                    {[80, 160, 100, 140, 80, 40].map((w, j) => (
+                      <td key={j}>
+                        <div
+                          className="pp-skel"
+                          style={{ height: 14, width: w }}
+                        />
+                      </td>
+                    ))}
+                  </tr>
                 ))}
               </tbody>
             </table>
           ) : records.length === 0 ? (
             <div className="pp-empty">
-              <div className="pp-empty-icon"><ClipboardCheck size={26} style={{ color:"hsl(var(--primary))" }} /></div>
-              <h3>{search || statusFilter ? "No matching records" : "No Pre-Possession records yet"}</h3>
-              <p>{search || statusFilter ? "Try adjusting your search" : "Create your first clearance record above"}</p>
+              <div className="pp-empty-icon">
+                <ClipboardCheck
+                  size={26}
+                  style={{ color: "hsl(var(--primary))" }}
+                />
+              </div>
+              <h3>
+                {search || statusFilter
+                  ? "No matching records"
+                  : "No Pre-Possession records yet"}
+              </h3>
+              <p>
+                {search || statusFilter
+                  ? "Try adjusting your search"
+                  : "Create your first clearance record above"}
+              </p>
             </div>
           ) : (
             <>
@@ -768,49 +1050,93 @@ export function PrePossessionClearancePage() {
                 <tbody>
                   {records.map((rec) => {
                     const cleared = countCleared(rec);
-                    const sm = STATUS_META[rec.Status] ?? STATUS_META["Pending"];
+                    const sm =
+                      STATUS_META[rec.Status] ?? STATUS_META["Pending"];
                     return (
                       <tr key={rec.Id}>
-                        <td><span className="pp-clrno">{rec.ClearanceNo}</span></td>
+                        <td>
+                          <span className="pp-clrno">{rec.ClearanceNo}</span>
+                        </td>
                         <td>
                           <div className="pp-applicant-cell">
-                            <div className="pp-avatar" style={{ background: avatarColor(rec.ApplicantName) }}>
+                            <div
+                              className="pp-avatar"
+                              style={{
+                                background: avatarColor(rec.ApplicantName),
+                              }}
+                            >
                               {initials(rec.ApplicantName)}
                             </div>
                             <div>
-                              <div className="pp-applicant-name">{rec.ApplicantName}</div>
-                              <div className="pp-applicant-no">{rec.ApplicantNo}</div>
+                              <div className="pp-applicant-name">
+                                {rec.ApplicantName}
+                              </div>
+                              <div className="pp-applicant-no">
+                                {rec.ApplicantNo}
+                              </div>
                             </div>
                           </div>
                         </td>
                         <td>
                           <div className="pp-unit">{rec.UnitNo ?? "—"}</div>
-                          {rec.ProjectName && <div className="pp-unit-sub">{rec.ProjectName}</div>}
+                          {rec.ProjectName && (
+                            <div className="pp-unit-sub">{rec.ProjectName}</div>
+                          )}
                         </td>
                         <td>
                           <div className="pp-progress-wrap">
                             <div className="pp-progress-bar">
-                              <div className="pp-progress-fill" style={{ width: `${(cleared / 8) * 100}%` }} />
+                              <div
+                                className="pp-progress-fill"
+                                style={{ width: `${(cleared / 8) * 100}%` }}
+                              />
                             </div>
-                            <span className="pp-progress-label">{cleared}/8</span>
+                            <span className="pp-progress-label">
+                              {cleared}/8
+                            </span>
                           </div>
                         </td>
                         <td>{fmtDate(rec.ClearanceDate)}</td>
                         <td>
-                          <span className={`pp-badge ${sm.cls}`}>{sm.icon}{sm.label}</span>
+                          <span className={`pp-badge ${sm.cls}`}>
+                            {sm.icon}
+                            {sm.label}
+                          </span>
                         </td>
                         <td>
-                          <div className="pp-actions" onClick={(e) => e.stopPropagation()}>
-                            <button className="pp-menu-btn" onClick={() => setOpenMenuId(openMenuId === rec.Id ? null : rec.Id)}>
+                          <div
+                            className="pp-actions"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              className="pp-menu-btn"
+                              onClick={() =>
+                                setOpenMenuId(
+                                  openMenuId === rec.Id ? null : rec.Id,
+                                )
+                              }
+                            >
                               <MoreHorizontal size={16} />
                             </button>
                             {openMenuId === rec.Id && (
                               <div className="pp-menu">
-                                <button className="pp-menu-item" onClick={() => { openEdit(rec); setOpenMenuId(null); }}>
+                                <button
+                                  className="pp-menu-item"
+                                  onClick={() => {
+                                    openEdit(rec);
+                                    setOpenMenuId(null);
+                                  }}
+                                >
                                   <Pencil size={14} /> Edit
                                 </button>
                                 {canDeleteRecords && (
-                                  <button className="pp-menu-item danger" onClick={() => { setDeleteId(rec.Id); setOpenMenuId(null); }}>
+                                  <button
+                                    className="pp-menu-item danger"
+                                    onClick={() => {
+                                      setDeleteId(rec.Id);
+                                      setOpenMenuId(null);
+                                    }}
+                                  >
                                     <Trash2 size={14} /> Delete
                                   </button>
                                 )}
@@ -826,15 +1152,48 @@ export function PrePossessionClearancePage() {
 
               {pagination && pagination.totalPages > 1 && (
                 <div className="pp-pagination">
-                  <span>Showing {records.length} of {pagination.total}</span>
+                  <span>
+                    Showing {records.length} of {pagination.total}
+                  </span>
                   <div className="pp-pag-btns">
-                    <button className="pp-pag-btn" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft size={14} /></button>
+                    <button
+                      className="pp-pag-btn"
+                      disabled={page <= 1}
+                      onClick={() => setPage((p) => p - 1)}
+                    >
+                      <ChevronLeft size={14} />
+                    </button>
                     {pageNums.map((n, i) =>
-                      n === "…"
-                        ? <span key={`e-${i}`} style={{ display:"flex",alignItems:"center",padding:"0 4px",color:"hsl(var(--muted-foreground))",fontSize:13 }}>…</span>
-                        : <button key={n} className={`pp-pag-btn${page === n ? " active" : ""}`} onClick={() => setPage(n as number)}>{n}</button>
+                      n === "…" ? (
+                        <span
+                          key={`e-${i}`}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            padding: "0 4px",
+                            color: "hsl(var(--muted-foreground))",
+                            fontSize: 13,
+                          }}
+                        >
+                          …
+                        </span>
+                      ) : (
+                        <button
+                          key={n}
+                          className={`pp-pag-btn${page === n ? " active" : ""}`}
+                          onClick={() => setPage(n as number)}
+                        >
+                          {n}
+                        </button>
+                      ),
                     )}
-                    <button className="pp-pag-btn" disabled={page >= pagination.totalPages} onClick={() => setPage((p) => p + 1)}><ChevronRight size={14} /></button>
+                    <button
+                      className="pp-pag-btn"
+                      disabled={page >= pagination.totalPages}
+                      onClick={() => setPage((p) => p + 1)}
+                    >
+                      <ChevronRight size={14} />
+                    </button>
                   </div>
                 </div>
               )}
@@ -844,36 +1203,75 @@ export function PrePossessionClearancePage() {
       </div>
 
       {/* ── Create / Edit Dialog ── */}
-      <Dialog open={dialogOpen} onOpenChange={(v) => { if (!v) setDialogOpen(false); }}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(v) => {
+          if (!v) setDialogOpen(false);
+        }}
+      >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base font-bold">
-              <div style={{ width:28,height:28,background:"hsl(var(--primary))",borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center" }}>
-                <ClipboardCheck size={15} style={{ color:"hsl(var(--primary-foreground))" }} />
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  background: "hsl(var(--primary))",
+                  borderRadius: 7,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <ClipboardCheck
+                  size={15}
+                  style={{ color: "hsl(var(--primary-foreground))" }}
+                />
               </div>
               {editId ? "Edit Clearance" : "New Pre-Possession Clearance"}
             </DialogTitle>
             <DialogDescription>
-              {editId ? "Update the clearance details below." : "Fill in the details to create a new clearance record."}
+              {editId
+                ? "Update the clearance details below."
+                : "Fill in the details to create a new clearance record."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-1">
             {/* Applicant */}
             <div className="space-y-2">
-              <Label>Applicant <span className="text-destructive">*</span></Label>
-              <Combobox value={form.ApplicantId} onChange={(v) => set("ApplicantId", v)} items={applicantItems} placeholder="Select applicant…" />
+              <Label>
+                Applicant <span className="text-destructive">*</span>
+              </Label>
+              <Combobox
+                value={form.ApplicantId}
+                onChange={(v) => set("ApplicantId", v)}
+                items={applicantItems}
+                placeholder="Select applicant…"
+              />
             </div>
 
             {/* Unit + Handover */}
             <div className="pp-form-grid">
               <div className="space-y-2">
                 <Label>Unit Selection</Label>
-                <Combobox value={form.UnitSelectionId} onChange={(v) => set("UnitSelectionId", v)} items={unitItems} placeholder="Select unit…" disabled={!form.ApplicantId} />
+                <Combobox
+                  value={form.UnitSelectionId}
+                  onChange={(v) => set("UnitSelectionId", v)}
+                  items={unitItems}
+                  placeholder="Select unit…"
+                  disabled={!form.ApplicantId}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Linked Handover</Label>
-                <Combobox value={form.HandoverId} onChange={(v) => set("HandoverId", v)} items={handoverItems} placeholder="Select handover…" disabled={!form.ApplicantId} />
+                <Combobox
+                  value={form.HandoverId}
+                  onChange={(v) => set("HandoverId", v)}
+                  items={handoverItems}
+                  placeholder="Select handover…"
+                  disabled={!form.ApplicantId}
+                />
               </div>
             </div>
 
@@ -881,11 +1279,21 @@ export function PrePossessionClearancePage() {
             <div className="pp-form-grid">
               <div className="space-y-2">
                 <Label>Project</Label>
-                <Combobox value={form.ProjectId} onChange={(v) => set("ProjectId", v)} items={projectItems} placeholder="Select project…" />
+                <Combobox
+                  value={form.ProjectId}
+                  onChange={(v) => set("ProjectId", v)}
+                  items={projectItems}
+                  placeholder="Select project…"
+                />
               </div>
               <div className="space-y-2">
                 <Label>Company</Label>
-                <Combobox value={form.CompanyId} onChange={(v) => set("CompanyId", v)} items={companyItems} placeholder="Select company…" />
+                <Combobox
+                  value={form.CompanyId}
+                  onChange={(v) => set("CompanyId", v)}
+                  items={companyItems}
+                  placeholder="Select company…"
+                />
               </div>
             </div>
 
@@ -893,7 +1301,8 @@ export function PrePossessionClearancePage() {
 
             {allCleared && (
               <div className="pp-all-cleared-hint">
-                <CheckCircle2 size={15} /> All items cleared — status will be set to <strong>Cleared</strong>
+                <CheckCircle2 size={15} /> All items cleared — status will be
+                set to <strong>Cleared</strong>
               </div>
             )}
 
@@ -915,13 +1324,25 @@ export function PrePossessionClearancePage() {
               <div className="space-y-2">
                 <Label>Clearance Date</Label>
                 <div className="relative">
-                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
-                  <input type="date" value={form.ClearanceDate} onChange={(e) => set("ClearanceDate", e.target.value)} className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer" />
+                  <CalendarDays
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <Input
+                    type="date"
+                    value={form.ClearanceDate}
+                    onChange={(e) => set("ClearanceDate", e.target.value)}
+                    className="pl-8"
+                  />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label>Inspected By</Label>
-                <Input value={form.InspectedBy} onChange={(e) => set("InspectedBy", e.target.value)} placeholder="Inspector name…" />
+                <Input
+                  value={form.InspectedBy}
+                  onChange={(e) => set("InspectedBy", e.target.value)}
+                  placeholder="Inspector name…"
+                />
               </div>
             </div>
 
@@ -929,50 +1350,79 @@ export function PrePossessionClearancePage() {
 
             <div className="space-y-2">
               <Label>Status</Label>
-              <div className="relative">
-                <select
-                  className="w-full appearance-none pl-3 pr-9 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-                  value={allCleared ? "Cleared" : form.Status}
-                  onChange={(e) => set("Status", e.target.value)}
-                  disabled={allCleared}
-                >
-                  {(meta?.statusOptions ?? (["Pending","In Progress","Cleared","Failed"] as PPStatus[])).map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-                <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              </div>
+              <select
+                className="w-full px-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                value={allCleared ? "Cleared" : form.Status}
+                onChange={(e) => set("Status", e.target.value)}
+                disabled={allCleared}
+              >
+                {(
+                  meta?.statusOptions ??
+                  ([
+                    "Pending",
+                    "In Progress",
+                    "Cleared",
+                    "Failed",
+                  ] as PPStatus[])
+                ).map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-2">
               <Label>Notes</Label>
-              <Textarea value={form.Notes} onChange={(e) => set("Notes", e.target.value)} placeholder="Additional remarks…" rows={2} />
+              <Textarea
+                value={form.Notes}
+                onChange={(e) => set("Notes", e.target.value)}
+                placeholder="Additional remarks…"
+                rows={2}
+              />
             </div>
           </div>
 
           <DialogFooter>
-            <button type="button" className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={() => setDialogOpen(false)}>Cancel</button>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+              Cancel
+            </Button>
             <Button
               disabled={!form.ApplicantId || isSaving}
               onClick={() => (editId ? updateMut.mutate() : createMut.mutate())}
               className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
-              {isSaving ? "Saving…" : editId ? "Update Clearance" : "Create Clearance"}
+              {isSaving
+                ? "Saving…"
+                : editId
+                  ? "Update Clearance"
+                  : "Create Clearance"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* ── Delete Confirm ── */}
-      <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
+      <AlertDialog
+        open={!!deleteId}
+        onOpenChange={(o) => !o && setDeleteId(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this record?</AlertDialogTitle>
-            <AlertDialogDescription>This Pre-Possession Clearance record will be permanently removed. This action cannot be undone.</AlertDialogDescription>
+            <AlertDialogDescription>
+              This Pre-Possession Clearance record will be permanently removed.
+              This action cannot be undone.
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => deleteMut.mutate()} style={{ background:"hsl(0 84% 50%)",color:"white" }}>Delete</AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => deleteMut.mutate()}
+              style={{ background: "hsl(0 84% 50%)", color: "white" }}
+            >
+              Delete
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -351,9 +351,13 @@ const GeneralLedgerMaster: React.FC = () => {
   const handleSave = () => {
     const e: Partial<Record<keyof LedgerForm, boolean>> = {};
     if (!form.LHeadName.trim()) e.LHeadName = true;
+    if (!form.LBelongsTo) e.LBelongsTo = true;
 
     if (Object.keys(e).length) {
       setErrors(e);
+      if (e.LBelongsTo) {
+        toast.error("Please select an Account Group before creating a Ledger Account.");
+      }
       return;
     }
 
@@ -534,14 +538,15 @@ const GeneralLedgerMaster: React.FC = () => {
 
                 {/* Account Group */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    Account Group
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    Account Group <span className="text-destructive">*</span>
                   </label>
                   {groupsLoading ? (
                     <div className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-muted/40 text-muted-foreground">
                       Loading…
                     </div>
                   ) : (
+                    <>
                     <div className="relative">
                       <BookOpen
                         size={13}
@@ -549,10 +554,13 @@ const GeneralLedgerMaster: React.FC = () => {
                       />
                       <select
                         value={form.LBelongsTo}
-                        onChange={(e) =>
-                          setForm((p) => ({ ...p, LBelongsTo: e.target.value }))
-                        }
-                        className="w-full appearance-none pl-8 pr-9 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                        onChange={(e) => {
+                          setForm((p) => ({ ...p, LBelongsTo: e.target.value }));
+                          setErrors((p) => ({ ...p, LBelongsTo: false }));
+                        }}
+                        className={`w-full appearance-none pl-8 pr-9 py-2.5 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
+                          errors.LBelongsTo ? "border-red-400" : "border-border"
+                        }`}
                       >
                         <option value="">Select group…</option>
                         {accountGroups.map((g) => (
@@ -566,6 +574,12 @@ const GeneralLedgerMaster: React.FC = () => {
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                       />
                     </div>
+                    {errors.LBelongsTo && (
+                      <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                        <AlertCircle size={11} /> Please select an Account Group
+                      </p>
+                    )}
+                    </>
                   )}
                 </div>
               </div>

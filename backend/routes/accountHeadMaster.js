@@ -51,6 +51,53 @@ const requireUserName = (req, res) => {
   return email;
 };
 
+// ─── GET single by id ───────────────────────────────────────────────────────
+router.get("/:id", async (req, res, next) => {
+  if (!/^\d+$/.test(req.params.id)) return next();
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    const columnMeta = await getAccountHeadColumnMeta();
+    const selectColumns = [
+      "lh.LHeadId",
+      "ISNULL(lh.DisplayName, lh.LHeadName) AS LHeadName",
+      "lh.LHeadCode",
+      "lh.LHeadType",
+      "lh.LHeadPhone",
+      "lh.LHeadEmail",
+      "lh.LHeadAddress",
+      "lh.LHeadContactPerson",
+      "lh.LHeadStatus",
+      "lh.LHeadPaymentTerms",
+      "lh.LBranchName",
+      "lh.LGST",
+      "lh.LGSTState",
+      "lh.LCountry",
+      "lh.LBelongsTo",
+      "lh.LDescription",
+    ];
+    if (hasColumn(columnMeta, "LGSTType")) selectColumns.push("lh.LGSTType");
+    if (hasColumn(columnMeta, "LHeadPan")) selectColumns.push("lh.LHeadPan");
+
+    const query = `SELECT ${selectColumns.join(", ")}
+      FROM dbo.AccountHeadMaster lh
+      WHERE lh.LHeadId = @id`;
+
+    const result = await pool.request().input("id", sql.Int, id).query(query);
+
+    if (!result.recordset.length) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    res.json(result.recordset[0]);
+  } catch (err) {
+    console.error("GET BY ID ERROR:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── GET all ──────────────────────────────────────────────────────────────────
 router.get("/", cache("account-head-master", 300), async (req, res) => {
   try {
@@ -149,6 +196,14 @@ router.post("/", async (req, res) => {
   try {
     const userName = requireUserName(req, res);
     if (!userName) return;
+
+    // ── Account Group is mandatory ─────────────────────────────────────────
+    if (!LBelongsTo) {
+      return res.status(400).json({
+        error: "Please select an Account Group before creating a Ledger Account.",
+        code: "MISSING_ACCOUNT_GROUP",
+      });
+    }
 
     const pool = getPool();
     const columnMeta = await getAccountHeadColumnMeta();
@@ -441,6 +496,14 @@ router.put("/:id", async (req, res) => {
       return res.status(400).json({ error: "Cannot edit an approved record" });
     }
 
+    // ── Account Group is mandatory ─────────────────────────────────────────
+    if (!LBelongsTo) {
+      return res.status(400).json({
+        error: "Please select an Account Group before saving a Ledger Account.",
+        code: "MISSING_ACCOUNT_GROUP",
+      });
+    }
+
     const columnMeta = await getAccountHeadColumnMeta();
     const request = pool
       .request()
@@ -544,7 +607,3 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-

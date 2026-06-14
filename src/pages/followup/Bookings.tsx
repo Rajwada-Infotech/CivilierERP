@@ -809,7 +809,7 @@ function BookingForm({
             <div className="relative">
               <CalendarDays
                 size={13}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
               />
               <input
                 type="date"
@@ -2015,7 +2015,7 @@ export default function BookingsPage() {
             <div className="relative">
               <Search
                 size={13}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
               />
               <input
                 className="pl-9 pr-9 py-2 border border-border rounded-xl text-sm bg-card text-foreground outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/10 transition-all w-64"
