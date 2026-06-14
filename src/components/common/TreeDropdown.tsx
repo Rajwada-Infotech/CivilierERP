@@ -1,0 +1,361 @@
+import React, { useState, useRef, useEffect } from "react";
+import {
+  ChevronRight,
+  ChevronDown,
+  FolderOpen,
+  Folder,
+  Layers,
+} from "lucide-react";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface TreeNode {
+  _id: string;
+  name: string;
+  code: string;
+  children: TreeNode[];
+}
+
+interface FlatOption {
+  value: string;
+  label: string;
+}
+
+interface AccountGroup {
+  _id: string;
+  name: string;
+  code: string;
+  parentId: string | null;
+}
+
+interface TreeDropdownProps {
+  /** "tree" for hierarchical parent-group selector, "flat" for simple picklist */
+  variant: "tree" | "flat";
+  /** Currently selected value (id or empty string) */
+  value: string;
+  /** Called when user selects an item */
+  onChange: (id: string) => void;
+  /** Placeholder text when nothing is selected */
+  placeholder?: string;
+  /** Visual error state — red border */
+  error?: boolean;
+  // ── Flat-mode props ──
+  /** Options for flat variant */
+  options?: FlatOption[];
+  /** Optional icon shown inside the trigger button (flat variant only) */
+  icon?: React.ReactNode;
+  // ── Tree-mode props ──
+  /** Tree nodes for the hierarchical variant */
+  items?: TreeNode[];
+  /** IDs that should appear disabled (self + descendants during edit) */
+  invalidParents?: Set<string>;
+  /** All flat groups (needed to look up selected group name/code/children) */
+  allGroups?: AccountGroup[];
+}
+
+// ─── Tree Node (internal recursive component) ─────────────────────────────────
+
+function TreeNodeRow({
+  node,
+  depth,
+  openNodes,
+  onToggleNode,
+  selectedId,
+  onSelect,
+  invalidParents,
+}: {
+  node: TreeNode;
+  depth: number;
+  openNodes: Set<string>;
+  onToggleNode: (id: string) => void;
+  selectedId: string;
+  onSelect: (id: string) => void;
+  invalidParents: Set<string>;
+}) {
+  const hasChildren = node.children.length > 0;
+  const isOpen = openNodes.has(node._id);
+  const isSelected = selectedId === node._id;
+  const isDisabled = invalidParents.has(node._id);
+
+  return (
+    <>
+      <div
+        className={`flex items-center select-none transition-colors rounded-md ${
+          isDisabled
+            ? "opacity-40"
+            : isSelected
+              ? "bg-primary/10 text-primary"
+              : "hover:bg-muted/60 text-foreground"
+        }`}
+        style={{ paddingLeft: `${depth * 16}px` }}
+      >
+        {/* Chevron — ONLY expands/collapses, never selects */}
+        <button
+          className={`w-8 h-8 flex items-center justify-center shrink-0 rounded transition-colors ${
+            hasChildren
+              ? "text-muted-foreground hover:text-foreground hover:bg-muted/80 cursor-pointer"
+              : "opacity-0 pointer-events-none cursor-default"
+          }`}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (hasChildren && !isDisabled) onToggleNode(node._id);
+          }}
+        >
+          {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        </button>
+
+        {/* Selectable label area — ONLY selects, never expands */}
+        <div
+          className={`flex items-center gap-2 flex-1 py-1.5 pr-2 min-w-0 ${
+            isDisabled ? "cursor-not-allowed" : "cursor-pointer"
+          }`}
+          onClick={() => {
+            if (isDisabled) return;
+            onSelect(node._id);
+          }}
+        >
+          {hasChildren ? (
+            <FolderOpen size={13} className="text-amber-500 shrink-0" />
+          ) : depth === 0 ? (
+            <Layers size={13} className="text-primary/60 shrink-0" />
+          ) : (
+            <Folder size={13} className="text-muted-foreground/50 shrink-0" />
+          )}
+
+          <span
+            className={`text-sm flex-1 truncate ${
+              depth === 0 ? "font-semibold" : "font-medium"
+            }`}
+          >
+            {node.name}
+          </span>
+          <span className="font-mono text-[10px] text-muted-foreground shrink-0 ml-1">
+            {node.code}
+          </span>
+        </div>
+      </div>
+
+      {/* Children — rendered only when open */}
+      {hasChildren && isOpen && (
+        <div>
+          {node.children.map((child) => (
+            <TreeNodeRow
+              key={child._id}
+              node={child}
+              depth={depth + 1}
+              openNodes={openNodes}
+              onToggleNode={onToggleNode}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              invalidParents={invalidParents}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+const TreeDropdown: React.FC<TreeDropdownProps> = ({
+  variant,
+  value,
+  onChange,
+  placeholder = "Select\u2026",
+  error,
+  // flat
+  options = [],
+  icon,
+  // tree
+  items = [],
+  invalidParents = new Set(),
+  allGroups = [],
+}) => {
+  const [open, setOpen] = useState(false);
+  const [openNodes, setOpenNodes] = useState<Set<string>>(new Set());
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const toggleNode = (id: string) =>
+    setOpenNodes((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+
+  // ── Tree variant helpers ──
+  const selectedGroup =
+    variant === "tree"
+      ? allGroups.find((g) => g._id === value) ?? null
+      : null;
+
+  const hasChildren =
+    variant === "tree" && selectedGroup
+      ? allGroups.some((g) => g.parentId === selectedGroup._id)
+      : false;
+
+  // ── Flat variant selection display ──
+  const flatSelected =
+    variant === "flat" ? options.find((o) => o.value === value) : null;
+
+  return (
+    <div className="relative" ref={containerRef}>
+      {/* ── Trigger button ── */}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left ${
+          error ? "border-red-400" : "border-border"
+        }`}
+      >
+        {/* Tree variant: icon based on selection type */}
+        {variant === "tree" &&
+          (selectedGroup ? (
+            hasChildren ? (
+              <FolderOpen size={14} className="text-amber-500 shrink-0" />
+            ) : (
+              <Folder size={14} className="text-muted-foreground/60 shrink-0" />
+            )
+          ) : (
+            <Layers size={14} className="text-primary/50 shrink-0" />
+          ))}
+
+        {/* Flat variant: custom icon */}
+        {variant === "flat" && icon && (
+          <span className="shrink-0 text-muted-foreground">{icon}</span>
+        )}
+
+        {/* Label */}
+        {variant === "tree" && selectedGroup ? (
+          <span className="flex-1 truncate font-medium text-foreground">
+            {selectedGroup.name}
+            <span className="font-mono font-normal text-muted-foreground ml-1.5 text-xs">
+              ({selectedGroup.code})
+            </span>
+          </span>
+        ) : variant === "tree" ? (
+          <span className="flex-1 truncate text-muted-foreground/70">
+            — Top-level group (no parent)
+          </span>
+        ) : (
+          <span
+            className={`flex-1 truncate ${
+              flatSelected
+                ? "text-foreground font-medium"
+                : "text-muted-foreground/70"
+            }`}
+          >
+            {flatSelected ? flatSelected.label : placeholder}
+          </span>
+        )}
+
+        <ChevronDown
+          size={14}
+          className={`text-muted-foreground shrink-0 transition-transform ${
+            open ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+
+      {/* ── Dropdown panel ── */}
+      {open && (
+        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+          {variant === "tree" ? (
+            /* ── Tree panel ── */
+            <>
+              {/* Top-level option */}
+              <div
+                className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors text-sm font-medium ${
+                  !value
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:bg-muted/60"
+                }`}
+                onClick={() => {
+                  onChange("");
+                  setOpen(false);
+                }}
+              >
+                <Layers size={13} className="shrink-0" />
+                <span>— Top-level group (no parent)</span>
+              </div>
+              <div className="border-t border-border/60" />
+
+              {/* Tree nodes */}
+              <div className="max-h-60 overflow-y-auto py-1 px-1">
+                {items.map((node) => (
+                  <TreeNodeRow
+                    key={node._id}
+                    node={node}
+                    depth={0}
+                    openNodes={openNodes}
+                    onToggleNode={toggleNode}
+                    selectedId={value}
+                    onSelect={(id) => {
+                      onChange(id);
+                      setOpen(false);
+                    }}
+                    invalidParents={invalidParents}
+                  />
+                ))}
+              </div>
+            </>
+          ) : (
+            /* ── Flat panel ── */
+            <div className="max-h-56 overflow-y-auto py-1">
+              {/* Placeholder / clear option */}
+              <div
+                className={`px-3 py-2 text-sm cursor-pointer transition-colors ${
+                  !value
+                    ? "bg-primary/10 text-primary font-medium"
+                    : "text-muted-foreground hover:bg-muted/60"
+                }`}
+                onClick={() => {
+                  onChange("");
+                  setOpen(false);
+                }}
+              >
+                {placeholder}
+              </div>
+              <div className="border-t border-border/40 mb-1" />
+
+              {/* Options */}
+              {options.map((o) => (
+                <div
+                  key={o.value}
+                  className={`px-3 py-2 text-sm cursor-pointer transition-colors ${
+                    value === o.value
+                      ? "bg-primary/10 text-primary font-medium"
+                      : "text-foreground hover:bg-muted/60"
+                  }`}
+                  onClick={() => {
+                    onChange(o.value);
+                    setOpen(false);
+                  }}
+                >
+                  {o.label}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default TreeDropdown;
