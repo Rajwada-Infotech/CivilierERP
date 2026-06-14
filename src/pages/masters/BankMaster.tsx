@@ -1,12 +1,11 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, {useState, useMemo, useEffect} from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
-import {
-  Landmark,
+import {Landmark,
   Plus,
   Edit2,
   Trash2,
@@ -21,10 +20,9 @@ import {
   Eye,
   Printer,
   Search,
-  ChevronDown,
   AlertCircle,
-  XCircle,
-} from "lucide-react";
+  XCircle} from "lucide-react";
+import TreeDropdown from "@/components/common/TreeDropdown";
 
 import {
   getBanks,
@@ -36,76 +34,36 @@ import {
   type CompanyOption,
 } from "@/api/bankMasterApi";
 
+import { getAccountGroups } from "@/api/accountApi";
+
 import {
   DataTable,
   type ColumnDef,
   type ExportColumn,
 } from "@/components/ui/DataTable";
 
-// ─── FlatDropdown ─────────────────────────────────────────────────────────────
-function FlatDropdown({
-  value,
-  onChange,
-  options,
-  placeholder = "Select\u2026",
-  icon,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-  placeholder?: string;
-  icon?: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const dropRef = useRef<HTMLDivElement>(null);
+// ─── Types ───────────────────────────────────────────────────────────────────
+interface AccountGroup {
+  _id: string;
+  name: string;
+  code: string;
+  parentId: string | null;
+}
 
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (dropRef.current && !dropRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
+interface TreeNode extends AccountGroup {
+  children: TreeNode[];
+}
 
-  const selected = options.find((o) => o.value === value);
-
-  return (
-    <div className="relative" ref={dropRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left"
-      >
-        {icon && <span className="shrink-0 text-muted-foreground">{icon}</span>}
-        <span className={`flex-1 truncate ${selected ? "text-foreground font-medium" : "text-muted-foreground/70"}`}>
-          {selected ? selected.label : placeholder}
-        </span>
-        <ChevronDown size={14} className={`text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
-          <div className="max-h-56 overflow-y-auto py-1">
-            <div
-              className={`px-3 py-2 text-sm cursor-pointer transition-colors ${!value ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted/60"}`}
-              onClick={() => { onChange(""); setOpen(false); }}
-            >
-              {placeholder}
-            </div>
-            <div className="border-t border-border/40 mb-1" />
-            {options.map((o) => (
-              <div
-                key={o.value}
-                className={`px-3 py-2 text-sm cursor-pointer transition-colors ${value === o.value ? "bg-primary/10 text-primary font-medium" : "text-foreground hover:bg-muted/60"}`}
-                onClick={() => { onChange(o.value); setOpen(false); }}
-              >
-                {o.label}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+function buildTree(items: AccountGroup[]): TreeNode[] {
+  const map: Record<string, TreeNode> = {};
+  items.forEach((i) => (map[i._id] = { ...i, children: [] }));
+  const roots: TreeNode[] = [];
+  items.forEach((i) => {
+    if (i.parentId && map[i.parentId])
+      map[i.parentId].children.push(map[i._id]);
+    else roots.push(map[i._id]);
+  });
+  return roots;
 }
 
 // ─── Zod Schema ─────────────────────────────────────────────────────────────
@@ -137,6 +95,7 @@ const bankFormSchema = z.object({
     ),
   address: z.string(),
   status: z.boolean(),
+  accountGroupId: z.string(),
 });
 
 type FormState = z.infer<typeof bankFormSchema>;
@@ -154,6 +113,7 @@ const EMPTY: FormState = {
   openingBalance: "",
   address: "",
   status: true,
+  accountGroupId: "",
 };
 
 // ─── Export Columns ─────────────────────────────────────────────────────────
@@ -392,6 +352,26 @@ const BankMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: groupsData } = useQuery({
+    queryKey: ["account-groups"],
+    queryFn: getAccountGroups,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const accountGroups: AccountGroup[] = useMemo(() => {
+    if (!Array.isArray(groupsData)) return [];
+    return (groupsData as any[])
+    .filter((item) => item.AGId != null && item.Name)
+    .map((item) => ({
+      _id: String(item.AGId),
+      name: item.Name as string,
+      code: item.Code || "",
+      parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
+    }));
+  }, [groupsData]);
+
+  const accountGroupTree = useMemo(() => buildTree(accountGroups), [accountGroups]);
+
   const dbBanks: BankRecord[] = Array.isArray(dbData) ? dbData : [];
 
   const {
@@ -458,6 +438,7 @@ const BankMaster: React.FC = () => {
     BAddress: f.address.trim() || null,
     BStatus: f.status,
     BCompanyName: f.companyName.trim() || null,
+    LBelongsTo: f.accountGroupId ? Number(f.accountGroupId) : null,
   });
 
   const handleSave = async (values: FormState) => {
@@ -491,6 +472,7 @@ const BankMaster: React.FC = () => {
         item.BOpeningBalance != null ? String(item.BOpeningBalance) : "",
       address: item.BAddress || "",
       status: Boolean(item.BStatus),
+      accountGroupId: (item as any).LBelongsTo != null ? String((item as any).LBelongsTo) : "",
     });
     setEditingId(String(item.BId));
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -640,11 +622,11 @@ const BankMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Company Name
                   </label>
-                  <FlatDropdown
+                  <TreeDropdown variant="flat"
                     value={form.companyName}
                     onChange={(v) => setValue("companyName", v, { shouldValidate: true })}
                     options={companies.map((c) => ({ value: c.label, label: c.label }))}
-                    placeholder="Select Company\u2026"
+                    placeholder="Select Company…"
                     icon={<Building2 size={13} />}
                   />
                 </div>
@@ -785,11 +767,11 @@ const BankMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Account Type
                   </label>
-                  <FlatDropdown
+                  <TreeDropdown variant="flat"
                     value={form.accountType}
                     onChange={(v) => setValue("accountType", v, { shouldValidate: true })}
                     options={ACCOUNT_TYPES.map((t) => ({ value: t, label: t }))}
-                    placeholder="Select Account Type\u2026"
+                    placeholder="Select Account Type…"
                   />
                 </div>
 
@@ -798,11 +780,25 @@ const BankMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Bank Type
                   </label>
-                  <FlatDropdown
+                  <TreeDropdown variant="flat"
                     value={form.bankType}
                     onChange={(v) => setValue("bankType", v, { shouldValidate: true })}
                     options={BANK_TYPES.map((t) => ({ value: t, label: t }))}
-                    placeholder="Select Bank Type\u2026"
+                    placeholder="Select Bank Type…"
+                  />
+                </div>
+
+                {/* Account Group */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Account Group
+                  </label>
+                  <TreeDropdown
+                    variant="tree"
+                    value={form.accountGroupId}
+                    onChange={(v) => setValue("accountGroupId", v, { shouldValidate: true })}
+                    items={accountGroupTree}
+                    allGroups={accountGroups}
                   />
                 </div>
 
@@ -904,14 +900,14 @@ const BankMaster: React.FC = () => {
               />
             </div>
 
-            <FlatDropdown
+            <TreeDropdown variant="flat"
               value={filterBankType}
               onChange={(v) => setFilterBankType(v)}
               options={BANK_TYPES.map((t) => ({ value: t, label: t }))}
               placeholder="All Types"
             />
 
-            <FlatDropdown
+            <TreeDropdown variant="flat"
               value={filterStatus}
               onChange={(v) => setFilterStatus(v)}
               options={[{ value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }]}

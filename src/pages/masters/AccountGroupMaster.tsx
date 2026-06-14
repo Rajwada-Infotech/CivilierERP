@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
@@ -26,6 +26,7 @@ import {
   Eye,
   XCircle,
 } from "lucide-react";
+import TreeDropdown from "@/components/common/TreeDropdown";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,218 +89,6 @@ function getBelongsTo(id: string, items: AccountGroup[]): string {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const EMPTY_FORM = { name: "", code: "", parentId: "" };
-
-// ─── TreeDropdown Component ───────────────────────────────────────────────────
-
-function TreeDropdownNode({
-  node,
-  depth,
-  openNodes,
-  onToggleNode,
-  selectedId,
-  onSelect,
-  invalidParents,
-}: {
-  node: TreeNode;
-  depth: number;
-  openNodes: Set<string>;
-  onToggleNode: (id: string) => void;
-  selectedId: string;
-  onSelect: (id: string) => void;
-  invalidParents: Set<string>;
-}) {
-  const hasChildren = node.children.length > 0;
-  const isOpen = openNodes.has(node._id);
-  const isSelected = selectedId === node._id;
-  const isDisabled = invalidParents.has(node._id);
-
-  return (
-    <>
-      <div
-        className={`flex items-center select-none transition-colors rounded-md ${
-          isDisabled ? "opacity-40" : isSelected ? "bg-primary/10 text-primary" : "hover:bg-muted/60 text-foreground"
-        }`}
-        style={{ paddingLeft: `${depth * 16}px` }}
-      >
-        {/* Chevron — ONLY expands/collapses, never selects */}
-        <button
-          className={`w-8 h-8 flex items-center justify-center shrink-0 rounded transition-colors ${
-            hasChildren
-              ? "text-muted-foreground hover:text-foreground hover:bg-muted/80 cursor-pointer"
-              : "opacity-0 pointer-events-none cursor-default"
-          }`}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (hasChildren && !isDisabled) onToggleNode(node._id);
-          }}
-        >
-          {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        </button>
-
-        {/* Selectable label area — ONLY selects, never expands */}
-        <div
-          className={`flex items-center gap-2 flex-1 py-1.5 pr-2 min-w-0 ${isDisabled ? "cursor-not-allowed" : "cursor-pointer"}`}
-          onClick={() => {
-            if (isDisabled) return;
-            onSelect(node._id);
-          }}
-        >
-          {/* Icon */}
-          {hasChildren ? (
-            <FolderOpen size={13} className="text-amber-500 shrink-0" />
-          ) : depth === 0 ? (
-            <Layers size={13} className="text-primary/60 shrink-0" />
-          ) : (
-            <Folder size={13} className="text-muted-foreground/50 shrink-0" />
-          )}
-
-          {/* Label */}
-          <span className={`text-sm flex-1 truncate ${depth === 0 ? "font-semibold" : "font-medium"}`}>
-            {node.name}
-          </span>
-          <span className="font-mono text-[10px] text-muted-foreground shrink-0 ml-1">
-            {node.code}
-          </span>
-        </div>
-      </div>
-
-      {/* Children */}
-      {hasChildren && isOpen && (
-        <div>
-          {node.children.map((child) => (
-            <TreeDropdownNode
-              key={child._id}
-              node={child}
-              depth={depth + 1}
-              openNodes={openNodes}
-              onToggleNode={onToggleNode}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              invalidParents={invalidParents}
-            />
-          ))}
-        </div>
-      )}
-    </>
-  );
-}
-
-function TreeDropdown({
-  tree,
-  value,
-  onChange,
-  invalidParents,
-  allGroups,
-}: {
-  tree: TreeNode[];
-  value: string;
-  onChange: (id: string) => void;
-  invalidParents: Set<string>;
-  allGroups: AccountGroup[];
-}) {
-  const [open, setOpen] = useState(false);
-  const [openNodes, setOpenNodes] = useState<Set<string>>(new Set());
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Close on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const toggleNode = (id: string) =>
-    setOpenNodes((prev) => {
-      const n = new Set(prev);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
-
-  const selectedGroup = allGroups.find((g) => g._id === value);
-
-  const hasChildren = selectedGroup
-    ? allGroups.some((g) => g.parentId === selectedGroup._id)
-    : false;
-
-  return (
-    <div className="relative" ref={containerRef}>
-      {/* Trigger */}
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left"
-      >
-        {selectedGroup ? (
-          hasChildren ? (
-            <FolderOpen size={14} className="text-amber-500 shrink-0" />
-          ) : (
-            <Folder size={14} className="text-muted-foreground/60 shrink-0" />
-          )
-        ) : (
-          <Layers size={14} className="text-primary/50 shrink-0" />
-        )}
-
-        {selectedGroup ? (
-          <span className="flex-1 truncate font-medium text-foreground">
-            {selectedGroup.name}
-            <span className="font-mono font-normal text-muted-foreground ml-1.5 text-xs">
-              ({selectedGroup.code})
-            </span>
-          </span>
-        ) : (
-          <span className="flex-1 truncate text-muted-foreground/70">
-            — Top-level group (no parent)
-          </span>
-        )}
-
-        <ChevronDown
-          size={14}
-          className={`text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
-        />
-      </button>
-
-      {/* Dropdown panel */}
-      {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
-          {/* Top-level option */}
-          <div
-            className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors text-sm font-medium ${
-              !value
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-muted/60"
-            }`}
-            onClick={() => { onChange(""); setOpen(false); }}
-          >
-            <Layers size={13} className="shrink-0" />
-            <span>— Top-level group (no parent)</span>
-          </div>
-          <div className="border-t border-border/60" />
-
-          {/* Scrollable tree */}
-          <div className="max-h-60 overflow-y-auto py-1 px-1">
-            {tree.map((node) => (
-              <TreeDropdownNode
-                key={node._id}
-                node={node}
-                depth={0}
-                openNodes={openNodes}
-                onToggleNode={toggleNode}
-                selectedId={value}
-                onSelect={(id) => { onChange(id); setOpen(false); }}
-                invalidParents={invalidParents}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── TreeRow Component ────────────────────────────────────────────────────────
 
@@ -781,7 +570,8 @@ const AccountGroupMaster: React.FC = () => {
                 Parent Group
               </label>
               <TreeDropdown
-                tree={filteredTree}
+                variant="tree"
+                items={filteredTree}
                 value={form.parentId}
                 onChange={(id) => setForm((p) => ({ ...p, parentId: id }))}
                 invalidParents={invalidParents}
