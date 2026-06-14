@@ -8,7 +8,11 @@ import {
   deleteRecord,
 } from "@/api/accountHeadApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { DataTable, type ColumnDef, type ExportColumn } from "@/components/ui/DataTable";
+import {
+  DataTable,
+  type ColumnDef,
+  type ExportColumn,
+} from "@/components/ui/DataTable";
 import {
   Pencil,
   Trash2,
@@ -136,7 +140,10 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "GST State", accessor: "LGSTState" },
   { header: "Category", accessor: "supplierCategory" },
   { header: "Address", accessor: "LHeadAddress" },
-  { header: "Status", accessor: (r) => (r.LHeadStatus ? "Active" : "Inactive") },
+  {
+    header: "Status",
+    accessor: (r) => (r.LHeadStatus ? "Active" : "Inactive"),
+  },
 ];
 
 // ─── Column builder ────────────────────────────────────────────────────────────
@@ -312,7 +319,7 @@ const SupplierMaster: React.FC = () => {
       LHeadEmail: item.LHeadEmail || null,
       LGST: item.LGST || null,
       LHeadPan: item.LHeadPan || null,
-      supplierCategory: item.LHeadCatagory || null,
+      supplierCategory: item.LHeadCategory || null,
       LGSTType: item.LGSTType || null,
       LGSTState: item.LGSTState || null,
       LHeadAddress: item.LHeadAddress || null,
@@ -332,7 +339,7 @@ const SupplierMaster: React.FC = () => {
     LHeadEmail: f.LHeadEmail || null,
     LGST: f.LGST || null,
     LHeadPan: f.LHeadPan || null,
-    LHeadCatagory: f.supplierCategory || null,
+    LHeadCategory: f.supplierCategory || null,
     LGSTType: f.LGSTType || null,
     LHeadAddress: f.LHeadAddress || null,
     LHeadStatus: f.LHeadStatus,
@@ -469,8 +476,7 @@ const SupplierMaster: React.FC = () => {
         (s.LHeadPhone ?? "").toLowerCase().includes(q) ||
         (s.LGST ?? "").toLowerCase().includes(q) ||
         (s.LHeadContactPerson ?? "").toLowerCase().includes(q);
-      const matchCat =
-        !filterCategory || s.supplierCategory === filterCategory;
+      const matchCat = !filterCategory || s.supplierCategory === filterCategory;
       const matchStatus =
         !filterStatus ||
         (filterStatus === "active" ? s.LHeadStatus : !s.LHeadStatus);
@@ -1025,9 +1031,17 @@ const SupplierMaster: React.FC = () => {
                   label: "Contact Person",
                   value: viewRecord.LHeadContactPerson || "—",
                 },
-                { label: "Phone", value: viewRecord.LHeadPhone || "—", mono: true },
+                {
+                  label: "Phone",
+                  value: viewRecord.LHeadPhone || "—",
+                  mono: true,
+                },
                 { label: "Email", value: viewRecord.LHeadEmail || "—" },
-                { label: "GST Number", value: viewRecord.LGST || "—", mono: true },
+                {
+                  label: "GST Number",
+                  value: viewRecord.LGST || "—",
+                  mono: true,
+                },
                 {
                   label: "PAN Number",
                   value: viewRecord.LHeadPan || "—",
