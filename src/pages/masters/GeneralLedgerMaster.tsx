@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccountGroups } from "@/api/accountApi";
 import {
@@ -20,15 +20,250 @@ import {
   BookOpen,
   Hash,
   ChevronDown,
+  ChevronRight,
   AlertCircle,
   Eye,
   XCircle,
+  Folder,
+  FolderOpen,
+  Layers,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface AccountGroup {
-  _id: string;
+  _id: string;        // String(AGId)
   name: string;
+  parentId: string | null; // String(ParentGroupId) or null
+}
+
+// ─── AGTreeNode ───────────────────────────────────────────────────────────────
+interface AGTreeNode {
+  id: string;
+  name: string;
+  parentId: string | null;
+  children: AGTreeNode[];
+}
+
+function buildAGTree(items: AccountGroup[]): AGTreeNode[] {
+  const map: Record<string, AGTreeNode> = {};
+  items.forEach((i) => {
+    map[i._id] = { id: i._id, name: i.name, parentId: i.parentId, children: [] };
+  });
+  const roots: AGTreeNode[] = [];
+  items.forEach((i) => {
+    if (i.parentId && map[i.parentId]) {
+      map[i.parentId].children.push(map[i._id]);
+    } else {
+      roots.push(map[i._id]);
+    }
+  });
+  return roots;
+}
+
+// ─── Recursive tree node ──────────────────────────────────────────────────────
+function AGTreeDropdownNode({
+  node,
+  depth,
+  openNodes,
+  onToggleNode,
+  selectedId,
+  onSelect,
+}: {
+  node: AGTreeNode;
+  depth: number;
+  openNodes: Set<string>;
+  onToggleNode: (id: string) => void;
+  selectedId: string;
+  onSelect: (id: string) => void;
+}) {
+  const hasChildren = node.children.length > 0;
+  const isOpen = openNodes.has(node.id);
+  const isSelected = selectedId === node.id;
+
+  return (
+    <>
+      <div
+        className={`flex items-center select-none cursor-pointer transition-colors rounded-md mx-1 my-0.5 ${
+          isSelected ? "bg-primary/10 text-primary" : "hover:bg-muted/60 text-foreground"
+        }`}
+        style={{ paddingLeft: `${depth * 16 + 4}px` }}
+        onClick={() => {
+          if (hasChildren) {
+            onToggleNode(node.id);
+          } else {
+            onSelect(node.id);
+          }
+        }}
+      >
+        <span className={`w-5 h-5 flex items-center justify-center shrink-0 ${hasChildren ? "text-muted-foreground" : "opacity-0"}`}>
+          {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </span>
+        <span className="mx-1.5 shrink-0">
+          {hasChildren ? (
+            <FolderOpen size={13} className="text-amber-500" />
+          ) : depth === 0 ? (
+            <Layers size={13} className="text-primary/60" />
+          ) : (
+            <Folder size={13} className="text-muted-foreground/50" />
+          )}
+        </span>
+        <span className={`text-sm flex-1 truncate py-2 ${depth === 0 ? "font-semibold" : "font-medium"}`}>
+          {node.name}
+        </span>
+        {hasChildren && (
+          <span className="text-[10px] text-muted-foreground/50 shrink-0 mr-2">
+            {node.children.length}
+          </span>
+        )}
+        {hasChildren && (
+          <button
+            type="button"
+            className="mr-1 px-1.5 py-0.5 text-[10px] rounded border border-border/60 text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors shrink-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect(node.id);
+            }}
+          >
+            select
+          </button>
+        )}
+      </div>
+
+      {hasChildren && isOpen && (
+        <div>
+          {node.children.map((child) => (
+            <AGTreeDropdownNode
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              openNodes={openNodes}
+              onToggleNode={onToggleNode}
+              selectedId={selectedId}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── TreeGroupDropdown ────────────────────────────────────────────────────────
+function TreeGroupDropdown({
+  value,
+  onChange,
+  allGroups,
+  placeholder = "Select group…",
+  error,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  allGroups: AccountGroup[];
+  placeholder?: string;
+  error?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [openNodes, setOpenNodes] = useState<Set<string>>(new Set());
+  const dropRef = useRef<HTMLDivElement>(null);
+
+  const tree = useMemo(() => buildAGTree(allGroups), [allGroups]);
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropRef.current && !dropRef.current.contains(e.target as Node))
+        setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  // Auto-expand ancestors when dropdown opens with a value already selected
+  useEffect(() => {
+    if (!open || !value) return;
+    const ancestors = new Set<string>();
+    const walk = (id: string) => {
+      const group = allGroups.find((g) => g._id === id);
+      if (group?.parentId) {
+        ancestors.add(group.parentId);
+        walk(group.parentId);
+      }
+    };
+    walk(value);
+    if (ancestors.size > 0)
+      setOpenNodes((prev) => new Set([...prev, ...ancestors]));
+  }, [open, value, allGroups]);
+
+  const toggleNode = (id: string) => {
+    setOpenNodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectedGroup = allGroups.find((g) => g._id === value);
+  const selectedHasChildren = selectedGroup
+    ? allGroups.some((g) => g.parentId === selectedGroup._id)
+    : false;
+
+  return (
+    <div className="relative" ref={dropRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left ${
+          error ? "border-red-400" : "border-border"
+        }`}
+      >
+        {selectedGroup ? (
+          selectedHasChildren ? (
+            <FolderOpen size={14} className="text-amber-500 shrink-0" />
+          ) : (
+            <Folder size={14} className="text-muted-foreground/60 shrink-0" />
+          )
+        ) : (
+          <BookOpen size={14} className="text-muted-foreground/50 shrink-0" />
+        )}
+        <span className={`flex-1 truncate ${selectedGroup ? "text-foreground font-medium" : "text-muted-foreground/70"}`}>
+          {selectedGroup ? selectedGroup.name : placeholder}
+        </span>
+        <ChevronDown
+          size={14}
+          className={`text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg">
+          <div className="max-h-72 overflow-y-auto py-1">
+            <div
+              className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer transition-colors border-b border-border/40 mb-1 ${
+                !value ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted/60"
+              }`}
+              onClick={() => { onChange(""); setOpen(false); }}
+            >
+              <BookOpen size={13} className="shrink-0" />
+              <span>{placeholder}</span>
+            </div>
+
+            {tree.map((node) => (
+              <AGTreeDropdownNode
+                key={node.id}
+                node={node}
+                depth={0}
+                openNodes={openNodes}
+                onToggleNode={toggleNode}
+                selectedId={value}
+                onSelect={(id) => { onChange(id); setOpen(false); }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface LedgerHead {
@@ -281,6 +516,7 @@ const GeneralLedgerMaster: React.FC = () => {
       .map((item) => ({
         _id: String(item.AGId),
         name: item.Name as string,
+        parentId: item.ParentGroupId != null ? String(item.ParentGroupId) : null,
       }));
   }, [groupsData]);
 
@@ -586,15 +822,14 @@ const GeneralLedgerMaster: React.FC = () => {
                     </div>
                   ) : (
                     <>
-                    <FlatDropdown
+                    <TreeGroupDropdown
                       value={form.LBelongsTo}
                       onChange={(v) => {
                         setForm((p) => ({ ...p, LBelongsTo: v }));
                         setErrors((p) => ({ ...p, LBelongsTo: false }));
                       }}
-                      options={accountGroups.map((g) => ({ value: g._id, label: g.name }))}
+                      allGroups={accountGroups}
                       placeholder="Select group…"
-                      icon={<BookOpen size={13} />}
                       error={errors.LBelongsTo}
                     />
                     {errors.LBelongsTo && (
