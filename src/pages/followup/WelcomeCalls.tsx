@@ -9,6 +9,7 @@ import {
   Search,
   X,
   Clock,
+  ChevronDown,
   Calendar,
   User,
   StickyNote,
@@ -387,6 +388,40 @@ export function WelcomeCallsPage() {
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingSearch, setBookingSearch] = useState("");
   const bookingRef = useRef<HTMLDivElement>(null);
+  const [timePickerOpen, setTimePickerOpen] = useState(false);
+  const timePickerRef = useRef<HTMLDivElement>(null);
+  const [timeParts, setTimeParts] = useState({ h: "12", m: "00", ampm: "AM" });
+
+  const applyTime = () => {
+    const h = parseInt(timeParts.h);
+    let h24 = h;
+    if (timeParts.ampm === "PM" && h !== 12) h24 = h + 12;
+    if (timeParts.ampm === "AM" && h === 12) h24 = 0;
+    set("CallTime", `${String(h24).padStart(2, "0")}:${timeParts.m.padStart(2, "0")}`);
+    setTimePickerOpen(false);
+  };
+
+  const displayTime = form.CallTime
+    ? (() => {
+        const [hh, mm] = form.CallTime.split(":");
+        const h = parseInt(hh);
+        const ampm = h >= 12 ? "PM" : "AM";
+        const h12 = h % 12 || 12;
+        return `${h12}:${mm} ${ampm}`;
+      })()
+    : null;
+
+  // close time picker on outside click
+  useEffect(() => {
+    if (!timePickerOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (timePickerRef.current && !timePickerRef.current.contains(e.target as Node)) {
+        setTimePickerOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [timePickerOpen]);
 
   // Bug 2 — close booking dropdown on outside click
   useEffect(() => {
@@ -627,24 +662,27 @@ export function WelcomeCallsPage() {
         {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           {[
-            { label: "Total", value: stats.total, dot: "bg-slate-400" },
+            { label: "Total", value: stats.total, dot: "bg-slate-400", borderL: "border-l-slate-400" },
             {
               label: "Connected",
               value: stats.connected,
               dot: "bg-emerald-500",
+              borderL: "border-l-emerald-500",
             },
-            { label: "No Answer", value: stats.noAnswer, dot: "bg-red-400" },
-            { label: "Callback", value: stats.callback, dot: "bg-blue-500" },
+            { label: "No Answer", value: stats.noAnswer, dot: "bg-red-400", borderL: "border-l-red-400" },
+            { label: "Callback", value: stats.callback, dot: "bg-blue-500", borderL: "border-l-blue-500" },
             {
               label: "Connect Rate",
               value: `${stats.rate}%`,
               dot: "bg-violet-500",
+              borderL: "border-l-violet-500",
             },
-          ].map(({ label, value, dot }) => (
+          ].map(({ label, value, dot, borderL }) => (
             <div
               key={label}
-              className="rounded-xl border border-border bg-card p-4"
+              className={`relative rounded-xl border border-border bg-card p-4 overflow-hidden border-l-2 ${borderL}`}
             >
+              <div className={`absolute top-0 right-0 w-20 h-20 rounded-full opacity-10 -translate-y-4 translate-x-4 ${dot}`} />
               <div className={`w-2 h-2 rounded-full ${dot} mb-3`} />
               <p className="text-2xl font-bold font-heading text-foreground leading-none">
                 {value}
@@ -945,12 +983,50 @@ export function WelcomeCallsPage() {
               </div>
               <div className="space-y-2">
                 <Label>Call Time</Label>
-                <Input
-                  type="time"
-                  value={form.CallTime}
-                  onChange={(e) => set("CallTime", e.target.value)}
-                  className="rounded-[9px]"
-                />
+                <div className="relative" ref={timePickerRef}>
+                  <button
+                    type="button"
+                    onClick={() => setTimePickerOpen((v) => !v)}
+                    className="w-full h-10 flex items-center gap-2 px-3 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 hover:border-primary/40 transition text-left"
+                  >
+                    <Clock size={13} className="text-muted-foreground shrink-0" />
+                    <span className={displayTime ? "text-foreground" : "text-muted-foreground"}>
+                      {displayTime ?? "Select time…"}
+                    </span>
+                  </button>
+                  {timePickerOpen && (
+                    <div className="absolute top-full left-0 z-50 mt-1 bg-card border border-border rounded-xl shadow-lg p-3 w-52">
+                      <div className="flex gap-2 items-center justify-center">
+                        {/* Hours */}
+                        <div className="flex flex-col gap-1 items-center">
+                          <button type="button" onClick={() => setTimeParts((p) => ({ ...p, h: String(parseInt(p.h) % 12 + 1) }))} className="p-1 hover:bg-muted rounded text-xs">▲</button>
+                          <span className="w-8 text-center font-mono font-semibold text-sm">{timeParts.h.padStart(2, "0")}</span>
+                          <button type="button" onClick={() => setTimeParts((p) => ({ ...p, h: String((parseInt(p.h) - 2 + 12) % 12 + 1) }))} className="p-1 hover:bg-muted rounded text-xs">▼</button>
+                        </div>
+                        <span className="text-lg font-bold pb-0.5">:</span>
+                        {/* Minutes */}
+                        <div className="flex flex-col gap-1 items-center">
+                          <button type="button" onClick={() => setTimeParts((p) => ({ ...p, m: String((parseInt(p.m) + 1) % 60).padStart(2, "0") }))} className="p-1 hover:bg-muted rounded text-xs">▲</button>
+                          <span className="w-8 text-center font-mono font-semibold text-sm">{timeParts.m}</span>
+                          <button type="button" onClick={() => setTimeParts((p) => ({ ...p, m: String((parseInt(p.m) - 1 + 60) % 60).padStart(2, "0") }))} className="p-1 hover:bg-muted rounded text-xs">▼</button>
+                        </div>
+                        {/* AM/PM */}
+                        <div className="flex flex-col gap-1 items-center">
+                          <button type="button" onClick={() => setTimeParts((p) => ({ ...p, ampm: p.ampm === "AM" ? "PM" : "AM" }))} className="px-2 py-1 rounded bg-muted text-xs font-semibold hover:bg-muted/60">▲</button>
+                          <span className="text-xs font-semibold w-8 text-center">{timeParts.ampm}</span>
+                          <button type="button" onClick={() => setTimeParts((p) => ({ ...p, ampm: p.ampm === "AM" ? "PM" : "AM" }))} className="px-2 py-1 rounded bg-muted text-xs font-semibold hover:bg-muted/60">▼</button>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={applyTime}
+                        className="w-full mt-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -968,19 +1044,18 @@ export function WelcomeCallsPage() {
               </div>
               <div className="space-y-2">
                 <Label>Status</Label>
-                <select
-                  value={form.Status}
-                  onChange={(e) => set("Status", e.target.value)}
-                  className="w-full h-10 px-3 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-                >
-                  {(
-                    meta?.statuses ?? ["Scheduled", "Completed", "Cancelled"]
-                  ).map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <select
+                    value={form.Status}
+                    onChange={(e) => set("Status", e.target.value)}
+                    className="w-full appearance-none h-10 pl-3 pr-9 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    {(meta?.statuses ?? ["Scheduled", "Completed", "Cancelled"]).map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                </div>
               </div>
             </div>
 
@@ -1049,18 +1124,19 @@ export function WelcomeCallsPage() {
             {meta?.assignees && meta.assignees.length > 0 && (
               <div className="space-y-2">
                 <Label>Assigned To</Label>
-                <select
-                  value={form.AssignedTo}
-                  onChange={(e) => set("AssignedTo", e.target.value)}
-                  className="w-full h-10 px-3 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-                >
-                  <option value="">— Not assigned —</option>
-                  {meta.assignees.map((u) => (
-                    <option key={u.Id} value={u.Id}>
-                      {u.Name}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <select
+                    value={form.AssignedTo}
+                    onChange={(e) => set("AssignedTo", e.target.value)}
+                    className="w-full appearance-none h-10 pl-3 pr-9 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    <option value="">— Not assigned —</option>
+                    {meta.assignees.map((u) => (
+                      <option key={u.Id} value={u.Id}>{u.Name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                </div>
               </div>
             )}
 

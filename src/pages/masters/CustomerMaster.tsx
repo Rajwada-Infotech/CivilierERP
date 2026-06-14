@@ -208,9 +208,11 @@ const CustomerMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Masters", "Customer Master"]} />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Customer Master
-      </h1>
+      <div className="space-y-8 mt-6">
+      <div>
+        <h1 className="text-xl font-heading font-bold text-foreground">Customer Master</h1>
+        <p className="text-xs text-muted-foreground mt-0.5">Manage customer records and contact information</p>
+      </div>
       <MasterPage
         title="Customer"
         fields={fields}
@@ -265,6 +267,7 @@ const CustomerMaster: React.FC = () => {
           win.print();
         }}
       />
+      </div>
     </>
   );
 };

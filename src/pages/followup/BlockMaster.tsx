@@ -140,9 +140,11 @@ const BlockMaster: React.FC = () => {
       <Breadcrumbs
         items={["Dashboard", "Follow-Up", "Setup", "Block Master"]}
       />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Block Master
-      </h1>
+      <div className="space-y-8 mt-6">
+      <div>
+        <h1 className="text-xl font-heading font-bold text-foreground">Block Master</h1>
+        <p className="text-xs text-muted-foreground mt-0.5">Manage project blocks and their configurations</p>
+      </div>
       <MasterPage
         title="Block"
         fields={fields}
@@ -178,6 +180,7 @@ const BlockMaster: React.FC = () => {
           win.print();
         }}
       />
+      </div>
     </>
   );
 };
