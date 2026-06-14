@@ -6,6 +6,8 @@ import {
   addRecord,
   updateRecord,
   deleteRecord,
+  getAccountGroups,
+  type AccountGroup,
 } from "@/api/accountHeadApi";
 import { getContractorCategoryOptions } from "@/api/contractorCategoryApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -35,6 +37,7 @@ import {
   Printer,
   HardHat,
   CreditCard,
+  Layers,
 } from "lucide-react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -60,6 +63,7 @@ interface Contractor {
   contractorType: string | null;
   LHeadPaymentTerms: string | null;
   LHeadAddress: string | null;
+  LBelongsTo: number | null;
   LHeadStatus: boolean;
 }
 
@@ -73,6 +77,7 @@ interface ContractorForm {
   contractorType: string;
   LHeadPaymentTerms: string;
   LHeadAddress: string;
+  LBelongsTo: number | "";
   LHeadStatus: boolean;
 }
 
@@ -86,6 +91,7 @@ const EMPTY_FORM: ContractorForm = {
   contractorType: "",
   LHeadPaymentTerms: "",
   LHeadAddress: "",
+  LBelongsTo: "",
   LHeadStatus: true,
 };
 
@@ -99,6 +105,10 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "PAN Number", accessor: "LHeadPan" },
   { header: "Contractor Type", accessor: "contractorType" },
   { header: "Payment Terms", accessor: "LHeadPaymentTerms" },
+  {
+    header: "Group",
+    accessor: (r) => (r.LBelongsTo != null ? String(r.LBelongsTo) : "—"),
+  },
   { header: "Address", accessor: "LHeadAddress" },
   {
     header: "Status",
@@ -308,9 +318,58 @@ const ContractorMaster: React.FC = () => {
       contractorType: item.LHeadCategory || null,
       LHeadPaymentTerms: item.LHeadPaymentTerms || null,
       LHeadAddress: item.LHeadAddress || null,
+      LBelongsTo: item.LBelongsTo != null ? Number(item.LBelongsTo) : null,
       LHeadStatus: Boolean(item.LHeadStatus),
     }));
   }, [rawData]);
+
+  // ── Account Groups ─────────────────────────────────────────────────────────
+  const { data: accountGroups = [] } = useQuery<AccountGroup[]>({
+    queryKey: ["account-groups"],
+    queryFn: getAccountGroups,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // AGId → Name lookup for display
+  const groupNameById = useMemo(
+    () => new Map<number, string>(accountGroups.map((g) => [g.AGId, g.Name])),
+    [accountGroups],
+  );
+
+  // Build { label: parentName, options: children[] } for <optgroup> dropdown
+  const groupedAccountGroups = useMemo(() => {
+    const byId = new Map<number, AccountGroup>(
+      accountGroups.map((g) => [g.AGId, g]),
+    );
+    const childrenOf = new Map<number, AccountGroup[]>();
+    const roots: AccountGroup[] = [];
+    for (const g of accountGroups) {
+      if (g.ParentGroupId === null) {
+        roots.push(g);
+      } else {
+        const list = childrenOf.get(g.ParentGroupId) ?? [];
+        list.push(g);
+        childrenOf.set(g.ParentGroupId, list);
+      }
+    }
+    const result: { label: string; options: AccountGroup[] }[] = [];
+    for (const root of roots) {
+      const kids = childrenOf.get(root.AGId);
+      if (kids && kids.length > 0) {
+        result.push({ label: root.Name, options: kids });
+      }
+    }
+    const uncategorised = [
+      ...roots.filter((r) => !childrenOf.has(r.AGId)),
+      ...accountGroups.filter(
+        (g) => g.ParentGroupId !== null && !byId.has(g.ParentGroupId),
+      ),
+    ];
+    if (uncategorised.length > 0) {
+      result.push({ label: "Other", options: uncategorised });
+    }
+    return result;
+  }, [accountGroups]);
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const invalidate = () =>
@@ -331,7 +390,7 @@ const ContractorMaster: React.FC = () => {
     LBranchName: null,
     LGSTState: null,
     LCountry: "India",
-    LBelongsTo: null,
+    LBelongsTo: f.LBelongsTo !== "" ? Number(f.LBelongsTo) : null,
     LDescription: null,
   });
 
@@ -382,6 +441,7 @@ const ContractorMaster: React.FC = () => {
       contractorType: c.contractorType ?? "",
       LHeadPaymentTerms: c.LHeadPaymentTerms ?? "",
       LHeadAddress: c.LHeadAddress ?? "",
+      LBelongsTo: c.LBelongsTo ?? "",
       LHeadStatus: c.LHeadStatus,
     });
     setErrors({});
@@ -425,6 +485,7 @@ const ContractorMaster: React.FC = () => {
         <tr><td>PAN Number</td><td>${c.LHeadPan || "—"}</td></tr>
         <tr><td>Contractor Type</td><td>${c.contractorType || "—"}</td></tr>
         <tr><td>Payment Terms</td><td>${c.LHeadPaymentTerms || "—"}</td></tr>
+        <tr><td>Group</td><td>${c.LBelongsTo != null ? (groupNameById.get(c.LBelongsTo) ?? "—") : "—"}</td></tr>
         <tr><td>Address</td><td>${c.LHeadAddress || "—"}</td></tr>
         <tr><td>Status</td><td>${c.LHeadStatus ? "Active" : "Inactive"}</td></tr>
       </table>
@@ -644,6 +705,42 @@ const ContractorMaster: React.FC = () => {
                         <option key={c} value={c}>
                           {c}
                         </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Account Group */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                    <Layers size={11} className="text-primary" />
+                    Group Name
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={form.LBelongsTo}
+                      onChange={(e) =>
+                        setForm((p) => ({
+                          ...p,
+                          LBelongsTo:
+                            e.target.value === "" ? "" : Number(e.target.value),
+                        }))
+                      }
+                      className={selectCls}
+                    >
+                      <option value="">— No Group —</option>
+                      {groupedAccountGroups.map(({ label, options }) => (
+                        <optgroup key={label} label={`── ${label}`}>
+                          {options.map((g) => (
+                            <option key={g.AGId} value={g.AGId}>
+                              {g.Name}
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
                     </select>
                     <ChevronDown
@@ -1010,6 +1107,13 @@ const ContractorMaster: React.FC = () => {
                 {
                   label: "Payment Terms",
                   value: viewRecord.LHeadPaymentTerms || "—",
+                },
+                {
+                  label: "Group Name",
+                  value:
+                    viewRecord.LBelongsTo != null
+                      ? (groupNameById.get(viewRecord.LBelongsTo) ?? "—")
+                      : "—",
                 },
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
               ].map(({ label, value, mono }) => (

@@ -24,6 +24,7 @@ import {
   ChevronDown,
   AlertCircle,
   XCircle,
+  Layers,
 } from "lucide-react";
 
 import {
@@ -35,6 +36,8 @@ import {
   type BankRecord,
   type CompanyOption,
 } from "@/api/bankMasterApi";
+
+import { getAccountGroups, type AccountGroup } from "@/api/accountHeadApi";
 
 import {
   DataTable,
@@ -70,6 +73,7 @@ const bankFormSchema = z.object({
       "Opening balance must be 0 or greater",
     ),
   address: z.string(),
+  groupId: z.number().nullable(),
   status: z.boolean(),
 });
 
@@ -87,6 +91,7 @@ const EMPTY: FormState = {
   holderName: "",
   openingBalance: "",
   address: "",
+  groupId: null,
   status: true,
 };
 
@@ -101,6 +106,10 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Bank Type", accessor: "bankType" },
   { header: "Holder Name", accessor: "holderName" },
   { header: "Opening Balance", accessor: "openingBalance" },
+  {
+    header: "Group",
+    accessor: (r) => (r.BLBelongsTo != null ? String(r.BLBelongsTo) : "—"),
+  },
   { header: "Address", accessor: "address" },
   { header: "Status", accessor: (r) => (r.BActive ? "Active" : "Inactive") },
 ];
@@ -326,6 +335,52 @@ const BankMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  // ── Account Groups ──────────────────────────────────────────────────────────
+  const { data: accountGroups = [] } = useQuery<AccountGroup[]>({
+    queryKey: ["account-groups"],
+    queryFn: getAccountGroups,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const groupNameById = useMemo(
+    () => new Map<number, string>(accountGroups.map((g) => [g.AGId, g.Name])),
+    [accountGroups],
+  );
+
+  const groupedAccountGroups = useMemo(() => {
+    const byId = new Map<number, AccountGroup>(
+      accountGroups.map((g) => [g.AGId, g]),
+    );
+    const childrenOf = new Map<number, AccountGroup[]>();
+    const roots: AccountGroup[] = [];
+    for (const g of accountGroups) {
+      if (g.ParentGroupId === null) {
+        roots.push(g);
+      } else {
+        const list = childrenOf.get(g.ParentGroupId) ?? [];
+        list.push(g);
+        childrenOf.set(g.ParentGroupId, list);
+      }
+    }
+    const result: { label: string; options: AccountGroup[] }[] = [];
+    for (const root of roots) {
+      const kids = childrenOf.get(root.AGId);
+      if (kids && kids.length > 0) {
+        result.push({ label: root.Name, options: kids });
+      }
+    }
+    const uncategorised = [
+      ...roots.filter((r) => !childrenOf.has(r.AGId)),
+      ...accountGroups.filter(
+        (g) => g.ParentGroupId !== null && !byId.has(g.ParentGroupId),
+      ),
+    ];
+    if (uncategorised.length > 0) {
+      result.push({ label: "Other", options: uncategorised });
+    }
+    return result;
+  }, [accountGroups]);
+
   const dbBanks: BankRecord[] = Array.isArray(dbData) ? dbData : [];
 
   const {
@@ -353,7 +408,6 @@ const BankMaster: React.FC = () => {
   const [page, setPage] = useState(1);
   const limit = 10;
 
-
   // ─── Filtered list ────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -367,8 +421,7 @@ const BankMaster: React.FC = () => {
         (b.BCompanyName ?? "").toLowerCase().includes(q);
       const matchType = !filterBankType || b.BBankType === filterBankType;
       const matchStatus =
-        !filterStatus ||
-        (filterStatus === "active" ? b.BStatus : !b.BStatus);
+        !filterStatus || (filterStatus === "active" ? b.BStatus : !b.BStatus);
       return matchSearch && matchType && matchStatus;
     });
   }, [dbBanks, search, filterBankType, filterStatus]);
@@ -392,6 +445,7 @@ const BankMaster: React.FC = () => {
     BAddress: f.address.trim() || null,
     BStatus: f.status,
     BCompanyName: f.companyName.trim() || null,
+    BLBelongsTo: f.groupId ?? null,
   });
 
   const handleSave = async (values: FormState) => {
@@ -424,6 +478,7 @@ const BankMaster: React.FC = () => {
       openingBalance:
         item.BOpeningBalance != null ? String(item.BOpeningBalance) : "",
       address: item.BAddress || "",
+      groupId: item.BLBelongsTo ?? null,
       status: Boolean(item.BStatus),
     });
     setEditingId(String(item.BId));
@@ -468,6 +523,7 @@ const BankMaster: React.FC = () => {
         <tr><td>Bank Type</td><td>${bank.BBankType || "—"}</td></tr>
         <tr><td>Account Holder</td><td>${bank.BAccountHolderName || "—"}</td></tr>
         <tr><td>Opening Balance</td><td>₹ ${Number(bank.BOpeningBalance || 0).toLocaleString("en-IN")}</td></tr>
+        <tr><td>Group</td><td>${bank.BLBelongsTo != null ? (groupNameById.get(bank.BLBelongsTo) ?? "—") : "—"}</td></tr>
         <tr><td>Address</td><td>${bank.BAddress || "—"}</td></tr>
         <tr><td>Status</td><td>${bank.BStatus ? "Active" : "Inactive"}</td></tr>
       </table>
@@ -632,6 +688,41 @@ const BankMaster: React.FC = () => {
                     placeholder="e.g. Park Street Branch"
                     className={inputCls}
                   />
+                </div>
+
+                {/* Account Group */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                    <Layers size={11} className="text-primary" />
+                    Group Name
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={form.groupId ?? ""}
+                      onChange={(e) =>
+                        setValue(
+                          "groupId",
+                          e.target.value === "" ? null : Number(e.target.value),
+                        )
+                      }
+                      className={selectCls}
+                    >
+                      <option value="">— No Group —</option>
+                      {groupedAccountGroups.map(({ label, options }) => (
+                        <optgroup key={label} label={`── ${label}`}>
+                          {options.map((g) => (
+                            <option key={g.AGId} value={g.AGId}>
+                              {g.Name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -915,7 +1006,6 @@ const BankMaster: React.FC = () => {
                 <X size={11} /> Clear
               </button>
             )}
-
           </div>
 
           {/* Table */}
@@ -1002,6 +1092,13 @@ const BankMaster: React.FC = () => {
                   mono: true,
                 },
                 { label: "Address", value: viewRow.BAddress },
+                {
+                  label: "Group Name",
+                  value:
+                    viewRow.BLBelongsTo != null
+                      ? (groupNameById.get(viewRow.BLBelongsTo) ?? "—")
+                      : "—",
+                },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
