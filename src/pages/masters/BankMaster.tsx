@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -41,6 +41,72 @@ import {
   type ColumnDef,
   type ExportColumn,
 } from "@/components/ui/DataTable";
+
+// ─── FlatDropdown ─────────────────────────────────────────────────────────────
+function FlatDropdown({
+  value,
+  onChange,
+  options,
+  placeholder = "Select\u2026",
+  icon,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+  icon?: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const dropRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropRef.current && !dropRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const selected = options.find((o) => o.value === value);
+
+  return (
+    <div className="relative" ref={dropRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left"
+      >
+        {icon && <span className="shrink-0 text-muted-foreground">{icon}</span>}
+        <span className={`flex-1 truncate ${selected ? "text-foreground font-medium" : "text-muted-foreground/70"}`}>
+          {selected ? selected.label : placeholder}
+        </span>
+        <ChevronDown size={14} className={`text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+          <div className="max-h-56 overflow-y-auto py-1">
+            <div
+              className={`px-3 py-2 text-sm cursor-pointer transition-colors ${!value ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted/60"}`}
+              onClick={() => { onChange(""); setOpen(false); }}
+            >
+              {placeholder}
+            </div>
+            <div className="border-t border-border/40 mb-1" />
+            {options.map((o) => (
+              <div
+                key={o.value}
+                className={`px-3 py-2 text-sm cursor-pointer transition-colors ${value === o.value ? "bg-primary/10 text-primary font-medium" : "text-foreground hover:bg-muted/60"}`}
+                onClick={() => { onChange(o.value); setOpen(false); }}
+              >
+                {o.label}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Zod Schema ─────────────────────────────────────────────────────────────
 const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
@@ -574,27 +640,13 @@ const BankMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Company Name
                   </label>
-                  <div className="relative">
-                    <Building2
-                      size={13}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                    <select
-                      {...register("companyName")}
-                      className={`${selectCls} pl-8`}
-                    >
-                      <option value="">Select Company...</option>
-                      {companies.map((c) => (
-                        <option key={c.id} value={c.label}>
-                          {c.label}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
+                  <FlatDropdown
+                    value={form.companyName}
+                    onChange={(v) => setValue("companyName", v, { shouldValidate: true })}
+                    options={companies.map((c) => ({ value: c.label, label: c.label }))}
+                    placeholder="Select Company\u2026"
+                    icon={<Building2 size={13} />}
+                  />
                 </div>
 
                 {/* Bank Name */}
@@ -733,20 +785,12 @@ const BankMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Account Type
                   </label>
-                  <div className="relative">
-                    <select {...register("accountType")} className={selectCls}>
-                      <option value="">Select Account Type...</option>
-                      {ACCOUNT_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
+                  <FlatDropdown
+                    value={form.accountType}
+                    onChange={(v) => setValue("accountType", v, { shouldValidate: true })}
+                    options={ACCOUNT_TYPES.map((t) => ({ value: t, label: t }))}
+                    placeholder="Select Account Type\u2026"
+                  />
                 </div>
 
                 {/* Bank Type */}
@@ -754,20 +798,12 @@ const BankMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Bank Type
                   </label>
-                  <div className="relative">
-                    <select {...register("bankType")} className={selectCls}>
-                      <option value="">Select Bank Type...</option>
-                      {BANK_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
+                  <FlatDropdown
+                    value={form.bankType}
+                    onChange={(v) => setValue("bankType", v, { shouldValidate: true })}
+                    options={BANK_TYPES.map((t) => ({ value: t, label: t }))}
+                    placeholder="Select Bank Type\u2026"
+                  />
                 </div>
 
                 {/* Opening Balance */}
@@ -868,40 +904,19 @@ const BankMaster: React.FC = () => {
               />
             </div>
 
-            <div className="relative">
-              <select
-                value={filterBankType}
-                onChange={(e) => setFilterBankType(e.target.value)}
-                className="appearance-none text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-              >
-                <option value="">All Types</option>
-                {BANK_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={12}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
+            <FlatDropdown
+              value={filterBankType}
+              onChange={(v) => setFilterBankType(v)}
+              options={BANK_TYPES.map((t) => ({ value: t, label: t }))}
+              placeholder="All Types"
+            />
 
-            <div className="relative">
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="appearance-none text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-              >
-                <option value="">All Status</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-              <ChevronDown
-                size={12}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
+            <FlatDropdown
+              value={filterStatus}
+              onChange={(v) => setFilterStatus(v)}
+              options={[{ value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }]}
+              placeholder="All Status"
+            />
 
             {(search || filterBankType || filterStatus) && (
               <button

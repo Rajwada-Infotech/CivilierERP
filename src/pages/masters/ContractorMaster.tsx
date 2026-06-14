@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -84,6 +84,74 @@ const EMPTY_FORM: ContractorForm = {
   LHeadAddress: "",
   LHeadStatus: true,
 };
+
+// ─── FlatDropdown ─────────────────────────────────────────────────────────────
+function FlatDropdown({
+  value,
+  onChange,
+  options,
+  placeholder = "Select\u2026",
+  icon,
+  error,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+  icon?: React.ReactNode;
+  error?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const dropRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropRef.current && !dropRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const selected = options.find((o) => o.value === value);
+
+  return (
+    <div className="relative" ref={dropRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left ${error ? "border-red-400" : "border-border"}`}
+      >
+        {icon && <span className="shrink-0 text-muted-foreground">{icon}</span>}
+        <span className={`flex-1 truncate ${selected ? "text-foreground font-medium" : "text-muted-foreground/70"}`}>
+          {selected ? selected.label : placeholder}
+        </span>
+        <ChevronDown size={14} className={`text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+          <div className="max-h-56 overflow-y-auto py-1">
+            <div
+              className={`px-3 py-2 text-sm cursor-pointer transition-colors ${!value ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted/60"}`}
+              onClick={() => { onChange(""); setOpen(false); }}
+            >
+              {placeholder}
+            </div>
+            <div className="border-t border-border/40 mb-1" />
+            {options.map((o) => (
+              <div
+                key={o.value}
+                className={`px-3 py-2 text-sm cursor-pointer transition-colors ${value === o.value ? "bg-primary/10 text-primary font-medium" : "text-foreground hover:bg-muted/60"}`}
+                onClick={() => { onChange(o.value); setOpen(false); }}
+              >
+                {o.label}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
 const EXPORT_COLUMNS: ExportColumn[] = [
@@ -622,29 +690,12 @@ const ContractorMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Contractor Type
                   </label>
-                  <div className="relative">
-                    <select
-                      value={form.contractorType}
-                      onChange={(e) =>
-                        setForm((p) => ({
-                          ...p,
-                          contractorType: e.target.value,
-                        }))
-                      }
-                      className={selectCls}
-                    >
-                      <option value="">Select type…</option>
-                      {contractorCategories.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
+                  <FlatDropdown
+                    value={form.contractorType}
+                    onChange={(v) => setForm((p) => ({ ...p, contractorType: v }))}
+                    options={contractorCategories.map((c) => ({ value: c, label: c }))}
+                    placeholder="Select type\u2026"
+                  />
                 </div>
               </div>
             </div>
@@ -854,40 +905,19 @@ const ContractorMaster: React.FC = () => {
               />
             </div>
 
-            <div className="relative">
-              <select
-                value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
-                className="appearance-none text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-              >
-                <option value="">All Types</option>
-                {contractorCategories.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={12}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
+            <FlatDropdown
+              value={filterCategory}
+              onChange={(v) => setFilterCategory(v)}
+              options={contractorCategories.map((c) => ({ value: c, label: c }))}
+              placeholder="All Types"
+            />
 
-            <div className="relative">
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="appearance-none text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-              >
-                <option value="">All Status</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-              <ChevronDown
-                size={12}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
+            <FlatDropdown
+              value={filterStatus}
+              onChange={(v) => setFilterStatus(v)}
+              options={[{ value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }]}
+              placeholder="All Status"
+            />
 
             {(search || filterCategory || filterStatus) && (
               <button
