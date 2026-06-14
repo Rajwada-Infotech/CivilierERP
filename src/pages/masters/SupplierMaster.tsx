@@ -6,6 +6,8 @@ import {
   addRecord,
   updateRecord,
   deleteRecord,
+  getAccountGroups,
+  type AccountGroup,
 } from "@/api/accountHeadApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -32,6 +34,7 @@ import {
   MapPin,
   FileText,
   Printer,
+  Layers,
 } from "lucide-react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -97,6 +100,7 @@ interface Supplier {
   LGSTType: string | null;
   LGSTState: string | null;
   LHeadAddress: string | null;
+  LBelongsTo: number | null;
   LHeadStatus: boolean;
 }
 
@@ -111,6 +115,7 @@ interface SupplierForm {
   LGSTType: string;
   LGSTState: string;
   LHeadAddress: string;
+  LBelongsTo: number | "";
   LHeadStatus: boolean;
 }
 
@@ -125,6 +130,7 @@ const EMPTY_FORM: SupplierForm = {
   LGSTType: "",
   LGSTState: "",
   LHeadAddress: "",
+  LBelongsTo: "",
   LHeadStatus: true,
 };
 
@@ -139,6 +145,13 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "GST Type", accessor: "LGSTType" },
   { header: "GST State", accessor: "LGSTState" },
   { header: "Category", accessor: "supplierCategory" },
+  {
+    header: "Group",
+    accessor: (r) => {
+      // resolved in display — raw value is AGId
+      return r.LBelongsTo != null ? String(r.LBelongsTo) : "—";
+    },
+  },
   { header: "Address", accessor: "LHeadAddress" },
   {
     header: "Status",
@@ -309,6 +322,55 @@ const SupplierMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  // ── Account Groups ─────────────────────────────────────────────────────────
+  const { data: accountGroups = [] } = useQuery<AccountGroup[]>({
+    queryKey: ["account-groups"],
+    queryFn: getAccountGroups,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // AGId → Name lookup for display
+  const groupNameById = useMemo(
+    () => new Map<number, string>(accountGroups.map((g) => [g.AGId, g.Name])),
+    [accountGroups],
+  );
+
+  // Build { label: parentName, options: children[] } for <optgroup> dropdown
+  const groupedAccountGroups = useMemo(() => {
+    const byId = new Map<number, AccountGroup>(
+      accountGroups.map((g) => [g.AGId, g]),
+    );
+    const childrenOf = new Map<number, AccountGroup[]>();
+    const roots: AccountGroup[] = [];
+    for (const g of accountGroups) {
+      if (g.ParentGroupId === null) {
+        roots.push(g);
+      } else {
+        const list = childrenOf.get(g.ParentGroupId) ?? [];
+        list.push(g);
+        childrenOf.set(g.ParentGroupId, list);
+      }
+    }
+    const result: { label: string; options: AccountGroup[] }[] = [];
+    for (const root of roots) {
+      const kids = childrenOf.get(root.AGId);
+      if (kids && kids.length > 0) {
+        result.push({ label: root.Name, options: kids });
+      }
+    }
+    // Leaf roots (no children) + orphans go to "Other"
+    const uncategorised = [
+      ...roots.filter((r) => !childrenOf.has(r.AGId)),
+      ...accountGroups.filter(
+        (g) => g.ParentGroupId !== null && !byId.has(g.ParentGroupId),
+      ),
+    ];
+    if (uncategorised.length > 0) {
+      result.push({ label: "Other", options: uncategorised });
+    }
+    return result;
+  }, [accountGroups]);
+
   const suppliers: Supplier[] = useMemo(() => {
     if (!Array.isArray(rawData)) return [];
     return rawData.map((item: any) => ({
@@ -323,6 +385,7 @@ const SupplierMaster: React.FC = () => {
       LGSTType: item.LGSTType || null,
       LGSTState: item.LGSTState || null,
       LHeadAddress: item.LHeadAddress || null,
+      LBelongsTo: item.LBelongsTo != null ? Number(item.LBelongsTo) : null,
       LHeadStatus: Boolean(item.LHeadStatus),
     }));
   }, [rawData]);
@@ -346,7 +409,7 @@ const SupplierMaster: React.FC = () => {
     LBranchName: null,
     LGSTState: f.LGSTState || null,
     LCountry: "India",
-    LBelongsTo: null,
+    LBelongsTo: f.LBelongsTo !== "" ? Number(f.LBelongsTo) : null,
     LDescription: null,
   });
 
@@ -397,6 +460,7 @@ const SupplierMaster: React.FC = () => {
       LGSTType: s.LGSTType ?? "",
       LGSTState: s.LGSTState ?? "",
       LHeadAddress: s.LHeadAddress ?? "",
+      LBelongsTo: s.LBelongsTo ?? "",
       LHeadStatus: s.LHeadStatus,
     });
     setErrors({});
@@ -441,6 +505,7 @@ const SupplierMaster: React.FC = () => {
         <tr><td>GST Type</td><td>${s.LGSTType || "—"}</td></tr>
         <tr><td>GST State</td><td>${s.LGSTState || "—"}</td></tr>
         <tr><td>Category</td><td>${s.supplierCategory || "—"}</td></tr>
+        <tr><td>Group</td><td>${s.LBelongsTo != null ? (groupNameById.get(s.LBelongsTo) ?? "—") : "—"}</td></tr>
         <tr><td>Address</td><td>${s.LHeadAddress || "—"}</td></tr>
         <tr><td>Status</td><td>${s.LHeadStatus ? "Active" : "Inactive"}</td></tr>
       </table>
@@ -658,6 +723,42 @@ const SupplierMaster: React.FC = () => {
                         <option key={c} value={c}>
                           {c}
                         </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Account Group */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                    <Layers size={11} className="text-primary" />
+                    Group Name
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={form.LBelongsTo}
+                      onChange={(e) =>
+                        setForm((p) => ({
+                          ...p,
+                          LBelongsTo:
+                            e.target.value === "" ? "" : Number(e.target.value),
+                        }))
+                      }
+                      className={selectCls}
+                    >
+                      <option value="">— No Group —</option>
+                      {groupedAccountGroups.map(({ label, options }) => (
+                        <optgroup key={label} label={`── ${label}`}>
+                          {options.map((g) => (
+                            <option key={g.AGId} value={g.AGId}>
+                              {g.Name}
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
                     </select>
                     <ChevronDown
@@ -1052,6 +1153,13 @@ const SupplierMaster: React.FC = () => {
                 {
                   label: "Supplier Category",
                   value: viewRecord.supplierCategory || "—",
+                },
+                {
+                  label: "Group Name",
+                  value:
+                    viewRecord.LBelongsTo != null
+                      ? (groupNameById.get(viewRecord.LBelongsTo) ?? "—")
+                      : "—",
                 },
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
               ].map(({ label, value, mono }) => (
