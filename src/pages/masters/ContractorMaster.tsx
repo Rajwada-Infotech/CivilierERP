@@ -9,7 +9,11 @@ import {
 } from "@/api/accountHeadApi";
 import { getContractorCategoryOptions } from "@/api/contractorCategoryApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { DataTable, type ColumnDef, type ExportColumn } from "@/components/ui/DataTable";
+import {
+  DataTable,
+  type ColumnDef,
+  type ExportColumn,
+} from "@/components/ui/DataTable";
 import {
   Pencil,
   Trash2,
@@ -96,7 +100,10 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Contractor Type", accessor: "contractorType" },
   { header: "Payment Terms", accessor: "LHeadPaymentTerms" },
   { header: "Address", accessor: "LHeadAddress" },
-  { header: "Status", accessor: (r) => (r.LHeadStatus ? "Active" : "Inactive") },
+  {
+    header: "Status",
+    accessor: (r) => (r.LHeadStatus ? "Active" : "Inactive"),
+  },
 ];
 
 // ─── Column builder ────────────────────────────────────────────────────────────
@@ -298,7 +305,7 @@ const ContractorMaster: React.FC = () => {
       LHeadEmail: item.LHeadEmail || null,
       LGST: item.LGST || null,
       LHeadPan: item.LHeadPan || null,
-      contractorType: item.LHeadCatagory || null,
+      contractorType: item.LHeadCategory || null,
       LHeadPaymentTerms: item.LHeadPaymentTerms || null,
       LHeadAddress: item.LHeadAddress || null,
       LHeadStatus: Boolean(item.LHeadStatus),
@@ -317,7 +324,7 @@ const ContractorMaster: React.FC = () => {
     LHeadEmail: f.LHeadEmail || null,
     LGST: f.LGST || null,
     LHeadPan: f.LHeadPan || null,
-    LHeadCatagory: f.contractorType || null,
+    LHeadCategory: f.contractorType || null,
     LHeadPaymentTerms: f.LHeadPaymentTerms || null,
     LHeadAddress: f.LHeadAddress || null,
     LHeadStatus: f.LHeadStatus,
@@ -453,8 +460,7 @@ const ContractorMaster: React.FC = () => {
         (c.LHeadPhone ?? "").toLowerCase().includes(q) ||
         (c.LGST ?? "").toLowerCase().includes(q) ||
         (c.LHeadContactPerson ?? "").toLowerCase().includes(q);
-      const matchCat =
-        !filterCategory || c.contractorType === filterCategory;
+      const matchCat = !filterCategory || c.contractorType === filterCategory;
       const matchStatus =
         !filterStatus ||
         (filterStatus === "active" ? c.LHeadStatus : !c.LHeadStatus);
