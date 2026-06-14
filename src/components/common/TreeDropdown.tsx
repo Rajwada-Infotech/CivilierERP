@@ -162,7 +162,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
   variant,
   value,
   onChange,
-  placeholder = "Select\u2026",
+  placeholder = "— Top-level group (no parent)",
   error,
   // flat
   options = [],
@@ -250,7 +250,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
           </span>
         ) : variant === "tree" ? (
           <span className="flex-1 truncate text-muted-foreground/70">
-            — Top-level group (no parent)
+            {placeholder}
           </span>
         ) : (
           <span
@@ -291,7 +291,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
                 }}
               >
                 <Layers size={13} className="shrink-0" />
-                <span>— Top-level group (no parent)</span>
+                <span>{placeholder}</span>
               </div>
               <div className="border-t border-border/60" />
 
