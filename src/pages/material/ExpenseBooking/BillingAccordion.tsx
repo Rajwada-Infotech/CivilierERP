@@ -328,8 +328,25 @@ interface Props {
   grnNetAmount?: number | null;
   /** When set (GRN source), use real per-item GST breakdown instead of averaged rates */
   gstBreakdown?: {
-    items: { itemName: string; cgstRate: number; sgstRate: number; cgstAmount: number; sgstAmount: number; baseAmount: number; gstAmount: number; totalAmountInclGST: number; receivedQty: number; gstPercent: number }[];
-    totals: { totalBase: number; totalCGST: number; totalSGST: number; totalGST: number; totalInclGST: number };
+    items: {
+      itemName: string;
+      cgstRate: number;
+      sgstRate: number;
+      cgstAmount: number;
+      sgstAmount: number;
+      baseAmount: number;
+      gstAmount: number;
+      totalAmountInclGST: number;
+      receivedQty: number;
+      gstPercent: number;
+    }[];
+    totals: {
+      totalBase: number;
+      totalCGST: number;
+      totalSGST: number;
+      totalGST: number;
+      totalInclGST: number;
+    };
   } | null;
 }
 
@@ -395,17 +412,11 @@ export function BillingAccordion({
     setTerms(terms.map((t, i) => (i === idx ? updated : t)));
 
   const bd = computeBreakdown(basicAmount, cgstRate, sgstRate, terms);
-  // For GRN bookings, snap Net Payable to the GRN's exact TotalAmount
-  if (grnNetAmount != null) {
-    bd.roundOff = grnNetAmount - bd.grossAmount;
-    bd.netAmount = grnNetAmount;
-  }
+
   const hasBase = basicAmount > 0;
   const activeCount = terms.filter((t) => t.applicable).length;
 
   // Running base amounts for per-row display
-  // Pre-GST terms: track against basic amount
-  // Post-GST terms: track against gross (taxable + cgst + sgst)
   const runningBases: number[] = [];
   let rb = basicAmount;
   const grossForPostGst = bd.taxableAmount + bd.cgstAmount + bd.sgstAmount;
@@ -620,44 +631,208 @@ export function BillingAccordion({
                     </p>
                   </div>
                 ) : gstBreakdown ? (
-                  /* GRN booking: show real per-item GST slabs */
-                  <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-xs">
-                    {/* Basic */}
-                    <div className="flex justify-between items-center px-3 py-2 bg-muted/20">
-                      <span className="text-muted-foreground">Basic Amount</span>
-                      <span className="font-medium tabular-nums">₹{fmt(gstBreakdown.totals.totalBase)}</span>
-                    </div>
-                    {/* Per-item CGST rows */}
-                    {gstBreakdown.items.map((item, i) => (
-                      <div key={`cgst-${i}`} className="flex justify-between items-center px-3 py-1.5 bg-amber-500/[0.04]">
-                        <span className="text-muted-foreground">
-                          CGST [{item.cgstRate}%]
-                          <span className="ml-1 text-[10px] text-muted-foreground/60">· {item.itemName}</span>
-                        </span>
-                        <span className="text-amber-600 dark:text-amber-400 tabular-nums">+ ₹{fmt(item.cgstAmount)}</span>
+                  /* GRN booking: correct flow based on term timing:
+                     - Before GST terms: adjust base first → recalculate GST on adjusted base → gross → net
+                     - After GST terms:  base → GST on original base → gross → adjust gross → net
+                  */
+                  (() => {
+                    const origBase = gstBreakdown.totals.totalBase;
+                    const origCGST = gstBreakdown.totals.totalCGST;
+                    const origSGST = gstBreakdown.totals.totalSGST;
+
+                    // Derive effective GST rates from item-level data (weighted by base amount)
+                    // This lets us recompute GST when the pre-GST base changes.
+                    const effectiveCGSTRate =
+                      origBase > 0 ? (origCGST / origBase) * 100 : 0;
+                    const effectiveSGSTRate =
+                      origBase > 0 ? (origSGST / origBase) * 100 : 0;
+
+                    const preTerms = bd.preGstTerms ?? [];
+                    const postTerms = bd.postGstTerms ?? [];
+
+                    // Step 1: Apply pre-GST terms sequentially to get taxable base
+                    let taxableBase = origBase;
+                    const preTermAmounts: number[] = [];
+                    for (const t of preTerms) {
+                      const amt =
+                        t.type === "percentage"
+                          ? (taxableBase * t.value) / 100
+                          : t.value;
+                      preTermAmounts.push(amt);
+                      if (t.termType === "Addition") taxableBase += amt;
+                      else taxableBase = Math.max(0, taxableBase - amt);
+                    }
+
+                    // Step 2: Recompute GST on the adjusted taxable base
+                    const adjCGST = (taxableBase * effectiveCGSTRate) / 100;
+                    const adjSGST = (taxableBase * effectiveSGSTRate) / 100;
+                    const adjGross = taxableBase + adjCGST + adjSGST;
+
+                    // Step 3: Apply post-GST terms on the gross
+                    let netPayable = adjGross;
+                    const postTermAmounts: number[] = [];
+                    for (const t of postTerms) {
+                      const amt =
+                        t.type === "percentage"
+                          ? (netPayable * t.value) / 100
+                          : t.value;
+                      postTermAmounts.push(amt);
+                      if (t.termType === "Addition") netPayable += amt;
+                      else netPayable = Math.max(0, netPayable - amt);
+                    }
+
+                    const hasPreTerms = preTerms.length > 0;
+
+                    return (
+                      <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-xs">
+                        {/* Basic Amount */}
+                        <div className="flex justify-between items-center px-3 py-2 bg-muted/20">
+                          <span className="text-muted-foreground">
+                            Basic Amount
+                          </span>
+                          <span className="font-medium tabular-nums">
+                            ₹{fmt(origBase)}
+                          </span>
+                        </div>
+
+                        {/* Pre-GST billing terms */}
+                        {preTerms.map((term, i) => {
+                          const amt = preTermAmounts[i] ?? 0;
+                          const isAdd = term.termType === "Addition";
+                          return (
+                            <div
+                              key={`pre-${i}`}
+                              className="flex justify-between items-center px-3 py-1.5"
+                            >
+                              <span className="text-muted-foreground">
+                                {term.masterTermName ?? `Term ${i + 1}`}
+                                <span className="ml-1 text-[10px] opacity-60">
+                                  · {isAdd ? "Addition" : "Deduction"} Before
+                                  GST
+                                  {term.type === "percentage"
+                                    ? ` · ${term.value}%`
+                                    : ""}
+                                </span>
+                              </span>
+                              <span
+                                className={
+                                  isAdd
+                                    ? "text-green-500 tabular-nums"
+                                    : "text-destructive tabular-nums"
+                                }
+                              >
+                                {isAdd ? "+ ₹" : "− ₹"}
+                                {fmt(amt)}
+                              </span>
+                            </div>
+                          );
+                        })}
+
+                        {/* Taxable Amount (shown when pre-GST terms exist) */}
+                        {hasPreTerms && (
+                          <div className="flex justify-between items-center px-3 py-1.5 bg-muted/30">
+                            <span className="text-muted-foreground font-medium">
+                              Taxable Amount
+                              <span className="ml-1 text-[10px] opacity-60">
+                                After pre-GST adjustments
+                              </span>
+                            </span>
+                            <span className="font-medium tabular-nums">
+                              ₹{fmt(taxableBase)}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* CGST — recalculated when pre-GST terms exist */}
+                        <div className="flex justify-between items-center px-3 py-1.5 bg-amber-500/[0.04]">
+                          <span className="text-muted-foreground">
+                            CGST
+                            {hasPreTerms && effectiveCGSTRate > 0 && (
+                              <span className="ml-1 text-[10px] opacity-60">
+                                @ {effectiveCGSTRate.toFixed(2)}%
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-amber-600 dark:text-amber-400 tabular-nums">
+                            + ₹{fmt(hasPreTerms ? adjCGST : origCGST)}
+                          </span>
+                        </div>
+
+                        {/* SGST — recalculated when pre-GST terms exist */}
+                        <div className="flex justify-between items-center px-3 py-1.5 bg-amber-500/[0.04]">
+                          <span className="text-muted-foreground">
+                            SGST
+                            {hasPreTerms && effectiveSGSTRate > 0 && (
+                              <span className="ml-1 text-[10px] opacity-60">
+                                @ {effectiveSGSTRate.toFixed(2)}%
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-amber-600 dark:text-amber-400 tabular-nums">
+                            + ₹{fmt(hasPreTerms ? adjSGST : origSGST)}
+                          </span>
+                        </div>
+
+                        {/* Gross Amount */}
+                        <div className="flex justify-between items-center px-3 py-2 bg-muted/30">
+                          <span className="text-muted-foreground">
+                            Gross Amount
+                            <span className="ml-1 text-[10px] opacity-60">
+                              Taxable + CGST + SGST
+                            </span>
+                          </span>
+                          <span className="font-medium tabular-nums">
+                            ₹{fmt(adjGross)}
+                          </span>
+                        </div>
+
+                        {/* Post-GST billing terms */}
+                        {postTerms.map((term, i) => {
+                          const amt = postTermAmounts[i] ?? 0;
+                          const isAdd = term.termType === "Addition";
+                          return (
+                            <div
+                              key={`post-${i}`}
+                              className="flex justify-between items-center px-3 py-1.5"
+                            >
+                              <span className="text-muted-foreground">
+                                {term.masterTermName ?? `Term ${i + 1}`}
+                                <span className="ml-1 text-[10px] opacity-60">
+                                  · {isAdd ? "Addition" : "Deduction"} After GST
+                                  {term.type === "percentage"
+                                    ? ` · ${term.value}%`
+                                    : ""}
+                                </span>
+                              </span>
+                              <span
+                                className={
+                                  isAdd
+                                    ? "text-green-500 tabular-nums"
+                                    : "text-destructive tabular-nums"
+                                }
+                              >
+                                {isAdd ? "+ ₹" : "− ₹"}
+                                {fmt(amt)}
+                              </span>
+                            </div>
+                          );
+                        })}
+
+                        {/* Net Payable */}
+                        <div className="flex justify-between items-center px-3 py-2.5 bg-primary/[0.06]">
+                          <span className="font-heading font-semibold text-foreground">
+                            Net Payable
+                            <span className="ml-1 text-[10px] font-normal opacity-60">
+                              Final amount due
+                            </span>
+                          </span>
+                          <span className="font-heading font-bold text-primary tabular-nums">
+                            ₹{fmt(Math.round(netPayable * 100) / 100)}
+                          </span>
+                        </div>
                       </div>
-                    ))}
-                    {/* Per-item SGST rows */}
-                    {gstBreakdown.items.map((item, i) => (
-                      <div key={`sgst-${i}`} className="flex justify-between items-center px-3 py-1.5 bg-amber-500/[0.04]">
-                        <span className="text-muted-foreground">
-                          SGST [{item.sgstRate}%]
-                          <span className="ml-1 text-[10px] text-muted-foreground/60">· {item.itemName}</span>
-                        </span>
-                        <span className="text-amber-600 dark:text-amber-400 tabular-nums">+ ₹{fmt(item.sgstAmount)}</span>
-                      </div>
-                    ))}
-                    {/* Gross subtotal */}
-                    <div className="flex justify-between items-center px-3 py-2 bg-muted/30">
-                      <span className="text-muted-foreground">Gross Amount</span>
-                      <span className="font-medium tabular-nums">₹{fmt(gstBreakdown.totals.totalInclGST)}</span>
-                    </div>
-                    {/* Net Payable */}
-                    <div className="flex justify-between items-center px-3 py-2.5 bg-primary/[0.06]">
-                      <span className="font-heading font-semibold text-foreground">Net Payable</span>
-                      <span className="font-heading font-bold text-primary tabular-nums">₹{fmt(gstBreakdown.totals.totalInclGST)}</span>
-                    </div>
-                  </div>
+                    );
+                  })()
                 ) : (
                   <PriceBreakdownPanel
                     bd={bd}

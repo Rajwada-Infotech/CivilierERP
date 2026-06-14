@@ -5,6 +5,12 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const logger = require("../logger");
 const { getPool, sql } = require("../db");
 
+// NULL placeholders so every UNION ALL branch has the same column count.
+// Only the expense-booking branch populates GrnTotalAmount and BillingTermsData.
+const NULL_EXTRA = `
+  CAST(NULL AS DECIMAL(18,2)) AS GrnTotalAmount,
+  CAST(NULL AS NVARCHAR(MAX)) AS BillingTermsData,`;
+
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
@@ -24,6 +30,7 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)               AS ContractorName,
           CAST(NULL AS NVARCHAR)               AS SupplierName,
           TotalAmount                          AS Amount,
+          ${NULL_EXTRA}
           CAST(CreatedBy AS NVARCHAR(255))     AS CreatedBy,
           ISNULL(CAST(ApprovedBy AS NVARCHAR(255)), '')  AS ApprovedBy,
           ISNULL(CAST(ApprovedAt AS NVARCHAR), '')       AS ApprovedAt,
@@ -47,6 +54,7 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)               AS ContractorName,
           CAST(NULL AS NVARCHAR)               AS SupplierName,
           TotalAmount                          AS Amount,
+          ${NULL_EXTRA}
           CAST(CreatedBy AS NVARCHAR(255))     AS CreatedBy,
           ISNULL(CAST(ApprovedBy AS NVARCHAR(255)), '')  AS ApprovedBy,
           ISNULL(CAST(ApprovedAt AS NVARCHAR), '')       AS ApprovedAt,
@@ -70,6 +78,7 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)               AS ContractorName,
           CAST(NULL AS NVARCHAR)               AS SupplierName,
           PAmount                              AS Amount,
+          ${NULL_EXTRA}
           CAST(PCreatedBy AS NVARCHAR(255))    AS CreatedBy,
           ISNULL(CAST(PApprovedBy AS NVARCHAR(255)), '') AS ApprovedBy,
           ''                                   AS ApprovedAt,
@@ -93,6 +102,7 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)                           AS ContractorName,
           ISNULL(RPCustomerName, RPReceivedFrom)           AS SupplierName,
           RPAmount                                        AS Amount,
+          ${NULL_EXTRA}
           CAST(RPCreatedBy AS NVARCHAR(255))              AS CreatedBy,
           ISNULL(CAST(RPApprovedBy AS NVARCHAR(255)), '') AS ApprovedBy,
           ISNULL(CAST(RPApprovedAt AS NVARCHAR), '')      AS ApprovedAt,
@@ -116,6 +126,7 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)                     AS ContractorName,
           s.LHeadName                               AS SupplierName,
           grn.TotalAmount                           AS Amount,
+          ${NULL_EXTRA}
           CAST(ISNULL(po.PurchaseOrderNo, '') AS NVARCHAR(255)) AS CreatedBy,
           ISNULL((
             SELECT TOP 1 ApproverEmail
@@ -172,6 +183,14 @@ router.get("/", async (req, res) => {
             ELSE eb.EName
           END                      AS SupplierName,
           ISNULL(eb.ENetAmount, eb.EAmount) AS Amount,
+          -- Live GRN total (incl GST) for GRN-linked bookings; NULL otherwise.
+          CASE
+            WHEN eb.ESourceType = 'GRN' AND grn_eb.TotalAmount IS NOT NULL AND grn_eb.TotalAmount > 0
+            THEN grn_eb.TotalAmount
+            ELSE NULL
+          END                      AS GrnTotalAmount,
+          -- Billing terms JSON so the frontend can apply them on top of GrnTotalAmount.
+          eb.EBillingTermsData     AS BillingTermsData,
           CAST(ISNULL(u_created.name, CAST(eb.ECreatedBy AS NVARCHAR(255))) AS NVARCHAR(255))  AS CreatedBy,
           CAST(ISNULL(u_approved.name, '') AS NVARCHAR(255))                                    AS ApprovedBy,
           ''                       AS ApprovedAt,
@@ -205,6 +224,7 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)               AS ContractorName,
           CAST(NULL AS NVARCHAR)               AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))          AS Amount,
+          ${NULL_EXTRA}
           CAST(wd.CreatedBy AS NVARCHAR(255))  AS CreatedBy,
           ''                                   AS ApprovedBy,
           ''                                   AS ApprovedAt,
@@ -232,6 +252,7 @@ router.get("/", async (req, res) => {
             COALESCE(co.name, '')
           ) AS NVARCHAR(512))                  AS SupplierName,
           b.TotalAmount                        AS Amount,
+          ${NULL_EXTRA}
           CAST(b.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
           ''                                   AS ApprovedBy,
           ''                                   AS ApprovedAt,
@@ -257,6 +278,7 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)               AS ContractorName,
           CAST(NULL AS NVARCHAR)               AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))          AS Amount,
+          ${NULL_EXTRA}
           CAST(CreatedBy AS NVARCHAR(255))     AS CreatedBy,
           ''                                   AS ApprovedBy,
           ''                                   AS ApprovedAt,
@@ -280,6 +302,7 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)                                         AS ContractorName,
           ISNULL(mi.IssuedTo, ISNULL(p.name, mi.Reason))                AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))                                    AS Amount,
+          ${NULL_EXTRA}
           CAST(mi.CreatedBy AS NVARCHAR(255))                            AS CreatedBy,
           ''                                                             AS ApprovedBy,
           ''                                                             AS ApprovedAt,

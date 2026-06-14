@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { createPortal } from "react-dom";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -322,7 +322,8 @@ function Combobox({
   React.useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -425,7 +426,6 @@ export function AgreementsPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
-  const [menuPos, setMenuPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
 
   // computed balance
   const balanceAmount = useMemo(() => {
@@ -442,7 +442,12 @@ export function AgreementsPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: result, isLoading, isFetching, refetch } = useQuery({
+  const {
+    data: result,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useQuery({
     queryKey: ["agreements", page, search, statusFilter],
     queryFn: () =>
       fetchAgreements({
@@ -493,11 +498,13 @@ export function AgreementsPage() {
 
   const projectItems: ComboItem[] = useMemo(
     () =>
-      (meta?.projects ?? []).map((p) => ({
-        value: String(p.Id),
-        label: p.Name,
-      })),
-    [meta],
+      filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map(
+        (p) => ({
+          value: String(p.Id),
+          label: p.Name,
+        }),
+      ),
+    [meta, form.CompanyId],
   );
 
   const companyItems: ComboItem[] = useMemo(
@@ -801,9 +808,10 @@ export function AgreementsPage() {
         }
         .ag-menu-btn:hover { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
         .ag-menu {
+          position: absolute; right: 0; top: 100%; margin-top: 4px;
           background: hsl(var(--card)); border: 1px solid hsl(var(--border));
-          border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-          z-index: 9999; min-width: 140px; overflow: hidden;
+          border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.10);
+          z-index: 50; min-width: 140px; overflow: hidden;
           animation: ag-menu-in 0.1s ease;
         }
         @keyframes ag-menu-in { from { opacity:0; transform: translateY(-4px); } to { opacity:1; transform: translateY(0); } }
@@ -934,7 +942,10 @@ export function AgreementsPage() {
           { label: "Agreements", path: "/followup/agreement/agreements" },
         ]}
       />
-      <div className="ag-page relative space-y-8 mt-6" onClick={() => { setOpenMenuId(null); setMenuPos(null); }}>
+      <div
+        className="ag-page relative space-y-8 mt-6"
+        onClick={() => setOpenMenuId(null)}
+      >
         {/* ── Header ── */}
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -942,7 +953,9 @@ export function AgreementsPage() {
               Agreements
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {pagination ? `${pagination.total} agreement${pagination.total !== 1 ? "s" : ""}` : "Manage all agreements"}
+              {pagination
+                ? `${pagination.total} agreement${pagination.total !== 1 ? "s" : ""}`
+                : "Manage all agreements"}
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -951,7 +964,10 @@ export function AgreementsPage() {
               disabled={isFetching}
               className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
-              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              <RefreshCw
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
+              />
               Refresh
             </button>
             <Button
@@ -1223,24 +1239,38 @@ export function AgreementsPage() {
                           >
                             <button
                               className="ag-menu-btn"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (openMenuId === ag.Id) {
-                                  setOpenMenuId(null);
-                                  setMenuPos(null);
-                                } else {
-                                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                  const flip = window.innerHeight - rect.bottom < 120;
-                                  setMenuPos(flip
-                                    ? { bottom: window.innerHeight - rect.top + 4, right: window.innerWidth - rect.right }
-                                    : { top: rect.bottom + 4, right: window.innerWidth - rect.right }
-                                  );
-                                  setOpenMenuId(ag.Id);
-                                }
-                              }}
+                              onClick={() =>
+                                setOpenMenuId(
+                                  openMenuId === ag.Id ? null : ag.Id,
+                                )
+                              }
                             >
                               <MoreHorizontal size={15} />
                             </button>
+                            {openMenuId === ag.Id && (
+                              <div className="ag-menu">
+                                <button
+                                  className="ag-menu-item"
+                                  onClick={() => {
+                                    openEdit(ag);
+                                    setOpenMenuId(null);
+                                  }}
+                                >
+                                  <Pencil size={13} /> Edit
+                                </button>
+                                {canDeleteRecords && (
+                                  <button
+                                    className="ag-menu-item danger"
+                                    onClick={() => {
+                                      setDeleteId(ag.Id);
+                                      setOpenMenuId(null);
+                                    }}
+                                  >
+                                    <Trash2 size={13} /> Delete
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1321,29 +1351,6 @@ export function AgreementsPage() {
           )}
         </div>
       </div>
-
-      {/* ── Row action portal menu ── */}
-      {openMenuId !== null && menuPos && (() => {
-        const ag = agreements.find((a) => a.Id === openMenuId);
-        if (!ag) return null;
-        return createPortal(
-          <div
-            className="ag-menu"
-            style={{ position: "fixed", top: menuPos.top, bottom: menuPos.bottom, right: menuPos.right }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button className="ag-menu-item" onClick={() => { openEdit(ag); setOpenMenuId(null); setMenuPos(null); }}>
-              <Pencil size={13} /> Edit
-            </button>
-            {canDeleteRecords && (
-              <button className="ag-menu-item danger" onClick={() => { setDeleteId(ag.Id); setOpenMenuId(null); setMenuPos(null); }}>
-                <Trash2 size={13} /> Delete
-              </button>
-            )}
-          </div>,
-          document.body
-        );
-      })()}
 
       {/* ── Create / Edit Dialog ── */}
       <Dialog
@@ -1498,7 +1505,7 @@ export function AgreementsPage() {
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
                   <input
                     type="date"
@@ -1513,7 +1520,7 @@ export function AgreementsPage() {
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
                   <input
                     type="date"
@@ -1566,9 +1573,16 @@ export function AgreementsPage() {
           </div>
 
           <DialogFooter style={{ marginTop: 8 }}>
-            <button type="button" className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors" onClick={() => { setDialogOpen(false); setEditId(null); setForm(EMPTY_FORM); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDialogOpen(false);
+                setEditId(null);
+                setForm(EMPTY_FORM);
+              }}
+            >
               Cancel
-            </button>
+            </Button>
             <Button
               disabled={
                 !form.ApplicantId || createMut.isPending || updateMut.isPending

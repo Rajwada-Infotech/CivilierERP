@@ -79,33 +79,189 @@ export function ExpenseBookingPreviewModal({
     };
   } | null>(null);
 
+  // Billing terms fetched from master (used when EBillingTermsData is empty
+  // but the record has a billingTermId pointing to the master)
+  const [masterBillingTerms, setMasterBillingTerms] = useState<any[]>([]);
+
   useEffect(() => {
     setGrnBreakdown(null);
-    if (previewRecord?.eSourceType === "GRN" && previewRecord?.eSourceId) {
-      fetchWithAuth(`/api/grns/${previewRecord.eSourceId}/gst-breakdown`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (data?.totals?.totalInclGST > 0) setGrnBreakdown(data);
+    if (!previewRecord) return;
+
+    /**
+     * Given a GRNID, fetch /api/grns/:id/gst-breakdown and call setGrnBreakdown.
+     * Falls back to synthesizing from inclGST + stored rates if the API returns
+     * empty totals (e.g. GRN has no item-level HSN data yet).
+     */
+    const loadGrnBreakdown = async (grnId: number) => {
+      try {
+        const r = await fetchWithAuth(`/api/grns/${grnId}/gst-breakdown`);
+        const data = r.ok ? await r.json() : null;
+        if (data?.totals?.totalInclGST > 0) {
+          setGrnBreakdown(data);
+          return;
+        }
+      } catch {
+        /* fall through to synthesis */
+      }
+      // Synthesis fallback: back-calculate from stored incl-GST total + rates.
+      // Only fires when the per-item breakdown API returned zero/empty.
+      const inclGST = previewRecord.grnTotalAmount ?? 0;
+      if (inclGST > 0) {
+        const cgstRate = previewRecord.cgstRate ?? 0;
+        const sgstRate = previewRecord.sgstRate ?? 0;
+        const totalGstRate = cgstRate + sgstRate;
+        const base = totalGstRate > 0
+          ? Math.round((inclGST / (1 + totalGstRate / 100)) * 100) / 100
+          : inclGST;
+        const cgst = Math.round((base * cgstRate / 100) * 100) / 100;
+        const sgst = Math.round((base * sgstRate / 100) * 100) / 100;
+        setGrnBreakdown({
+          items: [],
+          totals: { totalBase: base, totalCGST: cgst, totalSGST: sgst, totalGST: cgst + sgst, totalInclGST: inclGST },
+        });
+      }
+    };
+
+    const { eSourceType, eSourceId } = previewRecord;
+
+    if (eSourceType === "GRN" && eSourceId) {
+      // Direct GRN link — load its breakdown immediately.
+      loadGrnBreakdown(eSourceId);
+    } else if (
+      (eSourceType === "PO" || eSourceType === "WO_PO") &&
+      eSourceId
+    ) {
+      // PO-linked booking: find the GRN(s) created against this PO,
+      // then load the most recent one's GST breakdown.
+      // This is the authoritative source for GST because the PO itself
+      // stores rates/GST at booking time, but the GRN holds the actual
+      // received quantities and item-level HSN rates used for payment.
+      fetchWithAuth(`/api/grns/by-po/${eSourceId}`)
+        .then((r) => (r.ok ? r.json() : []))
+        .then((grns: { GRNID: number }[]) => {
+          if (Array.isArray(grns) && grns.length > 0) {
+            // grns is ordered newest-first (ORDER BY GRNID DESC)
+            loadGrnBreakdown(grns[0].GRNID);
+          }
+          // If no GRNs exist for this PO, grnBreakdown stays null →
+          // modal falls back to standard breakdown using stored rates.
         })
-        .catch(() => {});
+        .catch(() => {
+          /* non-fatal — standard breakdown will be shown */
+        });
     }
+
+    // Fetch billing terms master to hydrate terms when EBillingTermsData is missing
+    fetchWithAuth("/api/billing-terms")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setMasterBillingTerms(Array.isArray(data) ? data : []))
+      .catch(() => {});
   }, [previewRecord?.id]);
 
+  // ── All hooks MUST be declared before any conditional return ──────────────
+  // Normalise billingTerms — prefer saved EBillingTermsData; if empty but
+  // billingTermId exists, hydrate from the fetched master record so the modal
+  // always shows the applied terms and their correct amounts.
+  const billingTerms = React.useMemo(() => {
+    if (!previewRecord) return [];
+    const saved = parseJsonArray(previewRecord.billingTerms ?? []);
+    if (saved.length > 0) return saved;
+    if (previewRecord.billingTermId && masterBillingTerms.length > 0) {
+      const master = masterBillingTerms.find(
+        (m: any) =>
+          String(m.BillingTermID) === String(previewRecord.billingTermId),
+      );
+      if (master) {
+        return [
+          {
+            applicable: true,
+            type: master.CalculationType === "flat" ? "fixed" : "percentage",
+            value: master.DiscountValue ?? 0,
+            appliedOn:
+              master.CalculationType === "After GST" ? "post-gst" : "pre-gst",
+            deductionType:
+              master.DeductionType === "Addition" ? "Addition" : "Deduction",
+            masterTermId: master.BillingTermID,
+            masterTermName: master.Name ?? previewRecord.billingTermName ?? "",
+            _key: `master-${master.BillingTermID}`,
+          },
+        ];
+      }
+    }
+    return [];
+  }, [
+    previewRecord?.billingTerms,
+    previewRecord?.billingTermId,
+    previewRecord?.billingTermName,
+    masterBillingTerms,
+  ]);
+
+  // For GRN: compute Net Payable from fetched GRN data + billing terms,
+  // respecting pre-GST vs post-GST ordering:
+  //   - Before GST terms: adjust base first, recompute GST on adjusted base, then gross
+  //   - After GST terms:  apply on gross after GST
+  const grnNetPayable = React.useMemo(() => {
+    if (!grnBreakdown) return null;
+
+    const origBase = grnBreakdown.totals.totalBase;
+    const origCGST = grnBreakdown.totals.totalCGST;
+    const origSGST = grnBreakdown.totals.totalSGST;
+    const origGross = grnBreakdown.totals.totalInclGST;
+
+    // Effective GST rates derived from actual GRN item totals
+    const effectiveCGSTRate = origBase > 0 ? (origCGST / origBase) * 100 : 0;
+    const effectiveSGSTRate = origBase > 0 ? (origSGST / origBase) * 100 : 0;
+
+    const preTerms = billingTerms.filter(
+      (t: any) => t.appliedOn !== "post-gst",
+    );
+    const postTerms = billingTerms.filter(
+      (t: any) => t.appliedOn === "post-gst",
+    );
+
+    // Step 1: apply pre-GST terms to base
+    let runningBase = origBase;
+    for (const t of preTerms) {
+      const amt =
+        t.type === "percentage"
+          ? (runningBase * (t.value ?? 0)) / 100
+          : (t.value ?? 0);
+      if (t.deductionType === "Addition") runningBase += amt;
+      else runningBase = Math.max(0, runningBase - amt);
+    }
+
+    // Step 2: recompute GST on adjusted base
+    const adjCGST = (runningBase * effectiveCGSTRate) / 100;
+    const adjSGST = (runningBase * effectiveSGSTRate) / 100;
+    const gross =
+      preTerms.length > 0 ? runningBase + adjCGST + adjSGST : origGross;
+
+    // Step 3: apply post-GST terms on gross
+    let running = gross;
+    for (const t of postTerms) {
+      const amt =
+        t.type === "percentage"
+          ? (running * (t.value ?? 0)) / 100
+          : (t.value ?? 0);
+      if (t.deductionType === "Addition") running += amt;
+      else running = Math.max(0, running - amt);
+    }
+
+    return Math.round(running);
+
+  }, [grnBreakdown, billingTerms]);
+
+  // ── Guard: nothing to render ───────────────────────────────────────────────
   if (!previewRecord) return null;
 
+  // ── Derived values (non-hooks, safe after the guard) ──────────────────────
   const hasEmi = !!(
     previewRecord.emi?.enabled && previewRecord.emi?.installmentCount
   );
 
-  // Normalise billingTerms — the API may return null/undefined when no terms are saved,
-  // so always coerce to an array before any checks.
-  const billingTerms = parseJsonArray(previewRecord.billingTerms ?? []);
-
-  // Use billingTerms array (multi-term) when available, otherwise fall back to
-  // the legacy single discount — ensures the total correctly reflects all applied terms.
+  // For the standard (non-GRN) breakdown, use computeBreakdown for GST components
   const effectiveTerms =
     billingTerms.length > 0 ? billingTerms : previewRecord.discount;
-
   const rbd = computeBreakdown(
     previewRecord.basicAmount,
     previewRecord.cgstRate,
@@ -116,24 +272,19 @@ export function ExpenseBookingPreviewModal({
   const hasIgst = (previewRecord.igstRate || 0) > 0;
   const hasDiscount =
     previewRecord.discount && (previewRecord.discount.value || 0) > 0;
-  // Use values computed from rbd (which now includes all billing terms)
   const cgstAmt = rbd.cgstAmount;
   const sgstAmt = rbd.sgstAmount;
   const igstAmt = rbd.igstAmount ?? 0;
 
-  // When GRN breakdown is available, use its exact totals for display.
-  // When billing terms are applied, always use the freshly computed rbd.netAmount
-  // so the total reflects all terms (not just the DB-stored value which may lag).
-  const displayNetAmount = grnBreakdown
-    ? grnBreakdown.totals.totalInclGST
-    : billingTerms.length > 0
-      ? rbd.netAmount
-      : (previewRecord.netAmount ?? rbd.netAmount);
+  // Net Payable: GRN records use grnNetPayable (live calc from GRN data + terms).
+  // Non-GRN records use rbd.netAmount (computeBreakdown from stored fields).
+  const displayNetAmount =
+    grnNetPayable !== null ? grnNetPayable : rbd.netAmount;
 
-  // Recalculate remaining when we have a corrected net amount
-  const displayRemainingAmount = grnBreakdown
-    ? Math.max(0, displayNetAmount - (previewRecord.totalPaid ?? 0))
-    : (previewRecord.remainingAmount ?? 0);
+  const displayRemainingAmount = Math.max(
+    0,
+    displayNetAmount - (previewRecord.totalPaid ?? 0),
+  );
 
   return (
     <Dialog open={!!previewRecord} onOpenChange={(open) => !open && onClose()}>
@@ -281,7 +432,14 @@ export function ExpenseBookingPreviewModal({
                       GST Breakdown by Item
                     </span>
                   </div>
-                  <div className="overflow-x-auto">
+                  {grnBreakdown.items.length === 0 && null}
+                  <div
+                    className="overflow-x-auto"
+                    style={{
+                      display:
+                        grnBreakdown.items.length === 0 ? "none" : undefined,
+                    }}
+                  >
                     <table className="w-full text-[11px]">
                       <thead>
                         <tr className="border-b border-blue-500/10 bg-muted/10">
@@ -345,63 +503,205 @@ export function ExpenseBookingPreviewModal({
                     </table>
                   </div>
                 </div>
-                {/* Cumulative GST summary */}
-                <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-sm">
-                  <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
-                    <div>
-                      <p className="text-xs font-medium">Basic Amount</p>
-                      <p className="text-[10px] text-muted-foreground">
-                        Pre-tax value (excl. GST)
-                      </p>
-                    </div>
-                    <p className="font-mono text-sm font-semibold">
-                      ₹{fmt(grnBreakdown.totals.totalBase)}
-                    </p>
-                  </div>
-                  {grnBreakdown.totals.totalCGST > 0 && (
-                    <div className="flex items-center justify-between px-4 py-2.5">
-                      <div>
-                        <p className="text-xs text-muted-foreground">CGST</p>
-                        <p className="text-[10px] text-muted-foreground">
-                          Central GST
+                {/* Cumulative GST summary — recomputes GST when pre-GST terms adjust the base */}
+                {(() => {
+                  const origBase = grnBreakdown.totals.totalBase;
+                  const origCGST = grnBreakdown.totals.totalCGST;
+                  const origSGST = grnBreakdown.totals.totalSGST;
+                  const origGross = grnBreakdown.totals.totalInclGST;
+                  const effectiveCGSTRate =
+                    origBase > 0 ? (origCGST / origBase) * 100 : 0;
+                  const effectiveSGSTRate =
+                    origBase > 0 ? (origSGST / origBase) * 100 : 0;
+
+                  const preTerms = billingTerms.filter(
+                    (t: any) => t.appliedOn !== "post-gst",
+                  );
+
+                  // Compute adjusted taxable base
+                  let taxableBase = origBase;
+                  for (const t of preTerms) {
+                    const a =
+
+                      t.type === "percentage"
+                        ? (taxableBase * (t.value ?? 0)) / 100
+                        : (t.value ?? 0);
+                    if (t.deductionType === "Addition") taxableBase += a;
+                    else taxableBase = Math.max(0, taxableBase - a);
+                  }
+
+                  const hasPreTerms = preTerms.length > 0;
+                  const displayCGST = hasPreTerms
+                    ? (taxableBase * effectiveCGSTRate) / 100
+                    : origCGST;
+                  const displaySGST = hasPreTerms
+                    ? (taxableBase * effectiveSGSTRate) / 100
+                    : origSGST;
+                  const displayGross = hasPreTerms
+                    ? taxableBase + displayCGST + displaySGST
+                    : origGross;
+
+                  return (
+                    <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-sm">
+                      <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
+                        <div>
+                          <p className="text-xs font-medium">Basic Amount</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            Pre-tax value (excl. GST)
+                          </p>
+                        </div>
+                        <p className="font-mono text-sm font-semibold">
+                          ₹{fmt(origBase)}
                         </p>
                       </div>
-                      <p className="font-mono text-sm text-foreground/80">
-                        + ₹{fmt(grnBreakdown.totals.totalCGST)}
-                      </p>
-                    </div>
-                  )}
-                  {grnBreakdown.totals.totalSGST > 0 && (
-                    <div className="flex items-center justify-between px-4 py-2.5">
-                      <div>
-                        <p className="text-xs text-muted-foreground">SGST</p>
-                        <p className="text-[10px] text-muted-foreground">
-                          State GST
+                      {displayCGST > 0 && (
+                        <div className="flex items-center justify-between px-4 py-2.5">
+                          <div>
+                            <p className="text-xs text-muted-foreground">
+                              CGST
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              Central GST
+                            </p>
+                          </div>
+                          <p className="font-mono text-sm text-foreground/80">
+                            + ₹{fmt(displayCGST)}
+                          </p>
+                        </div>
+                      )}
+                      {displaySGST > 0 && (
+                        <div className="flex items-center justify-between px-4 py-2.5">
+                          <div>
+                            <p className="text-xs text-muted-foreground">
+                              SGST
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              State GST
+                            </p>
+                          </div>
+                          <p className="font-mono text-sm text-foreground/80">
+                            + ₹{fmt(displaySGST)}
+                          </p>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20">
+                        <div>
+                          <p className="text-xs font-medium">Gross Amount</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            Basic + CGST + SGST
+                          </p>
+                        </div>
+                        <p className="font-mono text-sm font-semibold">
+                          ₹{fmt(displayGross)}
                         </p>
                       </div>
-                      <p className="font-mono text-sm text-foreground/80">
-                        + ₹{fmt(grnBreakdown.totals.totalSGST)}
-                      </p>
+                      {/* Billing term rows — rendered with correct pre/post-GST base.
+                      Pre-GST terms apply sequentially on the base amount.
+                      Post-GST terms apply sequentially on the gross (base + recalculated GST). */}
+                      {billingTerms.map((t: any, i: number) => {
+                        const origBase = grnBreakdown.totals.totalBase;
+                        const origCGST = grnBreakdown.totals.totalCGST;
+                        const origSGST = grnBreakdown.totals.totalSGST;
+                        const origGross = grnBreakdown.totals.totalInclGST;
+                        const effectiveCGSTRate =
+                          origBase > 0 ? (origCGST / origBase) * 100 : 0;
+                        const effectiveSGSTRate =
+                          origBase > 0 ? (origSGST / origBase) * 100 : 0;
+
+                        const isPreGst = t.appliedOn !== "post-gst";
+                        const preTerms = billingTerms.filter(
+                          (_t: any) => _t.appliedOn !== "post-gst",
+                        );
+                        const postTerms = billingTerms.filter(
+                          (_t: any) => _t.appliedOn === "post-gst",
+                        );
+
+                        let base: number;
+                        if (isPreGst) {
+                          // Running base after previous pre-GST terms
+                          let running = origBase;
+                          for (let j = 0; j < preTerms.indexOf(t); j++) {
+                            const prev = preTerms[j];
+                            const a =
+                              prev.type === "percentage"
+                                ? (running * (prev.value ?? 0)) / 100
+                                : (prev.value ?? 0);
+                            if (prev.deductionType === "Addition") running += a;
+                            else running = Math.max(0, running - a);
+                          }
+                          base = running;
+                        } else {
+                          // Running gross after all pre-GST terms + previous post-GST terms
+                          let runBase = origBase;
+                          for (const pt of preTerms) {
+                            const a =
+                              pt.type === "percentage"
+                                ? (runBase * (pt.value ?? 0)) / 100
+                                : (pt.value ?? 0);
+                            if (pt.deductionType === "Addition") runBase += a;
+                            else runBase = Math.max(0, runBase - a);
+                          }
+                          const adjGross =
+                            preTerms.length > 0
+                              ? runBase +
+                                (runBase * effectiveCGSTRate) / 100 +
+                                (runBase * effectiveSGSTRate) / 100
+                              : origGross;
+                          let runGross = adjGross;
+                          for (let j = 0; j < postTerms.indexOf(t); j++) {
+                            const prev = postTerms[j];
+                            const a =
+                              prev.type === "percentage"
+                                ? (runGross * (prev.value ?? 0)) / 100
+                                : (prev.value ?? 0);
+                            if (prev.deductionType === "Addition")
+                              runGross += a;
+                            else runGross = Math.max(0, runGross - a);
+                          }
+                          base = runGross;
+                        }
+
+                        const amt =
+                          t.type === "percentage"
+                            ? (base * (t.value ?? 0)) / 100
+                            : (t.value ?? 0);
+                        const isAdd = t.deductionType === "Addition";
+                        return (
+                          <div
+                            key={t._key ?? t.masterTermId ?? i}
+                            className={`flex items-center justify-between px-4 py-2.5 ${isAdd ? "bg-emerald-500/5" : "bg-red-500/5"}`}
+                          >
+                            <p
+                              className={`text-xs flex items-center gap-1.5 ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
+                            >
+                              <TrendingUp size={10} />
+                              {t.masterTermName || `Term ${i + 1}`}
+                              <span className="font-mono text-[10px] opacity-70">
+                                {t.type === "percentage"
+                                  ? `${t.value ?? 0}%`
+                                  : `₹${fmt(t.value ?? 0)}`}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground/60">
+                                ({isPreGst ? "pre-GST" : "post-GST"})
+                              </span>
+                            </p>
+                            <p
+                              className={`font-mono text-sm font-semibold ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}
+                            >
+                              {isAdd ? "+ " : "− "}₹{fmt(amt)}
+                            </p>
+                          </div>
+                        );
+                      })}
                     </div>
-                  )}
-                  <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20">
-                    <div>
-                      <p className="text-xs font-medium">Gross Amount</p>
-                      <p className="text-[10px] text-muted-foreground">
-                        Basic + CGST + SGST
-                      </p>
-                    </div>
-                    <p className="font-mono text-sm font-semibold">
-                      ₹{fmt(grnBreakdown.totals.totalInclGST)}
-                    </p>
-                  </div>
-                </div>
+                  );
+                })()}
                 <div className="flex items-center justify-between px-4 py-3 bg-primary/10 border border-primary/20 rounded-xl">
                   <p className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
                     Net Payable
                   </p>
                   <p className="font-mono text-base font-bold text-primary">
-                    ₹{fmt(grnBreakdown.totals.totalInclGST)}
+                    ₹{fmt(displayNetAmount)}
                   </p>
                 </div>
               </div>
@@ -451,55 +751,25 @@ export function ExpenseBookingPreviewModal({
                         </p>
                       </div>
                     )}
-                  {/* Billing Terms — pre-GST applied before GST */}
-                  {(rbd.preGstTerms ?? []).map((t, i) => {
-                    const amt =
-                      t.type === "percentage"
-                        ? (previewRecord.basicAmount * t.value) / 100
-                        : t.value;
-                    const isAdd = t.termType === "Addition";
-                    return (
-                      <div
-                        key={t._key ?? i}
-                        className={`flex items-center justify-between px-4 py-2.5 ${isAdd ? "bg-emerald-500/5" : "bg-red-500/5"}`}
-                      >
-                        <p
-                          className={`text-xs flex items-center gap-1.5 ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
-                        >
-                          <TrendingUp size={10} />
-                          {t.masterTermName || `Term ${i + 1}`}
-                          <span className="font-mono text-[10px] bg-current/10 px-1.5 py-0.5 rounded opacity-70">
-                            {t.type === "percentage"
-                              ? `${t.value}%`
-                              : `₹${fmt(t.value)}`}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground/60">
-                            (pre-GST)
-                          </span>
-                        </p>
-                        <p
-                          className={`font-mono text-sm font-semibold ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}
-                        >
-                          {isAdd ? "+ " : "− "}₹{fmt(amt)}
-                        </p>
-                      </div>
-                    );
-                  })}
-                  {/* Billing Terms — post-GST applied after GST */}
-                  {(rbd.postGstTerms ?? []).map((t, i) => {
-                    const grossForCalc =
+                  {/* Billing Terms — rendered directly from billingTerms so they
+                      always appear regardless of applicable flag. Pre-GST terms use
+                      basicAmount as base; post-GST terms use gross (basic + GST). */}
+                  {billingTerms.map((t: any, i: number) => {
+                    const isPreGst = t.appliedOn !== "post-gst";
+                    const gross =
                       rbd.taxableAmount +
                       rbd.cgstAmount +
                       rbd.sgstAmount +
                       (rbd.igstAmount ?? 0);
+                    const base = isPreGst ? previewRecord.basicAmount : gross;
                     const amt =
                       t.type === "percentage"
-                        ? (grossForCalc * t.value) / 100
-                        : t.value;
-                    const isAdd = t.termType === "Addition";
+                        ? (base * (t.value ?? 0)) / 100
+                        : (t.value ?? 0);
+                    const isAdd = t.deductionType === "Addition";
                     return (
                       <div
-                        key={t._key ?? `post-${i}`}
+                        key={t._key ?? t.masterTermId ?? i}
                         className={`flex items-center justify-between px-4 py-2.5 ${isAdd ? "bg-emerald-500/5" : "bg-red-500/5"}`}
                       >
                         <p
@@ -509,11 +779,11 @@ export function ExpenseBookingPreviewModal({
                           {t.masterTermName || `Term ${i + 1}`}
                           <span className="font-mono text-[10px] bg-current/10 px-1.5 py-0.5 rounded opacity-70">
                             {t.type === "percentage"
-                              ? `${t.value}%`
-                              : `₹${fmt(t.value)}`}
+                              ? `${t.value ?? 0}%`
+                              : `₹${fmt(t.value ?? 0)}`}
                           </span>
                           <span className="text-[10px] text-muted-foreground/60">
-                            (post-GST)
+                            ({isPreGst ? "pre-GST" : "post-GST"})
                           </span>
                         </p>
                         <p

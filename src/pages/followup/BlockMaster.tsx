@@ -138,14 +138,11 @@ const BlockMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs
-        items={[{label: "Follow-Up", path: "/followup"}, {label: "Setup"}, {label: "Block Master"}]}
+        items={["Dashboard", "Follow-Up", "Setup", "Block Master"]}
       />
-      <div className="mt-6 mb-4">
-        <h1 className="text-xl font-heading font-bold text-foreground">
-          Block Master
-        </h1>
-        <p className="text-xs text-muted-foreground mt-0.5">Manage blocks within your projects.</p>
-      </div>
+      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
+        Block Master
+      </h1>
       <MasterPage
         title="Block"
         fields={fields}

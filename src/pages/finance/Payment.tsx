@@ -53,6 +53,7 @@ import {
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { computeGrnNetWithTerms } from "@/pages/material/ExpenseBooking/helpers";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -297,7 +298,7 @@ const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
   if (!res.ok) return [];
   const raw = await res.json();
   const items: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
-  return items.map((o: any) => ({
+  const mapped = items.map((o: any) => ({
     ...o,
     companyName:
       o.companyName ||
@@ -323,6 +324,32 @@ const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
       o.EName ||
       null,
   }));
+
+  // For booking-type options, fetch the authoritative amount from /:id
+  // (the /options endpoint stores ENetAmount which may be stale for GRN bookings)
+  const enriched = await Promise.all(
+    mapped.map(async (o) => {
+      if (o.type !== "booking") return o;
+      try {
+        const det = await fetchWithAuth(`/api/expense-booking/${o.id}`, {
+          cache: "no-store",
+        });
+        if (!det.ok) return o;
+        const d = await det.json();
+        const correctAmount = d.ENetAmount ?? d.EAmount ?? o.amount;
+        if (correctAmount == null) return o;
+        const amountInt = Math.round(Number(correctAmount));
+        return {
+          ...o,
+          amount: Number(correctAmount),
+          label: `${o.docNo} — ${o.projectName ?? ""} (₹${amountInt.toLocaleString("en-IN")})`,
+        };
+      } catch {
+        return o;
+      }
+    }),
+  );
+  return enriched;
 };
 
 const fetchExpenseDetail = async (
@@ -2031,6 +2058,8 @@ const Payment: React.FC = () => {
   const { data: expenseOptions = [] } = useQuery<ExpenseOption[]>({
     queryKey: ["expense-options-payment"],
     queryFn: fetchExpenseOptions,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   // ── Stats ──────────────────────────────────────────────────────────────────
@@ -2203,12 +2232,27 @@ const Payment: React.FC = () => {
             );
             return matched?.label || String(detail.ECompanyId ?? "");
           })(),
-          amount: detail.ENetAmount ?? detail.EAmount ?? null,
+          // Amount field = stored ENetAmount (net after billing terms on GRN total).
+          // Falls back to EGrnTotalAmount (incl-GST) if ENetAmount not set, then EAmount.
+          amount: detail.ENetAmount
+            ? parseFloat(String(detail.ENetAmount))
+            : (detail as any).EGrnTotalAmount
+              ? parseFloat((detail as any).EGrnTotalAmount)
+              : detail.EAmount ?? null,
           docType: detail.DocTypeName || detail.EDocumentType || "",
-          baseAmount: detail.EAmount ?? null,
-          cgstRate: detail.ECgstRate ?? null,
-          sgstRate: detail.ESgstRate ?? null,
-          igstRate: detail.EIgstRate ?? null,
+          // For GRN: baseAmount = pre-tax base (totalBase), rates from DB.
+          // GST breakdown API will override these with precise per-item values.
+          // If EGrnTotalAmount is set but breakdown hasn't loaded yet,
+          // zero out GST rates to avoid double-counting on the incl-GST figure.
+          baseAmount: (detail as any).EGrnTotalAmount
+            ? parseFloat((detail as any).EGrnTotalAmount)  // will be overridden by GRN breakdown
+            : (detail.EAmount ?? null),
+          // Zero out GST rates for GRN records — the GRN breakdown fetch below
+          // will set correct totalBase + rates. Without this, if the breakdown
+          // API fails, cgstRate applied on EGrnTotalAmount (incl-GST) would double-count GST.
+          cgstRate: (detail as any).EGrnTotalAmount ? 0 : (detail.ECgstRate ?? null),
+          sgstRate: (detail as any).EGrnTotalAmount ? 0 : (detail.ESgstRate ?? null),
+          igstRate: (detail as any).EGrnTotalAmount ? 0 : (detail.EIgstRate ?? null),
           billingTermsData:
             detail.EBillingTermsData ?? detail.EDiscountData ?? null,
         }));
@@ -2233,27 +2277,54 @@ const Payment: React.FC = () => {
           }));
         }
 
-        // If this expense is linked to a GRN, fetch the per-item GST breakdown
-        if (detail.ESourceType === "GRN" && detail.ESourceId) {
+        // Helper: given a GRNID, fetch its item-level GST breakdown and populate
+        // grnGstBreakdown + form rates. Used by both GRN-direct and PO-indirect paths.
+        const applyGrnBreakdown = async (grnId: number | string) => {
           try {
             const bdRes = await fetchWithAuth(
-              `/api/grns/${detail.ESourceId}/gst-breakdown`,
+              `/api/grns/${grnId}/gst-breakdown`,
             );
             if (bdRes.ok) {
               const bd = await bdRes.json();
               setGrnGstBreakdown(bd);
-              // Override form amounts with correct values from GRN item-level GST breakdown.
-              // This ensures the Amount field matches the Net Payable shown in the breakdown.
+              // Override form amounts with correct values from GRN item-level GST breakdown,
+              // then apply billing terms (pre/post-GST) to arrive at the true Net Payable.
               if (bd?.totals?.totalInclGST > 0) {
+                setGrnGstBreakdown(bd);
                 const t = bd.totals;
-                const inclTotal = Math.round(t.totalInclGST * 100) / 100;
                 const avgCGST =
                   t.totalBase > 0 ? (t.totalCGST / t.totalBase) * 100 : 0;
                 const avgSGST =
                   t.totalBase > 0 ? (t.totalSGST / t.totalBase) * 100 : 0;
+
+                // Parse billing terms from the expense detail
+                let billingTerms: any[] = [];
+                try {
+                  const raw =
+                    detail.EBillingTermsData ?? detail.EDiscountData ?? null;
+                  if (raw) {
+                    let parsed = JSON.parse(raw);
+                    if (typeof parsed === "string") parsed = JSON.parse(parsed);
+                    billingTerms = Array.isArray(parsed) ? parsed : [];
+                  }
+                } catch {
+                  /* ignore parse errors */
+                }
+
+                // Compute net payable: apply billing terms on GRN gross with
+                // correct pre/post-GST ordering (same logic as MaterialExpenseBooking)
+                const netPayable =
+                  billingTerms.length > 0
+                    ? computeGrnNetWithTerms(
+                        t.totalInclGST,
+                        billingTerms,
+                        t.totalBase,
+                      )
+                    : Math.round(t.totalInclGST * 100) / 100;
+
                 setForm((prev) => ({
                   ...prev,
-                  amount: inclTotal, // sync Amount field
+                  amount: netPayable, // correct net after billing terms
                   baseAmount: Math.round(t.totalBase * 100) / 100,
                   cgstRate: Math.round(avgCGST * 100) / 100,
                   sgstRate: Math.round(avgSGST * 100) / 100,
@@ -2263,6 +2334,31 @@ const Payment: React.FC = () => {
             }
           } catch {
             /* non-fatal */
+          }
+        };
+
+        // If this expense is linked to a GRN directly, fetch the per-item GST breakdown.
+        // For PO/WO_PO-linked bookings, find the GRN created against that PO and use its breakdown —
+        // because the actual GST lives in the GRN items (PO stores rates but GRN stores received actuals).
+        if (detail.ESourceType === "GRN" && detail.ESourceId) {
+          await applyGrnBreakdown(detail.ESourceId);
+        } else if (
+          (detail.ESourceType === "PO" || detail.ESourceType === "WO_PO") &&
+          detail.ESourceId
+        ) {
+          try {
+            const poGrnsRes = await fetchWithAuth(
+              `/api/grns/by-po/${detail.ESourceId}`,
+            );
+            if (poGrnsRes.ok) {
+              const poGrns: { GRNID: number }[] = await poGrnsRes.json();
+              if (Array.isArray(poGrns) && poGrns.length > 0) {
+                // grns returned newest-first; use most recent GRN's breakdown
+                await applyGrnBreakdown(poGrns[0].GRNID);
+              }
+            }
+          } catch {
+            /* non-fatal — breakdown stays null, standard cgstRate/sgstRate used */
           }
         } else {
           setGrnGstBreakdown(null);
@@ -2677,6 +2773,108 @@ const Payment: React.FC = () => {
                     );
                   })()}
 
+                {!form.expenseRef && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-1">
+                    <Field label="Company">
+                      <div className="relative">
+                        <Building2
+                          size={13}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                        <select
+                          value={(() => {
+                            const asNum = parseInt(form.company, 10);
+                            if (
+                              !isNaN(asNum) &&
+                              String(asNum) === form.company.trim()
+                            )
+                              return String(asNum);
+                            const matched = companyOptions.find(
+                              (c) => c.label === form.company,
+                            );
+                            return matched ? String(matched.id) : "";
+                          })()}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            const label =
+                              companyOptions.find((c) => String(c.id) === id)
+                                ?.label || "";
+                            set("company", label);
+                            set("project", "");
+                            set("projectSite", "");
+                          }}
+                          className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Select company…</option>
+                          {companyOptions.map((c) => (
+                            <option key={c.id} value={String(c.id)}>
+                              {c.label}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown
+                          size={11}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Project / Site">
+                      <div className="relative">
+                        <FolderKanban
+                          size={13}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                        <select
+                          value={(() => {
+                            const matched = projectOptions.find(
+                              (p) =>
+                                p.label === form.project ||
+                                p.label === form.projectSite,
+                            );
+                            return matched ? String(matched.id) : "";
+                          })()}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            const label =
+                              projectOptions.find((p) => String(p.id) === id)
+                                ?.label || "";
+                            set("project", label);
+                            set("projectSite", label);
+                          }}
+                          className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Select project…</option>
+                          {(() => {
+                            const asNum = parseInt(form.company, 10);
+                            const companyId =
+                              !isNaN(asNum) &&
+                              String(asNum) === form.company.trim()
+                                ? asNum
+                                : (companyOptions.find(
+                                    (c) => c.label === form.company,
+                                  )?.id ?? null);
+                            return (
+                              companyId
+                                ? projectOptions.filter(
+                                    (p) => p.company_id === companyId,
+                                  )
+                                : projectOptions
+                            ).map((p) => (
+                              <option key={p.id} value={String(p.id)}>
+                                {p.label}
+                              </option>
+                            ));
+                          })()}
+                        </select>
+                        <ChevronDown
+                          size={11}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                      </div>
+                    </Field>
+                  </div>
+                )}
+
                 {form.expenseRef && (
                   <AutoFillBanner
                     docNo={form.expenseRef}
@@ -2925,7 +3123,8 @@ const Payment: React.FC = () => {
                         (t) => t.appliedOn === "post-gst",
                       );
 
-                      // Compute taxable after pre-GST terms
+                      // Apply pre-GST terms sequentially to taxable base, then
+                      // recompute GST on adjusted base. Post-GST terms apply on gross.
                       let taxable = base;
                       const preGstRows: {
                         term: (typeof preGst)[0];
@@ -2941,21 +3140,46 @@ const Payment: React.FC = () => {
                         else taxable = Math.max(0, taxable - amt);
                       }
 
-                      // When a GRN breakdown is available, use its exact per-item sums
-                      // instead of recomputing from averaged rates — avoids floating-point drift.
-                      const cgst = grnGstBreakdown
-                        ? grnGstBreakdown.totals.totalCGST
-                        : (taxable * cgstRate) / 100;
-                      const sgst = grnGstBreakdown
-                        ? grnGstBreakdown.totals.totalSGST
-                        : (taxable * sgstRate) / 100;
-                      const igst = grnGstBreakdown
-                        ? 0
-                        : (taxable * igstRate) / 100;
-                      let gross = grnGstBreakdown
-                        ? grnGstBreakdown.totals.totalInclGST
-                        : taxable + cgst + sgst + igst;
+                      // Derive effective GST rates from GRN breakdown to recompute
+                      // GST correctly on the adjusted taxable base.
+                      const effectiveCGSTRate =
+                        grnGstBreakdown && grnGstBreakdown.totals.totalBase > 0
+                          ? (grnGstBreakdown.totals.totalCGST /
+                              grnGstBreakdown.totals.totalBase) *
+                            100
+                          : cgstRate;
+                      const effectiveSGSTRate =
+                        grnGstBreakdown && grnGstBreakdown.totals.totalBase > 0
+                          ? (grnGstBreakdown.totals.totalSGST /
+                              grnGstBreakdown.totals.totalBase) *
+                            100
+                          : sgstRate;
 
+                      // When pre-GST terms exist, recompute GST on adjusted base.
+                      // Otherwise use exact per-item sums from GRN breakdown.
+                      const hasPreTerms = preGstRows.length > 0;
+                      const cgst = hasPreTerms
+                        ? (taxable * effectiveCGSTRate) / 100
+                        : grnGstBreakdown
+                          ? grnGstBreakdown.totals.totalCGST
+                          : (taxable * cgstRate) / 100;
+                      const sgst = hasPreTerms
+                        ? (taxable * effectiveSGSTRate) / 100
+                        : grnGstBreakdown
+                          ? grnGstBreakdown.totals.totalSGST
+                          : (taxable * sgstRate) / 100;
+                      const igst = hasPreTerms
+                        ? 0
+                        : grnGstBreakdown
+                          ? 0
+                          : (taxable * igstRate) / 100;
+                      let gross = hasPreTerms
+                        ? taxable + cgst + sgst + igst
+                        : grnGstBreakdown
+                          ? grnGstBreakdown.totals.totalInclGST
+                          : taxable + cgst + sgst + igst;
+
+                      // Apply post-GST terms sequentially on gross
                       const postGstRows: {
                         term: (typeof postGst)[0];
                         amt: number;
@@ -2970,8 +3194,9 @@ const Payment: React.FC = () => {
                         else gross = Math.max(0, gross - amt);
                       }
 
-                      const roundOff = Math.round(gross) - gross;
-                      const net = Math.round(gross);
+                      // Net Payable = gross after all term adjustments
+                      const roundOff = 0;
+                      const net = Math.round(gross * 100) / 100;
 
                       const hasGst = cgst + sgst + igst > 0;
                       const hasTerms =
@@ -3109,11 +3334,17 @@ const Payment: React.FC = () => {
                             )}
 
                           <div className="space-y-1.5">
-                            {/* Base */}
+                            {/* Base — for GRN breakdown always show totalBase (pre-tax),
+                                not form.baseAmount which may still hold the incl-GST figure
+                                if the setForm override hasn't landed yet */}
                             <Row
                               label="Basic Amount"
                               sub={grnGstBreakdown ? "Excl. GST" : undefined}
-                              value={formatINR(base)}
+                              value={formatINR(
+                                grnGstBreakdown
+                                  ? grnGstBreakdown.totals.totalBase
+                                  : base,
+                              )}
                             />
 
                             {/* Pre-GST billing terms */}
@@ -3204,7 +3435,10 @@ const Payment: React.FC = () => {
                               </>
                             )}
 
-                            {/* Gross before post-GST */}
+                            {/* Gross before post-GST — use the pre-computed `gross`
+                                variable which equals totalInclGST when a GRN breakdown
+                                is available, avoiding the double-count from
+                                (inclGST base) + cgst + sgst */}
                             {(hasGst || hasTerms) && (
                               <>
                                 <div className="border-t border-border/40 pt-1" />
@@ -3215,9 +3449,7 @@ const Payment: React.FC = () => {
                                       ? "Taxable + GST"
                                       : "Before post-GST adjustments"
                                   }
-                                  value={formatINR(
-                                    taxable + cgst + sgst + igst,
-                                  )}
+                                  value={formatINR(gross)}
                                   bold
                                 />
                               </>

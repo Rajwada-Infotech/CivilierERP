@@ -1,4 +1,5 @@
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useMemo, useState } from "react";
+import { filterProjectsByCompany } from "@/lib/projectBelongsTo";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -17,7 +18,6 @@ import {
   MoreHorizontal,
   ChevronLeft,
   ChevronRight,
-  KeyRound,
   Zap,
   Droplets,
   Car,
@@ -28,7 +28,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { DashboardBackground } from "@/components/DashboardBackground";
+
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   Dialog,
@@ -342,7 +342,6 @@ function Combobox({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
   const selected = items.find((i) => i.value === value);
   const filtered = useMemo(() => {
     if (!q) return items;
@@ -354,17 +353,8 @@ function Combobox({
     );
   }, [items, q]);
 
-  useEffect(() => {
-    if (!open) return;
-    function handle(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
-  }, [open]);
-
   return (
-    <div className="ho-combo" ref={ref}>
+    <div className="ho-combo">
       <button
         type="button"
         className={`ho-combo-trigger${open ? " open" : ""}${!value ? " empty" : ""}${disabled ? " disabled" : ""}`}
@@ -493,7 +483,12 @@ export function HandoverPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: result, isLoading, isFetching, refetch } = useQuery({
+  const {
+    data: result,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useQuery({
     queryKey: ["handovers", page, search, statusFilter],
     queryFn: () =>
       fetchHandovers({
@@ -559,11 +554,13 @@ export function HandoverPage() {
 
   const projectItems: ComboItem[] = useMemo(
     () =>
-      (meta?.projects ?? []).map((p) => ({
-        value: String(p.Id),
-        label: p.Name,
-      })),
-    [meta],
+      filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map(
+        (p) => ({
+          value: String(p.Id),
+          label: p.Name,
+        }),
+      ),
+    [meta, form.CompanyId],
   );
 
   const companyItems: ComboItem[] = useMemo(
@@ -1015,7 +1012,10 @@ export function HandoverPage() {
           { label: "Handover", path: "/followup/closure/handover" },
         ]}
       />
-      <div className="ho-page relative space-y-8 mt-6" onClick={() => setOpenMenuId(null)}>
+      <div
+        className="ho-page relative space-y-8 mt-6"
+        onClick={() => setOpenMenuId(null)}
+      >
         {/* ── Header ── */}
         <div className="flex items-start justify-between gap-4">
           <div className="ho-title-row">
@@ -1031,7 +1031,10 @@ export function HandoverPage() {
               disabled={isFetching}
               className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
-              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              <RefreshCw
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
+              />
               Refresh
             </button>
             <Button
@@ -1046,58 +1049,58 @@ export function HandoverPage() {
 
         {/* Filter + search */}
         <div className="ho-filter-bar">
-            <div className="ho-search-wrap">
-              <Search size={14} />
-              <input
-                className="ho-search"
-                placeholder="Search by applicant, handover no, unit…"
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
+          <div className="ho-search-wrap">
+            <Search size={14} />
+            <input
+              className="ho-search"
+              placeholder="Search by applicant, handover no, unit…"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+            />
+            {search && (
+              <button
+                className="ho-search-clear"
+                onClick={() => {
+                  setSearch("");
                   setPage(1);
                 }}
-              />
-              {search && (
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+          <div className="ho-pills">
+            {STATUS_FILTERS.map((s) => {
+              const isActive = statusFilter === s;
+              const pillClass = isActive
+                ? s === ""
+                  ? "ho-pill active"
+                  : s === "Scheduled"
+                    ? "ho-pill active-scheduled"
+                    : s === "Completed"
+                      ? "ho-pill active-completed"
+                      : s === "Delayed"
+                        ? "ho-pill active-delayed"
+                        : "ho-pill active-cancelled"
+                : "ho-pill";
+              return (
                 <button
-                  className="ho-search-clear"
+                  key={s}
+                  className={pillClass}
                   onClick={() => {
-                    setSearch("");
+                    setStatusFilter(s);
                     setPage(1);
                   }}
                 >
-                  <X size={13} />
+                  {STATUS_LABELS[s]}
                 </button>
-              )}
-            </div>
-            <div className="ho-pills">
-              {STATUS_FILTERS.map((s) => {
-                const isActive = statusFilter === s;
-                const pillClass = isActive
-                  ? s === ""
-                    ? "ho-pill active"
-                    : s === "Scheduled"
-                      ? "ho-pill active-scheduled"
-                      : s === "Completed"
-                        ? "ho-pill active-completed"
-                        : s === "Delayed"
-                          ? "ho-pill active-delayed"
-                          : "ho-pill active-cancelled"
-                  : "ho-pill";
-                return (
-                  <button
-                    key={s}
-                    className={pillClass}
-                    onClick={() => {
-                      setStatusFilter(s);
-                      setPage(1);
-                    }}
-                  >
-                    {STATUS_LABELS[s]}
-                  </button>
-                );
-              })}
-            </div>
+              );
+            })}
           </div>
+        </div>
 
         {/* Stats bar */}
         <div className="ho-stats">
@@ -1506,14 +1509,19 @@ export function HandoverPage() {
             <div className="ho-form-grid-3">
               <div>
                 <Label
-                  style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "block" }}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    marginBottom: 6,
+                    display: "block",
+                  }}
                 >
                   Scheduled Date
                 </Label>
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
                   <input
                     type="date"
@@ -1525,14 +1533,19 @@ export function HandoverPage() {
               </div>
               <div>
                 <Label
-                  style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "block" }}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    marginBottom: 6,
+                    display: "block",
+                  }}
                 >
                   Actual Date
                 </Label>
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
                   <input
                     type="date"
@@ -1544,14 +1557,19 @@ export function HandoverPage() {
               </div>
               <div>
                 <Label
-                  style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "block" }}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    marginBottom: 6,
+                    display: "block",
+                  }}
                 >
                   Key Handover Date
                 </Label>
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
                   <input
                     type="date"
@@ -1599,14 +1617,19 @@ export function HandoverPage() {
               </div>
               <div>
                 <Label
-                  style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "block" }}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    marginBottom: 6,
+                    display: "block",
+                  }}
                 >
                   Snags Cleared Date
                 </Label>
                 <div className="relative">
                   <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
                   <input
                     type="date"
@@ -1803,10 +1826,14 @@ export function HandoverPage() {
 
           <DialogFooter>
             <button
-              type="button"
+              className="ho-add-btn"
+              style={{
+                background: "hsl(var(--muted))",
+                color: "hsl(var(--foreground))",
+                boxShadow: "none",
+              }}
               onClick={() => setDialogOpen(false)}
               disabled={isSaving}
-              className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors disabled:opacity-50"
             >
               Cancel
             </button>

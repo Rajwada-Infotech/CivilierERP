@@ -100,6 +100,8 @@ export interface ExpenseRecord {
   /** Payment mode derived from EMI flag. */
   paymentType?: "full" | "partial";
   netAmount: number | null;
+  /** Live GRN incl-GST total for GRN-linked bookings; null for others. */
+  grnTotalAmount: number | null;
   status: BookingStatus;
   remarks: string;
   billingTermId: number | null;
