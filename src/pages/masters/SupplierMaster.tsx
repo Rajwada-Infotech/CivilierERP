@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -6,6 +6,8 @@ import {
   addRecord,
   updateRecord,
   deleteRecord,
+  getAccountGroups,
+  type AccountGroup,
 } from "@/api/accountHeadApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -32,6 +34,7 @@ import {
   MapPin,
   FileText,
   Printer,
+  Layers,
 } from "lucide-react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -97,6 +100,7 @@ interface Supplier {
   LGSTType: string | null;
   LGSTState: string | null;
   LHeadAddress: string | null;
+  LBelongsTo: number | null;
   LHeadStatus: boolean;
 }
 
@@ -111,6 +115,7 @@ interface SupplierForm {
   LGSTType: string;
   LGSTState: string;
   LHeadAddress: string;
+  LBelongsTo: number | "";
   LHeadStatus: boolean;
 }
 
@@ -125,8 +130,77 @@ const EMPTY_FORM: SupplierForm = {
   LGSTType: "",
   LGSTState: "",
   LHeadAddress: "",
+  LBelongsTo: "",
   LHeadStatus: true,
 };
+
+// ─── FlatDropdown ─────────────────────────────────────────────────────────────
+function FlatDropdown({
+  value,
+  onChange,
+  options,
+  placeholder = "Select\u2026",
+  icon,
+  error,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+  icon?: React.ReactNode;
+  error?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const dropRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropRef.current && !dropRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const selected = options.find((o) => o.value === value);
+
+  return (
+    <div className="relative" ref={dropRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left ${error ? "border-red-400" : "border-border"}`}
+      >
+        {icon && <span className="shrink-0 text-muted-foreground">{icon}</span>}
+        <span className={`flex-1 truncate ${selected ? "text-foreground font-medium" : "text-muted-foreground/70"}`}>
+          {selected ? selected.label : placeholder}
+        </span>
+        <ChevronDown size={14} className={`text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+          <div className="max-h-56 overflow-y-auto py-1">
+            <div
+              className={`px-3 py-2 text-sm cursor-pointer transition-colors ${!value ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted/60"}`}
+              onClick={() => { onChange(""); setOpen(false); }}
+            >
+              {placeholder}
+            </div>
+            <div className="border-t border-border/40 mb-1" />
+            {options.map((o) => (
+              <div
+                key={o.value}
+                className={`px-3 py-2 text-sm cursor-pointer transition-colors ${value === o.value ? "bg-primary/10 text-primary font-medium" : "text-foreground hover:bg-muted/60"}`}
+                onClick={() => { onChange(o.value); setOpen(false); }}
+              >
+                {o.label}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
 const EXPORT_COLUMNS: ExportColumn[] = [
@@ -139,6 +213,13 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "GST Type", accessor: "LGSTType" },
   { header: "GST State", accessor: "LGSTState" },
   { header: "Category", accessor: "supplierCategory" },
+  {
+    header: "Group",
+    accessor: (r) => {
+      // resolved in display — raw value is AGId
+      return r.LBelongsTo != null ? String(r.LBelongsTo) : "—";
+    },
+  },
   { header: "Address", accessor: "LHeadAddress" },
   {
     header: "Status",
@@ -309,6 +390,55 @@ const SupplierMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  // ── Account Groups ─────────────────────────────────────────────────────────
+  const { data: accountGroups = [] } = useQuery<AccountGroup[]>({
+    queryKey: ["account-groups"],
+    queryFn: getAccountGroups,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // AGId → Name lookup for display
+  const groupNameById = useMemo(
+    () => new Map<number, string>(accountGroups.map((g) => [g.AGId, g.Name])),
+    [accountGroups],
+  );
+
+  // Build { label: parentName, options: children[] } for <optgroup> dropdown
+  const groupedAccountGroups = useMemo(() => {
+    const byId = new Map<number, AccountGroup>(
+      accountGroups.map((g) => [g.AGId, g]),
+    );
+    const childrenOf = new Map<number, AccountGroup[]>();
+    const roots: AccountGroup[] = [];
+    for (const g of accountGroups) {
+      if (g.ParentGroupId === null) {
+        roots.push(g);
+      } else {
+        const list = childrenOf.get(g.ParentGroupId) ?? [];
+        list.push(g);
+        childrenOf.set(g.ParentGroupId, list);
+      }
+    }
+    const result: { label: string; options: AccountGroup[] }[] = [];
+    for (const root of roots) {
+      const kids = childrenOf.get(root.AGId);
+      if (kids && kids.length > 0) {
+        result.push({ label: root.Name, options: kids });
+      }
+    }
+    // Leaf roots (no children) + orphans go to "Other"
+    const uncategorised = [
+      ...roots.filter((r) => !childrenOf.has(r.AGId)),
+      ...accountGroups.filter(
+        (g) => g.ParentGroupId !== null && !byId.has(g.ParentGroupId),
+      ),
+    ];
+    if (uncategorised.length > 0) {
+      result.push({ label: "Other", options: uncategorised });
+    }
+    return result;
+  }, [accountGroups]);
+
   const suppliers: Supplier[] = useMemo(() => {
     if (!Array.isArray(rawData)) return [];
     return rawData.map((item: any) => ({
@@ -323,6 +453,7 @@ const SupplierMaster: React.FC = () => {
       LGSTType: item.LGSTType || null,
       LGSTState: item.LGSTState || null,
       LHeadAddress: item.LHeadAddress || null,
+      LBelongsTo: item.LBelongsTo != null ? Number(item.LBelongsTo) : null,
       LHeadStatus: Boolean(item.LHeadStatus),
     }));
   }, [rawData]);
@@ -346,7 +477,7 @@ const SupplierMaster: React.FC = () => {
     LBranchName: null,
     LGSTState: f.LGSTState || null,
     LCountry: "India",
-    LBelongsTo: null,
+    LBelongsTo: f.LBelongsTo !== "" ? Number(f.LBelongsTo) : null,
     LDescription: null,
   });
 
@@ -397,6 +528,7 @@ const SupplierMaster: React.FC = () => {
       LGSTType: s.LGSTType ?? "",
       LGSTState: s.LGSTState ?? "",
       LHeadAddress: s.LHeadAddress ?? "",
+      LBelongsTo: s.LBelongsTo ?? "",
       LHeadStatus: s.LHeadStatus,
     });
     setErrors({});
@@ -441,6 +573,7 @@ const SupplierMaster: React.FC = () => {
         <tr><td>GST Type</td><td>${s.LGSTType || "—"}</td></tr>
         <tr><td>GST State</td><td>${s.LGSTState || "—"}</td></tr>
         <tr><td>Category</td><td>${s.supplierCategory || "—"}</td></tr>
+        <tr><td>Group</td><td>${s.LBelongsTo != null ? (groupNameById.get(s.LBelongsTo) ?? "—") : "—"}</td></tr>
         <tr><td>Address</td><td>${s.LHeadAddress || "—"}</td></tr>
         <tr><td>Status</td><td>${s.LHeadStatus ? "Active" : "Inactive"}</td></tr>
       </table>
@@ -642,22 +775,41 @@ const SupplierMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Supplier Category
                   </label>
+                  <FlatDropdown
+                    value={form.supplierCategory}
+                    onChange={(v) => setForm((p) => ({ ...p, supplierCategory: v }))}
+                    options={SUPPLIER_CATEGORIES.map((c) => ({ value: c, label: c }))}
+                    placeholder="Select category\u2026"
+                  />
+                </div>
+
+                {/* Account Group */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                    <Layers size={11} className="text-primary" />
+                    Group Name
+                  </label>
                   <div className="relative">
                     <select
-                      value={form.supplierCategory}
+                      value={form.LBelongsTo}
                       onChange={(e) =>
                         setForm((p) => ({
                           ...p,
-                          supplierCategory: e.target.value,
+                          LBelongsTo:
+                            e.target.value === "" ? "" : Number(e.target.value),
                         }))
                       }
                       className={selectCls}
                     >
-                      <option value="">Select category…</option>
-                      {SUPPLIER_CATEGORIES.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
+                      <option value="">— No Group —</option>
+                      {groupedAccountGroups.map(({ label, options }) => (
+                        <optgroup key={label} label={`── ${label}`}>
+                          {options.map((g) => (
+                            <option key={g.AGId} value={g.AGId}>
+                              {g.Name}
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
                     </select>
                     <ChevronDown
@@ -809,26 +961,12 @@ const SupplierMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     GST Type
                   </label>
-                  <div className="relative">
-                    <select
-                      value={form.LGSTType}
-                      onChange={(e) =>
-                        setForm((p) => ({ ...p, LGSTType: e.target.value }))
-                      }
-                      className={selectCls}
-                    >
-                      <option value="">Select type…</option>
-                      {GST_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
+                  <FlatDropdown
+                    value={form.LGSTType}
+                    onChange={(v) => setForm((p) => ({ ...p, LGSTType: v }))}
+                    options={GST_TYPES.map((t) => ({ value: t, label: t }))}
+                    placeholder="Select type\u2026"
+                  />
                 </div>
 
                 {/* GST State */}
@@ -836,26 +974,12 @@ const SupplierMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     GST State
                   </label>
-                  <div className="relative">
-                    <select
-                      value={form.LGSTState}
-                      onChange={(e) =>
-                        setForm((p) => ({ ...p, LGSTState: e.target.value }))
-                      }
-                      className={selectCls}
-                    >
-                      <option value="">Select state…</option>
-                      {GST_STATES.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
+                  <FlatDropdown
+                    value={form.LGSTState}
+                    onChange={(v) => setForm((p) => ({ ...p, LGSTState: v }))}
+                    options={GST_STATES.map((s) => ({ value: s, label: s }))}
+                    placeholder="Select state\u2026"
+                  />
                 </div>
               </div>
             </div>
@@ -904,40 +1028,19 @@ const SupplierMaster: React.FC = () => {
               />
             </div>
 
-            <div className="relative">
-              <select
-                value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
-                className="appearance-none text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-              >
-                <option value="">All Categories</option>
-                {SUPPLIER_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={12}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
+            <FlatDropdown
+              value={filterCategory}
+              onChange={(v) => setFilterCategory(v)}
+              options={SUPPLIER_CATEGORIES.map((c) => ({ value: c, label: c }))}
+              placeholder="All Categories"
+            />
 
-            <div className="relative">
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="appearance-none text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-              >
-                <option value="">All Status</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-              <ChevronDown
-                size={12}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
+            <FlatDropdown
+              value={filterStatus}
+              onChange={(v) => setFilterStatus(v)}
+              options={[{ value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }]}
+              placeholder="All Status"
+            />
 
             {(search || filterCategory || filterStatus) && (
               <button
@@ -1052,6 +1155,13 @@ const SupplierMaster: React.FC = () => {
                 {
                   label: "Supplier Category",
                   value: viewRecord.supplierCategory || "—",
+                },
+                {
+                  label: "Group Name",
+                  value:
+                    viewRecord.LBelongsTo != null
+                      ? (groupNameById.get(viewRecord.LBelongsTo) ?? "—")
+                      : "—",
                 },
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
               ].map(({ label, value, mono }) => (

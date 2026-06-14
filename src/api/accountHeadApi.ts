@@ -9,7 +9,10 @@ export const getList = async (type?: string) => {
   return res.json();
 };
 
-export const addRecord = async (data: Record<string, unknown>, type: string) => {
+export const addRecord = async (
+  data: Record<string, unknown>,
+  type: string,
+) => {
   const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -22,7 +25,11 @@ export const addRecord = async (data: Record<string, unknown>, type: string) => 
   return res.json();
 };
 
-export const updateRecord = async (id: number, data: Record<string, unknown>, type: string) => {
+export const updateRecord = async (
+  id: number,
+  data: Record<string, unknown>,
+  type: string,
+) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -47,9 +54,22 @@ export const deleteRecord = async (id: number) => {
 };
 
 export const getOptions = async (type?: string) => {
-  const url = type ? `${BASE_URL}/options?type=${encodeURIComponent(type)}` : `${BASE_URL}/options`;
+  const url = type
+    ? `${BASE_URL}/options?type=${encodeURIComponent(type)}`
+    : `${BASE_URL}/options`;
   const res = await fetchWithAuth(url);
   if (!res.ok) throw new Error(`Options GET failed: ${res.status}`);
   return res.json();
 };
 
+export interface AccountGroup {
+  AGId: number;
+  Name: string;
+  ParentGroupId: number | null;
+}
+
+export const getAccountGroups = async (): Promise<AccountGroup[]> => {
+  const res = await fetchWithAuth("/api/account-group");
+  if (!res.ok) throw new Error(`Account Groups GET failed: ${res.status}`);
+  return res.json();
+};
