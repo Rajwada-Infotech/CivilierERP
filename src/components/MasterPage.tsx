@@ -7,7 +7,6 @@ import {
   Check,
   X,
   Plus,
-  RotateCcw,
   Eye,
   Printer,
   ChevronDown,
@@ -394,6 +393,14 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     setErrors({});
   };
 
+  const canSave = fields.every(
+    (f) =>
+      !f.required ||
+      (form[f.name] &&
+        (typeof form[f.name] !== "string" ||
+          (form[f.name] as string).trim() !== "")),
+  );
+
   const filtered = data.filter((row) => {
     if (!search) return true;
     return Object.values(row).some((v) =>
@@ -407,45 +414,20 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   return (
     <div className="space-y-5">
       {/* ── FORM CARD ── */}
-      <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-visible">
-        <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border rounded-t-xl">
-          <div className="flex items-center gap-3">
-            {editingId !== null && (
-              <button
-                onClick={handleReset}
-                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <RotateCcw size={15} />
-                <span className="hidden sm:inline">Back</span>
-              </button>
-            )}
-            {editingId !== null && <span className="text-border/60">|</span>}
-            <div>
-              <h2 className="font-heading font-semibold text-foreground text-sm">
-                {editingId !== null ? `Edit ${title}` : `Add ${title}`}
-              </h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                {editingId !== null
-                  ? "Modify the details below and save."
+      <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
+        {/* Header — title only */}
+        <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20 rounded-t-xl">
+          <div>
+            <h2 className="font-heading font-semibold text-foreground text-sm">
+              {editingId !== null ? `Edit ${title}` : `Add ${title}`}
+            </h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {editingId !== null
+                ? "Modify the details below and save."
+                : fields.some((f) => f.required)
+                  ? <>Fields marked <span className="text-destructive">*</span> are required</>
                   : "Fill in the details to create a new record."}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleReset}
-              className="px-4 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
-            >
-              <RotateCcw size={13} />
-              {editingId !== null ? "Cancel" : "Reset"}
-            </button>
-            <button
-              onClick={handleSave}
-              className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60 flex items-center gap-2"
-            >
-              {editingId !== null ? <Check size={14} /> : <Plus size={14} />}
-              {editingId !== null ? `Update ${title}` : `Save ${title}`}
-            </button>
+            </p>
           </div>
         </div>
 
@@ -613,6 +595,35 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             })}
           </div>
 
+        </div>
+
+        {/* Footer — actions */}
+        <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
+          <p className="text-[11px] text-muted-foreground">
+            {canSave
+              ? <span className="text-emerald-500 font-medium">Ready to save</span>
+              : fields.some((f) => f.required)
+                ? "Fill in the required fields to save"
+                : ""}
+          </p>
+          <div className="flex items-center gap-2">
+            {editingId !== null && (
+              <button
+                onClick={handleReset}
+                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+            )}
+            <button
+              onClick={handleSave}
+              disabled={!canSave}
+              className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
+            >
+              {editingId !== null ? <Check size={14} /> : <Plus size={14} />}
+              {editingId !== null ? `Update ${title}` : `Save ${title}`}
+            </button>
+          </div>
         </div>
       </div>
 

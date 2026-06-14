@@ -10,7 +10,6 @@ import {
   Plus,
   Edit2,
   Trash2,
-  RotateCcw,
   Check,
   X,
   Hash,
@@ -455,7 +454,7 @@ const BankMaster: React.FC = () => {
     reset,
     setValue,
     watch,
-    formState: { errors },
+    formState: { errors, isValid },
   } = useForm<FormState>({
     resolver: zodResolver(bankFormSchema),
     defaultValues: EMPTY,
@@ -463,6 +462,7 @@ const BankMaster: React.FC = () => {
   });
 
   const form = watch();
+  const canSave = isValid;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [viewRow, setViewRow] = useState<BankRecord | null>(null);
@@ -641,41 +641,15 @@ const BankMaster: React.FC = () => {
 
         {/* ── Form Card ── */}
         <div className="rounded-xl border border-border bg-card shadow-sm">
-          {/* Card Header */}
-          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
-            <div className="flex items-center gap-3">
-              {editingId && (
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <RotateCcw size={15} />
-                  <span className="hidden sm:inline">Back</span>
-                </button>
-              )}
-              {editingId && <span className="text-border/60">|</span>}
-              <h2 className="text-base font-heading font-semibold text-foreground">
+          {/* Card header — title only */}
+          <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
+            <div>
+              <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? "Edit Bank" : "Add Bank"}
               </h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleReset}
-                className="px-4 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
-              >
-                <RotateCcw size={13} />
-                {editingId ? "Cancel" : "Reset"}
-              </button>
-              <button
-                type="button"
-                onClick={handleSubmit(handleSave)}
-                className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white flex items-center gap-2"
-              >
-                {editingId ? <Check size={14} /> : <Plus size={14} />}
-                {editingId ? "Update Bank" : "Save Bank"}
-              </button>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Fields marked <span className="text-destructive">*</span> are required
+              </p>
             </div>
           </div>
 
@@ -974,6 +948,35 @@ const BankMaster: React.FC = () => {
                   {form.status ? "Active" : "Inactive"}
                 </span>
               </span>
+            </div>
+          </div>
+
+          {/* Card footer — actions */}
+          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
+            <p className="text-[11px] text-muted-foreground">
+              {canSave
+                ? <span className="text-emerald-500 font-medium">Ready to save</span>
+                : "Fill in the required fields to save"}
+            </p>
+            <div className="flex items-center gap-2">
+              {editingId && (
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleSubmit(handleSave)}
+                disabled={!canSave}
+                className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
+              >
+                {editingId ? <Check size={14} /> : <Plus size={14} />}
+                {editingId ? "Update Bank" : "Save Bank"}
+              </button>
             </div>
           </div>
         </div>
