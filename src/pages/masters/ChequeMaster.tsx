@@ -20,6 +20,7 @@ import {
   BookOpen,
   Eye,
   Printer,
+  ChevronDown,
 } from "lucide-react";
 import {
   Dialog,
@@ -78,7 +79,9 @@ function calcTotal(start: number | "", end: number | ""): number {
 }
 
 const inp =
-  "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
+  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
+const sel =
+  "w-full appearance-none pl-3 pr-9 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
 
 // ─── Column builder ────────────────────────────────────────────────────────────
 function buildChequeColumns(
@@ -153,7 +156,7 @@ function buildChequeColumns(
     },
     {
       id: "actions",
-      header: "",
+      header: "Actions",
       enableSorting: false,
       cell: ({ row }) => {
         const id = String(row.original.CId);
@@ -196,13 +199,13 @@ function buildChequeColumns(
             </button>
             <button
               onClick={() => handleEdit(row.original)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+              className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10"
             >
               <Edit2 size={13} />
             </button>
             <button
               onClick={() => setDeleteId(id)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10"
             >
               <Trash2 size={13} />
             </button>
@@ -429,330 +432,298 @@ const ChequeMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Cheque Master"]} />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Cheque Master
-      </h1>
-
-      <div className="space-y-5">
+      <div className="relative mt-6 space-y-8">
+      <div>
+        <h1 className="text-xl font-heading font-bold text-foreground">
+          Cheque Master
+        </h1>
+        <p className="text-xs text-muted-foreground mt-0.5">Register and manage cheque books / lots with bank and lot details.</p>
+      </div>
         {/* Form */}
         <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
-            <div>
-              <h2 className="font-heading font-semibold text-foreground text-sm">
-                {editingId ? "Edit Cheque Lot" : "Add Cheque Lot"}
-              </h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                {editingId
-                  ? "Modify cheque lot details below."
-                  : "Register a new cheque book / lot."}
-              </p>
-            </div>
-            {editingId && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-primary/10 text-primary border border-primary/20">
-                Editing
-              </span>
-            )}
-          </div>
-
-          <div className="p-5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Company dropdown — live from DB */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Company <span className="text-destructive">*</span>
-                </label>
-                <select
-                  value={form.companyId}
-                  onChange={(e) => setField("companyId", e.target.value)}
-                  className={`${inp} ${errors.companyId ? "border-destructive" : ""}`}
-                >
-                  <option value="">Select Company...</option>
-                  {companies.map((c) => (
-                    <option key={c.id} value={String(c.id)}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-                {errors.companyId && (
-                  <p className="text-[11px] text-destructive mt-1">
-                    Company is required
-                  </p>
-                )}
-              </div>
-
-              {/* Bank dropdown — live from DB */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Bank Name <span className="text-destructive">*</span>
-                </label>
-                <div className="relative">
-                  <Landmark
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <select
-                    value={form.bankId}
-                    onChange={(e) => handleBankChange(e.target.value)}
-                    className={`${inp} pl-8 ${errors.bankId ? "border-destructive" : ""}`}
-                  >
-                    <option value="">Select Bank...</option>
-                    {dbBanks.map((b) => (
-                      <option key={b.id} value={String(b.id)}>
-                        {b.label}
-                        {b.branchName ? ` — ${b.branchName}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {errors.bankId && (
-                  <p className="text-[11px] text-destructive mt-1">
-                    Bank is required
-                  </p>
-                )}
-              </div>
-
-              {/* Account Number — auto-filled */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Account Number <span className="text-destructive">*</span>
-                  <span className="ml-2 normal-case text-[10px] text-muted-foreground/60">
-                    (auto-filled)
-                  </span>
-                </label>
-                <div className="relative">
-                  <Hash
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <input
-                    type="text"
-                    value={form.accountNumber}
-                    onChange={(e) => setField("accountNumber", e.target.value)}
-                    placeholder="Auto-filled on bank selection"
-                    className={`${inp} pl-8 font-mono tracking-widest ${errors.accountNumber ? "border-destructive" : ""}`}
-                  />
-                  {form.accountNumber && (
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
-                      AUTO
-                    </span>
-                  )}
-                </div>
-                {errors.accountNumber && (
-                  <p className="text-[11px] text-destructive mt-1">
-                    Account number is required
-                  </p>
-                )}
-              </div>
-
-              {/* IFSC — read-only */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  IFSC Code{" "}
-                  <span className="ml-2 normal-case text-[10px] text-muted-foreground/60">
-                    (auto-filled)
-                  </span>
-                </label>
-                <div className="relative">
-                  <Hash
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <input
-                    type="text"
-                    value={form.ifscCode}
-                    readOnly
-                    placeholder="Auto-filled on bank selection"
-                    className={`${inp} pl-8 font-mono tracking-widest bg-muted/50 cursor-default text-muted-foreground`}
-                  />
-                  {form.ifscCode && (
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
-                      AUTO
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Lot Number */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Cheque Lot Number <span className="text-destructive">*</span>
-                </label>
-                <div className="relative">
-                  <BookOpen
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <input
-                    type="text"
-                    value={form.lotNumber}
-                    onChange={(e) => setField("lotNumber", e.target.value)}
-                    placeholder="e.g. LOT-2024-001"
-                    className={`${inp} pl-8 ${errors.lotNumber ? "border-destructive" : ""}`}
-                  />
-                </div>
-                {errors.lotNumber && (
-                  <p className="text-[11px] text-destructive mt-1">
-                    Lot number is required
-                  </p>
-                )}
-              </div>
-
-              {/* Cheque Start */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Cheque Start Number{" "}
-                  <span className="text-destructive">*</span>
-                </label>
-                <div className="relative">
-                  <FileText
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <input
-                    type="number"
-                    value={form.chqStart}
-                    onChange={(e) =>
-                      setField(
-                        "chqStart",
-                        e.target.value === "" ? "" : Number(e.target.value),
-                      )
-                    }
-                    placeholder="e.g. 100001"
-                    className={`${inp} pl-8 font-mono ${errors.chqStart ? "border-destructive" : ""}`}
-                  />
-                </div>
-                {errors.chqStart && (
-                  <p className="text-[11px] text-destructive mt-1">
-                    Start number is required
-                  </p>
-                )}
-              </div>
-
-              {/* Cheque End */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Cheque End Number <span className="text-destructive">*</span>
-                </label>
-                <div className="relative">
-                  <FileText
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <input
-                    type="number"
-                    value={form.chqEnd}
-                    onChange={(e) =>
-                      setField(
-                        "chqEnd",
-                        e.target.value === "" ? "" : Number(e.target.value),
-                      )
-                    }
-                    placeholder="e.g. 100050"
-                    className={`${inp} pl-8 font-mono ${errors.chqEnd ? "border-destructive" : ""}`}
-                  />
-                </div>
-                {errors.chqEnd && (
-                  <p className="text-[11px] text-destructive mt-1">
-                    {Number(form.chqEnd) < Number(form.chqStart)
-                      ? "End must be ≥ start"
-                      : "End number is required"}
-                  </p>
-                )}
-              </div>
-
-              {/* Total — calculated */}
-              <div className="sm:col-span-2">
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Total Cheques{" "}
-                  <span className="ml-2 normal-case text-[10px] text-muted-foreground/60">
-                    (auto-calculated)
-                  </span>
-                </label>
-                <div
-                  className={`flex items-center gap-4 px-4 py-3 rounded-xl border transition-all ${rangeValid ? "bg-primary/5 border-primary/30" : "bg-muted/40 border-border"}`}
-                >
-                  <div
-                    className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${rangeValid ? "bg-primary/10" : "bg-muted"}`}
-                  >
-                    <Calculator
-                      size={16}
-                      className={
-                        rangeValid ? "text-primary" : "text-muted-foreground"
-                      }
-                    />
-                  </div>
-                  <div>
-                    <p
-                      className={`text-2xl font-heading font-bold leading-none ${rangeValid ? "text-primary" : "text-muted-foreground/40"}`}
-                    >
-                      {rangeValid ? totalCheques.toLocaleString() : "—"}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                      {rangeValid
-                        ? `Cheques from ${form.chqStart} to ${form.chqEnd}`
-                        : "Enter start and end numbers above"}
-                    </p>
-                  </div>
-                  {rangeValid && (
-                    <div className="ml-auto text-right hidden sm:block">
-                      <p className="text-[10px] font-heading text-muted-foreground uppercase tracking-widest">
-                        Range
-                      </p>
-                      <p className="text-xs font-mono text-foreground">
-                        {form.chqStart} – {form.chqEnd}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Remarks */}
-              <div className="sm:col-span-2">
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Remarks
-                </label>
-                <textarea
-                  value={form.remarks}
-                  onChange={(e) => setField("remarks", e.target.value)}
-                  rows={2}
-                  placeholder="Optional notes..."
-                  className={inp}
-                />
-              </div>
-
-              {/* Status */}
-              <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Status
-                </label>
+          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
+            <div className="flex items-center gap-3">
+              {editingId && (
                 <button
-                  type="button"
-                  onClick={() => setField("status", !form.status)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.status ? "bg-primary" : "bg-muted border border-border"}`}
+                  onClick={handleReset}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  <span
-                    className={`inline-block h-4 w-4 rounded-full bg-primary-foreground transition-transform shadow-sm ${form.status ? "translate-x-6" : "translate-x-1"}`}
-                  />
+                  <RotateCcw size={15} />
+                  <span className="hidden sm:inline">Back</span>
                 </button>
+              )}
+              {editingId && <span className="text-border/60">|</span>}
+              <div>
+                <h2 className="font-heading font-semibold text-foreground text-sm">
+                  {editingId ? "Edit Cheque Lot" : "Add Cheque Lot"}
+                </h2>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {editingId
+                    ? "Modify cheque lot details below."
+                    : "Register a new cheque book / lot."}
+                </p>
               </div>
             </div>
-
-            <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border">
-              <button
-                onClick={handleSave}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
-              >
-                <Plus size={15} />
-                {editingId ? "Update" : "Save"}
-              </button>
+            <div className="flex items-center gap-2">
               <button
                 onClick={handleReset}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
+                className="px-4 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
               >
-                <RotateCcw size={14} />
-                Reset
+                <RotateCcw size={13} />
+                {editingId ? "Cancel" : "Reset"}
+              </button>
+              <button
+                onClick={handleSave}
+                className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60 flex items-center gap-2"
+              >
+                {editingId ? <Check size={14} /> : <Plus size={14} />}
+                {editingId ? "Update Lot" : "Save Lot"}
               </button>
             </div>
+          </div>
+
+          <div className="px-5 sm:px-6 py-6 space-y-7">
+
+            {/* ── Section: Bank Details ── */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+                  <Landmark size={12} className="text-primary" />
+                </div>
+                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                  Bank Details
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
+                {/* Company */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Company <span className="text-destructive">*</span>
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={form.companyId}
+                      onChange={(e) => setField("companyId", e.target.value)}
+                      className={`${sel} ${errors.companyId ? "border-destructive" : ""}`}
+                    >
+                      <option value="">Select Company...</option>
+                      {companies.map((c) => (
+                        <option key={c.id} value={String(c.id)}>{c.label}</option>
+                      ))}
+                    </select>
+                    <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  </div>
+                  {errors.companyId && <p className="text-xs text-destructive mt-1">Company is required</p>}
+                </div>
+
+                {/* Bank */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    Bank Name <span className="text-destructive">*</span>
+                  </label>
+                  <div className="relative">
+                    <Landmark size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <select
+                      value={form.bankId}
+                      onChange={(e) => handleBankChange(e.target.value)}
+                      className={`${sel} pl-8 ${errors.bankId ? "border-destructive" : ""}`}
+                    >
+                      <option value="">Select Bank...</option>
+                      {dbBanks.map((b) => (
+                        <option key={b.id} value={String(b.id)}>
+                          {b.label}{b.branchName ? ` — ${b.branchName}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  </div>
+                  {errors.bankId && <p className="text-xs text-destructive mt-1">Bank is required</p>}
+                </div>
+
+                {/* Account Number */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    Account Number <span className="text-destructive">*</span>
+                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">(auto-filled)</span>
+                  </label>
+                  <div className="relative">
+                    <Hash size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <input
+                      type="text"
+                      value={form.accountNumber}
+                      onChange={(e) => setField("accountNumber", e.target.value)}
+                      placeholder="Auto-filled on bank selection"
+                      className={`${inp} pl-8 font-mono tracking-widest ${errors.accountNumber ? "border-destructive" : ""}`}
+                    />
+                    {form.accountNumber && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">AUTO</span>
+                    )}
+                  </div>
+                  {errors.accountNumber && <p className="text-xs text-destructive mt-1">Account number is required</p>}
+                </div>
+
+                {/* IFSC */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    IFSC Code
+                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">(auto-filled)</span>
+                  </label>
+                  <div className="relative">
+                    <Hash size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <input
+                      type="text"
+                      value={form.ifscCode}
+                      readOnly
+                      placeholder="Auto-filled on bank selection"
+                      className={`${inp} pl-8 font-mono tracking-widest bg-muted/50 cursor-default text-muted-foreground`}
+                    />
+                    {form.ifscCode && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">AUTO</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Section: Cheque Lot ── */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+                  <BookOpen size={12} className="text-primary" />
+                </div>
+                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                  Cheque Lot
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
+                {/* Lot Number */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    Lot Number <span className="text-destructive">*</span>
+                  </label>
+                  <div className="relative">
+                    <BookOpen size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <input
+                      type="text"
+                      value={form.lotNumber}
+                      onChange={(e) => setField("lotNumber", e.target.value)}
+                      placeholder="e.g. LOT-2024-001"
+                      className={`${inp} pl-8 ${errors.lotNumber ? "border-destructive" : ""}`}
+                    />
+                  </div>
+                  {errors.lotNumber && <p className="text-xs text-destructive mt-1">Lot number is required</p>}
+                </div>
+
+                {/* Start */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    Start Number <span className="text-destructive">*</span>
+                  </label>
+                  <div className="relative">
+                    <FileText size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <input
+                      type="number"
+                      value={form.chqStart}
+                      onChange={(e) => setField("chqStart", e.target.value === "" ? "" : Number(e.target.value))}
+                      placeholder="e.g. 100001"
+                      className={`${inp} pl-8 font-mono ${errors.chqStart ? "border-destructive" : ""}`}
+                    />
+                  </div>
+                  {errors.chqStart && <p className="text-xs text-destructive mt-1">Start number is required</p>}
+                </div>
+
+                {/* End */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    End Number <span className="text-destructive">*</span>
+                  </label>
+                  <div className="relative">
+                    <FileText size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <input
+                      type="number"
+                      value={form.chqEnd}
+                      onChange={(e) => setField("chqEnd", e.target.value === "" ? "" : Number(e.target.value))}
+                      placeholder="e.g. 100050"
+                      className={`${inp} pl-8 font-mono ${errors.chqEnd ? "border-destructive" : ""}`}
+                    />
+                  </div>
+                  {errors.chqEnd && (
+                    <p className="text-xs text-destructive mt-1">
+                      {Number(form.chqEnd) < Number(form.chqStart) ? "End must be ≥ start" : "End number is required"}
+                    </p>
+                  )}
+                </div>
+
+                {/* Total Cheques */}
+                <div className="space-y-1.5 sm:col-span-3">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    Total Cheques
+                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">(auto-calculated)</span>
+                  </label>
+                  <div className={`flex items-center gap-4 px-4 py-3 rounded-xl border transition-all ${rangeValid ? "bg-primary/5 border-primary/30" : "bg-muted/40 border-border"}`}>
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${rangeValid ? "bg-primary/10" : "bg-muted"}`}>
+                      <Calculator size={16} className={rangeValid ? "text-primary" : "text-muted-foreground"} />
+                    </div>
+                    <div>
+                      <p className={`text-2xl font-heading font-bold leading-none ${rangeValid ? "text-primary" : "text-muted-foreground/40"}`}>
+                        {rangeValid ? totalCheques.toLocaleString() : "—"}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        {rangeValid ? `Cheques from ${form.chqStart} to ${form.chqEnd}` : "Enter start and end numbers above"}
+                      </p>
+                    </div>
+                    {rangeValid && (
+                      <div className="ml-auto text-right hidden sm:block">
+                        <p className="text-[10px] font-heading text-muted-foreground uppercase tracking-widest">Range</p>
+                        <p className="text-xs font-mono text-foreground">{form.chqStart} – {form.chqEnd}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Section: Additional ── */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+                  <FileText size={12} className="text-primary" />
+                </div>
+                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                  Additional
+                </p>
+              </div>
+              <div className="space-y-5">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Remarks
+                  </label>
+                  <textarea
+                    value={form.remarks}
+                    onChange={(e) => setField("remarks", e.target.value)}
+                    rows={2}
+                    placeholder="Optional notes..."
+                    className={inp}
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setField("status", !form.status)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${form.status ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
+                  >
+                    <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.status ? "translate-x-4" : "translate-x-0.5"}`} />
+                  </button>
+                  <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                    Status —{" "}
+                    <span className={form.status ? "text-emerald-600" : "text-foreground"}>
+                      {form.status ? "Active" : "Inactive"}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
 

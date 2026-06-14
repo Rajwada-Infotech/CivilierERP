@@ -176,6 +176,8 @@ function StatCard({
   icon: Icon,
   iconColor = "text-indigo-600",
   iconBg = "bg-indigo-500/10",
+  accent = "bg-indigo-500",
+  borderL = "border-l-indigo-500",
   onClick,
 }: {
   label: string;
@@ -184,17 +186,20 @@ function StatCard({
   icon: React.ElementType;
   iconColor?: string;
   iconBg?: string;
+  accent?: string;
+  borderL?: string;
   onClick?: () => void;
 }) {
   return (
     <div
       onClick={onClick}
-      className={`rounded-xl border border-border bg-card p-5 flex flex-col gap-3 transition-all duration-200 ${
+      className={`relative rounded-xl border border-border bg-card p-5 flex flex-col gap-3 overflow-hidden transition-all duration-200 border-l-2 ${borderL} ${
         onClick
           ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5 hover:border-primary/20"
           : ""
       }`}
     >
+      <div className={`absolute top-0 right-0 w-24 h-24 rounded-full opacity-10 -translate-y-6 translate-x-6 ${accent}`} />
       <div className="flex items-start justify-between">
         <div className={`p-2 rounded-lg ${iconBg}`}>
           <Icon size={18} className={iconColor} />
@@ -523,6 +528,8 @@ export default function FollowupTasks() {
             icon={AlertCircle}
             iconColor="text-slate-600"
             iconBg="bg-slate-500/10"
+            accent="bg-slate-500"
+            borderL="border-l-slate-500"
           />
           <StatCard
             label="In Progress"
@@ -531,6 +538,8 @@ export default function FollowupTasks() {
             icon={Activity}
             iconColor="text-blue-600"
             iconBg="bg-blue-500/10"
+            accent="bg-blue-500"
+            borderL="border-l-blue-500"
           />
           <StatCard
             label="Completed"
@@ -539,6 +548,8 @@ export default function FollowupTasks() {
             icon={CheckCircle2}
             iconColor="text-emerald-600"
             iconBg="bg-emerald-500/10"
+            accent="bg-emerald-500"
+            borderL="border-l-emerald-500"
           />
           <StatCard
             label="Overdue"
@@ -547,6 +558,8 @@ export default function FollowupTasks() {
             icon={Clock}
             iconColor="text-red-600"
             iconBg="bg-red-500/10"
+            accent="bg-red-500"
+            borderL="border-l-red-500"
           />
         </div>
 

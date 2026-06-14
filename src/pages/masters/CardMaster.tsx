@@ -13,12 +13,13 @@ import {
   Edit2,
   Trash2,
   RotateCcw,
+  Check,
   X,
   Search,
   Landmark,
   Hash,
   ShieldAlert,
-  Calendar,
+  CalendarDays,
   Bell,
   BellRing,
   Clock,
@@ -375,7 +376,7 @@ function buildCardColumns(
     },
     {
       id: "actions",
-      header: "",
+      header: "Actions",
       enableSorting: false,
       cell: ({ row }) => {
         const id = row.original._id;
@@ -384,20 +385,20 @@ function buildCardColumns(
           <div className="flex items-center justify-end gap-1">
             <button
               onClick={() => onView(row.original)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 transition-colors"
+              className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
               title="View details"
             >
               <Eye size={13} />
             </button>
             <button
               onClick={() => handleEdit(id)}
-              className={`p-1.5 rounded-lg transition-colors ${isEditing ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-primary hover:bg-primary/10"}`}
+              className={`p-1.5 rounded-lg transition-colors ${isEditing ? "text-blue-400 bg-blue-400/10" : "text-blue-400 hover:bg-blue-400/10"}`}
             >
               <Edit2 size={13} />
             </button>
             <button
               onClick={() => setDeleteId(id)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
             >
               <Trash2 size={13} />
             </button>
@@ -679,8 +680,9 @@ const CardMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Card Master"]} />
-
-      <div className="flex items-center justify-between mb-4">
+      <div className="relative mt-6 space-y-8">
+      <div>
+      <div className="flex items-center justify-between">
         <h1 className="text-xl font-heading font-bold text-foreground">
           Card Master
         </h1>
@@ -704,6 +706,8 @@ const CardMaster: React.FC = () => {
           </button>
         )}
       </div>
+      <p className="text-xs text-muted-foreground mt-0.5">Register and manage bank cards with network, type and security details.</p>
+      </div>
 
       <div className="space-y-4">
         {showReminderPanel && (
@@ -716,22 +720,45 @@ const CardMaster: React.FC = () => {
 
         {/* Form */}
         <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
-            <div>
-              <h2 className="font-heading font-semibold text-foreground text-sm">
-                {editingId ? "Edit Card" : "Add Card"}
-              </h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                {editingId
-                  ? "Modify card details below."
-                  : "Register a new bank card."}
-              </p>
+          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
+            <div className="flex items-center gap-3">
+              {editingId && (
+                <button
+                  onClick={handleReset}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <RotateCcw size={15} />
+                  <span className="hidden sm:inline">Back</span>
+                </button>
+              )}
+              {editingId && <span className="text-border/60">|</span>}
+              <div>
+                <h2 className="font-heading font-semibold text-foreground text-sm">
+                  {editingId ? "Edit Card" : "Add Card"}
+                </h2>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {editingId
+                    ? "Modify card details below."
+                    : "Register a new bank card."}
+                </p>
+              </div>
             </div>
-            {editingId && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-primary/10 text-primary border border-primary/20">
-                Editing
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleReset}
+                className="px-4 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+              >
+                <RotateCcw size={13} />
+                {editingId ? "Cancel" : "Reset"}
+              </button>
+              <button
+                onClick={handleSave}
+                className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60 flex items-center gap-2"
+              >
+                {editingId ? <Check size={14} /> : <Plus size={14} />}
+                {editingId ? "Update Card" : "Save Card"}
+              </button>
+            </div>
           </div>
 
           <div className="p-5">
@@ -782,12 +809,12 @@ const CardMaster: React.FC = () => {
                 <div className="relative">
                   <Landmark
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
                   <select
                     value={form.bankId}
                     onChange={(e) => handleBankChange(e.target.value)}
-                    className={`${inp} pl-8 ${errors.bankId ? "border-destructive" : ""}`}
+                    className={`${inp} appearance-none pl-8 pr-9 ${errors.bankId ? "border-destructive" : ""}`}
                   >
                     <option value="">Select Bank...</option>
                     {dbBanks.map((b) => (
@@ -797,6 +824,7 @@ const CardMaster: React.FC = () => {
                       </option>
                     ))}
                   </select>
+                  <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                 </div>
                 {errors.bankId && (
                   <p className="text-[11px] text-destructive mt-1">
@@ -809,18 +837,21 @@ const CardMaster: React.FC = () => {
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Company Name
                 </label>
-                <select
-                  value={form.companyName}
-                  onChange={(e) => setField("companyName", e.target.value)}
-                  className={inp}
-                >
-                  <option value="">Select Company...</option>
-                  {companies.map((c) => (
-                    <option key={c.id} value={c.label}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <select
+                    value={form.companyName}
+                    onChange={(e) => setField("companyName", e.target.value)}
+                    className={`${inp} appearance-none pr-9`}
+                  >
+                    <option value="">Select Company...</option>
+                    {companies.map((c) => (
+                      <option key={c.id} value={c.label}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                </div>
               </div>
 
               {/* Account Number — auto-filled from bank selection */}
@@ -883,36 +914,42 @@ const CardMaster: React.FC = () => {
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Card Network
                 </label>
-                <select
-                  value={form.network}
-                  onChange={(e) => setField("network", e.target.value)}
-                  className={inp}
-                >
-                  <option value="">Select Network...</option>
-                  {CARD_NETWORKS.map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <select
+                    value={form.network}
+                    onChange={(e) => setField("network", e.target.value)}
+                    className={`${inp} appearance-none pr-9`}
+                  >
+                    <option value="">Select Network...</option>
+                    {CARD_NETWORKS.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                </div>
               </div>
 
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Card Type
                 </label>
-                <select
-                  value={form.cardType}
-                  onChange={(e) => setField("cardType", e.target.value)}
-                  className={inp}
-                >
-                  <option value="">Select Type...</option>
-                  {CARD_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <select
+                    value={form.cardType}
+                    onChange={(e) => setField("cardType", e.target.value)}
+                    className={`${inp} appearance-none pr-9`}
+                  >
+                    <option value="">Select Type...</option>
+                    {CARD_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                </div>
               </div>
 
               <div className="sm:col-span-2">
@@ -1005,17 +1042,24 @@ const CardMaster: React.FC = () => {
                   Expiry Date <span className="text-destructive">*</span>
                 </label>
                 <div className="relative">
-                  <Calendar
+                  <CalendarDays
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
                   <input
-                    type="text"
-                    value={form.expiryDate}
-                    onChange={(e) => handleExpiry(e.target.value)}
-                    placeholder="MM/YY"
-                    maxLength={5}
-                    className={`${inp} pl-8 font-mono tracking-widest ${errors.expiryDate ? "border-destructive" : ""}`}
+                    type="month"
+                    value={
+                      form.expiryDate && form.expiryDate.length === 5
+                        ? `20${form.expiryDate.slice(3)}-${form.expiryDate.slice(0, 2)}`
+                        : ""
+                    }
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (!val) { handleExpiry(""); return; }
+                      const [year, month] = val.split("-");
+                      handleExpiry(`${month}${year.slice(-2)}`);
+                    }}
+                    className={`${inp} pl-8 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.expiryDate ? "border-destructive" : ""}`}
                   />
                 </div>
                 {errors.expiryDate && (
@@ -1111,7 +1155,7 @@ const CardMaster: React.FC = () => {
                           Reminder Will Fire On
                         </label>
                         <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-primary/10 border border-primary/20">
-                          <Calendar
+                          <CalendarDays
                             size={14}
                             className="text-primary flex-shrink-0"
                           />
@@ -1134,37 +1178,26 @@ const CardMaster: React.FC = () => {
               </div>
 
               <div className="flex flex-col justify-end">
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Status
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setField("status", !form.status)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.status ? "bg-primary" : "bg-muted border border-border"}`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 rounded-full bg-primary-foreground transition-transform shadow-sm ${form.status ? "translate-x-6" : "translate-x-1"}`}
-                  />
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setField("status", !form.status)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${form.status ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.status ? "translate-x-4" : "translate-x-0.5"}`}
+                    />
+                  </button>
+                  <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                    Status —{" "}
+                    <span className={form.status ? "text-emerald-600" : "text-foreground"}>
+                      {form.status ? "Active" : "Inactive"}
+                    </span>
+                  </span>
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border">
-              <button
-                onClick={handleSave}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
-              >
-                <Plus size={15} />
-                {editingId ? "Update" : "Save"}
-              </button>
-              <button
-                onClick={handleReset}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
-              >
-                <RotateCcw size={14} />
-                Reset
-              </button>
-            </div>
           </div>
         </div>
 
@@ -1242,6 +1275,7 @@ const CardMaster: React.FC = () => {
             </div>
           </div>
         )}
+      </div>
       </div>
 
       {/* ── View Detail Drawer ── */}
@@ -1346,7 +1380,7 @@ const CardMaster: React.FC = () => {
                     Expiry
                   </p>
                   <p className="font-mono text-sm text-foreground flex items-center gap-1">
-                    <Calendar size={11} className="text-muted-foreground" />
+                    <CalendarDays size={11} className="text-muted-foreground" />
                     {viewRecord.expiryDate || "—"}
                   </p>
                 </div>

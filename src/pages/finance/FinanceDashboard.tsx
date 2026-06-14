@@ -117,6 +117,9 @@ const StatCard = ({
   sub,
   icon: Icon,
   trend,
+  accent = "border-l-primary",
+  iconBg = "bg-primary/10",
+  iconColor = "text-primary",
   onClick,
 }: {
   label: string;
@@ -124,11 +127,14 @@ const StatCard = ({
   sub: string;
   icon: React.ElementType;
   trend?: "up" | "down" | "neutral";
+  accent?: string;
+  iconBg?: string;
+  iconColor?: string;
   onClick?: () => void;
 }) => (
   <Card
     onClick={onClick}
-    className={`relative overflow-hidden transition-all duration-200 ${
+    className={`relative overflow-hidden transition-all duration-200 border-l-2 ${accent} ${
       onClick
         ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5 hover:border-primary/20 active:scale-[0.98]"
         : ""
@@ -140,11 +146,11 @@ const StatCard = ({
       </CardTitle>
 
       <div
-        className={`w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center transition-transform duration-200 ${
+        className={`w-8 h-8 rounded-lg ${iconBg} flex items-center justify-center transition-transform duration-200 ${
           onClick ? "group-hover:scale-110" : ""
         }`}
       >
-        <Icon size={15} className="text-primary" />
+        <Icon size={15} className={iconColor} />
       </div>
     </CardHeader>
 
@@ -280,6 +286,9 @@ const FinanceDashboard = () => {
           sub: `${fmt(data.paymentsMade.todayAmount)} paid today · ${data.paymentsMade.totalCount} total`,
           icon: Receipt,
           trend: "up" as const,
+          accent: "border-l-rose-500",
+          iconBg: "bg-rose-500/10",
+          iconColor: "text-rose-600",
           onClick: () => navigate("/payments"),
         },
         {
@@ -288,6 +297,9 @@ const FinanceDashboard = () => {
           sub: `${fmt(data.receivedPayments.todayAmount)} received today · ${data.receivedPayments.totalCount} total`,
           icon: BadgeDollarSign,
           trend: "up" as const,
+          accent: "border-l-emerald-500",
+          iconBg: "bg-emerald-500/10",
+          iconColor: "text-emerald-600",
           onClick: () => navigate("/received-payments"),
         },
         {
@@ -299,6 +311,9 @@ const FinanceDashboard = () => {
             data.cheques.pendingCount > 0
               ? ("down" as const)
               : ("neutral" as const),
+          accent: "border-l-amber-500",
+          iconBg: "bg-amber-500/10",
+          iconColor: "text-amber-600",
           onClick: () => navigate("/masters/cheque"),
         },
         {
@@ -307,6 +322,9 @@ const FinanceDashboard = () => {
           sub: `${data.cards.inactiveCount} inactive · ${data.cards.totalCount} total`,
           icon: CreditCard,
           trend: "neutral" as const,
+          accent: "border-l-violet-500",
+          iconBg: "bg-violet-500/10",
+          iconColor: "text-violet-600",
           onClick: () => navigate("/masters/card"),
         },
       ]
@@ -364,6 +382,9 @@ const FinanceDashboard = () => {
               value={(data?.banks.activeCount ?? 0).toString()}
               sub={`${data?.banks.totalCount ?? 0} total bank heads`}
               icon={Landmark}
+              accent="border-l-blue-500"
+              iconBg="bg-blue-500/10"
+              iconColor="text-blue-600"
               onClick={() => navigate("/masters/banks")}
             />
             <StatCard
@@ -371,6 +392,9 @@ const FinanceDashboard = () => {
               value={fmt(data?.paymentsMade.totalAmount ?? 0)}
               sub={`${data?.paymentsMade.totalCount ?? 0} entries all-time`}
               icon={Receipt}
+              accent="border-l-rose-500"
+              iconBg="bg-rose-500/10"
+              iconColor="text-rose-600"
               trend="neutral"
             />
             <StatCard
@@ -378,6 +402,9 @@ const FinanceDashboard = () => {
               value={fmt(data?.receivedPayments.totalAmount ?? 0)}
               sub={`${data?.receivedPayments.approvedCount ?? 0} approved · ${data?.receivedPayments.draftCount ?? 0} draft`}
               icon={BadgeDollarSign}
+              accent="border-l-emerald-500"
+              iconBg="bg-emerald-500/10"
+              iconColor="text-emerald-600"
               trend="neutral"
             />
           </>
@@ -575,27 +602,31 @@ const FinanceDashboard = () => {
         </CardHeader>
         <CardContent className="grid grid-cols-2 md:grid-cols-5 gap-4">
           {[
-            { label: "New Payment", icon: Receipt, path: "/payments" },
+            { label: "New Payment", icon: Receipt, path: "/payments", iconBg: "bg-rose-500/10", iconColor: "text-rose-600" },
             {
               label: "New Received Payment",
               icon: BadgeDollarSign,
               path: "/received-payments",
+              iconBg: "bg-emerald-500/10",
+              iconColor: "text-emerald-600",
             },
             {
               label: "Manage Cheques",
               icon: BookOpen,
               path: "/masters/cheque",
+              iconBg: "bg-amber-500/10",
+              iconColor: "text-amber-600",
             },
-            { label: "Manage Cards", icon: CreditCard, path: "/masters/card" },
-            { label: "Manage Banks", icon: Landmark, path: "/masters/banks" },
-          ].map(({ label, icon: Icon, path }) => (
+            { label: "Manage Cards", icon: CreditCard, path: "/masters/card", iconBg: "bg-violet-500/10", iconColor: "text-violet-600" },
+            { label: "Manage Banks", icon: Landmark, path: "/masters/banks", iconBg: "bg-blue-500/10", iconColor: "text-blue-600" },
+          ].map(({ label, icon: Icon, path, iconBg, iconColor }) => (
             <button
               key={path}
               onClick={() => navigate(path)}
               className="flex flex-col items-center gap-3 py-6 rounded-xl border border-border hover:bg-muted hover:border-primary/20 transition-all duration-150 active:scale-95 group"
             >
-              <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Icon size={20} className="text-primary" />
+              <div className={`w-11 h-11 rounded-xl ${iconBg} flex items-center justify-center group-hover:scale-110 transition-transform`}>
+                <Icon size={20} className={iconColor} />
               </div>
               <span className="text-sm font-medium text-center leading-tight">
                 {label}

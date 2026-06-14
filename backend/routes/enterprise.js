@@ -407,7 +407,7 @@ router.get("/options", async (req, res) => {
     conditions.push("(discontinue IS NULL OR discontinue = 0)");
 
     let query =
-      "SELECT id, name AS label, belongs_to, company_id FROM dbo.enterprise";
+      "SELECT id, name AS label, belongs_to, company_id, enterprise_id FROM dbo.enterprise";
     query += " WHERE " + conditions.join(" AND ");
     query += " ORDER BY name";
 

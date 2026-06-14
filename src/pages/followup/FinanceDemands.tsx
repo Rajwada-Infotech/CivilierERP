@@ -1,8 +1,6 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft,
   Bell,
   CheckCircle2,
   ChevronLeft,
@@ -216,7 +214,7 @@ interface SummaryCardProps {
   icon: React.ReactNode;
   active: boolean;
   onClick: () => void;
-  styles: { ring: string; bar: string; num: string; bg: string };
+  styles: { ring: string; bar: string; borderL: string; num: string; bg: string };
 }
 
 function SummaryCard({
@@ -231,7 +229,7 @@ function SummaryCard({
   return (
     <button
       onClick={onClick}
-      className={`relative text-left w-full rounded-xl border bg-card p-5 transition-all duration-150 hover:shadow-md hover:-translate-y-0.5 focus:outline-none ${
+      className={`relative text-left w-full rounded-xl border bg-card p-5 overflow-hidden transition-all duration-150 hover:shadow-md hover:-translate-y-0.5 focus:outline-none border-l-2 ${styles.borderL} ${
         active
           ? `ring-2 ${styles.ring} shadow-md -translate-y-0.5`
           : "border-border"
@@ -240,6 +238,7 @@ function SummaryCard({
       <div
         className={`absolute top-0 left-0 h-0.5 w-full rounded-t-xl ${active ? styles.bar : "bg-transparent"}`}
       />
+      <div className={`absolute top-0 right-0 w-24 h-24 rounded-full opacity-10 -translate-y-6 translate-x-6 ${styles.bar}`} />
       <div className="flex items-start justify-between">
         <div>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
@@ -268,7 +267,6 @@ function SummaryCard({
 const PAGE_SIZE = 50;
 
 export function FinanceDemandsPage() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const [page, setPage] = useState(1);
@@ -286,7 +284,7 @@ export function FinanceDemandsPage() {
 
   const queryKey = ["followup-demands", page, search, projectId, status];
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey,
     queryFn: () =>
       fetchDemands({ page, pageSize: PAGE_SIZE, search, projectId, status }),
@@ -345,42 +343,34 @@ export function FinanceDemandsPage() {
   const hasFilters = search || projectId || status;
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-[1400px] mx-auto px-6 py-6 space-y-5">
+    <>
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Finance" },
+          { label: "Demands" },
+        ]}
+      />
+      <div className="space-y-8 mt-6">
         {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <Breadcrumbs
-              items={[
-                { label: "Follow-Up", path: "/followup" },
-                { label: "Finance" },
-                { label: "Demands" },
-              ]}
-            />
-            <h1 className="text-2xl font-heading font-bold tracking-tight text-foreground mt-1">
+            <h1 className="text-xl font-heading font-bold text-foreground">
               Payment Demands
             </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
+            <p className="text-xs text-muted-foreground mt-0.5">
               Raise and track milestone payment demand letters for all bookings.
             </p>
           </div>
-          <div className="flex gap-2 shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate("/followup")}
-              className="gap-1.5"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" /> Dashboard
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
+          <div className="flex items-center gap-2 shrink-0">
+            <button
               onClick={() => refetch()}
-              className="gap-1.5"
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
-              <RefreshCw className="w-3.5 h-3.5" /> Refresh
-            </Button>
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              Refresh
+            </button>
           </div>
         </div>
 
@@ -401,6 +391,7 @@ export function FinanceDemandsPage() {
             styles={{
               ring: "ring-amber-400/60",
               bar: "bg-amber-400",
+              borderL: "border-l-amber-400",
               num: "text-amber-600 dark:text-amber-400",
               bg: "bg-amber-50 dark:bg-amber-950/30",
             }}
@@ -418,6 +409,7 @@ export function FinanceDemandsPage() {
             styles={{
               ring: "ring-primary/40",
               bar: "bg-primary",
+              borderL: "border-l-primary",
               num: "text-primary",
               bg: "bg-primary/10",
             }}
@@ -437,6 +429,7 @@ export function FinanceDemandsPage() {
             styles={{
               ring: "ring-emerald-400/60",
               bar: "bg-emerald-500",
+              borderL: "border-l-emerald-500",
               num: "text-emerald-600 dark:text-emerald-400",
               bg: "bg-emerald-50 dark:bg-emerald-950/30",
             }}
@@ -736,7 +729,7 @@ export function FinanceDemandsPage() {
             </div>
           )}
         </div>
-      </div>
+      </div> {/* end space-y-8 */}
 
       {/* ── Raise Demand Dialog ───────────────────────────────────────────── */}
       <Dialog open={!!raiseRow} onOpenChange={(o) => !o && setRaiseRow(null)}>
@@ -868,7 +861,7 @@ export function FinanceDemandsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }
 

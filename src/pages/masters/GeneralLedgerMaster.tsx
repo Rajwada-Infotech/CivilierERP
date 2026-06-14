@@ -15,7 +15,6 @@ import {
   Trash2,
   X,
   Check,
-  RotateCcw,
   Plus,
   Search,
   BookOpen,
@@ -417,7 +416,7 @@ function buildGLColumns(
     },
     {
       id: "actions",
-      header: "",
+      header: "Actions",
       enableSorting: false,
       cell: ({ row }) => {
         const id = row.original.LHeadId;
@@ -446,20 +445,20 @@ function buildGLColumns(
           <div className="flex items-center justify-end gap-1">
             <button
               onClick={() => onView(row.original)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10"
+              className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10"
               title="View details"
             >
               <Eye size={13} />
             </button>
             <button
               onClick={() => startEdit(row.original)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+              className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10"
             >
               <Pencil size={13} />
             </button>
             <button
               onClick={() => setDeleteConfirm(id)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10"
             >
               <Trash2 size={13} />
             </button>
@@ -645,6 +644,8 @@ const GeneralLedgerMaster: React.FC = () => {
     [editingId, deleteConfirm],
   );
 
+  const canSave = form.LHeadName.trim() !== "" && !!form.LBelongsTo;
+
   const resetForm = () => {
     setEditingId(null);
     setForm(EMPTY_FORM);
@@ -735,45 +736,15 @@ const GeneralLedgerMaster: React.FC = () => {
 
         {/* ── Form Card ── */}
         <div className="rounded-xl border border-border bg-card shadow-sm">
-          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
-            <div className="flex items-center gap-3">
-              {editingId && (
-                <button
-                  onClick={resetForm}
-                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <RotateCcw size={15} />
-                  <span className="hidden sm:inline">Back</span>
-                </button>
-              )}
-              {editingId && <span className="text-border/60">|</span>}
-              <h2 className="text-base font-heading font-semibold text-foreground">
+          {/* Card header — title only */}
+          <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
+            <div>
+              <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? "Edit Ledger Account" : "Add Ledger Account"}
               </h2>
-            </div>
-            <div className="flex items-center gap-2">
-              {editingId && (
-                <button
-                  onClick={resetForm}
-                  className="px-5 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                >
-                  Cancel
-                </button>
-              )}
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60 flex items-center gap-2"
-              >
-                {saving ? (
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : editingId ? (
-                  <Check size={14} />
-                ) : (
-                  <Plus size={14} />
-                )}
-                {saving ? "Saving…" : editingId ? "Update Account" : "Save Account"}
-              </button>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Fields marked <span className="text-destructive">*</span> are required
+              </p>
             </div>
           </div>
 
@@ -870,6 +841,39 @@ const GeneralLedgerMaster: React.FC = () => {
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Card footer — actions */}
+          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
+            <p className="text-[11px] text-muted-foreground">
+              {canSave
+                ? <span className="text-emerald-500 font-medium">Ready to save</span>
+                : "Fill in the required fields to save"}
+            </p>
+            <div className="flex items-center gap-2">
+              {editingId && (
+                <button
+                  onClick={resetForm}
+                  className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                onClick={handleSave}
+                disabled={saving || !canSave}
+                className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
+              >
+                {saving ? (
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : editingId ? (
+                  <Check size={14} />
+                ) : (
+                  <Plus size={14} />
+                )}
+                {saving ? "Saving…" : editingId ? "Update Account" : "Save Account"}
+              </button>
             </div>
           </div>
         </div>
