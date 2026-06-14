@@ -1,8 +1,6 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft,
   Bell,
   CheckCircle2,
   ChevronLeft,
@@ -269,7 +267,6 @@ function SummaryCard({
 const PAGE_SIZE = 50;
 
 export function FinanceDemandsPage() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const [page, setPage] = useState(1);
@@ -287,7 +284,7 @@ export function FinanceDemandsPage() {
 
   const queryKey = ["followup-demands", page, search, projectId, status];
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey,
     queryFn: () =>
       fetchDemands({ page, pageSize: PAGE_SIZE, search, projectId, status }),
@@ -346,42 +343,34 @@ export function FinanceDemandsPage() {
   const hasFilters = search || projectId || status;
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-[1400px] mx-auto px-6 py-6 space-y-5">
+    <>
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Finance" },
+          { label: "Demands" },
+        ]}
+      />
+      <div className="space-y-8 mt-6">
         {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <Breadcrumbs
-              items={[
-                { label: "Follow-Up", path: "/followup" },
-                { label: "Finance" },
-                { label: "Demands" },
-              ]}
-            />
-            <h1 className="text-2xl font-heading font-bold tracking-tight text-foreground mt-1">
+            <h1 className="text-xl font-heading font-bold text-foreground">
               Payment Demands
             </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
+            <p className="text-xs text-muted-foreground mt-0.5">
               Raise and track milestone payment demand letters for all bookings.
             </p>
           </div>
-          <div className="flex gap-2 shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate("/followup")}
-              className="gap-1.5"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" /> Dashboard
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
+          <div className="flex items-center gap-2 shrink-0">
+            <button
               onClick={() => refetch()}
-              className="gap-1.5"
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
-              <RefreshCw className="w-3.5 h-3.5" /> Refresh
-            </Button>
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              Refresh
+            </button>
           </div>
         </div>
 
@@ -740,7 +729,7 @@ export function FinanceDemandsPage() {
             </div>
           )}
         </div>
-      </div>
+      </div> {/* end space-y-8 */}
 
       {/* ── Raise Demand Dialog ───────────────────────────────────────────── */}
       <Dialog open={!!raiseRow} onOpenChange={(o) => !o && setRaiseRow(null)}>
@@ -872,7 +861,7 @@ export function FinanceDemandsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }
 

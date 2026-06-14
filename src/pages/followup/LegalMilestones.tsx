@@ -225,7 +225,7 @@ function MilestoneStepper({
                             type="date"
                             value={form.doneDate}
                             onChange={(e) => setForm((f) => ({ ...f, doneDate: e.target.value }))}
-                            className="w-full pl-8 pr-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 dark:[[&::-webkit-calendar-picker-indicator]:invert::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                            className="w-full pl-8 pr-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                           />
                         </div>
                       </div>
@@ -483,7 +483,7 @@ export function LegalMilestonesPage() {
                               e.stopPropagation();
                               setAuditTarget({ id: rec.Id, no: rec.MilestoneNo ?? `#${rec.Id}` });
                             }}
-                            className="p-1 rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                            className="p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
                           >
                             <Clock size={14} />
                           </button>
@@ -689,7 +689,7 @@ export function LegalMilestonesPage() {
                   <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
                   <input
                     type="date"
-                    className="w-full pl-8 pr-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 dark:[[&::-webkit-calendar-picker-indicator]:invert::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                    className="w-full pl-8 pr-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                     onChange={(e) => setForm((f) => ({ ...f, [`${s.field}Due`]: e.target.value }))}
                   />
                 </div>

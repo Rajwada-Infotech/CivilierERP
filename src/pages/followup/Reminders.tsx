@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
-  ArrowLeft,
   Bell,
   BellRing,
+  CalendarDays,
   CheckCircle,
   Clock,
   Plus,
@@ -14,13 +13,13 @@ import {
   Inbox,
   CalendarClock,
   Zap,
-  ChevronRight,
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -354,7 +353,6 @@ function ReminderRow({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function FollowupReminders() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { currentUser } = useAuth();
 
@@ -428,38 +426,27 @@ export default function FollowupReminders() {
   ];
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-[1280px] mx-auto px-6 py-8 space-y-6">
+    <>
+      <Breadcrumbs items={["Follow-Up", "Reminders"]} />
+      <div className="space-y-6 mt-6">
         {/* ── Header ── */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2 font-medium tracking-wide uppercase">
-              <button
-                onClick={() => navigate("/followup")}
-                className="hover:text-primary transition-colors flex items-center gap-1"
-              >
-                <ArrowLeft className="w-3 h-3" />
-                Follow-Up
-              </button>
-              <ChevronRight className="w-3 h-3" />
-              <span className="text-foreground">Reminders</span>
-            </div>
-            <h1 className="text-2xl font-bold text-foreground tracking-tight">
-              Reminders Management
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Reminders
             </h1>
-            <p className="text-muted-foreground text-sm mt-1">
-              Track and dispatch follow-up reminders across all tenants and
-              modules.
+            <p className="text-muted-foreground text-xs mt-0.5">
+              Track and dispatch follow-up reminders across all tenants and modules.
             </p>
           </div>
 
           <div className="flex items-center gap-2">
             <button
               onClick={() => refetch()}
-              className="p-2 rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground hover:border-border/60 transition-all"
-              title="Refresh"
+              className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className="w-3.5 h-3.5" />
+              Refresh
             </button>
             <Button
               size="sm"
@@ -709,14 +696,15 @@ export default function FollowupReminders() {
                 <label className="text-sm font-medium text-foreground">
                   Due Date
                 </label>
-                <Input
-                  type="date"
-                  value={form.dueDate}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, dueDate: e.target.value }))
-                  }
-                  className="rounded-xl"
-                />
+                <div className="relative">
+                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                  <input
+                    type="date"
+                    value={form.dueDate}
+                    onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
+                    className="w-full pl-8 pr-3 py-2 rounded-xl text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
             </div>
 
@@ -762,6 +750,6 @@ export default function FollowupReminders() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }
