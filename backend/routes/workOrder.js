@@ -2,6 +2,10 @@ const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
+const { validateBody } = require("../middleware/validate");
+const schemas = require("../validation/financialRouteSchemas2");
+
+
 const { transition, guardEdit } = require("../services/approvalService");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -363,6 +367,7 @@ router.get(
   },
 );
 
+  validateBody(schemas.workOrderCreate),
 router.post("/", async (req, res) => {
   const {
     CompanyId,
@@ -457,6 +462,7 @@ router.post("/", async (req, res) => {
   }
 });
 
+  validateBody(schemas.workOrderUpdate),
 router.put("/:id", async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
@@ -600,6 +606,7 @@ router.get("/:id/activities", async (req, res) => {
   }
 });
 
+  validateBody(schemas.workOrderActivity),
 router.post("/:id/activities", async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
@@ -657,6 +664,7 @@ router.post("/:id/activities", async (req, res) => {
   }
 });
 
+  validateBody(schemas.workOrderActivity),
 router.put("/:id/activities/:activityId", async (req, res) => {
   if (!requireValidId(req, res)) return;
 
@@ -759,6 +767,7 @@ router.get(
  * POST material — now includes DocNo FK (required by FK_WorkOrderActivityMaterials_DocNo)
  * DocNo is fetched from the WorkOrderHeader via the activity's WorkOrderHeaderId
  */
+  validateBody(schemas.workOrderMaterial),
 router.post("/:id/activities/:activityId/materials", async (req, res) => {
   if (!requireValidId(req, res)) return;
 
@@ -821,6 +830,7 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
 
 router.put(
   "/:id/activities/:activityId/materials/:materialId",
+  validateBody(schemas.workOrderMaterial),
   async (req, res) => {
     if (!requireValidId(req, res)) return;
 
@@ -882,6 +892,7 @@ router.delete(
 // =============================================
 //  BULK SAVE  —  POST /api/work-orders/:id/save-full
 // =============================================
+  validateBody(schemas.workOrderSaveFull),
 router.post("/:id/save-full", async (req, res) => {
   const headerId = requireValidId(req, res);
   if (!headerId) return;
@@ -1418,6 +1429,7 @@ router.put("/:id/approve", async (req, res) => {
   }
 });
 
+  validateBody(schemas.workOrderReject),
 router.put("/:id/reject", async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;

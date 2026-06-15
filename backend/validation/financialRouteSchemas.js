@@ -1,5 +1,7 @@
 const { z } = require("zod");
 
+// ── shared helpers ────────────────────────────────────────────────────────────
+
 const emptyToUndefined = (value) => {
   if (value === undefined || value === null) return undefined;
   if (typeof value === "string" && value.trim() === "") return undefined;
@@ -53,6 +55,7 @@ const reqNonNegativeNumber = (message) =>
   );
 
 const optDate = z.preprocess(emptyToUndefined, z.coerce.date().optional());
+
 const reqDate = (message) =>
   z.preprocess(
     (value) => {
@@ -63,6 +66,10 @@ const reqDate = (message) =>
   );
 
 const jsonPassthrough = z.any().optional();
+
+const noteField = z.object({ note: optStr(2000) }).passthrough();
+
+// ── purchaseOrders ────────────────────────────────────────────────────────────
 
 const poLineItemSchema = z
   .object({
@@ -124,6 +131,8 @@ const purchaseOrderUpdateSchema = purchaseOrderBaseSchema
   })
   .passthrough();
 
+// ── grns ──────────────────────────────────────────────────────────────────────
+
 const grnItemSchema = z
   .object({
     itemId: optStr(100),
@@ -152,8 +161,10 @@ const grnBodySchema = z
   })
   .passthrough();
 
-const paymentBodySchema = z
-  .preprocess((value) => {
+// ── newPayment ────────────────────────────────────────────────────────────────
+
+const paymentBodySchema = z.preprocess(
+  (value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       return value;
     }
@@ -212,11 +223,187 @@ const paymentBodySchema = z
       PImpsReference: optStr(100),
     })
     .passthrough(),
-  );
+);
+
+// ── workOrder ─────────────────────────────────────────────────────────────────
+
+const workOrderHeaderBase = z
+  .object({
+    CompanyId: optInt,
+    ProjectId: optInt,
+    DocumentNumber: optStr(100),
+    DocumentDate: optDate,
+    ContractorId: optInt,
+    SupplierId: optInt,
+    TotalAmount: optNumber,
+    Remarks: optStr(4000),
+    TermsAndConditions: optStr(4000),
+    DocTypeId: optInt,
+    DocNo: optStr(100),
+    finYear: optStr(10),
+    GST: jsonPassthrough,
+    BoqID: optInt,
+  })
+  .passthrough();
+
+const workOrderActivitySchema = z
+  .object({
+    ActivityGroupId: optInt,
+    ActivityId: optInt,
+    UOMId: optInt,
+    Rate: optNumber,
+    Area: optNumber,
+    LabourAmount: optNumber,
+    MaterialAmount: optNumber,
+    GrandTotal: optNumber,
+    Remarks: optStr(500),
+  })
+  .passthrough();
+
+const workOrderMaterialSchema = z
+  .object({
+    ItemId: z
+      .string()
+      .trim()
+      .min(1, "ItemId is required")
+      .uuid("Must be a valid UUID"),
+    UOMId: optInt,
+    Quantity: optNumber,
+    Rate: optNumber,
+    Remarks: optStr(2000),
+    SupplierIdPerLine: optInt,
+  })
+  .passthrough();
+
+const workOrderSaveFullSchema = z
+  .object({
+    header: workOrderHeaderBase.partial(),
+    activities: z.array(z.any()),
+  })
+  .passthrough();
+
+const workOrderCreateSchema = workOrderHeaderBase;
+const workOrderUpdateSchema = workOrderHeaderBase.partial();
+
+// ── amendments ────────────────────────────────────────────────────────────────
+
+const amendmentBase = z
+  .object({
+    RefDocId: optInt,
+    RefDocType: optStr(100),
+    RefDocNo: optStr(100),
+    OriginalValue: optNumber,
+    RevisedValue: optNumber,
+    ProjectName: optStr(200),
+    CompanyName: optStr(200),
+    Description: optStr(2000),
+    Reason: optStr(2000),
+    AmendmentDate: optDate,
+  })
+  .passthrough();
+
+const amendmentLineChangeSchema = z
+  .object({
+    FieldName: z.string().trim().min(1, "FieldName required").max(200),
+    FieldLabel: optStr(200),
+    OldValue: z.string().nullable().optional(),
+    NewValue: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+const amendmentLineChangesSchema = z
+  .object({
+    changes: z
+      .array(amendmentLineChangeSchema)
+      .min(1, "changes array must not be empty"),
+  })
+  .passthrough();
+
+// ── boq ───────────────────────────────────────────────────────────────────────
+
+const boqBase = z
+  .object({
+    BoqNo: optStr(100),
+    BoqDate: optDate,
+    CompanyId: optInt,
+    ProjectId: optInt,
+    Description: optStr(4000),
+    BoqItems: jsonPassthrough,
+    BoqActivities: jsonPassthrough,
+    Status: optStr(50),
+    Remarks: optStr(4000),
+    DocTypeId: optInt,
+    DocNo: optStr(100),
+    finYear: optStr(10),
+  })
+  .passthrough();
+
+// ── receivedPayment ───────────────────────────────────────────────────────────
+
+const rpBase = z
+  .object({
+    RPCompanyName: optStr(255),
+    RPCompanyId: optInt,
+    RPReceivedFrom: optStr(255),
+    RPCustomerName: optStr(255),
+    RPProjectName: optStr(255),
+    RPProjectId: optInt,
+    RPDocDate: optDate,
+    RPFinYear: optStr(10),
+    RPDocTypeId: optInt,
+    RPMode: optStr(50),
+    RPAmount: optNumber,
+    RPBankName: optStr(255),
+    RPTransactionId: optStr(255),
+    RPCheckNumber: optStr(100),
+    RPRemarks: optStr(4000),
+    RPDepositBankId: optInt,
+    RPDepositBankName: optStr(255),
+    RPIsEmi: z.coerce.boolean().optional(),
+    RPEmiTotal: optNumber,
+    RPEmiMonths: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().positive().optional(),
+    ),
+    RPEmiStartDate: optStr(30),
+    RPEmiSchedule: jsonPassthrough,
+    RPEmiPaying: jsonPassthrough,
+  })
+  .passthrough();
+
+// ── exports ───────────────────────────────────────────────────────────────────
 
 module.exports = {
+  // purchaseOrders
   purchaseOrderBodySchema,
   purchaseOrderUpdateSchema,
+
+  // grns
   grnBodySchema,
+
+  // newPayment
   paymentBodySchema,
+
+  // workOrder
+  workOrderCreateSchema,
+  workOrderUpdateSchema,
+  workOrderActivitySchema,
+  workOrderMaterialSchema,
+  workOrderSaveFullSchema,
+
+  // amendments
+  amendmentCreateSchema: amendmentBase,
+  amendmentUpdateSchema: amendmentBase.partial(),
+  amendmentNoteSchema: noteField,
+  amendmentLineChangesSchema,
+
+  // boq
+  boqCreateSchema: boqBase,
+  boqUpdateSchema: boqBase.partial(),
+  boqNoteSchema: noteField,
+
+  // receivedPayment
+  receivedPaymentCreateSchema: rpBase,
+  receivedPaymentUpdateSchema: rpBase.partial(),
+  receivedPaymentNoteSchema: noteField,
 };

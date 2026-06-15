@@ -2,6 +2,10 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const role = require("../middleware/role");
+const { validateBody } = require("../middleware/validate");
+const schemas = require("../validation/financialRouteSchemas2");
+
+
 
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -280,6 +284,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+  validateBody(schemas.amendmentCreate),
 router.post("/", async (req, res) => {
   const userName = requireUserName(req, res);
   if (!userName) return;
@@ -372,6 +377,7 @@ router.post("/", async (req, res) => {
   }
 });
 
+  validateBody(schemas.amendmentUpdate),
 router.put("/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
@@ -436,6 +442,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
+  validateBody(schemas.amendmentNote),
 router.post("/:id/submit", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
@@ -633,6 +640,7 @@ router.get("/:id/line-changes", async (req, res) => {
   }
 });
 
+  validateBody(schemas.amendmentLineChanges),
 router.post("/:id/line-changes", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid amendment id" });
