@@ -3,6 +3,8 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
+const { validateBody } = require("../middleware/validate");
+const schemas = require("../validation/followupSchemas");
 const rateLimit = require("express-rate-limit");
 
 const router = express.Router();
@@ -228,6 +230,7 @@ router.get(
 // ── PATCH /:id/raise ──────────────────────────────────────────────────────────
 router.patch(
   "/:id/raise",
+  validateBody(schemas.demandRaise),
   checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "write"),
   async (req, res) => {
     try {
