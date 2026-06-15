@@ -25,6 +25,11 @@ router.use(routeLimiter);
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
+const { validateBody } = require("../middleware/validateBody");
+const {
+  materialIssueBodySchema,
+  materialIssueUpdateSchema,
+} = require("../validation/financialRouteSchemas");
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -364,7 +369,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ── POST / ────────────────────────────────────────────────────────────────────
-router.post("/", async (req, res) => {
+router.post("/", validateBody(materialIssueBodySchema), async (req, res) => {
   try {
     const pool = getPool();
     const {
@@ -526,7 +531,7 @@ router.post("/", async (req, res) => {
 });
 
 // ── PUT /:id ──────────────────────────────────────────────────────────────────
-router.put("/:id", async (req, res) => {
+router.put("/:id", validateBody(materialIssueUpdateSchema), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id, 10);

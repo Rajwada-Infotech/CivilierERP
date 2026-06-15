@@ -29,6 +29,11 @@ const {
   previewNextDocNumber,
 } = require("../utils/docNumberLock");
 const { transition } = require("../services/approvalService");
+const { validateBody } = require("../middleware/validateBody");
+const {
+  materialRequestBodySchema,
+  materialRequestUpdateSchema,
+} = require("../validation/financialRouteSchemas");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -476,7 +481,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ── POST / ─────────────────────────────────────────────────────────────────────
-router.post("/", async (req, res) => {
+router.post("/", validateBody(materialRequestBodySchema), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
 
@@ -606,7 +611,7 @@ router.post("/", async (req, res) => {
 });
 
 // ── PUT /:id ───────────────────────────────────────────────────────────────────
-router.put("/:id", async (req, res) => {
+router.put("/:id", validateBody(materialRequestUpdateSchema), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
 
