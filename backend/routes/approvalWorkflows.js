@@ -6,6 +6,11 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { validateBody } = require("../middleware/validateBody");
+const {
+  approvalWorkflowBodySchema,
+  approvalWorkflowUpdateSchema,
+} = require("../validation/approvalWorkflowSchemas");
 
 const CACHE_NS = "approval-workflows";
 
@@ -54,7 +59,7 @@ router.get("/", cache(CACHE_NS, 60), async (req, res) => {
 });
 
 // POST /api/approval-workflows
-router.post("/", async (req, res) => {
+router.post("/", validateBody(approvalWorkflowBodySchema), async (req, res) => {
   const {
     name,
     type = "sequential",
@@ -111,7 +116,7 @@ router.post("/", async (req, res) => {
 });
 
 // PUT /api/approval-workflows/:id
-router.put("/:id", async (req, res) => {
+router.put("/:id", validateBody(approvalWorkflowUpdateSchema), async (req, res) => {
   const {
     name,
     type = "sequential",

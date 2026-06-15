@@ -5,6 +5,11 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const { checkPermission } = require("../middleware/permissions");
+const { validateBody } = require("../middleware/validateBody");
+const {
+  typeofdocBodySchema,
+  typeofdocUpdateSchema,
+} = require("../validation/documentTypeSchemas");
 
 // GET /api/typeofdoc - List all document types
 router.get(
@@ -66,6 +71,7 @@ router.get("/entrytypes", async (req, res) => {
 router.post(
   "/",
   checkPermission("Admin", "DocumentType", "CanAdd"),
+  validateBody(typeofdocBodySchema),
   async (req, res) => {
     const { Prefix, Description, CompanyId, ProjectId, EntryTypeId } = req.body;
 
@@ -106,6 +112,7 @@ router.post(
 router.put(
   "/:id",
   checkPermission("Admin", "DocumentType", "CanEdit"),
+  validateBody(typeofdocUpdateSchema),
   async (req, res) => {
     const { id } = req.params;
     const { Prefix, Description, CompanyId, ProjectId, EntryTypeId, IsActive } =
@@ -173,7 +180,3 @@ router.delete(
 );
 
 module.exports = router;
-
-
-
-

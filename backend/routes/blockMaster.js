@@ -5,6 +5,8 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
+const { validateBody } = require("../middleware/validateBody");
+const { blockBodySchema } = require("../validation/masterDataSchemas");
 
 bumpCacheVersion("block-master").catch(() => {});
 
@@ -56,7 +58,7 @@ router.get(
 );
 
 // POST — add block
-router.post("/", async (req, res) => {
+router.post("/", validateBody(blockBodySchema), async (req, res) => {
   const { ProjectId, BlockName, IsActive } = req.body;
   const createdBy = req.user?.userId || null;
   try {
@@ -80,7 +82,7 @@ router.post("/", async (req, res) => {
 });
 
 // PUT — update block
-router.put("/:id", async (req, res) => {
+router.put("/:id", validateBody(blockBodySchema), async (req, res) => {
   const { id } = req.params;
   const { ProjectId, BlockName, IsActive } = req.body;
   const updatedBy = req.user?.userId || null;
@@ -143,7 +145,3 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-

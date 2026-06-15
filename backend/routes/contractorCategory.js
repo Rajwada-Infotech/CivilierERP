@@ -4,6 +4,8 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const { checkPermission } = require("../middleware/permissions");
+const { validateBody } = require("../middleware/validateBody");
+const { contractorCategoryBodySchema } = require("../validation/masterDataSchemas");
 
 // ─── Sanitizer ───────────────────────────────────────────────────────────────
 const cleanStr = (v, len = 255) => {
@@ -57,7 +59,7 @@ router.get("/", async (req, res) => {
 });
 
 // ─── POST /create ─────────────────────────────────────────────────────────────
-router.post("/create", async (req, res) => {
+router.post("/create", validateBody(contractorCategoryBodySchema), async (req, res) => {
   const { code, name, isActive = true } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
 
@@ -106,7 +108,7 @@ router.post("/create", async (req, res) => {
 });
 
 // ─── PUT /update/:id ──────────────────────────────────────────────────────────
-router.put("/update/:id", async (req, res) => {
+router.put("/update/:id", validateBody(contractorCategoryBodySchema), async (req, res) => {
   const { id } = req.params;
   const { code, name, isActive } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
@@ -204,6 +206,3 @@ router.delete("/delete/:id", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
