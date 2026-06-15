@@ -371,6 +371,74 @@ const rpBase = z
   })
   .passthrough();
 
+// ── materialRequests ──────────────────────────────────────────────────────────
+
+const mrItemSchema = z.object({
+  ItemId:   z.union([z.string().min(1), z.number()]),
+  ItemName: optStr(200),
+  UOMCode:  optStr(20),
+  Quantity: z.preprocess(
+    (v) => (v === undefined || v === null || v === "" ? undefined : Number(v)),
+    z.number({ invalid_type_error: "Quantity must be a number" }).positive("Quantity must be positive"),
+  ),
+  Remarks:  optStr(4000),
+}).passthrough();
+
+const materialRequestBodySchema = z.object({
+  CompanyId:      optInt,
+  ProjectId:      optInt,
+  FinYearId:      optInt,
+  DocTypeId:      optInt,
+  RequestDate:    optDate,
+  RequiredByDate: optDate,
+  Priority:       z.enum(["Low", "Normal", "High", "Urgent"]).optional().default("Normal"),
+  Reason:         z.string().trim().min(1, "Reason is required"),
+  Remarks:        optStr(4000),
+  items:          z.array(mrItemSchema).min(1, "At least one item required"),
+}).passthrough();
+
+const materialRequestUpdateSchema = materialRequestBodySchema
+  .extend({
+    Status: optStr(20),
+  })
+  .passthrough();
+
+// ── materialIssues ────────────────────────────────────────────────────────────
+
+const issueItemSchema = z.object({
+  ItemId:   z.union([z.string().min(1), z.number()]),
+  UOMCode:  optStr(20),
+  Quantity: z.preprocess(
+    (v) => (v === undefined || v === null || v === "" ? undefined : Number(v)),
+    z.number({ invalid_type_error: "Quantity must be a number" }).positive("Quantity must be positive"),
+  ),
+  Remarks:  optStr(4000),
+}).passthrough();
+
+const materialIssueBodySchema = z.object({
+  CompanyId:      optInt,
+  ProjectId:      optInt,
+  FinYearId:      optInt,
+  DocTypeId:      optInt,
+  Date:           optDate,
+  Reason:         optStr(4000),
+  Remarks:        optStr(4000),
+  ParentDocNo:    optStr(100),
+  RootExBDocNo:   optStr(100),
+  ReferenceType:  optStr(20),
+  ReferenceId:    optInt,
+  ReferenceDocNo: optStr(100),
+  IssuedTo:       optStr(200),
+  CostCenter:     optStr(200),
+  Purpose:        optStr(500),
+  GodownId:       optInt,
+  items:          z.array(issueItemSchema).min(1, "At least one item is required"),
+}).passthrough();
+
+const materialIssueUpdateSchema = materialIssueBodySchema
+  .omit({ DocTypeId: true, ParentDocNo: true, RootExBDocNo: true, ReferenceType: true, ReferenceId: true, ReferenceDocNo: true })
+  .passthrough();
+
 // ── exports ───────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -406,4 +474,12 @@ module.exports = {
   receivedPaymentCreateSchema: rpBase,
   receivedPaymentUpdateSchema: rpBase.partial(),
   receivedPaymentNoteSchema: noteField,
+
+  // materialRequests
+  materialRequestBodySchema,
+  materialRequestUpdateSchema,
+
+  // materialIssues
+  materialIssueBodySchema,
+  materialIssueUpdateSchema,
 };
