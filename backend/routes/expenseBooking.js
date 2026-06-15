@@ -1,5 +1,4 @@
 const express = require("express");
-const logger = require("../logger");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
@@ -1558,9 +1557,7 @@ router.put(
       let emiData = {};
       try {
         emiData = JSON.parse(existing.recordset[0]?.EEmiData || "{}");
-      } catch (parseErr) {
-        logger.warn({ event: "EMI_DATA_PARSE_ERROR", err: parseErr }, "Failed to parse EEmiData on schedule update");
-      }
+      } catch {}
 
       emiData.schedule = schedule;
 
@@ -1635,9 +1632,7 @@ router.put(
         let emiData = {};
         try {
           emiData = JSON.parse(parentRow.EEmiData || "{}");
-        } catch (parseErr) {
-          logger.warn({ event: "EMI_DATA_PARSE_ERROR", err: parseErr }, "Failed to parse EEmiData on schedule delete");
-        }
+        } catch {}
         emiData.enabled = false;
         if (deleteUnpaid && Array.isArray(emiData.schedule)) {
           emiData.schedule = emiData.schedule.filter(

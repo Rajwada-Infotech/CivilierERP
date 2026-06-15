@@ -6,8 +6,6 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
-const { validateBody } = require("../middleware/validateBody");
-const { godownBodySchema, godownUpdateSchema } = require("../validation/masterDataSchemas");
 
 // Bust cache on startup so IsMain filter takes effect immediately
 bumpCacheVersion("godowns").catch(() => {});
@@ -61,7 +59,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ─── POST create godown ───────────────────────────────────────────────────────
-router.post("/", validateBody(godownBodySchema), async (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const {
       GodownCode,
@@ -113,7 +111,7 @@ router.post("/", validateBody(godownBodySchema), async (req, res) => {
 });
 
 // ─── PUT update godown ────────────────────────────────────────────────────────
-router.put("/:id", validateBody(godownUpdateSchema), async (req, res) => {
+router.put("/:id", async (req, res) => {
   try {
     const id = requireValidId(req, res);
     if (!id) return;

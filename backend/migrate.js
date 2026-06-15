@@ -27,8 +27,8 @@ const dbConfig = {
   password: process.env.DB_PASSWORD,
   port:     parseInt(process.env.DB_PORT || "1433", 10),
   options: {
-    encrypt:                process.env.DB_ENCRYPT === "true",
-    trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE !== "false",
+    encrypt:              process.env.DB_ENCRYPT === "true",
+    trustServerCertificate: true,
   },
   pool: { max: 3, min: 0, idleTimeoutMillis: 30000 },
 };

@@ -20,6 +20,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
+const authenticateToken = require("../middleware/auth");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const {
@@ -29,11 +30,6 @@ const {
   previewNextDocNumber,
 } = require("../utils/docNumberLock");
 const { transition } = require("../services/approvalService");
-const { validateBody } = require("../middleware/validateBody");
-const {
-  materialRequestBodySchema,
-  materialRequestUpdateSchema,
-} = require("../validation/financialRouteSchemas");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -86,7 +82,7 @@ async function ensureTablesExist(pool) {
 }
 
 // ── GET /companies ─────────────────────────────────────────────────────────────
-router.get("/companies", async (req, res) => {
+router.get("/companies", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -102,7 +98,7 @@ router.get("/companies", async (req, res) => {
 });
 
 // ── GET /projects ──────────────────────────────────────────────────────────────
-router.get("/projects", async (req, res) => {
+router.get("/projects", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -118,7 +114,7 @@ router.get("/projects", async (req, res) => {
 });
 
 // ── GET /fin-years ─────────────────────────────────────────────────────────────
-router.get("/fin-years", async (req, res) => {
+router.get("/fin-years", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -134,7 +130,7 @@ router.get("/fin-years", async (req, res) => {
 });
 
 // ── GET /item-options ──────────────────────────────────────────────────────────
-router.get("/item-options", async (req, res) => {
+router.get("/item-options", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
 
@@ -238,7 +234,7 @@ router.get("/item-options", async (req, res) => {
 });
 
 // ── GET /uom-options ───────────────────────────────────────────────────────────
-router.get("/uom-options", async (req, res) => {
+router.get("/uom-options", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -253,7 +249,7 @@ router.get("/uom-options", async (req, res) => {
 });
 
 // ── GET /preview-next-number ───────────────────────────────────────────────────
-router.get("/preview-next-number", async (req, res) => {
+router.get("/preview-next-number", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     let dtId = null;
@@ -271,7 +267,7 @@ router.get("/preview-next-number", async (req, res) => {
 });
 
 // ── GET / (list) ───────────────────────────────────────────────────────────────
-router.get("/", async (req, res) => {
+router.get("/", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     await ensureTablesExist(pool);
@@ -331,7 +327,7 @@ router.get("/", async (req, res) => {
 // ── GET /approved-list ────────────────────────────────────────────────────────
 // Returns a lightweight list of all Approved MRs for use in dropdown pickers.
 // Optional query params: ?companyId=<id>&projectId=<id>
-router.get("/approved-list", async (req, res) => {
+router.get("/approved-list", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
@@ -369,7 +365,7 @@ router.get("/approved-list", async (req, res) => {
 // ── GET /by-docno/:docNo ───────────────────────────────────────────────────────
 // Look up an Approved MR by its document number and return PO prefill data.
 // Used by the PO form's "Load from MR" input.
-router.get("/by-docno/:docNo", async (req, res) => {
+router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const docNo = (req.params.docNo || "").trim().toUpperCase();
@@ -446,7 +442,7 @@ router.get("/by-docno/:docNo", async (req, res) => {
 });
 
 // ── GET /:id ───────────────────────────────────────────────────────────────────
-router.get("/:id", async (req, res) => {
+router.get("/:id", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     await ensureTablesExist(pool);
@@ -481,7 +477,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ── POST / ─────────────────────────────────────────────────────────────────────
-router.post("/", validateBody(materialRequestBodySchema), async (req, res) => {
+router.post("/", authenticateToken, async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
 
@@ -611,7 +607,7 @@ router.post("/", validateBody(materialRequestBodySchema), async (req, res) => {
 });
 
 // ── PUT /:id ───────────────────────────────────────────────────────────────────
-router.put("/:id", validateBody(materialRequestUpdateSchema), async (req, res) => {
+router.put("/:id", authenticateToken, async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
 
@@ -703,7 +699,7 @@ router.put("/:id", validateBody(materialRequestUpdateSchema), async (req, res) =
 });
 
 // ── DELETE /:id ────────────────────────────────────────────────────────────────
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
@@ -736,7 +732,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 // ── PUT /:id/submit ────────────────────────────────────────────────────────────
-router.put("/:id/submit", async (req, res) => {
+router.put("/:id/submit", authenticateToken, async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
   try {
@@ -759,7 +755,7 @@ router.put("/:id/submit", async (req, res) => {
 // ── GET /:id/create-po-prefill ─────────────────────────────────────────────────
 // Returns MR header + items shaped for the PO form.
 // Only Approved MRs can generate a Normal PO.
-router.get("/:id/create-po-prefill", async (req, res) => {
+router.get("/:id/create-po-prefill", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
@@ -824,7 +820,7 @@ router.get("/:id/create-po-prefill", async (req, res) => {
 });
 
 // ── PUT /:id/approve ──────────────────────────────────────────────────────────
-router.put("/:id/approve", async (req, res) => {
+router.put("/:id/approve", authenticateToken, async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
   try {
@@ -848,7 +844,7 @@ router.put("/:id/approve", async (req, res) => {
 });
 
 // ── PUT /:id/reject ───────────────────────────────────────────────────────────
-router.put("/:id/reject", async (req, res) => {
+router.put("/:id/reject", authenticateToken, async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
   try {
@@ -875,7 +871,7 @@ router.put("/:id/reject", async (req, res) => {
 
 // ── PUT /:id/mark-ordered ──────────────────────────────────────────────────────
 // Called by the PO creation flow after a Normal PO is saved against this MR.
-router.put("/:id/mark-ordered", async (req, res) => {
+router.put("/:id/mark-ordered", authenticateToken, async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
   try {

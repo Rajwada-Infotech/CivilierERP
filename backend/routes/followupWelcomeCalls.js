@@ -45,6 +45,7 @@ const LIST_COLUMNS = `
   wc.UpdatedAt
 `;
 
+router.use(authMiddleware);
 router.use(checkPermissionForMethod(PERMISSION_MODULE, PERMISSION_SUBMODULE));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

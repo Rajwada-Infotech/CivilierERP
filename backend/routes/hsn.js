@@ -5,8 +5,6 @@ const router = express.Router()
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db")
-const { validateBody } = require("../middleware/validateBody")
-const { hsnBodySchema, hsnUpdateSchema } = require("../validation/masterDataSchemas")
 
 router.get("/", cache("hsn", 300), async (req, res) => {
   try {
@@ -21,7 +19,7 @@ router.get("/", cache("hsn", 300), async (req, res) => {
   }
 })
 
-router.post("/", validateBody(hsnBodySchema), async (req, res) => {
+router.post("/", async (req, res) => {
   const {
     HCode, HDescription, HShortDescription,
     HCGST, HSGST, HIGST, HStatus,
@@ -62,7 +60,7 @@ router.post("/", validateBody(hsnBodySchema), async (req, res) => {
   }
 })
 
-router.put("/:code", validateBody(hsnUpdateSchema), async (req, res) => {
+router.put("/:code", async (req, res) => {
   const { code } = req.params
   const {
     HDescription, HShortDescription,
@@ -123,3 +121,8 @@ router.delete("/:code", async (req, res) => {
 })
 
 module.exports = router
+
+
+
+
+

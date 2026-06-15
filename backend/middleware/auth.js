@@ -16,14 +16,11 @@ async function checkBlacklist(token) {
   }
   const val = await redisGetStrict(`${BLACKLIST_PREFIX}${token}`);
   localBlacklist.set(token, { val, at: Date.now() });
-  // Evict stale entries lazily to avoid unbounded growth (audit 10.2).
-  // Stop early once we're back under the target size — avoids an O(N) full
-  // sweep on every request when the map is large.
+  // Evict stale entries lazily to avoid unbounded growth
   if (localBlacklist.size > 5000) {
     const cutoff = Date.now() - BL_CACHE_TTL_MS;
     for (const [k, v] of localBlacklist) {
       if (v.at < cutoff) localBlacklist.delete(k);
-      if (localBlacklist.size <= 4000) break;
     }
   }
   return val;
@@ -98,7 +95,7 @@ module.exports = async (req, res, next) => {
 
     next();
   } catch (err) {
-    logger.warn({ event: "AUTH_INVALID_TOKEN", err: err.message }, "Invalid token");
+    console.error("Auth error:", err.message);
     return res.status(401).json({ error: "Invalid token" });
   }
 };

@@ -2,8 +2,6 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
-const { validateBody } = require("../middleware/validate");
-const schemas = require("../validation/followupSchemas");
 
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -38,6 +36,7 @@ const LIST_COLUMNS = `
 
 const STATUS_OPTIONS = ["Reserved", "Negotiation", "Confirmed", "Released"];
 
+router.use(authMiddleware);
 router.use(checkPermissionForMethod("Followup", "UnitSelections"));
 
 function requireUserName(req, res) {
@@ -268,9 +267,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.post("/",
-  validateBody(schemas.unitSelectionCreate),
-async (req, res) => {
+router.post("/", async (req, res) => {
   const userName = requireUserName(req, res);
   if (!userName) return;
 
@@ -376,9 +373,7 @@ async (req, res) => {
   }
 });
 
-router.put("/:id",
-  validateBody(schemas.unitSelectionUpdate),
-async (req, res) => {
+router.put("/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
     return res.status(400).json({ error: "Invalid unit selection id" });
