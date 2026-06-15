@@ -639,6 +639,30 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
   }
 
   const pool = await getPool();
+
+  // Enforce: a GRN can only be raised against an Approved Purchase Order.
+  // "Received" is also allowed so corrective/late GRNs can still be logged
+  // against a PO that has already been fully received.
+  if (poId) {
+    const poCheck = await pool
+      .request()
+      .input("POID", sql.Int, parseInt(poId, 10))
+      .query("SELECT Status FROM PurchaseOrders WHERE PurchaseOrderID = @POID");
+
+    if (!poCheck.recordset.length) {
+      return res
+        .status(404)
+        .json({ error: "Source Purchase Order not found." });
+    }
+
+    const poStatus = poCheck.recordset[0].Status;
+    if (!["Approved", "Received"].includes(poStatus)) {
+      return res.status(400).json({
+        error: `Cannot create a GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can have a GRN raised against them.`,
+      });
+    }
+  }
+
   const transaction = pool.transaction();
 
   try {
