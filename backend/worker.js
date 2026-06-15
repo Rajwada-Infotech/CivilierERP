@@ -55,8 +55,24 @@ async function cleanupInactiveUsers() {
     const redis = await getRedis();
     const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
-    const keys = await redis.keys("engagement:last:*");
-    if (!keys || keys.length === 0) return;
+    // SCAN instead of KEYS — avoids blocking the Redis event loop on large
+    // keyspaces (audit 9.2). KEYS is O(N) and stalls all Redis clients while
+    // it runs; SCAN spreads the work across multiple non-blocking iterations.
+    const keys = [];
+    let cursor = "0";
+    do {
+      const [nextCursor, batch] = await redis.scan(
+        cursor,
+        "MATCH",
+        "engagement:last:*",
+        "COUNT",
+        100,
+      );
+      cursor = nextCursor;
+      keys.push(...batch);
+    } while (cursor !== "0");
+
+    if (keys.length === 0) return;
 
     const pipeline = redis.pipeline();
     keys.forEach((k) => pipeline.get(k));

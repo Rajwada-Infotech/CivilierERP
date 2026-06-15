@@ -36,7 +36,6 @@ const LIST_COLUMNS = `
 
 const STATUS_OPTIONS = ["Reserved", "Negotiation", "Confirmed", "Released"];
 
-router.use(authMiddleware);
 router.use(checkPermissionForMethod("Followup", "UnitSelections"));
 
 function requireUserName(req, res) {

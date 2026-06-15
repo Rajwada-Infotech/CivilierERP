@@ -64,11 +64,10 @@ function initSocket(httpServer) {
 
   // ── JWT handshake ────────────────────────────────────────────────────────
   io.use((socket, next) => {
-    // Clients send token via auth object: socket({ auth: { token } })
-    const token =
-      socket.handshake.auth?.token ||
-      socket.handshake.query?.token ||
-      null;
+    // Clients must send token via auth object: io({ auth: { token } })
+    // The query.token fallback has been removed — query params appear in
+    // nginx access logs, browser history, and Referer headers (audit 6.2).
+    const token = socket.handshake.auth?.token ?? null;
 
     if (!token) {
       return next(new Error("Authentication required"));

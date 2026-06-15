@@ -48,7 +48,6 @@ const LIST_COLUMNS = `
 
 const STATUS_OPTIONS = ["Draft", "Executed", "Registered", "Overdue", "Cancelled"];
 
-router.use(authMiddleware);
 router.use(checkPermissionForMethod("Followup", "SalesDeed"));
 
 function requireUserName(req, res) {

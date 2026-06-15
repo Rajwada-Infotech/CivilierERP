@@ -3,7 +3,6 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
-const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 
 // ─── Sanitizer ───────────────────────────────────────────────────────────────
@@ -14,7 +13,7 @@ const cleanStr = (v, len = 255) => {
 
 // ─── GET /options ─────────────────────────────────────────────────────────────
 // Used by dropdowns in Work Orders, Purchase Orders, Material Expense Booking
-router.get("/options", authMiddleware, async (req, res) => {
+router.get("/options", async (req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().query(`
@@ -34,7 +33,7 @@ router.get("/options", authMiddleware, async (req, res) => {
 });
 
 // ─── GET / (full list with all columns — for the management table UI) ─────────
-router.get("/", authMiddleware, async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().query(`
@@ -58,7 +57,7 @@ router.get("/", authMiddleware, async (req, res) => {
 });
 
 // ─── POST /create ─────────────────────────────────────────────────────────────
-router.post("/create", authMiddleware, async (req, res) => {
+router.post("/create", async (req, res) => {
   const { code, name, isActive = true } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
 
@@ -107,7 +106,7 @@ router.post("/create", authMiddleware, async (req, res) => {
 });
 
 // ─── PUT /update/:id ──────────────────────────────────────────────────────────
-router.put("/update/:id", authMiddleware, async (req, res) => {
+router.put("/update/:id", async (req, res) => {
   const { id } = req.params;
   const { code, name, isActive } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
@@ -169,7 +168,7 @@ router.put("/update/:id", authMiddleware, async (req, res) => {
 // ─── DELETE /delete/:id ───────────────────────────────────────────────────────
 // Soft delete — sets CtIsActive = 0, does NOT remove the row.
 // Hard deleting category records breaks FK references in historical Work Orders / POs.
-router.delete("/delete/:id", authMiddleware, async (req, res) => {
+router.delete("/delete/:id", async (req, res) => {
   const { id } = req.params;
   const actor = req.user?.email || req.user?.name || "system";
   const ctId  = parseInt(id, 10);

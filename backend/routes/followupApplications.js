@@ -50,7 +50,6 @@ const STATUS_OPTIONS = [
 const PERMISSION_MODULE = "Followup";
 const PERMISSION_SUBMODULE = "Applicants";
 
-router.use(authMiddleware);
 
 function requireUserName(req, res) {
   const userName = req.user?.name || req.user?.email || null;

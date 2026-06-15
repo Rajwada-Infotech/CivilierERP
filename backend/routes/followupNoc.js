@@ -50,7 +50,6 @@ const LIST_COLUMNS = `
 
 const STATUS_OPTIONS = ["Pending", "Approved", "Issued", "Rejected"];
 
-router.use(authMiddleware);
 router.use(checkPermissionForMethod("Followup", "NOC"));
 
 function requireUserName(req, res) {

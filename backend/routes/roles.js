@@ -3,7 +3,6 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
-const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -36,7 +35,6 @@ function generateRoleCode(rName) {
 // Returns RId + RName so any authenticated user can populate a role select.
 router.get(
   "/list",
-  authMiddleware,
   cache("roles:list", 120),
   async (req, res) => {
     try {
@@ -57,7 +55,6 @@ router.get(
 // GET ALL (full detail) — admin only, used by Role Master page
 router.get(
   "/",
-  authMiddleware,
   checkPermission("Rights", "Menu", "CanView"),
   cache("roles", 120),
   async (req, res) => {
@@ -81,7 +78,6 @@ router.get(
 // CREATE
 router.post(
   "/",
-  authMiddleware,
   checkPermission("Rights", "Menu", "CanAdd"),
   validateBody(roleMasterCreateSchema),
   async (req, res) => {
@@ -124,7 +120,6 @@ router.post(
 // UPDATE
 router.put(
   "/:id",
-  authMiddleware,
   checkPermission("Rights", "Menu", "CanEdit"),
   validateBody(roleMasterUpdateSchema),
   async (req, res) => {
@@ -184,7 +179,6 @@ router.put(
 // DELETE
 router.delete(
   "/:id",
-  authMiddleware,
   checkPermission("Rights", "Menu", "CanDelete"),
   async (req, res) => {
     try {
@@ -204,7 +198,7 @@ router.delete(
 );
 
 // GET ROLE RIGHTS
-router.get("/:roleId/rights", authMiddleware, async (req, res) => {
+router.get("/:roleId/rights", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool
@@ -242,7 +236,7 @@ router.get("/:roleId/rights", authMiddleware, async (req, res) => {
 });
 
 // SET ROLE RIGHTS
-router.post("/:roleId/rights", authMiddleware, async (req, res) => {
+router.post("/:roleId/rights", async (req, res) => {
   try {
     const roleId = parseInt(req.params.roleId);
     const { pagePermissions } = req.body;

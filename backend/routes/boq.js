@@ -1,4 +1,5 @@
 const express = require("express");
+const logger = require("../logger");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
@@ -438,7 +439,7 @@ router.post("/", async (req, res) => {
   } catch (err) {
     try {
       if (transaction) await transaction.rollback();
-    } catch (_) {}
+    } catch (rbErr) { logger.warn({ event: "BOQ_ROLLBACK_ERROR", err: rbErr }, "POST BOQ rollback failed"); }
     console.error("POST BOQ error:", err);
     res.status(500).json({ error: err.message });
   }
@@ -542,7 +543,7 @@ router.put("/:id", async (req, res) => {
   } catch (err) {
     try {
       if (transaction) await transaction.rollback();
-    } catch (_) {}
+    } catch (rbErr) { logger.warn({ event: "BOQ_ROLLBACK_ERROR", err: rbErr }, "PUT BOQ rollback failed"); }
     console.error("PUT BOQ error:", err);
     res.status(500).json({ error: err.message });
   }
@@ -584,7 +585,7 @@ router.delete("/:id", async (req, res) => {
   } catch (err) {
     try {
       if (transaction) await transaction.rollback();
-    } catch (_) {}
+    } catch (rbErr) { logger.warn({ event: "BOQ_ROLLBACK_ERROR", err: rbErr }, "DELETE BOQ rollback failed"); }
     console.error("DELETE BOQ error:", err.message);
     res.status(500).json({ error: err.message });
   }

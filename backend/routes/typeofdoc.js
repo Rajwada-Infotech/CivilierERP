@@ -4,13 +4,11 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
-const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 
 // GET /api/typeofdoc - List all document types
 router.get(
   "/",
-  authMiddleware,
   checkPermission("Admin", "DocumentType", "CanView"),
   async (req, res) => {
     try {
@@ -45,7 +43,7 @@ router.get(
 );
 
 // GET /api/typeofdoc/entrytypes - Get Entry_Type for dropdown
-router.get("/entrytypes", authMiddleware, async (req, res) => {
+router.get("/entrytypes", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -67,7 +65,6 @@ router.get("/entrytypes", authMiddleware, async (req, res) => {
 // POST /api/typeofdoc - Create new document type
 router.post(
   "/",
-  authMiddleware,
   checkPermission("Admin", "DocumentType", "CanAdd"),
   async (req, res) => {
     const { Prefix, Description, CompanyId, ProjectId, EntryTypeId } = req.body;
@@ -108,7 +105,6 @@ router.post(
 // PUT /api/typeofdoc/:id - Update
 router.put(
   "/:id",
-  authMiddleware,
   checkPermission("Admin", "DocumentType", "CanEdit"),
   async (req, res) => {
     const { id } = req.params;
@@ -150,7 +146,6 @@ router.put(
 // DELETE /api/typeofdoc/:id - Soft delete (deactivate)
 router.delete(
   "/:id",
-  authMiddleware,
   checkPermission("Admin", "DocumentType", "CanDelete"),
   async (req, res) => {
     try {

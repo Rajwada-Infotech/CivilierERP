@@ -22,7 +22,7 @@ const allowRoles = require("../middleware/role");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
-router.use(authMiddleware, adminOnly);
+router.use(adminOnly);
 
 const clean = (v, len = 255) =>
   v && String(v).trim() ? String(v).trim().slice(0, len) : null;
