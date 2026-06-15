@@ -56,7 +56,6 @@ const CONDITION_OPTIONS = [
   "Minor Works",
 ];
 
-router.use(authMiddleware);
 router.use(checkPermissionForMethod("Followup", "Handover"));
 
 function requireUserName(req, res) {

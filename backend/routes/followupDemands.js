@@ -7,7 +7,6 @@ const rateLimit = require("express-rate-limit");
 
 const router = express.Router();
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false }));
-router.use(authMiddleware);
 
 const PERMISSION_MODULE = "Followup";
 const PERMISSION_SUBMODULE = "FinanceDemands";

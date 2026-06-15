@@ -35,7 +35,6 @@ const LIST_COLUMNS = `
   UpdatedAt
 `;
 
-router.use(authMiddleware);
 
 function requireUserName(req, res) {
   const userName = req.user?.name || req.user?.email || null;

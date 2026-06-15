@@ -1,4 +1,5 @@
 const express = require("express");
+const logger = require("../logger");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
@@ -14,7 +15,6 @@ const PERMISSION_SUBMODULE = "Bookings";
 const STATUS_OPTIONS = ["Confirmed", "Pending", "Cancelled"];
 const PAYMENT_MODES = ["Cheque", "NEFT", "RTGS", "DD", "Cash", "Online"];
 
-router.use(authMiddleware);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function requireUserName(req, res) {
@@ -524,7 +524,7 @@ router.post(
     } catch (err) {
       try {
         await transaction.rollback();
-      } catch {}
+      } catch (rbErr) { logger.warn({ event: "BOOKING_ROLLBACK_ERROR", err: rbErr }, "POST booking rollback failed"); }
       console.error("followupBookings POST error:", err);
       res.status(500).json({ error: "Failed to create booking" });
     }
@@ -644,7 +644,7 @@ router.put(
       logAudit({ module: "Booking", recordId: id, recordNo: bookingNo, action: "Updated", notes: `Status: ${payload.Status}`, changedBy: userName });
       res.json({ success: true });
     } catch (err) {
-      try { await transaction.rollback(); } catch {}
+      try { await transaction.rollback(); } catch (rbErr) { logger.warn({ event: "BOOKING_ROLLBACK_ERROR", err: rbErr }, "PUT booking rollback failed"); }
       console.error("followupBookings PUT error:", err);
       res.status(500).json({ error: "Failed to update booking" });
     }
