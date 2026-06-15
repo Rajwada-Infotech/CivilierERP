@@ -772,6 +772,26 @@ export default function GRN() {
   });
   const godowns = (godownsData as any)?.data ?? [];
 
+  // Find the godown linked to a project (by ProjectID FK on Godowns row)
+  const findProjectGodownId = (
+    projectId: string | number | null | undefined,
+  ): string => {
+    if (!projectId || !godowns.length) return "";
+    const match = godowns.find(
+      (g: any) => String(g.ProjectID) === String(projectId),
+    );
+    return match ? String(match.GodownID) : "";
+  };
+
+  // Auto-select the project-linked godown whenever projectId changes.
+  // Skip when editing an existing GRN (the saved GodownID is loaded via loadForEdit).
+  useEffect(() => {
+    if (editingId) return;
+    const auto = findProjectGodownId(formData.projectId);
+    setFormData((prev) => ({ ...prev, godownId: auto }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.projectId, godowns]);
+
   const { data: projectsData = [] } = useQuery({
     queryKey: ["grn-projects"],
     queryFn: getProjects,

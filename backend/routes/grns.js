@@ -77,6 +77,23 @@ function normaliseGRNRow(row) {
   return row;
 }
 
+// Resolve the godown linked to a project (enterprise with business_type='P')
+// Returns null if no project-specific godown exists (caller should fall back to Main)
+async function resolveProjectGodownId(pool, projectId) {
+  if (!projectId) return null;
+  try {
+    const res = await pool
+      .request()
+      .input("ProjectID", sql.Int, parseInt(projectId, 10))
+      .query(
+        "SELECT TOP 1 GodownID FROM dbo.Godowns WHERE ProjectID = @ProjectID AND IsDeleted = 0 ORDER BY GodownID",
+      );
+    return res.recordset[0]?.GodownID || null;
+  } catch {
+    return null;
+  }
+}
+
 async function resolveMainGodownId(pool) {
   try {
     const res = await pool
@@ -629,7 +646,8 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
     finYear,
     parentDocNo = null, // DocNo of the parent PO or WO
     rootExBDocNo = null, // Root ExB DocNo when raised under Expense Booking
-    godownId = null, // Target godown for stock credit (null → Main Godown)
+    godownId = null, // Target godown for stock credit (null → resolve from project or Main)
+    projectId = null, // Project linked to this GRN (used for godown resolution)
   } = req.body;
 
   if (!grnDate || !supplierId) {
@@ -639,30 +657,6 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
   }
 
   const pool = await getPool();
-
-  // Enforce: a GRN can only be raised against an Approved Purchase Order.
-  // "Received" is also allowed so corrective/late GRNs can still be logged
-  // against a PO that has already been fully received.
-  if (poId) {
-    const poCheck = await pool
-      .request()
-      .input("POID", sql.Int, parseInt(poId, 10))
-      .query("SELECT Status FROM PurchaseOrders WHERE PurchaseOrderID = @POID");
-
-    if (!poCheck.recordset.length) {
-      return res
-        .status(404)
-        .json({ error: "Source Purchase Order not found." });
-    }
-
-    const poStatus = poCheck.recordset[0].Status;
-    if (!["Approved", "Received"].includes(poStatus)) {
-      return res.status(400).json({
-        error: `Cannot create a GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can have a GRN raised against them.`,
-      });
-    }
-  }
-
   const transaction = pool.transaction();
 
   try {
@@ -734,10 +728,45 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
 
     await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
 
-    // Use the godown sent by the client; fall back to Main Godown only if none given
-    const resolvedGodownId = godownId
-      ? parseInt(godownId, 10)
-      : await resolveMainGodownId(pool);
+    // Godown resolution priority:
+    // 1. Explicit godownId from client
+    // 2. Project's linked godown (when PO has a ProjectId)
+    // 3. Main Godown fallback
+    let resolvedGodownId = godownId ? parseInt(godownId, 10) : null;
+    if (!resolvedGodownId) {
+      // Try to get ProjectId from the PO if not provided in body
+      let resolvedProjectId = projectId ? parseInt(projectId, 10) : null;
+      if (!resolvedProjectId && poId) {
+        const poRow = await pool
+          .request()
+          .input("POID", sql.Int, parseInt(poId, 10))
+          .query(
+            "SELECT TOP 1 ProjectId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+          );
+        resolvedProjectId = poRow.recordset[0]?.ProjectId || null;
+      }
+      if (resolvedProjectId) {
+        resolvedGodownId = await resolveProjectGodownId(
+          pool,
+          resolvedProjectId,
+        );
+      }
+      if (!resolvedGodownId) {
+        resolvedGodownId = await resolveMainGodownId(pool);
+      }
+    }
+
+    // Also update the GRN row's GodownID to reflect the resolved godown
+    // (the INSERT above stored the raw client value; patch it now if it changed)
+    if (resolvedGodownId) {
+      await pool
+        .request()
+        .input("GRNID", sql.Int, grnId)
+        .input("GodownID", sql.Int, resolvedGodownId)
+        .query(
+          "UPDATE dbo.GoodsReceiptNotes SET GodownID = @GodownID WHERE GRNID = @GRNID",
+        );
+    }
     await insertStockLedgerEntries(
       transaction,
       grnId,
