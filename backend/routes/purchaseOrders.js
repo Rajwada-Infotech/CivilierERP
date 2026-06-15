@@ -66,6 +66,21 @@ const computeSubtotal = (items) => {
   }, 0);
 };
 
+// Resolve a FinYear.FId from its FName label (e.g. "2026-2027").
+// Returns null if no label was supplied or no matching row exists.
+const resolveFyId = async (pool, finYearLabel) => {
+  if (!finYearLabel) return null;
+  try {
+    const r = await pool
+      .request()
+      .input("FName", sql.NVarChar, finYearLabel)
+      .query("SELECT FId FROM dbo.FinYear WHERE FName = @FName");
+    return r.recordset[0]?.FId ?? null;
+  } catch {
+    return null;
+  }
+};
+
 // Build the UOM-id lookup map: name → id (used when syncing PurchaseOrderItems)
 const buildUomMap = async (pool) => {
   try {
@@ -406,6 +421,7 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
     }
 
     const uomMap = await buildUomMap(pool);
+    const fyId = await resolveFyId(pool, finYear);
 
     transaction = pool.transaction();
     await transaction.begin();
@@ -497,7 +513,8 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
               : SourceWDId
                 ? "WO_PO"
                 : "Direct"),
-      ).query(`
+      )
+      .input("FyId", sql.Int, fyId).query(`
         INSERT INTO dbo.PurchaseOrders (
           PurchaseOrderNo, PODate, ExpectedDeliveryDate, SupplierID, CompanyId,
           ProjectId, ItemDescription, Quantity, Unit, Rate,
@@ -508,7 +525,7 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
           SourceWOId, SourceWODocNo,
           SourceMRId, SourceMRDocNo,
           SourceWDId, SourceWDDocNo,
-          POType
+          POType, fy_id
         )
         OUTPUT INSERTED.PurchaseOrderID
         VALUES (
@@ -521,7 +538,7 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
           @SourceWOId, @SourceWODocNo,
           @SourceMRId, @SourceMRDocNo,
           @SourceWDId, @SourceWDDocNo,
-          @POType
+          @POType, @FyId
         )
       `);
 
@@ -649,6 +666,7 @@ router.put(
       Remarks,
       DocTypeId,
       DocNo,
+      finYear,
       POItems,
       Discount,
       GST,
@@ -674,6 +692,7 @@ router.put(
 
       const pool = getPool();
       const uomMap = await buildUomMap(pool);
+      const fyId = await resolveFyId(pool, finYear);
 
       transaction = pool.transaction();
       await transaction.begin();
@@ -717,7 +736,8 @@ router.put(
         .input("UpdatedAt", sql.DateTime2, new Date())
         .input("POItems", sql.NVarChar(sql.MAX), poItemsJson)
         .input("Discount", sql.NVarChar(sql.MAX), discountJson)
-        .input("GST", sql.NVarChar(sql.MAX), gstJson).query(`
+        .input("GST", sql.NVarChar(sql.MAX), gstJson)
+        .input("FyId", sql.Int, fyId).query(`
         UPDATE dbo.PurchaseOrders SET
           PurchaseOrderNo       = @PurchaseOrderNo,
           PODate                = @PODate,
@@ -743,7 +763,8 @@ router.put(
           UpdatedAt             = @UpdatedAt,
           POItems               = @POItems,
           Discount              = @Discount,
-          GST                   = @GST
+          GST                   = @GST,
+          fy_id                 = COALESCE(@FyId, fy_id)
         WHERE PurchaseOrderID = @PurchaseOrderID
       `);
 

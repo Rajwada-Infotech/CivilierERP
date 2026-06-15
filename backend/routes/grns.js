@@ -726,7 +726,8 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
 
     const grnId = grnResult.recordset[0].GRNID;
 
-    await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
+    // NOTE: backPatchRecordId runs on pool (outside transaction).
+    // Moved to after transaction.commit() to avoid lock contention.
 
     // Godown resolution priority:
     // 1. Explicit godownId from client
@@ -758,8 +759,10 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
 
     // Also update the GRN row's GodownID to reflect the resolved godown
     // (the INSERT above stored the raw client value; patch it now if it changed)
+    // IMPORTANT: use transaction.request() not pool.request() — the GRN row
+    // only exists inside this uncommitted transaction; pool sees nothing yet.
     if (resolvedGodownId) {
-      await pool
+      await transaction
         .request()
         .input("GRNID", sql.Int, grnId)
         .input("GodownID", sql.Int, resolvedGodownId)
@@ -776,6 +779,9 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
     );
 
     await transaction.commit();
+
+    // backPatchRecordId uses pool directly — must run after commit
+    await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
 
     // ── Update parent PO status ───────────────────────────────────────────────
     // Check if all ordered quantities are now received; set status accordingly.
@@ -861,6 +867,7 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
   } catch (err) {
     await transaction.rollback().catch(() => {});
     console.error("CREATE GRN FULL ERROR:", err);
+    if (res.headersSent) return; // timeout middleware may have already sent 503
     res.status(500).json({
       error: "Failed to create GRN",
       message: err.message,
