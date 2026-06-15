@@ -201,7 +201,6 @@ function GodownSelect({
                 className="bg-popover text-foreground"
               >
                 {g.GodownName}
-                {g.IsMain ? " [Main]" : ""}
               </option>
             ))}
         </select>
@@ -233,11 +232,6 @@ function GodownSelect({
           >
             {selected.GodownName}
           </p>
-          {selected.IsMain && (
-            <span className="text-[9px] bg-emerald-500/15 text-emerald-600 px-1.5 py-0.5 rounded-full font-bold shrink-0 ml-auto">
-              MAIN
-            </span>
-          )}
         </div>
       )}
     </div>
@@ -590,7 +584,6 @@ export default function StockTransfer() {
 
   const filteredGodowns = useMemo(() => {
     return allGodowns.filter((g) => {
-      if (g.IsMain) return false; // exclude Main Godown — transfers only between project godowns
       if (filterCompanyId && String(g.EnterpriseID ?? "") !== filterCompanyId)
         return false;
       if (filterProjectId && String(g.ProjectID ?? "") !== filterProjectId)
@@ -716,8 +709,7 @@ export default function StockTransfer() {
               Stock Transfer
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Move stock between godowns — main to branch or any godown to
-              godown
+              Move stock between project godowns
             </p>
           </div>
           <div className="flex items-center gap-1 p-1 rounded-xl bg-muted border border-border">

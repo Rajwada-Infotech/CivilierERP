@@ -28,27 +28,28 @@ let _schemaCache = null;
 
 async function getSchema(pool) {
   if (_schemaCache) return _schemaCache;
-  const [
+  const [hasCreatedDate, hasEntryDate, hasUomCol, hasUomOnItem, hasGodownCol] =
+    await Promise.all([
+      hasColumn(pool, "dbo.StockLedger", "CreatedDate"),
+      hasColumn(pool, "dbo.StockLedger", "EntryDate"),
+      hasColumn(pool, "dbo.StockLedger", "UOM"),
+      hasColumn(pool, "dbo.Item_Master_Group", "M_UOM"),
+      hasColumn(pool, "dbo.StockLedger", "GodownID"),
+    ]);
+  _schemaCache = {
     hasCreatedDate,
     hasEntryDate,
     hasUomCol,
     hasUomOnItem,
     hasGodownCol,
-  ] = await Promise.all([
-    hasColumn(pool, "dbo.StockLedger", "CreatedDate"),
-    hasColumn(pool, "dbo.StockLedger", "EntryDate"),
-    hasColumn(pool, "dbo.StockLedger", "UOM"),
-    hasColumn(pool, "dbo.Item_Master_Group", "M_UOM"),
-    hasColumn(pool, "dbo.StockLedger", "GodownID"),
-  ]);
-  _schemaCache = { hasCreatedDate, hasEntryDate, hasUomCol, hasUomOnItem, hasGodownCol };
+  };
   return _schemaCache;
 }
 
 /**
  * GET /api/inventory-master
  * ?date=YYYY-MM-DD  (default: today)
- * ?godownId=<int>   (default: Main Godown)
+ * ?godownId=<int>   (required — no default)
  */
 router.get("/", cache("inventory-master", 60), async (req, res) => {
   try {
@@ -162,24 +163,21 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
       request.input("godownId", sql.Int, godownId);
     }
 
-    // ── Godown name + IsMain ────────────────────────────────────────────────────
-    // Fetch once — the entire query is already scoped to a single godownId.
-    let godownName = "Main Godown";
-    let isMainGodown = true;
+    // ── Godown name ──────────────────────────────────────────────────────────
+    let godownName = null;
     if (hasGodownCol && godownId) {
       try {
         const gdRes = await pool
           .request()
           .input("gid", sql.Int, godownId)
           .query(
-            "SELECT TOP 1 GodownName, ISNULL(IsMain,0) AS IsMain FROM dbo.Godowns WHERE GodownID=@gid",
+            "SELECT TOP 1 GodownName FROM dbo.Godowns WHERE GodownID=@gid AND IsMain=0 AND IsDeleted=0",
           );
         if (gdRes.recordset.length) {
-          godownName = gdRes.recordset[0].GodownName ?? "Main Godown";
-          isMainGodown = !!gdRes.recordset[0].IsMain;
+          godownName = gdRes.recordset[0].GodownName ?? null;
         }
       } catch {
-        // non-fatal: defaults stay
+        // non-fatal
       }
     }
 
@@ -217,14 +215,12 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
         Number(r.StockIn || 0) -
         Number(r.StockOut || 0),
       GodownName: godownName,
-      IsMainGodown: isMainGodown,
     }));
 
     res.json({
       date: targetDate,
       godownId,
       godownName,
-      isMainGodown,
       data: rows,
       total: rows.length,
     });
