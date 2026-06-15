@@ -5,6 +5,8 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const allowRoles = require("../middleware/role");
 const { bumpCacheVersion } = require("../redis");
+const { validateBody } = require("../middleware/validateBody");
+const { companyBodySchema } = require("../validation/masterDataSchemas");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 const GST_STATUSES = new Set(["Registered", "Unregistered"]);
@@ -105,7 +107,7 @@ router.get("/", async (req, res) => {
 });
 
 // POST — inserts into enterprise with business_type = 'C'
-router.post("/", adminOnly, async (req, res) => {
+router.post("/", adminOnly, validateBody(companyBodySchema), async (req, res) => {
   const f = req.body;
   const gst = normalizeCompanyGst(f);
   if (gst.error) return res.status(400).json({ error: gst.error });
@@ -190,7 +192,7 @@ router.post("/", adminOnly, async (req, res) => {
 });
 
 // PUT — updates enterprise row
-router.put("/:id", adminOnly, async (req, res) => {
+router.put("/:id", adminOnly, validateBody(companyBodySchema), async (req, res) => {
   const f = req.body;
   const gst = normalizeCompanyGst(f);
   if (gst.error) return res.status(400).json({ error: gst.error });

@@ -50,7 +50,7 @@ services:
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_PID: Developer
-      MSSQL_SA_PASSWORD: ${LOCAL_SA_PASSWORD:-infotech@123}
+      MSSQL_SA_PASSWORD: ${LOCAL_SA_PASSWORD:?LOCAL_SA_PASSWORD must be set in your .env or shell}
     ports:
       - "1433:1433"
     volumes:
@@ -98,9 +98,12 @@ services:
     image: nginx:1.27-alpine
     ports:
       - "80:80"
+      - "443:443"   # 15.3: HTTPS -- uncomment when TLS cert is provisioned on EC2
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - frontend_dist:/usr/share/nginx/html:ro
+      # 15.3: mount Lets Encrypt certs -- uncomment on EC2 after running certbot
+      # - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       backend:
         condition: service_healthy
@@ -118,3 +121,4 @@ volumes:
 networks:
   civilier-network:
     driver: bridge
+    

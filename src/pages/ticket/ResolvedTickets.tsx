@@ -132,15 +132,6 @@ const fmtDateTime = (d?: string | null) => {
 // ─── Attachment blob URL cache ────────────────────────────────────────────────
 
 const attachmentBlobUrlCache = new Map<string, string>();
-let attachmentCacheCleanupRegistered = false;
-const registerAttachmentCacheCleanup = () => {
-  if (attachmentCacheCleanupRegistered || typeof window === "undefined") return;
-  attachmentCacheCleanupRegistered = true;
-  window.addEventListener("pagehide", () => {
-    attachmentBlobUrlCache.forEach((blobUrl) => URL.revokeObjectURL(blobUrl));
-    attachmentBlobUrlCache.clear();
-  });
-};
 
 // ─── Priority / Status config ─────────────────────────────────────────────────
 
@@ -203,7 +194,6 @@ function AuthenticatedAttachmentImage({ url, alt, className, onClick }: { url: s
         if (blob.type && !blob.type.startsWith("image/")) { setIsNonImage(true); return; }
         const objectUrl = URL.createObjectURL(blob);
         attachmentBlobUrlCache.set(url, objectUrl);
-        registerAttachmentCacheCleanup();
         setSrc(objectUrl);
       })
       .catch(() => { if (alive) setFailed(true); });
@@ -235,7 +225,6 @@ function openAttachmentViewer(url: string, filename: string) {
           else if (blob.type.startsWith("image/")) isPdf = false;
           blobUrl = URL.createObjectURL(blob);
           attachmentBlobUrlCache.set(url, blobUrl);
-          registerAttachmentCacheCleanup();
         }
       } catch { const p = win.document.createElement('p'); p.textContent = 'Unable to load attachment.'; p.style.cssText = 'color:#ccc;font-family:sans-serif;padding:24px'; win.document.body.appendChild(p); return; }
     }
@@ -835,6 +824,16 @@ const ResolvedTickets: React.FC = () => {
     });
 
   useTicketSync(refetch);
+
+  // 10.1: register pagehide cleanup inside component lifecycle so listener is always removed
+  useEffect(() => {
+    const cleanup = () => {
+      attachmentBlobUrlCache.forEach((blobUrl) => URL.revokeObjectURL(blobUrl));
+      attachmentBlobUrlCache.clear();
+    };
+    window.addEventListener("pagehide", cleanup);
+    return () => window.removeEventListener("pagehide", cleanup);
+  }, []);
 
   const filteredTickets = useMemo(() => {
     let list = allTickets.filter((t) => t.status === activeTab);

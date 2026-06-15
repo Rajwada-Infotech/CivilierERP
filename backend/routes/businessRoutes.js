@@ -5,7 +5,6 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool } = require("../db");
 const authMiddleware = require("../middleware/auth");
 
-router.use(authMiddleware);
 
 router.get("/dropdown", async (req, res) => {
   try {

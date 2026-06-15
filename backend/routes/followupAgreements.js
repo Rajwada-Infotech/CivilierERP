@@ -2,6 +2,9 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
+const { validateBody } = require("../middleware/validate");
+const schemas = require("../validation/followupSchemas");
+const logger = require("../logger");
 
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -35,7 +38,7 @@ const LIST_COLUMNS = `
 
 const STATUS_OPTIONS = ["Draft", "Issued", "Signed", "Cancelled"];
 
-router.use(authMiddleware);
+// authMiddleware is applied globally in server.js — no need to repeat here (audit 3.1)
 router.use(checkPermissionForMethod("Followup", "Agreements"));
 
 function requireUserName(req, res) {
@@ -208,7 +211,7 @@ router.get("/meta/options", async (req, res) => {
   try {
     res.json(await buildOptions());
   } catch (err) {
-    console.error("followupAgreements options error:", err);
+    logger.error({ event: "AGREEMENT_OPTIONS_ERROR", err }, "Failed to load agreement options");
     res.status(500).json({ error: "Failed to load agreement options" });
   }
 });
@@ -289,12 +292,14 @@ router.get("/", async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("followupAgreements GET error:", err);
+    logger.error({ event: "AGREEMENT_GET_ERROR", err }, "Failed to fetch agreements");
     res.status(500).json({ error: "Failed to fetch agreements" });
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/",
+  validateBody(schemas.agreementCreate),
+async (req, res) => {
   const userName = requireUserName(req, res);
   if (!userName) return;
 
@@ -337,59 +342,73 @@ router.post("/", async (req, res) => {
       applicant.CompanyId ||
       null;
 
-    const insertResult = await pool
-      .request()
-      .input("ApplicantId", sql.Int, payload.ApplicantId)
-      .input("UnitSelectionId", sql.Int, payload.UnitSelectionId)
-      .input("BookingId", sql.Int, payload.BookingId)
-      .input("ProjectId", sql.Int, projectId)
-      .input("CompanyId", sql.Int, companyId)
-      .input("AgreementDate", sql.Date, payload.AgreementDate)
-      .input("AgreementValue", sql.Decimal(18, 2), payload.AgreementValue)
-      .input("AdvanceAmount", sql.Decimal(18, 2), payload.AdvanceAmount)
-      .input("BalanceAmount", sql.Decimal(18, 2), payload.BalanceAmount)
-      .input("RegistrationDate", sql.Date, payload.RegistrationDate)
-      .input("Status", sql.NVarChar(30), payload.Status)
-      .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
-      .input("CreatedBy", sql.NVarChar(100), userName).query(`
-        INSERT INTO dbo.FollowupAgreements (
-          AgreementNo, ApplicantId, UnitSelectionId, BookingId,
-          ProjectId, CompanyId, AgreementDate, AgreementValue,
-          AdvanceAmount, BalanceAmount, RegistrationDate,
-          Status, Notes, CreatedBy, CreatedAt
-        )
-        VALUES (
-          NULL, @ApplicantId, @UnitSelectionId, @BookingId,
-          @ProjectId, @CompanyId, @AgreementDate, @AgreementValue,
-          @AdvanceAmount, @BalanceAmount, @RegistrationDate,
-          @Status, @Notes, @CreatedBy, SYSDATETIME()
-        );
-        SELECT SCOPE_IDENTITY() AS Id;
-      `);
+    // --- 1.6 fix: wrap INSERT + AgreementNo UPDATE in a transaction so we
+    // never end up with a row whose AgreementNo is NULL if the second query
+    // fails (e.g. connection drop, server crash between the two queries).
+    const transaction = new sql.Transaction(pool);
+    await transaction.begin();
 
-    const id = Number(insertResult.recordset[0]?.Id);
-    if (!id) throw new Error("Insert returned no Id");
-    const agreementNo = `AGR${String(id).padStart(6, "0")}`;
+    let id;
+    try {
+      const insertResult = await new sql.Request(transaction)
+        .input("ApplicantId", sql.Int, payload.ApplicantId)
+        .input("UnitSelectionId", sql.Int, payload.UnitSelectionId)
+        .input("BookingId", sql.Int, payload.BookingId)
+        .input("ProjectId", sql.Int, projectId)
+        .input("CompanyId", sql.Int, companyId)
+        .input("AgreementDate", sql.Date, payload.AgreementDate)
+        .input("AgreementValue", sql.Decimal(18, 2), payload.AgreementValue)
+        .input("AdvanceAmount", sql.Decimal(18, 2), payload.AdvanceAmount)
+        .input("BalanceAmount", sql.Decimal(18, 2), payload.BalanceAmount)
+        .input("RegistrationDate", sql.Date, payload.RegistrationDate)
+        .input("Status", sql.NVarChar(30), payload.Status)
+        .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
+        .input("CreatedBy", sql.NVarChar(100), userName).query(`
+          INSERT INTO dbo.FollowupAgreements (
+            AgreementNo, ApplicantId, UnitSelectionId, BookingId,
+            ProjectId, CompanyId, AgreementDate, AgreementValue,
+            AdvanceAmount, BalanceAmount, RegistrationDate,
+            Status, Notes, CreatedBy, CreatedAt
+          )
+          VALUES (
+            NULL, @ApplicantId, @UnitSelectionId, @BookingId,
+            @ProjectId, @CompanyId, @AgreementDate, @AgreementValue,
+            @AdvanceAmount, @BalanceAmount, @RegistrationDate,
+            @Status, @Notes, @CreatedBy, SYSDATETIME()
+          );
+          SELECT SCOPE_IDENTITY() AS Id;
+        `);
 
-    await pool
-      .request()
-      .input("Id", sql.Int, id)
-      .input("AgreementNo", sql.NVarChar(50), agreementNo).query(`
-        UPDATE dbo.FollowupAgreements
-        SET AgreementNo = @AgreementNo
-        WHERE Id = @Id
-      `);
+      id = Number(insertResult.recordset[0]?.Id);
+      if (!id) throw new Error("Insert returned no Id");
+      const agreementNo = `AGR${String(id).padStart(6, "0")}`;
 
-    res
-      .status(201)
-      .json({ Id: id, AgreementNo: agreementNo, Status: payload.Status });
+      await new sql.Request(transaction)
+        .input("Id", sql.Int, id)
+        .input("AgreementNo", sql.NVarChar(50), agreementNo).query(`
+          UPDATE dbo.FollowupAgreements
+          SET AgreementNo = @AgreementNo
+          WHERE Id = @Id
+        `);
+
+      await transaction.commit();
+
+      return res
+        .status(201)
+        .json({ Id: id, AgreementNo: agreementNo, Status: payload.Status });
+    } catch (txErr) {
+      await transaction.rollback().catch(() => {});
+      throw txErr; // re-throw so the outer catch logs + responds
+    }
   } catch (err) {
-    console.error("followupAgreements POST error:", err);
+    logger.error({ event: "AGREEMENT_POST_ERROR", err }, "Failed to create agreement");
     res.status(500).json({ error: "Failed to create agreement" });
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id",
+  validateBody(schemas.agreementUpdate),
+async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
     return res.status(400).json({ error: "Invalid agreement id" });
@@ -486,7 +505,7 @@ router.put("/:id", async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error("followupAgreements PUT error:", err);
+    logger.error({ event: "AGREEMENT_PUT_ERROR", err }, "Failed to update agreement");
     res.status(500).json({ error: "Failed to update agreement" });
   }
 });
@@ -526,7 +545,7 @@ router.delete("/:id", async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error("followupAgreements DELETE error:", err);
+    logger.error({ event: "AGREEMENT_DELETE_ERROR", err }, "Failed to delete agreement");
     res.status(500).json({ error: "Failed to delete agreement" });
   }
 });

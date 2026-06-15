@@ -10,7 +10,6 @@ const {
   communicatorConfigSchema,
 } = require("../validation/communicatorSchemas");
 
-router.use(authMiddleware);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 const superAdminOnly = allowRoles("super_admin");
 

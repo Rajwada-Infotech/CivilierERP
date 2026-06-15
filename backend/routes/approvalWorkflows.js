@@ -1,11 +1,16 @@
 const express = require("express");
+const logger = require("../logger");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const authMiddleware = require("../middleware/auth");
+const { validateBody } = require("../middleware/validateBody");
+const {
+  approvalWorkflowBodySchema,
+  approvalWorkflowUpdateSchema,
+} = require("../validation/approvalWorkflowSchemas");
 
 const CACHE_NS = "approval-workflows";
 
@@ -20,7 +25,7 @@ function parseJson(val, fallback = []) {
 }
 
 // GET /api/approval-workflows[?module=X]
-router.get("/", authMiddleware, cache(CACHE_NS, 60), async (req, res) => {
+router.get("/", cache(CACHE_NS, 60), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -54,7 +59,7 @@ router.get("/", authMiddleware, cache(CACHE_NS, 60), async (req, res) => {
 });
 
 // POST /api/approval-workflows
-router.post("/", authMiddleware, async (req, res) => {
+router.post("/", validateBody(approvalWorkflowBodySchema), async (req, res) => {
   const {
     name,
     type = "sequential",
@@ -111,7 +116,7 @@ router.post("/", authMiddleware, async (req, res) => {
 });
 
 // PUT /api/approval-workflows/:id
-router.put("/:id", authMiddleware, async (req, res) => {
+router.put("/:id", validateBody(approvalWorkflowUpdateSchema), async (req, res) => {
   const {
     name,
     type = "sequential",
@@ -154,7 +159,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
 });
 
 // PATCH /api/approval-workflows/:id/toggle
-router.patch("/:id/toggle", authMiddleware, async (req, res) => {
+router.patch("/:id/toggle", async (req, res) => {
   try {
     const pool = getPool();
     await pool
@@ -176,7 +181,7 @@ router.patch("/:id/toggle", authMiddleware, async (req, res) => {
 });
 
 // DELETE /api/approval-workflows/:id
-router.delete("/:id", authMiddleware, async (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
     const pool = getPool();
     await pool
@@ -196,7 +201,7 @@ module.exports = router;
 // GET /api/approval-workflows/trail?module=GoodsReceiptNotes&id=123
 // Returns the active workflow levels + audit log for a specific record.
 // Only returns the LATEST entry per level (handles resubmissions).
-router.get("/trail", authMiddleware, async (req, res) => {
+router.get("/trail", async (req, res) => {
   const { module, id } = req.query;
   if (!module || !id) {
     return res.status(400).json({ error: "module and id are required" });
@@ -243,7 +248,9 @@ router.get("/trail", authMiddleware, async (req, res) => {
     if (wfRow?.LevelsJson) {
       try {
         workflowLevels = JSON.parse(wfRow.LevelsJson);
-      } catch {}
+      } catch (parseErr) {
+        logger.warn({ event: "WORKFLOW_LEVELS_PARSE_ERROR", err: parseErr }, "Failed to parse LevelsJson");
+      }
     }
 
     // 2. Fetch full audit trail (all rows, Level > 0 only — Level 0 is submission marker)

@@ -14,7 +14,6 @@ const {
   getDynamicLimit,
 } = require("../redis");
 
-router.use(authMiddleware);
 
 const metricsOnly = allowRoles("admin", "super_admin", "dba", "director");
 

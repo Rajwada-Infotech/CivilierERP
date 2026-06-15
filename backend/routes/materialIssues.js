@@ -19,13 +19,17 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
-const authenticateToken = require("../middleware/auth");
 const rateLimit = require("express-rate-limit");
 const routeLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
 router.use(routeLimiter);
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
+const { validateBody } = require("../middleware/validateBody");
+const {
+  materialIssueBodySchema,
+  materialIssueUpdateSchema,
+} = require("../validation/financialRouteSchemas");
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -54,7 +58,7 @@ async function resolveMainGodownId(pool) {
 }
 
 // ── GET /companies ────────────────────────────────────────────────────────────
-router.get("/companies", authenticateToken, async (req, res) => {
+router.get("/companies", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -70,7 +74,7 @@ router.get("/companies", authenticateToken, async (req, res) => {
 });
 
 // ── GET /projects ─────────────────────────────────────────────────────────────
-router.get("/projects", authenticateToken, async (req, res) => {
+router.get("/projects", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -86,7 +90,7 @@ router.get("/projects", authenticateToken, async (req, res) => {
 });
 
 // ── GET /fin-years ────────────────────────────────────────────────────────────
-router.get("/fin-years", authenticateToken, async (req, res) => {
+router.get("/fin-years", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -102,7 +106,7 @@ router.get("/fin-years", authenticateToken, async (req, res) => {
 });
 
 // ── GET /godowns ──────────────────────────────────────────────────────────────
-router.get("/godowns", authenticateToken, async (req, res) => {
+router.get("/godowns", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -120,7 +124,7 @@ router.get("/godowns", authenticateToken, async (req, res) => {
 
 // ── GET /item-options ─────────────────────────────────────────────────────────
 // Optional ?godownId=N filters stock to that godown only.
-router.get("/item-options", authenticateToken, async (req, res) => {
+router.get("/item-options", async (req, res) => {
   try {
     const pool = getPool();
     const godownId = req.query.godownId
@@ -176,7 +180,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
 
 // ── GET /stock/:itemId ────────────────────────────────────────────────────────
 // Optional ?godownId=N scopes the balance to a specific godown.
-router.get("/stock/:itemId", authenticateToken, async (req, res) => {
+router.get("/stock/:itemId", async (req, res) => {
   try {
     const pool = getPool();
     const godownId = req.query.godownId
@@ -203,7 +207,7 @@ router.get("/stock/:itemId", authenticateToken, async (req, res) => {
 });
 
 // ── GET /next-number ──────────────────────────────────────────────────────────
-router.get("/next-number", authenticateToken, async (req, res) => {
+router.get("/next-number", async (req, res) => {
   try {
     const pool = getPool();
     const prefix = req.query.exb === "true" ? "ExB-ISS" : "ISS";
@@ -218,7 +222,6 @@ router.get("/next-number", authenticateToken, async (req, res) => {
 // ── GET / ─────────────────────────────────────────────────────────────────────
 router.get(
   "/",
-  authenticateToken,
   cache("material-issues", 300),
   async (req, res) => {
     try {
@@ -289,7 +292,7 @@ router.get(
 );
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
-router.get("/:id", authenticateToken, async (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
@@ -366,7 +369,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
 });
 
 // ── POST / ────────────────────────────────────────────────────────────────────
-router.post("/", authenticateToken, async (req, res) => {
+router.post("/", validateBody(materialIssueBodySchema), async (req, res) => {
   try {
     const pool = getPool();
     const {
@@ -528,7 +531,7 @@ router.post("/", authenticateToken, async (req, res) => {
 });
 
 // ── PUT /:id ──────────────────────────────────────────────────────────────────
-router.put("/:id", authenticateToken, async (req, res) => {
+router.put("/:id", validateBody(materialIssueUpdateSchema), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
@@ -633,7 +636,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
 });
 
 // ── DELETE /:id ───────────────────────────────────────────────────────────────
-router.delete("/:id", authenticateToken, async (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
@@ -675,7 +678,7 @@ router.delete("/:id", authenticateToken, async (req, res) => {
 });
 
 // ── GET /reference-list/grn ───────────────────────────────────────────────────
-router.get("/reference-list/grn", authenticateToken, async (req, res) => {
+router.get("/reference-list/grn", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -692,7 +695,7 @@ router.get("/reference-list/grn", authenticateToken, async (req, res) => {
 });
 
 // ── GET /reference-list/mr ────────────────────────────────────────────────────
-router.get("/reference-list/mr", authenticateToken, async (req, res) => {
+router.get("/reference-list/mr", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -712,7 +715,7 @@ router.get("/reference-list/mr", authenticateToken, async (req, res) => {
 // ── GET /prefill/:type/:id ────────────────────────────────────────────────────
 // Returns items pre-filled from a GRN, MR, or Work Done record.
 // :id can be a numeric DB id OR a doc number string (e.g. GRN-2026-00004)
-router.get("/prefill/:type/:id", authenticateToken, async (req, res) => {
+router.get("/prefill/:type/:id", async (req, res) => {
   try {
     const pool = getPool();
     const type = (req.params.type || "").toUpperCase();
@@ -925,7 +928,7 @@ router.get("/prefill/:type/:id", authenticateToken, async (req, res) => {
 });
 
 // ── PUT /:id/submit — Pending re-submission after rejection ───────────────────
-router.put("/:id/submit", authenticateToken, async (req, res) => {
+router.put("/:id/submit", async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
@@ -944,7 +947,7 @@ router.put("/:id/submit", authenticateToken, async (req, res) => {
 });
 
 // ── PUT /:id/approve ──────────────────────────────────────────────────────────
-router.put("/:id/approve", authenticateToken, async (req, res) => {
+router.put("/:id/approve", async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
@@ -964,7 +967,7 @@ router.put("/:id/approve", authenticateToken, async (req, res) => {
 });
 
 // ── PUT /:id/reject ───────────────────────────────────────────────────────────
-router.put("/:id/reject", authenticateToken, async (req, res) => {
+router.put("/:id/reject", async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });

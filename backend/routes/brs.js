@@ -6,6 +6,7 @@ const sql = require("mssql");
 
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+
 const { getPool } = require("../db");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
@@ -392,7 +393,3 @@ router.put("/auto-match", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-

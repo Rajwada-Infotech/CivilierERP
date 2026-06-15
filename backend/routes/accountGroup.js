@@ -5,7 +5,6 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
-const authenticateToken = require("../middleware/auth");
 
 router.get("/", cache("account-group", 300), async (req, res) => {
   try {
@@ -26,7 +25,7 @@ router.get("/", cache("account-group", 300), async (req, res) => {
   }
 });
 
-router.post("/", authenticateToken, async (req, res) => {
+router.post("/", async (req, res) => {
   const { Name, Code, ParentGroupId, Status } = req.body;
   try {
     const userId = req.user?.id ?? req.user?.userId;
@@ -59,7 +58,7 @@ router.post("/", authenticateToken, async (req, res) => {
   }
 });
 
-router.put("/:id", authenticateToken, async (req, res) => {
+router.put("/:id", async (req, res) => {
   const { Name, Code, ParentGroupId, Status } = req.body;
   try {
     const userId = req.user?.id ?? req.user?.userId;

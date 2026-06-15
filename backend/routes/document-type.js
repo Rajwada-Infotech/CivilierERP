@@ -9,6 +9,11 @@ const { getPool, sql } = require("../db");
 const { checkPermission } = require("../middleware/permissions");
 const { previewNextDocNumber } = require("../utils/docNumberLock");
 const { cache, localVersionCache } = require("../middleware/cache");
+const { validateBody } = require("../middleware/validateBody");
+const {
+  documentTypeBodySchema,
+  documentTypeUpdateSchema,
+} = require("../validation/documentTypeSchemas");
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
@@ -206,6 +211,7 @@ router.get("/projects", async (req, res) => {
 router.post(
   "/",
   ...bypassOrCheck("Admin", "DocumentType", "CanAdd"),
+  validateBody(documentTypeBodySchema),
   async (req, res) => {
     const {
       Prefix,
@@ -284,6 +290,7 @@ router.post(
 router.put(
   "/:id",
   ...bypassOrCheck("Admin", "DocumentType", "CanEdit"),
+  validateBody(documentTypeUpdateSchema),
   async (req, res) => {
     const { id } = req.params;
     const {
