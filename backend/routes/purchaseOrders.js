@@ -380,6 +380,31 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
     if (!userEmail) return;
 
     const pool = getPool();
+
+    // Enforce: a PO can only be raised against an Approved Material Request.
+    // Once partially ordered, further POs are still allowed against the same
+    // MR until it is fully covered (Status moves to 'Ordered').
+    if (SourceMRId) {
+      const mrId = parseInt(SourceMRId, 10);
+      const mrCheck = await pool
+        .request()
+        .input("MRId", sql.Int, mrId)
+        .query("SELECT Status FROM dbo.MaterialRequests WHERE MRId = @MRId");
+
+      if (!mrCheck.recordset.length) {
+        return res
+          .status(404)
+          .json({ error: "Source Material Request not found." });
+      }
+
+      const mrStatus = mrCheck.recordset[0].Status;
+      if (!["Approved", "Partially Ordered"].includes(mrStatus)) {
+        return res.status(400).json({
+          error: `Cannot create a Purchase Order: Material Request is "${mrStatus}". Only Approved Material Requests can be used to raise a Purchase Order.`,
+        });
+      }
+    }
+
     const uomMap = await buildUomMap(pool);
 
     transaction = pool.transaction();

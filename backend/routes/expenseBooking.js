@@ -1116,6 +1116,20 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
         await transaction.rollback();
         return res.status(404).json({ error: "Linked GRN not found." });
       }
+
+      // Enforce: an expense can only be booked against an Approved GRN.
+      const grnStatusResult = await transaction
+        .request()
+        .input("GRNID", sql.Int, grnId)
+        .query("SELECT Status FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID");
+      const grnStatus = grnStatusResult.recordset[0]?.Status;
+      if (grnStatus !== "Approved") {
+        await transaction.rollback();
+        return res.status(400).json({
+          error: `Cannot book expense: GRN is "${grnStatus}". Only Approved GRNs can be used for expense booking.`,
+        });
+      }
+
       if (!grnGst.totals.receivedQty || grnGst.totals.receivedQty <= 0) {
         await transaction.rollback();
         return res.status(400).json({
