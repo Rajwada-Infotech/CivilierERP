@@ -4,6 +4,8 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const { logAudit } = require("../utils/auditLog");
+const { validateBody } = require("../middleware/validate");
+const schemas = require("../validation/followupSchemas");
 
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -430,6 +432,7 @@ router.get(
 // ── POST / (create) ───────────────────────────────────────────────────────────
 router.post(
   "/",
+  validateBody(schemas.bookingCreate),
   checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanAdd"),
   async (req, res) => {
     const userName = requireUserName(req, res);
@@ -534,6 +537,7 @@ router.post(
 // ── PUT /:id (update) ─────────────────────────────────────────────────────────
 router.put(
   "/:id",
+  validateBody(schemas.bookingUpdate),
   checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanEdit"),
   async (req, res) => {
     const id = parseId(req.params.id);

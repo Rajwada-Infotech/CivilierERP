@@ -2,6 +2,8 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
+const { validateBody } = require("../middleware/validate");
+const schemas = require("../validation/followupSchemas");
 const logger = require("../logger");
 
 const router = express.Router();
@@ -295,7 +297,9 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/",
+  validateBody(schemas.agreementCreate),
+async (req, res) => {
   const userName = requireUserName(req, res);
   if (!userName) return;
 
@@ -402,7 +406,9 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id",
+  validateBody(schemas.agreementUpdate),
+async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
     return res.status(400).json({ error: "Invalid agreement id" });
