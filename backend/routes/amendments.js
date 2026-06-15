@@ -2,6 +2,16 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const role = require("../middleware/role");
+const { validateBody } = require("../middleware/validateRequest");
+const {
+  amendmentCreateSchema:      amendmentCreate,
+  amendmentUpdateSchema:      amendmentUpdate,
+  amendmentNoteSchema:        amendmentNote,
+  amendmentLineChangesSchema: amendmentLineChanges,
+} = require("../validation/financialRouteSchemas");
+const schemas = { amendmentCreate, amendmentUpdate, amendmentNote, amendmentLineChanges };
+
+
 
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -35,7 +45,6 @@ const LIST_COLUMNS = `
   UpdatedAt
 `;
 
-router.use(authMiddleware);
 
 function requireUserName(req, res) {
   const userName = req.user?.name || req.user?.email || null;
@@ -281,7 +290,9 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/",
+  validateBody(schemas.amendmentCreate),
+  async (req, res) => {
   const userName = requireUserName(req, res);
   if (!userName) return;
 
@@ -373,7 +384,9 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id",
+  validateBody(schemas.amendmentUpdate),
+  async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
     return res.status(400).json({ error: "Invalid amendment id" });
@@ -437,7 +450,9 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-router.post("/:id/submit", async (req, res) => {
+router.post("/:id/submit",
+  validateBody(schemas.amendmentNote),
+  async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
     return res.status(400).json({ error: "Invalid amendment id" });
@@ -634,7 +649,9 @@ router.get("/:id/line-changes", async (req, res) => {
   }
 });
 
-router.post("/:id/line-changes", async (req, res) => {
+router.post("/:id/line-changes",
+  validateBody(schemas.amendmentLineChanges),
+  async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid amendment id" });
 
@@ -681,7 +698,3 @@ router.post("/:id/line-changes", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-

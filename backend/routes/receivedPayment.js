@@ -9,6 +9,14 @@ const {
 } = require("../utils/docNumberLock");
 const { cache, localVersionCache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { validateBody } = require("../middleware/validateRequest");
+const {
+  receivedPaymentCreateSchema: receivedPaymentCreate,
+  receivedPaymentUpdateSchema: receivedPaymentUpdate,
+  receivedPaymentNoteSchema:   receivedPaymentNote,
+} = require("../validation/financialRouteSchemas");
+const schemas = { receivedPaymentCreate, receivedPaymentUpdate, receivedPaymentNote };
+
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
@@ -34,10 +42,10 @@ async function invalidateReceivedPaymentWorkflowCaches() {
 }
 
 async function hasNewColumns(pool) {
-  // 1. In-process memo — fastest path for warm requests
+  // 1. In-process memo Â— fastest path for warm requests
   if (_hasNewCols !== null) return _hasNewCols;
 
-  // 2. Redis — survives across cold starts within the same deployment
+  // 2. Redis Â— survives across cold starts within the same deployment
   try {
     const { redisGet, redisSet } = require("../redis");
     const cached = await redisGet(HAS_NEW_COLS_REDIS_KEY);
@@ -46,17 +54,17 @@ async function hasNewColumns(pool) {
       return _hasNewCols;
     }
   } catch {
-    // Redis unavailable — fall through to DB probe
+    // Redis unavailable Â— fall through to DB probe
   }
 
-  // 3. DB probe — only on true first-ever cold start or after Redis flush
+  // 3. DB probe Â— only on true first-ever cold start or after Redis flush
   const r = await pool.request().query(`
     SELECT COUNT(*) AS cnt FROM sys.columns
     WHERE object_id = OBJECT_ID('dbo.ReceivedPayment') AND name = 'RPDocNo'
   `);
   _hasNewCols = r.recordset[0].cnt > 0;
 
-  // Store in Redis for 24 h — schema changes require a deploy anyway
+  // Store in Redis for 24 h Â— schema changes require a deploy anyway
   try {
     const { redisSet } = require("../redis");
     await redisSet(HAS_NEW_COLS_REDIS_KEY, _hasNewCols ? "1" : "0", 86400);
@@ -112,7 +120,9 @@ router.get("/", cache("received-payment", 30), async (req, res) => {
 });
 
 // -- POST / --------------------------------------------------------------------
-router.post("/", async (req, res) => {
+router.post("/",
+  validateBody(schemas.receivedPaymentCreate),
+  async (req, res) => {
   try {
     const {
       RPCompanyName,
@@ -228,7 +238,9 @@ router.post("/", async (req, res) => {
 });
 
 // -- PUT /:id -------------------------------------------------------------------
-router.put("/:id", async (req, res) => {
+router.put("/:id",
+  validateBody(schemas.receivedPaymentUpdate),
+  async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -378,7 +390,9 @@ router.delete("/:id", async (req, res) => {
 
 // -- PATCH /:id/submit ---------------------------------------------------------
 // Sets status = 'Pending' so it appears in the admin Approval Inbox
-router.patch("/:id/submit", async (req, res) => {
+router.patch("/:id/submit",
+  validateBody(schemas.receivedPaymentNote),
+  async (req, res) => {
   try {
     const { id } = req.params;
     const submittedBy = req.user?.name || req.user?.email || null;

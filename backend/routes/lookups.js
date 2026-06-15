@@ -6,7 +6,6 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
 
-router.use(authMiddleware);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
 // ─── GET /api/lookups?type=CURRENCY ──────────────────────────────────────────

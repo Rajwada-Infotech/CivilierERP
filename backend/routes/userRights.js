@@ -1,17 +1,19 @@
 const express = require("express");
+const logger = require("../logger");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
-const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
 const { userPermissionCache } = require("../middleware/permissions");
+const { validateBody } = require("../middleware/validateBody");
+const { userRightsSchema } = require("../validation/userSchemas");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
 // GET non-admin users for dropdown
 // NOTE: role column was dropped in migration 006; now derived via RoleId → dbo.Role join
-router.get("/users", authMiddleware, adminOnly, async (req, res) => {
+router.get("/users", adminOnly, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -29,7 +31,7 @@ router.get("/users", authMiddleware, adminOnly, async (req, res) => {
 });
 
 // GET own permissions -- any authenticated user can fetch their own
-router.get("/my", authMiddleware, async (req, res) => {
+router.get("/my", async (req, res) => {
   try {
     const userId = req.user?.userId ?? req.user?.id;
     if (!userId) return res.status(401).json({ error: "Not authenticated" });
@@ -39,7 +41,7 @@ router.get("/my", authMiddleware, async (req, res) => {
       .query(`SELECT RightsJson FROM dbo.UserPageRightsJson WHERE UserId = @UserId AND IsActive = 1`);
     const row = result.recordset[0];
     let rightsJson = [];
-    try { rightsJson = row?.RightsJson ? JSON.parse(row.RightsJson) : []; } catch {}
+    try { rightsJson = row?.RightsJson ? JSON.parse(row.RightsJson) : []; } catch (parseErr) { logger.warn({ event: "USER_RIGHTS_PARSE_ERROR", err: parseErr }, "Failed to parse RightsJson"); }
     res.json({ rightsJson });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch own permissions" });
@@ -47,7 +49,7 @@ router.get("/my", authMiddleware, async (req, res) => {
 });
 
 // GET permissions
-router.get("/:userId", authMiddleware, adminOnly, async (req, res) => {
+router.get("/:userId", adminOnly, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool
@@ -71,7 +73,7 @@ router.get("/:userId", authMiddleware, adminOnly, async (req, res) => {
 });
 
 // SAVE permissions
-router.put("/:userId", authMiddleware, adminOnly, async (req, res) => {
+router.put("/:userId", adminOnly, validateBody(userRightsSchema), async (req, res) => {
   const { rightsJson } = req.body;
   if (!Array.isArray(rightsJson)) {
     return res.status(400).json({ error: "rightsJson must be an array" });
@@ -105,8 +107,3 @@ router.put("/:userId", authMiddleware, adminOnly, async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
-

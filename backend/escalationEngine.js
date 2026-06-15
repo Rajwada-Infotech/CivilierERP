@@ -151,24 +151,29 @@ async function escalateLegalMilestones() {
 
     if (setClauses.length === 0) continue;
 
-    await pool.request().input("Id", sql.Int, row.Id).query(`
+    await pool
+      .request()
+      .input("Id", sql.Int, row.Id)
+      .input("SystemUser", sql.NVarChar(100), SYSTEM_USER)
+      .query(`
         UPDATE dbo.FollowupLegalMilestones
-        SET ${setClauses.join(", ")}, UpdatedBy = '${SYSTEM_USER}', UpdatedAt = SYSDATETIME()
+        SET ${setClauses.join(", ")}, UpdatedBy = @SystemUser, UpdatedAt = SYSDATETIME()
         WHERE Id = @Id
       `);
 
-    logAudit({
-      module: "LegalMilestone",
-      recordId: row.Id,
-      recordNo: row.MilestoneNo,
-      action: "Escalated",
-      changedBy: SYSTEM_USER,
-      changes: blockedSteps.map((s) => ({
-        field: `${s}Status`,
+    for (const s of blockedSteps) {
+      logAudit({
+        module: "LegalMilestone",
+        recordId: row.Id,
+        recordNo: row.MilestoneNo,
+        action: "Escalated",
+        changedBy: SYSTEM_USER,
+        stepName: s,
+        fieldName: `${s}Status`,
         oldValue: row[`${s}Status`],
         newValue: "Blocked",
-      })),
-    });
+      });
+    }
 
     totalBlocked += blockedSteps.length;
   }
@@ -212,24 +217,29 @@ async function escalateAgreementWorkflows() {
 
     if (setClauses.length === 0) continue;
 
-    await pool.request().input("Id", sql.Int, row.Id).query(`
+    await pool
+      .request()
+      .input("Id", sql.Int, row.Id)
+      .input("SystemUser", sql.NVarChar(100), SYSTEM_USER)
+      .query(`
         UPDATE dbo.FollowupAgreementWorkflows
-        SET ${setClauses.join(", ")}, UpdatedBy = '${SYSTEM_USER}', UpdatedAt = SYSDATETIME()
+        SET ${setClauses.join(", ")}, UpdatedBy = @SystemUser, UpdatedAt = SYSDATETIME()
         WHERE Id = @Id
       `);
 
-    logAudit({
-      module: "AgreementWorkflow",
-      recordId: row.Id,
-      recordNo: row.WorkflowNo,
-      action: "Escalated",
-      changedBy: SYSTEM_USER,
-      changes: blockedSteps.map((s) => ({
-        field: `${s}Status`,
+    for (const s of blockedSteps) {
+      logAudit({
+        module: "AgreementWorkflow",
+        recordId: row.Id,
+        recordNo: row.WorkflowNo,
+        action: "Escalated",
+        changedBy: SYSTEM_USER,
+        stepName: s,
+        fieldName: `${s}Status`,
         oldValue: row[`${s}Status`],
         newValue: "Blocked",
-      })),
-    });
+      });
+    }
 
     totalBlocked += blockedSteps.length;
   }
@@ -247,10 +257,13 @@ async function escalateSalesDeeds() {
   const todayStr = today();
 
   // Draft deeds past their DeedDate
-  const draftResult = await pool.request().input("Today", sql.Date, todayStr)
+  const draftResult = await pool
+    .request()
+    .input("Today", sql.Date, todayStr)
+    .input("SystemUser", sql.NVarChar(100), SYSTEM_USER)
     .query(`
       UPDATE dbo.FollowupSalesDeeds
-      SET Status = 'Overdue', UpdatedBy = '${SYSTEM_USER}', UpdatedAt = SYSDATETIME()
+      SET Status = 'Overdue', UpdatedBy = @SystemUser, UpdatedAt = SYSDATETIME()
       OUTPUT INSERTED.Id, INSERTED.DeedNo
       WHERE IsDeleted = 0
         AND Status = 'Draft'
@@ -265,15 +278,20 @@ async function escalateSalesDeeds() {
       recordNo: r.DeedNo,
       action: "Escalated",
       changedBy: SYSTEM_USER,
-      changes: [{ field: "Status", oldValue: "Draft", newValue: "Overdue" }],
+      fieldName: "Status",
+      oldValue: "Draft",
+      newValue: "Overdue",
     });
   }
 
   // Executed deeds past their RegistrationDate
-  const execResult = await pool.request().input("Today", sql.Date, todayStr)
+  const execResult = await pool
+    .request()
+    .input("Today", sql.Date, todayStr)
+    .input("SystemUser", sql.NVarChar(100), SYSTEM_USER)
     .query(`
       UPDATE dbo.FollowupSalesDeeds
-      SET Status = 'Overdue', UpdatedBy = '${SYSTEM_USER}', UpdatedAt = SYSDATETIME()
+      SET Status = 'Overdue', UpdatedBy = @SystemUser, UpdatedAt = SYSDATETIME()
       OUTPUT INSERTED.Id, INSERTED.DeedNo
       WHERE IsDeleted = 0
         AND Status = 'Executed'
@@ -288,7 +306,9 @@ async function escalateSalesDeeds() {
       recordNo: r.DeedNo,
       action: "Escalated",
       changedBy: SYSTEM_USER,
-      changes: [{ field: "Status", oldValue: "Executed", newValue: "Overdue" }],
+      fieldName: "Status",
+      oldValue: "Executed",
+      newValue: "Overdue",
     });
   }
 
@@ -302,14 +322,17 @@ async function escalateSalesDeeds() {
 async function escalateBookings() {
   const pool = getPool();
 
-  const result = await pool.request().query(`
-    UPDATE dbo.FollowupBookings
-    SET Status = 'Stale', UpdatedBy = '${SYSTEM_USER}', UpdatedAt = SYSDATETIME()
-    OUTPUT INSERTED.Id, INSERTED.BookingNo
-    WHERE IsDeleted = 0
-      AND Status = 'Pending'
-      AND DATEDIFF(day, BookingDate, SYSDATETIME()) > 30
-  `);
+  const result = await pool
+    .request()
+    .input("SystemUser", sql.NVarChar(100), SYSTEM_USER)
+    .query(`
+      UPDATE dbo.FollowupBookings
+      SET Status = 'Stale', UpdatedBy = @SystemUser, UpdatedAt = SYSDATETIME()
+      OUTPUT INSERTED.Id, INSERTED.BookingNo
+      WHERE IsDeleted = 0
+        AND Status = 'Pending'
+        AND DATEDIFF(day, BookingDate, SYSDATETIME()) > 30
+    `);
 
   for (const r of result.recordset) {
     logAudit({
@@ -318,7 +341,9 @@ async function escalateBookings() {
       recordNo: r.BookingNo,
       action: "Escalated",
       changedBy: SYSTEM_USER,
-      changes: [{ field: "Status", oldValue: "Pending", newValue: "Stale" }],
+      fieldName: "Status",
+      oldValue: "Pending",
+      newValue: "Stale",
     });
   }
 

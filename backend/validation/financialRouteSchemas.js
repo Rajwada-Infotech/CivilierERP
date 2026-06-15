@@ -1,68 +1,19 @@
 const { z } = require("zod");
-
-const emptyToUndefined = (value) => {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value === "string" && value.trim() === "") return undefined;
-  return value;
-};
-
-const optStr = (max) =>
-  z.preprocess(emptyToUndefined, z.string().trim().max(max).optional());
-
-const reqStr = (max, message) =>
-  z.preprocess(
-    (value) => (typeof value === "string" ? value.trim() : value),
-    z
-      .string({ required_error: message, invalid_type_error: message })
-      .min(1, message)
-      .max(max),
-  );
-
-const optInt = z.preprocess(
+const {
   emptyToUndefined,
-  z.coerce.number().int().positive().optional(),
-);
+  optStr,
+  reqStr,
+  optInt,
+  reqInt,
+  optNumber,
+  reqNonNegativeNumber,
+  optDate,
+  reqDate,
+  jsonPassthrough,
+  noteField,
+} = require("./helpers");
 
-const reqInt = (message) =>
-  z.preprocess(
-    (value) => {
-      const cleaned = emptyToUndefined(value);
-      return cleaned === undefined ? cleaned : Number(cleaned);
-    },
-    z
-      .number({ required_error: message, invalid_type_error: message })
-      .int(message)
-      .positive(message),
-  );
-
-const optNumber = z.preprocess(
-  emptyToUndefined,
-  z.coerce.number().finite().optional(),
-);
-
-const reqNonNegativeNumber = (message) =>
-  z.preprocess(
-    (value) => {
-      const cleaned = emptyToUndefined(value);
-      return cleaned === undefined ? cleaned : Number(cleaned);
-    },
-    z
-      .number({ required_error: message, invalid_type_error: message })
-      .finite(message)
-      .min(0, message),
-  );
-
-const optDate = z.preprocess(emptyToUndefined, z.coerce.date().optional());
-const reqDate = (message) =>
-  z.preprocess(
-    (value) => {
-      const cleaned = emptyToUndefined(value);
-      return cleaned === undefined ? cleaned : new Date(cleaned);
-    },
-    z.date({ required_error: message, invalid_type_error: message }),
-  );
-
-const jsonPassthrough = z.any().optional();
+// ── purchaseOrders ────────────────────────────────────────────────────────────
 
 const poLineItemSchema = z
   .object({
@@ -119,10 +70,10 @@ const purchaseOrderBodySchema = purchaseOrderBaseSchema.refine(
 );
 
 const purchaseOrderUpdateSchema = purchaseOrderBaseSchema
-  .extend({
-    DocNo: optStr(100),
-  })
+  .extend({ DocNo: optStr(100) })
   .passthrough();
+
+// ── grns ──────────────────────────────────────────────────────────────────────
 
 const grnItemSchema = z
   .object({
@@ -152,12 +103,13 @@ const grnBodySchema = z
   })
   .passthrough();
 
-const paymentBodySchema = z
-  .preprocess((value) => {
+// ── newPayment ────────────────────────────────────────────────────────────────
+
+const paymentBodySchema = z.preprocess(
+  (value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       return value;
     }
-
     const body = value;
     return {
       ...body,
@@ -212,11 +164,278 @@ const paymentBodySchema = z
       PImpsReference: optStr(100),
     })
     .passthrough(),
-  );
+);
+
+// ── workOrder ─────────────────────────────────────────────────────────────────
+
+const workOrderHeaderBase = z
+  .object({
+    CompanyId: optInt,
+    ProjectId: optInt,
+    DocumentNumber: optStr(100),
+    DocumentDate: optDate,
+    ContractorId: optInt,
+    SupplierId: optInt,
+    TotalAmount: optNumber,
+    Remarks: optStr(4000),
+    TermsAndConditions: optStr(4000),
+    DocTypeId: optInt,
+    DocNo: optStr(100),
+    finYear: optStr(10),
+    GST: jsonPassthrough,
+    BoqID: optInt,
+  })
+  .passthrough();
+
+const workOrderActivitySchema = z
+  .object({
+    ActivityGroupId: optInt,
+    ActivityId: optInt,
+    UOMId: optInt,
+    Rate: optNumber,
+    Area: optNumber,
+    LabourAmount: optNumber,
+    MaterialAmount: optNumber,
+    GrandTotal: optNumber,
+    Remarks: optStr(500),
+  })
+  .passthrough();
+
+const workOrderMaterialSchema = z
+  .object({
+    ItemId: z.string().trim().min(1, "ItemId is required").uuid("Must be a valid UUID"),
+    UOMId: optInt,
+    Quantity: optNumber,
+    Rate: optNumber,
+    Remarks: optStr(2000),
+    SupplierIdPerLine: optInt,
+  })
+  .passthrough();
+
+const workOrderSaveFullSchema = z
+  .object({
+    header: workOrderHeaderBase.partial(),
+    activities: z.array(z.any()),
+  })
+  .passthrough();
+
+const workOrderCreateSchema = workOrderHeaderBase;
+const workOrderUpdateSchema = workOrderHeaderBase.partial();
+
+// Reject endpoint only accepts an optional note; all other fields are ignored.
+const workOrderRejectSchema = z
+  .object({
+    note: z.string().trim().max(4000).optional().nullable(),
+  })
+  .passthrough();
+
+// ── amendments ────────────────────────────────────────────────────────────────
+
+const amendmentBase = z
+  .object({
+    RefDocId: optInt,
+    RefDocType: optStr(100),
+    RefDocNo: optStr(100),
+    OriginalValue: optNumber,
+    RevisedValue: optNumber,
+    ProjectName: optStr(200),
+    CompanyName: optStr(200),
+    Description: optStr(2000),
+    Reason: optStr(2000),
+    AmendmentDate: optDate,
+  })
+  .passthrough();
+
+const amendmentLineChangeSchema = z
+  .object({
+    FieldName: z.string().trim().min(1, "FieldName required").max(200),
+    FieldLabel: optStr(200),
+    OldValue: z.string().nullable().optional(),
+    NewValue: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+const amendmentLineChangesSchema = z
+  .object({
+    changes: z.array(amendmentLineChangeSchema).min(1, "changes array must not be empty"),
+  })
+  .passthrough();
+
+// ── boq ───────────────────────────────────────────────────────────────────────
+
+const boqBase = z
+  .object({
+    BoqNo: optStr(100),
+    BoqDate: optDate,
+    CompanyId: optInt,
+    ProjectId: optInt,
+    Description: optStr(4000),
+    BoqItems: jsonPassthrough,
+    BoqActivities: jsonPassthrough,
+    Status: optStr(50),
+    Remarks: optStr(4000),
+    DocTypeId: optInt,
+    DocNo: optStr(100),
+    finYear: optStr(10),
+  })
+  .passthrough();
+
+// ── receivedPayment ───────────────────────────────────────────────────────────
+
+const rpBase = z
+  .object({
+    RPCompanyName: optStr(255),
+    RPCompanyId: optInt,
+    RPReceivedFrom: optStr(255),
+    RPCustomerName: optStr(255),
+    RPProjectName: optStr(255),
+    RPProjectId: optInt,
+    RPDocDate: optDate,
+    RPFinYear: optStr(10),
+    RPDocTypeId: optInt,
+    RPMode: optStr(50),
+    RPAmount: optNumber,
+    RPBankName: optStr(255),
+    RPTransactionId: optStr(255),
+    RPCheckNumber: optStr(100),
+    RPRemarks: optStr(4000),
+    RPDepositBankId: optInt,
+    RPDepositBankName: optStr(255),
+    RPIsEmi: z.coerce.boolean().optional(),
+    RPEmiTotal: optNumber,
+    RPEmiMonths: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().positive().optional(),
+    ),
+    RPEmiStartDate: optStr(30),
+    RPEmiSchedule: jsonPassthrough,
+    RPEmiPaying: jsonPassthrough,
+  })
+  .passthrough();
+
+// ── materialRequests ──────────────────────────────────────────────────────────
+
+const mrItemSchema = z
+  .object({
+    ItemId: z.union([z.string().min(1), z.number()]),
+    ItemName: optStr(200),
+    UOMCode: optStr(20),
+    Quantity: z.preprocess(
+      (v) => (v === undefined || v === null || v === "" ? undefined : Number(v)),
+      z.number({ invalid_type_error: "Quantity must be a number" }).positive("Quantity must be positive"),
+    ),
+    Remarks: optStr(4000),
+  })
+  .passthrough();
+
+const materialRequestBodySchema = z
+  .object({
+    CompanyId: optInt,
+    ProjectId: optInt,
+    FinYearId: optInt,
+    DocTypeId: optInt,
+    RequestDate: optDate,
+    RequiredByDate: optDate,
+    Priority: z.enum(["Low", "Normal", "High", "Urgent"]).optional().default("Normal"),
+    Reason: z.string().trim().min(1, "Reason is required"),
+    Remarks: optStr(4000),
+    items: z.array(mrItemSchema).min(1, "At least one item required"),
+  })
+  .passthrough();
+
+const materialRequestUpdateSchema = materialRequestBodySchema
+  .extend({ Status: optStr(20) })
+  .passthrough();
+
+// ── materialIssues ────────────────────────────────────────────────────────────
+
+const issueItemSchema = z
+  .object({
+    ItemId: z.union([z.string().min(1), z.number()]),
+    UOMCode: optStr(20),
+    Quantity: z.preprocess(
+      (v) => (v === undefined || v === null || v === "" ? undefined : Number(v)),
+      z.number({ invalid_type_error: "Quantity must be a number" }).positive("Quantity must be positive"),
+    ),
+    Remarks: optStr(4000),
+  })
+  .passthrough();
+
+const materialIssueBodySchema = z
+  .object({
+    CompanyId: optInt,
+    ProjectId: optInt,
+    FinYearId: optInt,
+    DocTypeId: optInt,
+    Date: optDate,
+    Reason: optStr(4000),
+    Remarks: optStr(4000),
+    ParentDocNo: optStr(100),
+    RootExBDocNo: optStr(100),
+    ReferenceType: optStr(20),
+    ReferenceId: optInt,
+    ReferenceDocNo: optStr(100),
+    IssuedTo: optStr(200),
+    CostCenter: optStr(200),
+    Purpose: optStr(500),
+    GodownId: optInt,
+    items: z.array(issueItemSchema).min(1, "At least one item is required"),
+  })
+  .passthrough();
+
+const materialIssueUpdateSchema = materialIssueBodySchema
+  .omit({
+    DocTypeId: true,
+    ParentDocNo: true,
+    RootExBDocNo: true,
+    ReferenceType: true,
+    ReferenceId: true,
+    ReferenceDocNo: true,
+  })
+  .passthrough();
+
+// ── exports ───────────────────────────────────────────────────────────────────
 
 module.exports = {
+  // purchaseOrders
   purchaseOrderBodySchema,
   purchaseOrderUpdateSchema,
+
+  // grns
   grnBodySchema,
+
+  // newPayment
   paymentBodySchema,
+
+  // workOrder
+  workOrderCreateSchema,
+  workOrderUpdateSchema,
+  workOrderActivitySchema,
+  workOrderMaterialSchema,
+  workOrderSaveFullSchema,
+  workOrderRejectSchema,
+
+  // amendments
+  amendmentCreateSchema: amendmentBase,
+  amendmentUpdateSchema: amendmentBase.partial(),
+  amendmentNoteSchema: noteField,
+  amendmentLineChangesSchema,
+
+  // boq
+  boqCreateSchema: boqBase,
+  boqUpdateSchema: boqBase.partial(),
+  boqNoteSchema: noteField,
+
+  // receivedPayment
+  receivedPaymentCreateSchema: rpBase,
+  receivedPaymentUpdateSchema: rpBase.partial(),
+  receivedPaymentNoteSchema: noteField,
+
+  // materialRequests
+  materialRequestBodySchema,
+  materialRequestUpdateSchema,
+
+  // materialIssues
+  materialIssueBodySchema,
+  materialIssueUpdateSchema,
 };
