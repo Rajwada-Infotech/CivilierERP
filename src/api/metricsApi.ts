@@ -1,4 +1,4 @@
-import api from "./axios";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 export interface SystemMetrics {
   rpm: number;
@@ -17,40 +17,40 @@ export interface SystemMetrics {
 }
 
 export const getSystemMetrics = async (): Promise<SystemMetrics> => {
-  const res = await api.get<SystemMetrics>("/api/system/metrics");
-  return res.data;
+  const res = await fetchWithAuth("/api/system/metrics");
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.error || "Failed to fetch system metrics");
+  }
+  return res.json();
 };
 
-/**
- * Fetches metrics from an arbitrary base URL with an optional token.
- * Used by the admin monitor panel which can point at a different server.
- * Intentionally keeps raw fetch — the configured axios instance is locked
- * to this app's base URL and cannot be retargeted at runtime.
- */
-export const fetchMetrics = async (
-  baseURL: string,
-  token?: string,
-): Promise<SystemMetrics> => {
-  const url = `${baseURL.replace(/\/$/, "")}/api/system/metrics`;
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(token && { Authorization: `Bearer ${token}` }),
+export const fetchMetrics = async (baseURL: string, token?: string): Promise<SystemMetrics> => {
+  const url = `${baseURL.replace(/\/$/, '')}/api/system/metrics`;
+  const headers: Record<string, string> = { 
+    'Content-Type': 'application/json',
+    ...(token && { Authorization: `Bearer ${token}` })
   };
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout
 
   try {
-    const response = await fetch(url, { headers, signal: controller.signal });
+    const response = await fetch(url, { 
+      headers, 
+      signal: controller.signal 
+    });
     clearTimeout(timeoutId);
+
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
+
     return await response.json();
   } catch (error) {
     clearTimeout(timeoutId);
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error("Request timeout (8s)");
+    if (error instanceof Error && 'name' in error && error.name === 'AbortError') {
+      throw new Error('Request timeout (8s)');
     }
     throw error;
   }
@@ -60,6 +60,7 @@ export const getDemoMetrics = () => {
   if (!import.meta.env.DEV) {
     throw new Error("Demo metrics are available only in development");
   }
+
   return {
     rpm: 42 + Math.floor(Math.random() * 20),
     activeUsers: 3 + Math.floor(Math.random() * 5),
@@ -73,3 +74,4 @@ export const getDemoMetrics = () => {
     lastUpdated: Date.now(),
   };
 };
+

@@ -194,7 +194,6 @@ const ALL_ROUTES = [
 // ─── createApp ───────────────────────────────────────────────────────────────
 async function createApp() {
   const app = express();
-  app.set("trust proxy", 1); // trust first hop (nginx) — req.ip must be the real client IP
   app.locals.startupTime = new Date().toISOString();
 
   app.disable("x-powered-by");
@@ -485,26 +484,6 @@ function setupGracefulShutdown(server, worker) {
   process.once("SIGTERM", () => shutdown("SIGTERM"));
   process.once("SIGINT", () => shutdown("SIGINT"));
 }
-
-// ─── Process-level error handlers (audit 2.7) ────────────────────────────────
-// Without these, Node.js silently exits on an unhandled rejection (Node ≥ 15).
-// Log fatally so the error appears in structured logs, then let graceful
-// shutdown handle the exit rather than calling process.exit() immediately.
-process.on("unhandledRejection", (reason, promise) => {
-  logger.fatal(
-    { event: "UNHANDLED_REJECTION", reason, promise },
-    "Unhandled promise rejection — review and fix the missing catch",
-  );
-  // Do NOT exit here; let the in-flight request finish and SIGTERM handle it.
-});
-
-process.on("uncaughtException", (err) => {
-  logger.fatal(
-    { event: "UNCAUGHT_EXCEPTION", err },
-    "Uncaught exception — process will exit",
-  );
-  process.exit(1);
-});
 
 // ─── Exports ──────────────────────────────────────────────────────────────────
 module.exports = { startServer, createApp };

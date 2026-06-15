@@ -1,19 +1,10 @@
 const express = require("express");
-const logger = require("../logger");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { validateBody } = require("../middleware/validateRequest");
-const {
-  boqCreateSchema: boqCreate,
-  boqUpdateSchema: boqUpdate,
-  boqNoteSchema:   boqNote,
-} = require("../validation/financialRouteSchemas");
-const schemas = { boqCreate, boqUpdate, boqNote };
-
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition, guardEdit } = require("../services/approvalService");
 const {
@@ -330,9 +321,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ── POST /  (Create) ──────────────────────────────────────────────────────────
-router.post("/",
-  validateBody(schemas.boqCreate),
-  async (req, res) => {
+router.post("/", async (req, res) => {
   const {
     BoqNo: boqNoFromClient,
     BoqDate,
@@ -449,16 +438,14 @@ router.post("/",
   } catch (err) {
     try {
       if (transaction) await transaction.rollback();
-    } catch (rbErr) { logger.warn({ event: "BOQ_ROLLBACK_ERROR", err: rbErr }, "POST BOQ rollback failed"); }
+    } catch (_) {}
     console.error("POST BOQ error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
 // ── PUT /:id  (Update) ────────────────────────────────────────────────────────
-router.put("/:id",
-  validateBody(schemas.boqUpdate),
-  async (req, res) => {
+router.put("/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const {
     BoqNo,
@@ -555,7 +542,7 @@ router.put("/:id",
   } catch (err) {
     try {
       if (transaction) await transaction.rollback();
-    } catch (rbErr) { logger.warn({ event: "BOQ_ROLLBACK_ERROR", err: rbErr }, "PUT BOQ rollback failed"); }
+    } catch (_) {}
     console.error("PUT BOQ error:", err);
     res.status(500).json({ error: err.message });
   }
@@ -597,7 +584,7 @@ router.delete("/:id", async (req, res) => {
   } catch (err) {
     try {
       if (transaction) await transaction.rollback();
-    } catch (rbErr) { logger.warn({ event: "BOQ_ROLLBACK_ERROR", err: rbErr }, "DELETE BOQ rollback failed"); }
+    } catch (_) {}
     console.error("DELETE BOQ error:", err.message);
     res.status(500).json({ error: err.message });
   }
@@ -645,9 +632,7 @@ router.put("/:id/approve", async (req, res) => {
   }
 });
 
-router.put("/:id/reject",
-  validateBody(schemas.boqNote),
-  async (req, res) => {
+router.put("/:id/reject", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { note } = req.body;
   try {

@@ -12,6 +12,7 @@ const rateLimit = require("express-rate-limit");
 
 const router = express.Router();
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false }));
+router.use(authMiddleware);
 
 // GET /api/followup-audit-log?module=Booking&recordId=42&page=1&pageSize=50
 router.get("/", async (req, res) => {

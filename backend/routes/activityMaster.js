@@ -5,8 +5,6 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
-const { validateBody } = require("../middleware/validateBody");
-const { activityBodySchema } = require("../validation/masterDataSchemas");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DB Schema (from sp_help):
@@ -90,7 +88,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ─── POST (Create) ────────────────────────────────────────────────────────────
-router.post("/", validateBody(activityBodySchema), async (req, res) => {
+router.post("/", async (req, res) => {
   const {
     activity_name,
     short_description,
@@ -152,7 +150,7 @@ router.post("/", validateBody(activityBodySchema), async (req, res) => {
 });
 
 // ─── PUT (Update) ─────────────────────────────────────────────────────────────
-router.put("/:id", validateBody(activityBodySchema), async (req, res) => {
+router.put("/:id", async (req, res) => {
   const {
     activity_name,
     short_description,
@@ -274,3 +272,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
+
+
+
+

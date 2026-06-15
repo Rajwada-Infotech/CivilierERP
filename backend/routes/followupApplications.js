@@ -2,8 +2,6 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
-const { validateBody } = require("../middleware/validate");
-const schemas = require("../validation/followupSchemas");
 
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -52,6 +50,7 @@ const STATUS_OPTIONS = [
 const PERMISSION_MODULE = "Followup";
 const PERMISSION_SUBMODULE = "Applicants";
 
+router.use(authMiddleware);
 
 function requireUserName(req, res) {
   const userName = req.user?.name || req.user?.email || null;
@@ -375,7 +374,6 @@ router.get(
 
 router.post(
   "/",
-  validateBody(schemas.applicationCreate),
   checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanAdd"),
   async (req, res) => {
     const userName = requireUserName(req, res);
@@ -454,7 +452,6 @@ router.post(
 
 router.put(
   "/:id",
-  validateBody(schemas.applicationUpdate),
   checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanEdit"),
   async (req, res) => {
     const id = parseId(req.params.id);

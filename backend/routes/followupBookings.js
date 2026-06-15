@@ -1,11 +1,8 @@
 const express = require("express");
-const logger = require("../logger");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const { logAudit } = require("../utils/auditLog");
-const { validateBody } = require("../middleware/validate");
-const schemas = require("../validation/followupSchemas");
 
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -17,6 +14,7 @@ const PERMISSION_SUBMODULE = "Bookings";
 const STATUS_OPTIONS = ["Confirmed", "Pending", "Cancelled"];
 const PAYMENT_MODES = ["Cheque", "NEFT", "RTGS", "DD", "Cash", "Online"];
 
+router.use(authMiddleware);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function requireUserName(req, res) {
@@ -432,7 +430,6 @@ router.get(
 // ── POST / (create) ───────────────────────────────────────────────────────────
 router.post(
   "/",
-  validateBody(schemas.bookingCreate),
   checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanAdd"),
   async (req, res) => {
     const userName = requireUserName(req, res);
@@ -527,7 +524,7 @@ router.post(
     } catch (err) {
       try {
         await transaction.rollback();
-      } catch (rbErr) { logger.warn({ event: "BOOKING_ROLLBACK_ERROR", err: rbErr }, "POST booking rollback failed"); }
+      } catch {}
       console.error("followupBookings POST error:", err);
       res.status(500).json({ error: "Failed to create booking" });
     }
@@ -537,7 +534,6 @@ router.post(
 // ── PUT /:id (update) ─────────────────────────────────────────────────────────
 router.put(
   "/:id",
-  validateBody(schemas.bookingUpdate),
   checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanEdit"),
   async (req, res) => {
     const id = parseId(req.params.id);
@@ -648,7 +644,7 @@ router.put(
       logAudit({ module: "Booking", recordId: id, recordNo: bookingNo, action: "Updated", notes: `Status: ${payload.Status}`, changedBy: userName });
       res.json({ success: true });
     } catch (err) {
-      try { await transaction.rollback(); } catch (rbErr) { logger.warn({ event: "BOOKING_ROLLBACK_ERROR", err: rbErr }, "PUT booking rollback failed"); }
+      try { await transaction.rollback(); } catch {}
       console.error("followupBookings PUT error:", err);
       res.status(500).json({ error: "Failed to update booking" });
     }

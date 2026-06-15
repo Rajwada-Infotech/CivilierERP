@@ -5,8 +5,6 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
-const { validateBody } = require("../middleware/validateBody");
-const { billingTermBodySchema } = require("../validation/masterDataSchemas");
 
 router.get("/", cache("billing-terms", 300), async (req, res) => {
   try {
@@ -20,7 +18,7 @@ router.get("/", cache("billing-terms", 300), async (req, res) => {
   }
 });
 
-router.post("/", validateBody(billingTermBodySchema), async (req, res) => {
+router.post("/", async (req, res) => {
   const { Name, Description, CalculationType, DeductionType, IsActive } =
     req.body;
   try {
@@ -46,7 +44,7 @@ router.post("/", validateBody(billingTermBodySchema), async (req, res) => {
   }
 });
 
-router.put("/:id", validateBody(billingTermBodySchema), async (req, res) => {
+router.put("/:id", async (req, res) => {
   const { Name, Description, CalculationType, DeductionType, IsActive } =
     req.body;
   try {
