@@ -6,6 +6,12 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { validateBody } = require("../middleware/validate");
+const schemas = require("../validation/financialRouteSchemas2");
+
+const { validateBody } = require("../middleware/validate");
+const schemas = require("../validation/financialRouteSchemas2");
+
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition, guardEdit } = require("../services/approvalService");
 const {
@@ -322,6 +328,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ── POST /  (Create) ──────────────────────────────────────────────────────────
+  validateBody(schemas.boqCreate),
 router.post("/", async (req, res) => {
   const {
     BoqNo: boqNoFromClient,
@@ -446,6 +453,7 @@ router.post("/", async (req, res) => {
 });
 
 // ── PUT /:id  (Update) ────────────────────────────────────────────────────────
+  validateBody(schemas.boqUpdate),
 router.put("/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const {
@@ -633,6 +641,7 @@ router.put("/:id/approve", async (req, res) => {
   }
 });
 
+  validateBody(schemas.boqNote),
 router.put("/:id/reject", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { note } = req.body;
