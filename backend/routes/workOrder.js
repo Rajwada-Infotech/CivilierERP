@@ -2,8 +2,16 @@ const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
-const { validateBody } = require("../middleware/validate");
-const schemas = require("../validation/financialRouteSchemas2");
+const { validateBody } = require("../middleware/validateRequest");
+const {
+  workOrderCreateSchema:   workOrderCreate,
+  workOrderUpdateSchema:   workOrderUpdate,
+  workOrderActivitySchema: workOrderActivity,
+  workOrderMaterialSchema: workOrderMaterial,
+  workOrderSaveFullSchema: workOrderSaveFull,
+  workOrderRejectSchema:   workOrderReject,
+} = require("../validation/financialRouteSchemas");
+const schemas = { workOrderCreate, workOrderUpdate, workOrderActivity, workOrderMaterial, workOrderSaveFull, workOrderReject };
 
 
 const { transition, guardEdit } = require("../services/approvalService");
@@ -367,8 +375,9 @@ router.get(
   },
 );
 
+router.post("/",
   validateBody(schemas.workOrderCreate),
-router.post("/", async (req, res) => {
+  async (req, res) => {
   const {
     CompanyId,
     ProjectId,
@@ -462,8 +471,9 @@ router.post("/", async (req, res) => {
   }
 });
 
+router.put("/:id",
   validateBody(schemas.workOrderUpdate),
-router.put("/:id", async (req, res) => {
+  async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
 
@@ -606,8 +616,9 @@ router.get("/:id/activities", async (req, res) => {
   }
 });
 
+router.post("/:id/activities",
   validateBody(schemas.workOrderActivity),
-router.post("/:id/activities", async (req, res) => {
+  async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
 
@@ -664,8 +675,9 @@ router.post("/:id/activities", async (req, res) => {
   }
 });
 
+router.put("/:id/activities/:activityId",
   validateBody(schemas.workOrderActivity),
-router.put("/:id/activities/:activityId", async (req, res) => {
+  async (req, res) => {
   if (!requireValidId(req, res)) return;
 
   const {
@@ -767,8 +779,9 @@ router.get(
  * POST material — now includes DocNo FK (required by FK_WorkOrderActivityMaterials_DocNo)
  * DocNo is fetched from the WorkOrderHeader via the activity's WorkOrderHeaderId
  */
+router.post("/:id/activities/:activityId/materials",
   validateBody(schemas.workOrderMaterial),
-router.post("/:id/activities/:activityId/materials", async (req, res) => {
+  async (req, res) => {
   if (!requireValidId(req, res)) return;
 
   const { ItemId, UOMId, Quantity, Rate, Remarks, SupplierIdPerLine } =
@@ -892,8 +905,9 @@ router.delete(
 // =============================================
 //  BULK SAVE  —  POST /api/work-orders/:id/save-full
 // =============================================
+router.post("/:id/save-full",
   validateBody(schemas.workOrderSaveFull),
-router.post("/:id/save-full", async (req, res) => {
+  async (req, res) => {
   const headerId = requireValidId(req, res);
   if (!headerId) return;
   const { header, activities } = req.body;
@@ -1429,8 +1443,9 @@ router.put("/:id/approve", async (req, res) => {
   }
 });
 
+router.put("/:id/reject",
   validateBody(schemas.workOrderReject),
-router.put("/:id/reject", async (req, res) => {
+  async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
   const { note } = req.body;

@@ -10,6 +10,11 @@ const { redisGet, redisSet, redisDel } = require("../redis");
 const { blacklistToken } = require("../middleware/blacklist");
 const { checkPermission } = require("../middleware/permissions");
 const allowRoles = require("../middleware/role");
+const { validateBody } = require("../middleware/validateBody");
+const {
+  userCreateSchema,
+  userUpdateSchema,
+} = require("../validation/userSchemas");
 const { normalizeRole: normalizeRoleFromRoleMiddleware } = allowRoles;
 
 // Privileged roles that can always list users (Password Reset, User Management)
@@ -208,6 +213,7 @@ router.get(
 router.post(
   "/",
   checkPermission("Users", "List", "CanAdd"),
+  validateBody(userCreateSchema),
   async (req, res) => {
     const { name, email, RoleId, roleId, password, can_accept_tickets } = req.body;
     if (!password) {
@@ -250,6 +256,7 @@ router.post(
 router.put(
   "/:id",
   checkPermission("Users", "List", "CanEdit"),
+  validateBody(userUpdateSchema),
   async (req, res) => {
     const { id } = req.params;
     const { name, email, RoleId, roleId, discontinue, can_accept_tickets } = req.body;

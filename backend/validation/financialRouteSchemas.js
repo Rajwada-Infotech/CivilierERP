@@ -1,73 +1,17 @@
 const { z } = require("zod");
-
-// ── shared helpers ────────────────────────────────────────────────────────────
-
-const emptyToUndefined = (value) => {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value === "string" && value.trim() === "") return undefined;
-  return value;
-};
-
-const optStr = (max) =>
-  z.preprocess(emptyToUndefined, z.string().trim().max(max).optional());
-
-const reqStr = (max, message) =>
-  z.preprocess(
-    (value) => (typeof value === "string" ? value.trim() : value),
-    z
-      .string({ required_error: message, invalid_type_error: message })
-      .min(1, message)
-      .max(max),
-  );
-
-const optInt = z.preprocess(
+const {
   emptyToUndefined,
-  z.coerce.number().int().positive().optional(),
-);
-
-const reqInt = (message) =>
-  z.preprocess(
-    (value) => {
-      const cleaned = emptyToUndefined(value);
-      return cleaned === undefined ? cleaned : Number(cleaned);
-    },
-    z
-      .number({ required_error: message, invalid_type_error: message })
-      .int(message)
-      .positive(message),
-  );
-
-const optNumber = z.preprocess(
-  emptyToUndefined,
-  z.coerce.number().finite().optional(),
-);
-
-const reqNonNegativeNumber = (message) =>
-  z.preprocess(
-    (value) => {
-      const cleaned = emptyToUndefined(value);
-      return cleaned === undefined ? cleaned : Number(cleaned);
-    },
-    z
-      .number({ required_error: message, invalid_type_error: message })
-      .finite(message)
-      .min(0, message),
-  );
-
-const optDate = z.preprocess(emptyToUndefined, z.coerce.date().optional());
-
-const reqDate = (message) =>
-  z.preprocess(
-    (value) => {
-      const cleaned = emptyToUndefined(value);
-      return cleaned === undefined ? cleaned : new Date(cleaned);
-    },
-    z.date({ required_error: message, invalid_type_error: message }),
-  );
-
-const jsonPassthrough = z.any().optional();
-
-const noteField = z.object({ note: optStr(2000) }).passthrough();
+  optStr,
+  reqStr,
+  optInt,
+  reqInt,
+  optNumber,
+  reqNonNegativeNumber,
+  optDate,
+  reqDate,
+  jsonPassthrough,
+  noteField,
+} = require("./helpers");
 
 // ── purchaseOrders ────────────────────────────────────────────────────────────
 
@@ -126,9 +70,7 @@ const purchaseOrderBodySchema = purchaseOrderBaseSchema.refine(
 );
 
 const purchaseOrderUpdateSchema = purchaseOrderBaseSchema
-  .extend({
-    DocNo: optStr(100),
-  })
+  .extend({ DocNo: optStr(100) })
   .passthrough();
 
 // ── grns ──────────────────────────────────────────────────────────────────────
@@ -168,7 +110,6 @@ const paymentBodySchema = z.preprocess(
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       return value;
     }
-
     const body = value;
     return {
       ...body,
@@ -262,11 +203,7 @@ const workOrderActivitySchema = z
 
 const workOrderMaterialSchema = z
   .object({
-    ItemId: z
-      .string()
-      .trim()
-      .min(1, "ItemId is required")
-      .uuid("Must be a valid UUID"),
+    ItemId: z.string().trim().min(1, "ItemId is required").uuid("Must be a valid UUID"),
     UOMId: optInt,
     Quantity: optNumber,
     Rate: optNumber,
@@ -284,6 +221,13 @@ const workOrderSaveFullSchema = z
 
 const workOrderCreateSchema = workOrderHeaderBase;
 const workOrderUpdateSchema = workOrderHeaderBase.partial();
+
+// Reject endpoint only accepts an optional note; all other fields are ignored.
+const workOrderRejectSchema = z
+  .object({
+    note: z.string().trim().max(4000).optional().nullable(),
+  })
+  .passthrough();
 
 // ── amendments ────────────────────────────────────────────────────────────────
 
@@ -313,9 +257,7 @@ const amendmentLineChangeSchema = z
 
 const amendmentLineChangesSchema = z
   .object({
-    changes: z
-      .array(amendmentLineChangeSchema)
-      .min(1, "changes array must not be empty"),
+    changes: z.array(amendmentLineChangeSchema).min(1, "changes array must not be empty"),
   })
   .passthrough();
 
@@ -373,70 +315,83 @@ const rpBase = z
 
 // ── materialRequests ──────────────────────────────────────────────────────────
 
-const mrItemSchema = z.object({
-  ItemId:   z.union([z.string().min(1), z.number()]),
-  ItemName: optStr(200),
-  UOMCode:  optStr(20),
-  Quantity: z.preprocess(
-    (v) => (v === undefined || v === null || v === "" ? undefined : Number(v)),
-    z.number({ invalid_type_error: "Quantity must be a number" }).positive("Quantity must be positive"),
-  ),
-  Remarks:  optStr(4000),
-}).passthrough();
+const mrItemSchema = z
+  .object({
+    ItemId: z.union([z.string().min(1), z.number()]),
+    ItemName: optStr(200),
+    UOMCode: optStr(20),
+    Quantity: z.preprocess(
+      (v) => (v === undefined || v === null || v === "" ? undefined : Number(v)),
+      z.number({ invalid_type_error: "Quantity must be a number" }).positive("Quantity must be positive"),
+    ),
+    Remarks: optStr(4000),
+  })
+  .passthrough();
 
-const materialRequestBodySchema = z.object({
-  CompanyId:      optInt,
-  ProjectId:      optInt,
-  FinYearId:      optInt,
-  DocTypeId:      optInt,
-  RequestDate:    optDate,
-  RequiredByDate: optDate,
-  Priority:       z.enum(["Low", "Normal", "High", "Urgent"]).optional().default("Normal"),
-  Reason:         z.string().trim().min(1, "Reason is required"),
-  Remarks:        optStr(4000),
-  items:          z.array(mrItemSchema).min(1, "At least one item required"),
-}).passthrough();
+const materialRequestBodySchema = z
+  .object({
+    CompanyId: optInt,
+    ProjectId: optInt,
+    FinYearId: optInt,
+    DocTypeId: optInt,
+    RequestDate: optDate,
+    RequiredByDate: optDate,
+    Priority: z.enum(["Low", "Normal", "High", "Urgent"]).optional().default("Normal"),
+    Reason: z.string().trim().min(1, "Reason is required"),
+    Remarks: optStr(4000),
+    items: z.array(mrItemSchema).min(1, "At least one item required"),
+  })
+  .passthrough();
 
 const materialRequestUpdateSchema = materialRequestBodySchema
-  .extend({
-    Status: optStr(20),
-  })
+  .extend({ Status: optStr(20) })
   .passthrough();
 
 // ── materialIssues ────────────────────────────────────────────────────────────
 
-const issueItemSchema = z.object({
-  ItemId:   z.union([z.string().min(1), z.number()]),
-  UOMCode:  optStr(20),
-  Quantity: z.preprocess(
-    (v) => (v === undefined || v === null || v === "" ? undefined : Number(v)),
-    z.number({ invalid_type_error: "Quantity must be a number" }).positive("Quantity must be positive"),
-  ),
-  Remarks:  optStr(4000),
-}).passthrough();
+const issueItemSchema = z
+  .object({
+    ItemId: z.union([z.string().min(1), z.number()]),
+    UOMCode: optStr(20),
+    Quantity: z.preprocess(
+      (v) => (v === undefined || v === null || v === "" ? undefined : Number(v)),
+      z.number({ invalid_type_error: "Quantity must be a number" }).positive("Quantity must be positive"),
+    ),
+    Remarks: optStr(4000),
+  })
+  .passthrough();
 
-const materialIssueBodySchema = z.object({
-  CompanyId:      optInt,
-  ProjectId:      optInt,
-  FinYearId:      optInt,
-  DocTypeId:      optInt,
-  Date:           optDate,
-  Reason:         optStr(4000),
-  Remarks:        optStr(4000),
-  ParentDocNo:    optStr(100),
-  RootExBDocNo:   optStr(100),
-  ReferenceType:  optStr(20),
-  ReferenceId:    optInt,
-  ReferenceDocNo: optStr(100),
-  IssuedTo:       optStr(200),
-  CostCenter:     optStr(200),
-  Purpose:        optStr(500),
-  GodownId:       optInt,
-  items:          z.array(issueItemSchema).min(1, "At least one item is required"),
-}).passthrough();
+const materialIssueBodySchema = z
+  .object({
+    CompanyId: optInt,
+    ProjectId: optInt,
+    FinYearId: optInt,
+    DocTypeId: optInt,
+    Date: optDate,
+    Reason: optStr(4000),
+    Remarks: optStr(4000),
+    ParentDocNo: optStr(100),
+    RootExBDocNo: optStr(100),
+    ReferenceType: optStr(20),
+    ReferenceId: optInt,
+    ReferenceDocNo: optStr(100),
+    IssuedTo: optStr(200),
+    CostCenter: optStr(200),
+    Purpose: optStr(500),
+    GodownId: optInt,
+    items: z.array(issueItemSchema).min(1, "At least one item is required"),
+  })
+  .passthrough();
 
 const materialIssueUpdateSchema = materialIssueBodySchema
-  .omit({ DocTypeId: true, ParentDocNo: true, RootExBDocNo: true, ReferenceType: true, ReferenceId: true, ReferenceDocNo: true })
+  .omit({
+    DocTypeId: true,
+    ParentDocNo: true,
+    RootExBDocNo: true,
+    ReferenceType: true,
+    ReferenceId: true,
+    ReferenceDocNo: true,
+  })
   .passthrough();
 
 // ── exports ───────────────────────────────────────────────────────────────────
@@ -458,6 +413,7 @@ module.exports = {
   workOrderActivitySchema,
   workOrderMaterialSchema,
   workOrderSaveFullSchema,
+  workOrderRejectSchema,
 
   // amendments
   amendmentCreateSchema: amendmentBase,

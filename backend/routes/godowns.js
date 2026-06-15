@@ -6,6 +6,8 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
+const { validateBody } = require("../middleware/validateBody");
+const { godownBodySchema, godownUpdateSchema } = require("../validation/masterDataSchemas");
 
 // ─── GET all godowns ──────────────────────────────────────────────────────────
 router.get("/", cache("godowns", 120), async (req, res) => {
@@ -56,7 +58,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ─── POST create godown ───────────────────────────────────────────────────────
-router.post("/", async (req, res) => {
+router.post("/", validateBody(godownBodySchema), async (req, res) => {
   try {
     const {
       GodownCode,
@@ -108,7 +110,7 @@ router.post("/", async (req, res) => {
 });
 
 // ─── PUT update godown ────────────────────────────────────────────────────────
-router.put("/:id", async (req, res) => {
+router.put("/:id", validateBody(godownUpdateSchema), async (req, res) => {
   try {
     const id = requireValidId(req, res);
     if (!id) return;

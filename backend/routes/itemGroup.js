@@ -5,6 +5,8 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
+const { validateBody } = require("../middleware/validateBody");
+const { itemGroupBodySchema } = require("../validation/masterDataSchemas");
 
 router.get("/", cache("item-groups", 300), async (req, res) => {
   try {
@@ -53,7 +55,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/", validateBody(itemGroupBodySchema), async (req, res) => {
   const {
     M_Name, M_Description, M_code,
     M_Type, M_BelongsTo, M_Group,
@@ -117,7 +119,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", validateBody(itemGroupBodySchema), async (req, res) => {
   const { id } = req.params;
   const {
     M_Name, M_Description, M_code,
@@ -213,6 +215,3 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
-
-
-

@@ -9,8 +9,13 @@ const {
 } = require("../utils/docNumberLock");
 const { cache, localVersionCache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { validateBody } = require("../middleware/validate");
-const schemas = require("../validation/financialRouteSchemas2");
+const { validateBody } = require("../middleware/validateRequest");
+const {
+  receivedPaymentCreateSchema: receivedPaymentCreate,
+  receivedPaymentUpdateSchema: receivedPaymentUpdate,
+  receivedPaymentNoteSchema:   receivedPaymentNote,
+} = require("../validation/financialRouteSchemas");
+const schemas = { receivedPaymentCreate, receivedPaymentUpdate, receivedPaymentNote };
 
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
@@ -115,8 +120,9 @@ router.get("/", cache("received-payment", 30), async (req, res) => {
 });
 
 // -- POST / --------------------------------------------------------------------
+router.post("/",
   validateBody(schemas.receivedPaymentCreate),
-router.post("/", async (req, res) => {
+  async (req, res) => {
   try {
     const {
       RPCompanyName,
@@ -232,8 +238,9 @@ router.post("/", async (req, res) => {
 });
 
 // -- PUT /:id -------------------------------------------------------------------
+router.put("/:id",
   validateBody(schemas.receivedPaymentUpdate),
-router.put("/:id", async (req, res) => {
+  async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -383,8 +390,9 @@ router.delete("/:id", async (req, res) => {
 
 // -- PATCH /:id/submit ---------------------------------------------------------
 // Sets status = 'Pending' so it appears in the admin Approval Inbox
+router.patch("/:id/submit",
   validateBody(schemas.receivedPaymentNote),
-router.patch("/:id/submit", async (req, res) => {
+  async (req, res) => {
   try {
     const { id } = req.params;
     const submittedBy = req.user?.name || req.user?.email || null;

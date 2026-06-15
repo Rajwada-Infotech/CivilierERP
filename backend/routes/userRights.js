@@ -6,6 +6,8 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const allowRoles = require("../middleware/role");
 const { userPermissionCache } = require("../middleware/permissions");
+const { validateBody } = require("../middleware/validateBody");
+const { userRightsSchema } = require("../validation/userSchemas");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
@@ -71,7 +73,7 @@ router.get("/:userId", adminOnly, async (req, res) => {
 });
 
 // SAVE permissions
-router.put("/:userId", adminOnly, async (req, res) => {
+router.put("/:userId", adminOnly, validateBody(userRightsSchema), async (req, res) => {
   const { rightsJson } = req.body;
   if (!Array.isArray(rightsJson)) {
     return res.status(400).json({ error: "rightsJson must be an array" });
@@ -105,8 +107,3 @@ router.put("/:userId", adminOnly, async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
-
