@@ -579,23 +579,41 @@ export default function StockTransfer() {
   const allProjects: {
     id: number;
     label: string;
-    belongs_to: string | null;
+    company_id: number | null;
   }[] = projectsData ?? [];
 
-  const filteredGodowns = useMemo(() => {
+  const companyGodowns = useMemo(() => {
     return allGodowns.filter((g) => {
       if (filterCompanyId && String(g.EnterpriseID ?? "") !== filterCompanyId)
         return false;
-      if (filterProjectId && String(g.ProjectID ?? "") !== filterProjectId)
-        return false;
       return true;
     });
-  }, [allGodowns, filterCompanyId, filterProjectId]);
+  }, [allGodowns, filterCompanyId]);
+
+  // The dedicated godown auto-created for the selected project (if any).
+  const projectGodown = useMemo(() => {
+    if (!filterProjectId) return null;
+    return (
+      companyGodowns.find(
+        (g) => String(g.ProjectID ?? "") === filterProjectId,
+      ) ?? null
+    );
+  }, [companyGodowns, filterProjectId]);
 
   const projectOptions = useMemo(() => {
     if (!filterCompanyId) return allProjects;
-    return allProjects.filter((p) => String(p.belongs_to) === filterCompanyId);
+    return allProjects.filter(
+      (p) => String(p.company_id ?? "") === filterCompanyId,
+    );
   }, [allProjects, filterCompanyId]);
+
+  // Auto-fill the source godown with the project's own godown once one is selected.
+  useEffect(() => {
+    if (projectGodown) {
+      setFromGodownId(projectGodown.GodownID);
+      setItems([emptyItem()]);
+    }
+  }, [projectGodown]);
 
   const { data: fromStockData, isLoading: isLoadingStock } = useQuery({
     queryKey: ["inventory-master", today, fromGodownId],
@@ -682,9 +700,9 @@ export default function StockTransfer() {
   };
 
   const fromGodown =
-    filteredGodowns.find((g) => g.GodownID === fromGodownId) || null;
+    companyGodowns.find((g) => g.GodownID === fromGodownId) || null;
   const toGodown =
-    filteredGodowns.find((g) => g.GodownID === toGodownId) || null;
+    companyGodowns.find((g) => g.GodownID === toGodownId) || null;
 
   const companyOptions = (enterprisesData ?? []).map((e) => ({
     value: String(e.id),
@@ -821,7 +839,7 @@ export default function StockTransfer() {
                     setFromGodownId(v);
                     setItems([emptyItem()]);
                   }}
-                  godowns={filteredGodowns}
+                  godowns={companyGodowns}
                   exclude={toGodownId}
                   variant="from"
                   placeholder="Select source godown…"
@@ -830,7 +848,7 @@ export default function StockTransfer() {
                   label="To"
                   value={toGodownId}
                   onChange={setToGodownId}
-                  godowns={filteredGodowns}
+                  godowns={companyGodowns}
                   exclude={fromGodownId}
                   variant="to"
                   placeholder="Select destination godown…"
@@ -882,8 +900,8 @@ export default function StockTransfer() {
                     </span>
                   )}
                   <span className="text-[10px] text-muted-foreground self-center">
-                    {filteredGodowns.length} godown
-                    {filteredGodowns.length !== 1 ? "s" : ""} available
+                    {companyGodowns.length} godown
+                    {companyGodowns.length !== 1 ? "s" : ""} available
                   </span>
                 </div>
               )}
