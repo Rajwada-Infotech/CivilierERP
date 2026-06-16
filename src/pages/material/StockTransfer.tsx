@@ -259,7 +259,7 @@ function ItemSearchRow({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return availableItems.slice(0, 10);
+    if (!search.trim()) return availableItems;
     const q = search.toLowerCase();
     return availableItems
       .filter((a) => a.itemName.toLowerCase().includes(q))
@@ -335,11 +335,13 @@ function ItemSearchRow({
           />
         </div>
 
-        {open && search.length >= 1 && (
+        {open && (
           <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-lg border border-border bg-popover shadow-lg overflow-hidden">
             {filtered.length === 0 ? (
               <div className="px-3 py-4 text-xs text-muted-foreground text-center">
-                No items match "{search}"
+                {search.trim()
+                  ? `No items match "${search}"`
+                  : "No items in stock"}
               </div>
             ) : (
               <div className="max-h-52 overflow-y-auto">

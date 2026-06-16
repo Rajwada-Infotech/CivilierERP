@@ -271,22 +271,28 @@ router.get("/", async (req, res) => {
         SELECT
           'material-requests'                  AS Module,
           'Material Request'                   AS ModuleLabel,
-          CAST(MRId AS NVARCHAR)               AS RecordId,
-          ISNULL(DocNo, CONCAT('MR#', CAST(MRId AS NVARCHAR))) AS Reference,
-          RequestDate                          AS RecordDate,
-          Status,
-          CAST(NULL AS NVARCHAR)               AS ContractorName,
-          CAST(NULL AS NVARCHAR)               AS SupplierName,
+          CAST(mr.MRId AS NVARCHAR)             AS RecordId,
+          ISNULL(mr.DocNo, CONCAT('MR#', CAST(mr.MRId AS NVARCHAR))) AS Reference,
+          mr.RequestDate                       AS RecordDate,
+          mr.Status,
+          CAST(pr.name AS NVARCHAR(255))        AS ContractorName,
+          CAST(CONCAT(
+            COALESCE(pr.name, ''),
+            CASE WHEN pr.name IS NOT NULL AND co.name IS NOT NULL THEN ' / ' ELSE '' END,
+            COALESCE(co.name, '')
+          ) AS NVARCHAR(512))                   AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))          AS Amount,
           ${NULL_EXTRA}
-          CAST(CreatedBy AS NVARCHAR(255))     AS CreatedBy,
+          CAST(mr.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
           ''                                   AS ApprovedBy,
           ''                                   AS ApprovedAt,
           ''                                   AS RejectedBy,
           ''                                   AS RejectionNote,
-          UpdatedAt                            AS LastModified
-        FROM dbo.MaterialRequests
-        WHERE Status = 'Pending'
+          mr.UpdatedAt                          AS LastModified
+        FROM dbo.MaterialRequests mr
+        LEFT JOIN dbo.enterprise co ON co.id = mr.CompanyId
+        LEFT JOIN dbo.enterprise pr ON pr.id = mr.ProjectId
+        WHERE mr.Status = 'Pending'
       `);
     }
 

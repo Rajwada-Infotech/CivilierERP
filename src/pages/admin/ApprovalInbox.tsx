@@ -269,7 +269,6 @@ const ModuleTab: React.FC<{
       }`}
     >
       {Icon && <Icon size={12} />}
-      <span>{label}</span>
       {count > 0 && (
         <span
           className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
@@ -328,7 +327,7 @@ const InboxRow: React.FC<{
   );
 
   return (
-    <>
+    <div>
       {/* ── Mobile card (< md) ─────────────────────────────────────────── */}
       <div className="md:hidden border-b border-border last:border-0 px-4 py-3.5 space-y-3">
         {/* Row 1: module + status */}
@@ -434,7 +433,7 @@ const InboxRow: React.FC<{
           {actions}
         </div>
       </div>
-    </>
+    </div>
   );
 };
 

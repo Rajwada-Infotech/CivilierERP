@@ -554,6 +554,21 @@ router.delete("/:id", async (req, res) => {
   try {
     const boqID = parseInt(req.params.id, 10);
     const pool = getPool();
+
+    // Block deletion if this BOQ is linked to any Work Order
+    const woCheck = await pool
+      .request()
+      .input("BoqID", sql.Int, boqID)
+      .query(
+        "SELECT TOP 1 Id, DocumentNumber FROM dbo.WorkOrderHeader WHERE BoqID = @BoqID",
+      );
+    if (woCheck.recordset.length > 0) {
+      const wo = woCheck.recordset[0];
+      return res.status(409).json({
+        error: `Cannot delete: this BOQ is linked to Work Order "${wo.DocumentNumber || wo.Id}". Remove the link from the Work Order first.`,
+      });
+    }
+
     transaction = pool.transaction();
     await transaction.begin();
 
