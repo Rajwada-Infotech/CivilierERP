@@ -77,43 +77,40 @@ function TreeNodeRow({
   const isSelected = selectedId === node._id;
   const isDisabled = invalidParents.has(node._id);
 
+  const handleRowClick = () => {
+    if (isDisabled) return;
+    if (hasChildren) onToggleNode(node._id);
+    else onSelect(node._id);
+  };
+
   return (
     <>
       <div
         className={`flex items-center select-none transition-colors rounded-md ${
           isDisabled
-            ? "opacity-40"
-            : isSelected
-              ? "bg-primary/10 text-primary"
-              : "hover:bg-muted/60 text-foreground"
+            ? "opacity-40 cursor-not-allowed"
+            : hasChildren
+              ? "cursor-pointer hover:bg-muted/60 text-foreground"
+              : isSelected
+                ? "bg-primary/10 text-primary cursor-pointer"
+                : "hover:bg-muted/60 text-foreground cursor-pointer"
         }`}
         style={{ paddingLeft: `${depth * 16}px` }}
+        onClick={handleRowClick}
       >
-        {/* Chevron — ONLY expands/collapses, never selects */}
-        <button
+        {/* Chevron — visual indicator only, row click handles expand/collapse */}
+        <div
           className={`w-8 h-8 flex items-center justify-center shrink-0 rounded transition-colors ${
             hasChildren
-              ? "text-muted-foreground hover:text-foreground hover:bg-muted/80 cursor-pointer"
-              : "opacity-0 pointer-events-none cursor-default"
+              ? "text-muted-foreground"
+              : "opacity-0 pointer-events-none"
           }`}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (hasChildren && !isDisabled) onToggleNode(node._id);
-          }}
         >
           {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        </button>
+        </div>
 
-        {/* Selectable label area — ONLY selects, never expands */}
-        <div
-          className={`flex items-center gap-2 flex-1 py-1.5 pr-2 min-w-0 ${
-            isDisabled ? "cursor-not-allowed" : "cursor-pointer"
-          }`}
-          onClick={() => {
-            if (isDisabled) return;
-            onSelect(node._id);
-          }}
-        >
+        {/* Label area */}
+        <div className="flex items-center gap-2 flex-1 py-1.5 pr-2 min-w-0">
           {hasChildren ? (
             <FolderOpen size={13} className="text-amber-500 shrink-0" />
           ) : depth === 0 ? (
