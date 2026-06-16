@@ -195,7 +195,7 @@ export default function AdminControlPanel() {
           <Shield className="text-blue-500" size={22} />
         </div>
         <div>
-          <h1 className="text-xl font-bold">Admin Control Panel</h1>
+          <h1 className="text-xl font-heading font-bold text-foreground">Admin Control Panel</h1>
           <p className="text-sm text-muted-foreground">
             Company-scoped user & database management
           </p>

@@ -375,7 +375,7 @@ export default function AdsManager() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold flex items-center gap-2">
+          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
             <Megaphone size={20} className="text-violet-500" />
             Ads Manager
           </h1>

@@ -454,7 +454,7 @@ export default function ApplicantTimeline() {
             </Badge>
           </div>
           <div>
-            <h1 className="text-3xl font-heading font-bold text-foreground">
+            <h1 className="text-xl font-heading font-bold text-foreground">
               {applicantNo} - {applicantName}
             </h1>
             <p className="text-muted-foreground mt-1">
