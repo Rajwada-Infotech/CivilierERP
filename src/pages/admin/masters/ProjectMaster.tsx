@@ -379,10 +379,7 @@ function ProjectViewModal({
             <Row label="GST Registration Date" value={project.gstDate} />
             <Row label="PAN Number" value={project.pan} />
             <Row label="TAN Number" value={project.tan} />
-            <Row
-              label="Trade License Number"
-              value={project.tradeLicenseNo}
-            />
+            <Row label="Trade License Number" value={project.tradeLicenseNo} />
 
             {project.jvEnabled && (
               <>
@@ -551,9 +548,28 @@ export default function ProjectMaster() {
   const [complianceLoading, setComplianceLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const projectTypes = useLookup("PROJECT_TYPE", ["Construction", "IT", "Infrastructure", "Manufacturing", "Consulting", "Research", "Maintenance"]);
-  const statuses = useLookup("PROJECT_STATUS", ["Planning", "Active", "On Hold", "Completed", "Cancelled"]);
-  const priorities = useLookup("PROJECT_PRIORITY", ["Low", "Medium", "High", "Critical"]);
+  const projectTypes = useLookup("PROJECT_TYPE", [
+    "Construction",
+    "IT",
+    "Infrastructure",
+    "Manufacturing",
+    "Consulting",
+    "Research",
+    "Maintenance",
+  ]);
+  const statuses = useLookup("PROJECT_STATUS", [
+    "Planning",
+    "Active",
+    "On Hold",
+    "Completed",
+    "Cancelled",
+  ]);
+  const priorities = useLookup("PROJECT_PRIORITY", [
+    "Low",
+    "Medium",
+    "High",
+    "Critical",
+  ]);
   const currencies = useLookup("CURRENCY", ["INR", "USD", "EUR", "GBP", "AED"]);
 
   const { data: projects = [], isLoading } = useQuery({
@@ -585,6 +601,15 @@ export default function ProjectMaster() {
     },
     staleTime: 5 * 60 * 1000,
   });
+
+  // Companies filtered to those belonging to the selected enterprise
+  const filteredCompanies = useMemo(() => {
+    if (!form.enterpriseId) return companies as any[];
+    return (companies as any[]).filter(
+      (c) =>
+        String(c.EnterpriseId ?? c.enterprise_id ?? "") === form.enterpriseId,
+    );
+  }, [companies, form.enterpriseId]);
 
   // Auto-fetch compliance fields when company selection changes
   const handleCompanyChange = async (
@@ -749,7 +774,7 @@ export default function ProjectMaster() {
 
   const columns = useMemo(
     () => buildProjectColumns(openView, openEdit, setDeleteConfirm),
-     
+
     [],
   );
 
@@ -814,7 +839,10 @@ export default function ProjectMaster() {
             </option>
           ))}
         </select>
-        <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <ChevronDown
+          size={13}
+          className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+        />
       </div>
     </div>
   );
@@ -1028,6 +1056,14 @@ export default function ProjectMaster() {
                             enterpriseName: selected
                               ? (selected.name ?? selected.Name ?? "")
                               : "",
+                            // Clear company when enterprise changes
+                            companyId: "",
+                            companyName: "",
+                            gst: "",
+                            gstDate: "",
+                            pan: "",
+                            tan: "",
+                            tradeLicenseNo: "",
                           }));
                         }}
                         className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
@@ -1043,11 +1079,14 @@ export default function ProjectMaster() {
                           );
                         })}
                       </select>
-                      <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      <ChevronDown
+                        size={13}
+                        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
                     </div>
                   </div>
 
-                  {/* Company Dropdown — triggers compliance auto-fetch */}
+                  {/* Company Dropdown — filtered by selected enterprise */}
                   <div>
                     <label className="block text-xs font-medium text-muted-foreground mb-1">
                       Company
@@ -1056,7 +1095,7 @@ export default function ProjectMaster() {
                       <select
                         value={form.companyId}
                         onChange={(e) => {
-                          const selected = companies.find(
+                          const selected = filteredCompanies.find(
                             (c: any) => String(c.Id ?? c.id) === e.target.value,
                           );
                           handleCompanyChange(
@@ -1066,10 +1105,15 @@ export default function ProjectMaster() {
                               : "",
                           );
                         }}
-                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+                        disabled={!form.enterpriseId}
+                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <option value="">— Select Company —</option>
-                        {companies.map((c: any) => {
+                        <option value="">
+                          {form.enterpriseId
+                            ? "— Select Company —"
+                            : "— Select Enterprise first —"}
+                        </option>
+                        {filteredCompanies.map((c: any) => {
                           const name = c.Name ?? c.name ?? "";
                           const id = String(c.Id ?? c.id ?? "");
                           return (
@@ -1079,7 +1123,10 @@ export default function ProjectMaster() {
                           );
                         })}
                       </select>
-                      <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      <ChevronDown
+                        size={13}
+                        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
                     </div>
                     {complianceLoading && (
                       <p className="text-[10px] text-primary mt-1 flex items-center gap-1">
@@ -1358,7 +1405,8 @@ export default function ProjectMaster() {
             </div>
           </div>
         )}
-      </div>{/* end space-y-6 mt-6 */}
+      </div>
+      {/* end space-y-6 mt-6 */}
     </>
   );
 }

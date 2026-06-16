@@ -303,12 +303,18 @@ router.get(
       if (!id) return;
       const pool = getPool();
       const headerResult = await pool.request().input("Id", sql.Int, id).query(`
-        SELECT h.*, ec.name AS CompanyName, ep.name AS ProjectName, ahm.LHeadName AS ContractorName, ams.LHeadName AS SupplierName
+        SELECT h.*,
+          ec.name AS CompanyName, ep.name AS ProjectName,
+          ahm.LHeadName AS ContractorName, ams.LHeadName AS SupplierName,
+          td.Prefix AS DocTypePrefix, td.Description AS DocTypeDescription,
+          COALESCE(b.DocNo, b.BoqNo) AS BoqDocNo
         FROM dbo.WorkOrderHeader h
         LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
         LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
         LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
         LEFT JOIN dbo.AccountHeadMaster ams ON ams.LHeadId = h.SupplierId
+        LEFT JOIN dbo.TypeOfDoc         td  ON td.TypeOfDocId = h.DocTypeId
+        LEFT JOIN dbo.BOQ               b   ON b.BoqID = h.BoqID
         WHERE h.Id = @Id
       `);
       if (!headerResult.recordset.length)
@@ -572,6 +578,63 @@ router.delete("/:id", async (req, res) => {
     const id = requireValidId(req, res);
     if (!id) return;
     const pool = getPool();
+
+    // Block deletion if this Work Order is linked to any Work Done entry.
+    const wdCheck = await pool
+      .request()
+      .input("WorkOrderID", sql.Int, id)
+      .query(
+        "SELECT TOP 1 ID, DocNo FROM dbo.WorkDone WHERE WorkOrderID = @WorkOrderID",
+      );
+    if (wdCheck.recordset.length > 0) {
+      const wd = wdCheck.recordset[0];
+      return res.status(409).json({
+        error: `Cannot delete: this Work Order is linked to Work Done "${wd.DocNo || wd.ID}". Remove the link from Work Done first.`,
+      });
+    }
+
+    // Block deletion if this Work Order is linked to any Purchase Order.
+    const poCheck = await pool
+      .request()
+      .input("SourceWOId", sql.Int, id)
+      .query(
+        "SELECT TOP 1 PurchaseOrderID, PurchaseOrderNo FROM dbo.PurchaseOrders WHERE SourceWOId = @SourceWOId",
+      );
+    if (poCheck.recordset.length > 0) {
+      const po = poCheck.recordset[0];
+      return res.status(409).json({
+        error: `Cannot delete: this Work Order is linked to Purchase Order "${po.PurchaseOrderNo || po.PurchaseOrderID}". Remove the link from the Purchase Order first.`,
+      });
+    }
+
+    // Block deletion if this Work Order is linked to any Expense Booking —
+    // either booked directly against its Work Done entries (ESourceType =
+    // 'WORK_DONE') or against its auto-generated WO-POs (ESourceType =
+    // 'WO_PO'). Deleted bookings don't count.
+    const ebCheck = await pool
+      .request()
+      .input("WorkOrderID1", sql.Int, id)
+      .input("SourceWOId2", sql.Int, id).query(`
+        SELECT TOP 1 Eid, EDocNo
+        FROM dbo.ExpenseBooking
+        WHERE EStatus != 'Deleted'
+          AND (
+            (ESourceType = 'WORK_DONE' AND ESourceId IN (
+              SELECT ID FROM dbo.WorkDone WHERE WorkOrderID = @WorkOrderID1
+            ))
+            OR
+            (ESourceType = 'WO_PO' AND ESourceId IN (
+              SELECT PurchaseOrderID FROM dbo.PurchaseOrders WHERE SourceWOId = @SourceWOId2
+            ))
+          )
+      `);
+    if (ebCheck.recordset.length > 0) {
+      const eb = ebCheck.recordset[0];
+      return res.status(409).json({
+        error: `Cannot delete: this Work Order is linked to Expense Booking "${eb.EDocNo || eb.Eid}". Remove the link from the Expense Booking first.`,
+      });
+    }
+
     await pool.request().input("WorkOrderHeaderId", sql.Int, id).query(`
       DELETE m FROM dbo.WorkOrderActivityMaterials m
       INNER JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
