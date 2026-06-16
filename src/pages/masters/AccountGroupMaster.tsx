@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
@@ -26,6 +26,7 @@ import {
   Eye,
   XCircle,
 } from "lucide-react";
+import TreeDropdown from "@/components/common/TreeDropdown";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,233 +89,6 @@ function getBelongsTo(id: string, items: AccountGroup[]): string {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const EMPTY_FORM = { name: "", code: "", parentId: "" };
-
-// ─── TreeDropdown Component ───────────────────────────────────────────────────
-
-function TreeDropdownNode({
-  node,
-  depth,
-  openNodes,
-  onToggleNode,
-  selectedId,
-  onSelect,
-  invalidParents,
-}: {
-  node: TreeNode;
-  depth: number;
-  openNodes: Set<string>;
-  onToggleNode: (id: string) => void;
-  selectedId: string;
-  onSelect: (id: string) => void;
-  invalidParents: Set<string>;
-}) {
-  const hasChildren = node.children.length > 0;
-  const isOpen = openNodes.has(node._id);
-  const isSelected = selectedId === node._id;
-  const isDisabled = invalidParents.has(node._id);
-
-  return (
-    <>
-      <div
-        className={`flex items-center select-none transition-colors rounded-md ${
-          isDisabled
-            ? "opacity-40"
-            : isSelected
-              ? "bg-primary/10 text-primary"
-              : "hover:bg-muted/60 text-foreground"
-        }`}
-        style={{ paddingLeft: `${depth * 16}px` }}
-      >
-        {/* Chevron — ONLY expands/collapses, never selects */}
-        <button
-          className={`w-8 h-8 flex items-center justify-center shrink-0 rounded transition-colors ${
-            hasChildren
-              ? "text-muted-foreground hover:text-foreground hover:bg-muted/80 cursor-pointer"
-              : "opacity-0 pointer-events-none cursor-default"
-          }`}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (hasChildren && !isDisabled) onToggleNode(node._id);
-          }}
-        >
-          {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        </button>
-
-        {/* Selectable label area — ONLY selects, never expands */}
-        <div
-          className={`flex items-center gap-2 flex-1 py-1.5 pr-2 min-w-0 ${isDisabled ? "cursor-not-allowed" : "cursor-pointer"}`}
-          onClick={() => {
-            if (isDisabled) return;
-            onSelect(node._id);
-          }}
-        >
-          {/* Icon */}
-          {hasChildren ? (
-            <FolderOpen size={13} className="text-amber-500 shrink-0" />
-          ) : depth === 0 ? (
-            <Layers size={13} className="text-primary/60 shrink-0" />
-          ) : (
-            <Folder size={13} className="text-muted-foreground/50 shrink-0" />
-          )}
-
-          {/* Label */}
-          <span
-            className={`text-sm flex-1 truncate ${depth === 0 ? "font-semibold" : "font-medium"}`}
-          >
-            {node.name}
-          </span>
-          <span className="font-mono text-[10px] text-muted-foreground shrink-0 ml-1">
-            {node.code}
-          </span>
-        </div>
-      </div>
-
-      {/* Children */}
-      {hasChildren && isOpen && (
-        <div>
-          {node.children.map((child) => (
-            <TreeDropdownNode
-              key={child._id}
-              node={child}
-              depth={depth + 1}
-              openNodes={openNodes}
-              onToggleNode={onToggleNode}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              invalidParents={invalidParents}
-            />
-          ))}
-        </div>
-      )}
-    </>
-  );
-}
-
-function TreeDropdown({
-  tree,
-  value,
-  onChange,
-  invalidParents,
-  allGroups,
-}: {
-  tree: TreeNode[];
-  value: string;
-  onChange: (id: string) => void;
-  invalidParents: Set<string>;
-  allGroups: AccountGroup[];
-}) {
-  const [open, setOpen] = useState(false);
-  const [openNodes, setOpenNodes] = useState<Set<string>>(new Set());
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Close on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const toggleNode = (id: string) =>
-    setOpenNodes((prev) => {
-      const n = new Set(prev);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
-
-  const selectedGroup = allGroups.find((g) => g._id === value);
-
-  const hasChildren = selectedGroup
-    ? allGroups.some((g) => g.parentId === selectedGroup._id)
-    : false;
-
-  return (
-    <div className="relative" ref={containerRef}>
-      {/* Trigger */}
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left"
-      >
-        {selectedGroup ? (
-          hasChildren ? (
-            <FolderOpen size={14} className="text-amber-500 shrink-0" />
-          ) : (
-            <Folder size={14} className="text-muted-foreground/60 shrink-0" />
-          )
-        ) : (
-          <Layers size={14} className="text-primary/50 shrink-0" />
-        )}
-
-        {selectedGroup ? (
-          <span className="flex-1 truncate font-medium text-foreground">
-            {selectedGroup.name}
-            <span className="font-mono font-normal text-muted-foreground ml-1.5 text-xs">
-              ({selectedGroup.code})
-            </span>
-          </span>
-        ) : (
-          <span className="flex-1 truncate text-muted-foreground/70">
-            — Top-level group (no parent)
-          </span>
-        )}
-
-        <ChevronDown
-          size={14}
-          className={`text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
-        />
-      </button>
-
-      {/* Dropdown panel */}
-      {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
-          {/* Top-level option */}
-          <div
-            className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors text-sm font-medium ${
-              !value
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-muted/60"
-            }`}
-            onClick={() => {
-              onChange("");
-              setOpen(false);
-            }}
-          >
-            <Layers size={13} className="shrink-0" />
-            <span>— Top-level group (no parent)</span>
-          </div>
-          <div className="border-t border-border/60" />
-
-          {/* Scrollable tree */}
-          <div className="max-h-60 overflow-y-auto py-1 px-1">
-            {tree.map((node) => (
-              <TreeDropdownNode
-                key={node._id}
-                node={node}
-                depth={0}
-                openNodes={openNodes}
-                onToggleNode={toggleNode}
-                selectedId={value}
-                onSelect={(id) => {
-                  onChange(id);
-                  setOpen(false);
-                }}
-                invalidParents={invalidParents}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── TreeRow Component ────────────────────────────────────────────────────────
 
@@ -424,14 +198,14 @@ function TreeRow({
           <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
               onClick={() => onView(node)}
-              className="w-7 h-7 flex items-center justify-center rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+              className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 transition-colors"
               title="View details"
             >
               <Eye size={13} />
             </button>
             <button
               onClick={() => onEdit(node)}
-              className="w-7 h-7 flex items-center justify-center rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
+              className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
             >
               <Pencil size={13} />
             </button>
@@ -439,7 +213,7 @@ function TreeRow({
               <>
                 <button
                   onClick={() => onDelete(node._id)}
-                  className="w-7 h-7 flex items-center justify-center rounded text-destructive hover:bg-destructive/10 transition-colors"
+                  className="w-7 h-7 flex items-center justify-center rounded text-red-500 hover:bg-red-50 transition-colors"
                 >
                   <Check size={13} />
                 </button>
@@ -453,7 +227,7 @@ function TreeRow({
             ) : (
               <button
                 onClick={() => setDeleteConfirm(node._id)}
-                className="w-7 h-7 flex items-center justify-center rounded text-destructive hover:bg-destructive/10 transition-colors"
+                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
               >
                 <Trash2 size={13} />
               </button>
@@ -558,8 +332,6 @@ const AccountGroupMaster: React.FC = () => {
     setErrors({});
   };
 
-  const canSave = form.name.trim() !== "" && form.code.trim() !== "";
-
   const resetForm = () => {
     setEditingId(null);
     setForm(EMPTY_FORM);
@@ -613,14 +385,7 @@ const AccountGroupMaster: React.FC = () => {
     } catch (err: any) {
       // Surface specific backend validation messages for blocked deletions
       const msg: string = err.message || "";
-      if (
-        msg.includes("HAS_LINKED_ACCOUNTS") ||
-        /linked to a .* record/i.test(msg)
-      ) {
-        // Backend already returns a fully-formed, specific message naming
-        // the linked Supplier / Contractor / Bank / Customer / GL record.
-        toast.error(msg, { duration: 7000 });
-      } else if (msg.includes("General Ledger")) {
+      if (msg.includes("General Ledger")) {
         toast.error(
           "Cannot delete — this group is linked to one or more General Ledger Accounts. " +
             "Please delete or reassign those accounts first.",
@@ -704,113 +469,36 @@ const AccountGroupMaster: React.FC = () => {
         </div>
 
         {/* ── Form card ── */}
-        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-          {/* Card header — title only */}
-          <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
-            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 shrink-0">
-              <Layers size={13} className="text-primary" />
-            </div>
-            <div>
-              <h2 className="text-sm font-heading font-semibold text-foreground">
-                {editingId ? "Edit Account Group" : "Add Account Group"}
+        <div className="rounded-xl border border-border bg-card shadow-sm">
+          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
+            <div className="flex items-center gap-3">
+              {editingId && (
+                <button
+                  onClick={resetForm}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <RotateCcw size={15} />
+                  <span className="hidden sm:inline">Back</span>
+                </button>
+              )}
+              {editingId && <span className="text-border/60">|</span>}
+              <h2 className="text-base font-heading font-semibold text-foreground">
+                {editingId ? "Edit Group" : "Add Account Group"}
               </h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                Fields marked <span className="text-destructive">*</span> are required
-              </p>
             </div>
-          </div>
-
-          {/* Form body */}
-          <div className="px-5 sm:px-6 py-6">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-5">
-              {/* Group Name */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                  Group Name <span className="text-destructive">*</span>
-                </label>
-                <input
-                  value={form.name}
-                  onChange={(e) => {
-                    setForm((p) => ({ ...p, name: e.target.value }));
-                    setErrors((p) => ({ ...p, name: false }));
-                  }}
-                  placeholder="e.g. Office Expenses"
-                  className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
-                    errors.name ? "border-red-400" : "border-border"
-                  }`}
-                />
-                {errors.name && (
-                  <p className="text-xs text-red-500 mt-1">Required</p>
-                )}
-              </div>
-
-              {/* Code */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                  Code <span className="text-destructive">*</span>
-                </label>
-                <input
-                  value={form.code}
-                  onChange={(e) => {
-                    setForm((p) => ({
-                      ...p,
-                      code: e.target.value.toUpperCase(),
-                    }));
-                    setErrors((p) => ({ ...p, code: false }));
-                  }}
-                  placeholder="e.g. EXP-OFF"
-                  className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
-                    errors.code ? "border-red-400" : "border-border"
-                  }`}
-                />
-                {errors.code && (
-                  <p className="text-xs text-red-500 mt-1">Required</p>
-                )}
-              </div>
-
-              {/* Parent Group */}
-              <div className="space-y-1.5 col-span-2">
-                <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                  Parent Group <span className="text-muted-foreground/50 font-normal normal-case tracking-normal">(optional)</span>
-                </label>
-                <TreeDropdown
-                  tree={filteredTree}
-                  value={form.parentId}
-                  onChange={(id) => setForm((p) => ({ ...p, parentId: id }))}
-                  invalidParents={invalidParents}
-                  allGroups={allGroups}
-                />
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  {selectedParentPath ? (
-                    <>Will nest under: <span className="font-medium text-foreground">{selectedParentPath}</span></>
-                  ) : (
-                    "Leave blank to create a top-level group"
-                  )}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Card footer — actions */}
-          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
-            <p className="text-[11px] text-muted-foreground">
-              {canSave
-                ? <span className="text-emerald-500 font-medium">Ready to save</span>
-                : "Fill in the required fields to save"}
-            </p>
             <div className="flex items-center gap-2">
               {editingId && (
                 <button
                   onClick={resetForm}
-                  className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  className="px-5 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                 >
                   Cancel
                 </button>
               )}
               <button
                 onClick={handleSave}
-                disabled={saving || !canSave}
-                className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
+                disabled={saving}
+                className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60 flex items-center gap-2"
               >
                 {saving ? (
                   <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -821,6 +509,92 @@ const AccountGroupMaster: React.FC = () => {
                 )}
                 {saving ? "Saving…" : editingId ? "Update Group" : "Save Group"}
               </button>
+            </div>
+          </div>
+
+          <div className="px-5 sm:px-6 py-6 space-y-7">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+                  <Layers size={12} className="text-primary" />
+                </div>
+                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                  Group Details
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-5">
+                {/* Group Name */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    Group Name <span className="text-destructive">*</span>
+                  </label>
+                  <input
+                    value={form.name}
+                    onChange={(e) => {
+                      setForm((p) => ({ ...p, name: e.target.value }));
+                      setErrors((p) => ({ ...p, name: false }));
+                    }}
+                    placeholder="e.g. Office Expenses"
+                    className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
+                      errors.name ? "border-red-400" : "border-border"
+                    }`}
+                  />
+                  {errors.name && (
+                    <p className="text-xs text-red-500 mt-1">Required</p>
+                  )}
+                </div>
+
+                {/* Code */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    Code <span className="text-destructive">*</span>
+                  </label>
+                  <input
+                    value={form.code}
+                    onChange={(e) => {
+                      setForm((p) => ({
+                        ...p,
+                        code: e.target.value.toUpperCase(),
+                      }));
+                      setErrors((p) => ({ ...p, code: false }));
+                    }}
+                    placeholder="e.g. EXP-OFF"
+                    className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
+                      errors.code ? "border-red-400" : "border-border"
+                    }`}
+                  />
+                  {errors.code && (
+                    <p className="text-xs text-red-500 mt-1">Required</p>
+                  )}
+                </div>
+
+                {/* Parent Group — hierarchical collapsible dropdown */}
+                <div className="space-y-1.5 col-span-2">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Parent Group
+                  </label>
+                  <TreeDropdown
+                    variant="tree"
+                    items={filteredTree}
+                    value={form.parentId}
+                    onChange={(id) => setForm((p) => ({ ...p, parentId: id }))}
+                    invalidParents={invalidParents}
+                    allGroups={allGroups}
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    {selectedParentPath ? (
+                      <>
+                        Will nest under:{" "}
+                        <span className="font-medium text-foreground">
+                          {selectedParentPath}
+                        </span>
+                      </>
+                    ) : (
+                      "Leave blank to create a top-level group"
+                    )}
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </div>

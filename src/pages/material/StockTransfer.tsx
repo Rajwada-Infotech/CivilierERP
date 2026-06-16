@@ -201,7 +201,6 @@ function GodownSelect({
                 className="bg-popover text-foreground"
               >
                 {g.GodownName}
-                {g.IsMain ? " [Main]" : ""}
               </option>
             ))}
         </select>
@@ -233,11 +232,6 @@ function GodownSelect({
           >
             {selected.GodownName}
           </p>
-          {selected.IsMain && (
-            <span className="text-[9px] bg-emerald-500/15 text-emerald-600 px-1.5 py-0.5 rounded-full font-bold shrink-0 ml-auto">
-              MAIN
-            </span>
-          )}
         </div>
       )}
     </div>
@@ -265,7 +259,7 @@ function ItemSearchRow({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return availableItems.slice(0, 10);
+    if (!search.trim()) return availableItems;
     const q = search.toLowerCase();
     return availableItems
       .filter((a) => a.itemName.toLowerCase().includes(q))
@@ -341,11 +335,13 @@ function ItemSearchRow({
           />
         </div>
 
-        {open && search.length >= 1 && (
+        {open && (
           <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-lg border border-border bg-popover shadow-lg overflow-hidden">
             {filtered.length === 0 ? (
               <div className="px-3 py-4 text-xs text-muted-foreground text-center">
-                No items match "{search}"
+                {search.trim()
+                  ? `No items match "${search}"`
+                  : "No items in stock"}
               </div>
             ) : (
               <div className="max-h-52 overflow-y-auto">
@@ -585,24 +581,41 @@ export default function StockTransfer() {
   const allProjects: {
     id: number;
     label: string;
-    belongs_to: string | null;
+    company_id: number | null;
   }[] = projectsData ?? [];
 
-  const filteredGodowns = useMemo(() => {
+  const companyGodowns = useMemo(() => {
     return allGodowns.filter((g) => {
-      if (g.IsMain) return false; // exclude Main Godown — transfers only between project godowns
       if (filterCompanyId && String(g.EnterpriseID ?? "") !== filterCompanyId)
-        return false;
-      if (filterProjectId && String(g.ProjectID ?? "") !== filterProjectId)
         return false;
       return true;
     });
-  }, [allGodowns, filterCompanyId, filterProjectId]);
+  }, [allGodowns, filterCompanyId]);
+
+  // The dedicated godown auto-created for the selected project (if any).
+  const projectGodown = useMemo(() => {
+    if (!filterProjectId) return null;
+    return (
+      companyGodowns.find(
+        (g) => String(g.ProjectID ?? "") === filterProjectId,
+      ) ?? null
+    );
+  }, [companyGodowns, filterProjectId]);
 
   const projectOptions = useMemo(() => {
     if (!filterCompanyId) return allProjects;
-    return allProjects.filter((p) => String(p.belongs_to) === filterCompanyId);
+    return allProjects.filter(
+      (p) => String(p.company_id ?? "") === filterCompanyId,
+    );
   }, [allProjects, filterCompanyId]);
+
+  // Auto-fill the source godown with the project's own godown once one is selected.
+  useEffect(() => {
+    if (projectGodown) {
+      setFromGodownId(projectGodown.GodownID);
+      setItems([emptyItem()]);
+    }
+  }, [projectGodown]);
 
   const { data: fromStockData, isLoading: isLoadingStock } = useQuery({
     queryKey: ["inventory-master", today, fromGodownId],
@@ -689,9 +702,9 @@ export default function StockTransfer() {
   };
 
   const fromGodown =
-    filteredGodowns.find((g) => g.GodownID === fromGodownId) || null;
+    companyGodowns.find((g) => g.GodownID === fromGodownId) || null;
   const toGodown =
-    filteredGodowns.find((g) => g.GodownID === toGodownId) || null;
+    companyGodowns.find((g) => g.GodownID === toGodownId) || null;
 
   const companyOptions = (enterprisesData ?? []).map((e) => ({
     value: String(e.id),
@@ -716,8 +729,7 @@ export default function StockTransfer() {
               Stock Transfer
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Move stock between godowns — main to branch or any godown to
-              godown
+              Move stock between project godowns
             </p>
           </div>
           <div className="flex items-center gap-1 p-1 rounded-xl bg-muted border border-border">
@@ -829,7 +841,7 @@ export default function StockTransfer() {
                     setFromGodownId(v);
                     setItems([emptyItem()]);
                   }}
-                  godowns={filteredGodowns}
+                  godowns={companyGodowns}
                   exclude={toGodownId}
                   variant="from"
                   placeholder="Select source godown…"
@@ -838,7 +850,7 @@ export default function StockTransfer() {
                   label="To"
                   value={toGodownId}
                   onChange={setToGodownId}
-                  godowns={filteredGodowns}
+                  godowns={companyGodowns}
                   exclude={fromGodownId}
                   variant="to"
                   placeholder="Select destination godown…"
@@ -890,8 +902,8 @@ export default function StockTransfer() {
                     </span>
                   )}
                   <span className="text-[10px] text-muted-foreground self-center">
-                    {filteredGodowns.length} godown
-                    {filteredGodowns.length !== 1 ? "s" : ""} available
+                    {companyGodowns.length} godown
+                    {companyGodowns.length !== 1 ? "s" : ""} available
                   </span>
                 </div>
               )}
