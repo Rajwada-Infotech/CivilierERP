@@ -1532,8 +1532,9 @@ export default function AmendmentMenu() {
     <>
       <Breadcrumbs items={["Material", "Amendment"]} />
 
+      <div className="p-6 space-y-5">
       {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="flex items-center gap-2.5 text-xl font-heading font-bold text-foreground">
             <FilePenLine size={20} className="text-primary" />
@@ -1555,7 +1556,7 @@ export default function AmendmentMenu() {
       />
 
       {/* ── Tab bar ─────────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-2 mb-4">
+      <div className="flex flex-wrap gap-2">
         {TAB_CONFIG.map(({ id, label, icon: Icon, color }) => (
           <button
             key={id}
@@ -1577,7 +1578,7 @@ export default function AmendmentMenu() {
       </div>
 
       {/* ── Filters bar ─────────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-4">
+      <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1 max-w-sm">
           <FileSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
@@ -1621,6 +1622,8 @@ export default function AmendmentMenu() {
         queryClient={queryClient}
         canApprove={canApprove}
       />
+
+      </div>
 
       {/* ── Amendment Form Dialog ────────────────────────────────────────────── */}
       <AmendFormDialog
