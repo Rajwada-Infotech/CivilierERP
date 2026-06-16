@@ -11,6 +11,10 @@ const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 router.use(checkPermissionForMethod("Finance", "BRS"));
 
+// Bust cache on startup so the unmatched-payments filter fix above takes
+// effect immediately instead of waiting out the 60s TTL on stale entries.
+bumpCacheVersion("brs").catch(() => {});
+
 // ── Dynamic column detection for AccountHeadMaster (same pattern as bankMaster.js) ──
 let _colMetaPromise = null;
 async function getAHMColumnMeta() {
@@ -169,12 +173,20 @@ router.get("/", cache("brs", 60), async (req, res) => {
         FROM dbo.NewPayment np
         LEFT JOIN dbo.enterprise ent
           ON  ent.business_type = 'C'
-          AND TRY_CAST(np.PCompany AS INT) IS NOT NULL
-          AND ent.id = TRY_CAST(np.PCompany AS INT)
+          AND (
+            ent.name = np.PCompany
+            OR (
+              TRY_CAST(np.PCompany AS INT) IS NOT NULL
+              AND ent.id = TRY_CAST(np.PCompany AS INT)
+            )
+          )
         LEFT JOIN BankReconciliation brc
           ON  brc.SourceType = 'PAYMENT'
           AND brc.SourceID   = np.PPaymentID
-        WHERE np.PBankID IS NOT NULL
+        -- Cash payments never hit a bank, so they're rightly excluded from BRS.
+        -- Every other mode belongs here even if PBankID wasn't captured at
+        -- save time (PBankID is nullable — see migration 089).
+        WHERE ISNULL(np.PMode, '') <> 'Cash'
           AND ISNULL(np.Status, 'Draft') NOT IN ('Draft', 'Rejected')
 
         UNION ALL
@@ -392,7 +404,3 @@ router.put("/auto-match", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
