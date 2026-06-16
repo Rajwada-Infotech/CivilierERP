@@ -808,6 +808,11 @@ export default function GRN() {
             String(po.PurchaseOrderID) === formData.poId
           )
             return true;
+          // Only Approved POs (or already-partially-received ones) can be
+          // used to raise a GRN. Draft / Pending / Rejected / Cancelled POs
+          // must not show up in the dropdown.
+          const status = (po as any).Status;
+          if (status !== "Approved" && status !== "Received") return false;
           if (selectedFinYear) {
             // Compare against FinYearName from the DB (same FName value the
             // fin-year selector uses).  For older POs created before fy_id
