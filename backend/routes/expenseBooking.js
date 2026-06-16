@@ -961,9 +961,6 @@ router.get("/:id", async (req, res) => {
         row.EBillingTermsData,
         row.EDiscountData,
       );
-      console.log(
-        `[/:id] Eid=${row.Eid} ESourceType=${_ESourceType} EGrnTotalAmount=${EGrnTotalAmount} stored=${row.ENetAmount} live=${liveENetAmount} billingTerms=${JSON.stringify(row.EBillingTermsData)}`,
-      );
     }
 
     res.json({ ...row, EGrnTotalAmount, ENetAmount: liveENetAmount });

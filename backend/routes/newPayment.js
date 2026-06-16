@@ -710,7 +710,10 @@ router.put("/:id/submit", async (req, res) => {
       userEmail,
       req.user?.role,
     );
-    await bumpCacheVersion("new-payment");
+    await Promise.all([
+      bumpCacheVersion("new-payment"),
+      bumpCacheVersion("brs"),
+    ]);
     res.json({ message: "Payment submitted for approval", ...result });
   } catch (err) {
     console.error("Payment submit error:", err.message);
