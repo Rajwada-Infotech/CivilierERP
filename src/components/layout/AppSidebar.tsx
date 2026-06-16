@@ -42,8 +42,17 @@ function useApprovalCount() {
   const [count, setCount] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const failRef = useRef(0);
+  // Guards against state updates / rescheduling from a fetch that resolves
+  // after the component (e.g. on logout) has already unmounted.
+  const mountedRef = useRef(true);
 
+  // Declared once per hook instance and only ever called from this effect's
+  // own setTimeout chain — not passed as a prop/dependency elsewhere — so it
+  // doesn't need useCallback. Refs (timerRef/failRef/mountedRef) are stable
+  // across renders, so the stale-closure risk that exhaustive-deps would
+  // normally flag doesn't apply here.
   const poll = () => {
+    if (!mountedRef.current) return;
     if (document.visibilityState === "hidden") {
       timerRef.current = setTimeout(poll, 60_000);
       return;
@@ -55,11 +64,13 @@ function useApprovalCount() {
       })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((d) => {
+        if (!mountedRef.current) return;
         failRef.current = 0;
-        setCount(d.total ?? 0);
+        setCount(d.count ?? 0);
         timerRef.current = setTimeout(poll, 60_000);
       })
       .catch(() => {
+        if (!mountedRef.current) return;
         failRef.current += 1;
         timerRef.current = setTimeout(
           poll,
@@ -69,8 +80,10 @@ function useApprovalCount() {
   };
 
   useEffect(() => {
+    mountedRef.current = true;
     poll();
     return () => {
+      mountedRef.current = false;
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
@@ -148,6 +161,12 @@ const MODULE_META: Record<
     icon: MessageSquare,
     color: "bg-pink-500/10 text-pink-500 border-pink-500/20",
     dot: "bg-pink-500",
+  },
+  customer: {
+    label: "Customer",
+    icon: User,
+    color: "bg-cyan-500/10 text-cyan-500 border-cyan-500/20",
+    dot: "bg-cyan-500",
   },
 };
 

@@ -61,6 +61,7 @@ import {
   History,
   ChevronDown,
   ChevronUp,
+  CheckCircle2,
 } from "lucide-react";
 import {
   Amendment,
