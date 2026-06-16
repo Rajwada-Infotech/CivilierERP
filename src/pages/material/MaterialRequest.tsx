@@ -224,9 +224,10 @@ export default function MaterialRequest() {
       : undefined;
 
   const { data: itemOptions = [] } = useQuery({
-    queryKey: ["mr-items"],
-    queryFn: mrApi.getMRItemOptions,
+    queryKey: ["mr-items", header.projectId],
+    queryFn: () => mrApi.getMRItemOptions(header.projectId || null),
     staleTime: 60_000,
+    enabled: true,
   });
 
   const { data: uoms = [] } = useQuery({
@@ -595,47 +596,58 @@ export default function MaterialRequest() {
       header: "Actions",
       cell: ({ row }) => {
         const status = row.original.Status as string;
+        const isDeleting = deleteMutation.isPending;
         return (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {/* View — always visible */}
             <button
               type="button"
               onClick={() => handleView(row.original)}
-              className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-              title="View"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 text-foreground transition-colors border border-border"
+              title="View details"
             >
-              <Eye size={14} />
+              <Eye size={12} /> View
             </button>
+
+            {/* Update — Draft only */}
             {status === "Draft" && (
               <button
                 type="button"
                 onClick={() => handleEdit(row.original)}
-                className="p-1.5 rounded hover:bg-primary/10 text-primary transition-colors"
-                title="Edit"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-primary/10 hover:bg-primary/20 text-primary transition-colors border border-primary/20"
+                title="Edit this request"
               >
-                <Edit3 size={14} />
+                <Edit3 size={12} /> Update
               </button>
             )}
-            {(status === "Draft" || status === "Rejected") && (
+
+            {/* Delete — Draft, Rejected, or Approved */}
+            {(status === "Draft" ||
+              status === "Rejected" ||
+              status === "Approved") && (
               <button
                 type="button"
+                disabled={isDeleting}
                 onClick={() => {
                   if (confirm("Delete this material request?"))
                     deleteMutation.mutate(row.original.MRId);
                 }}
-                className="p-1.5 rounded hover:bg-destructive/10 text-destructive transition-colors"
-                title="Delete"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-destructive/10 hover:bg-destructive/20 text-destructive transition-colors border border-destructive/20 disabled:opacity-50"
+                title="Delete this request"
               >
-                <Trash2 size={14} />
+                <Trash2 size={12} /> Delete
               </button>
             )}
+
+            {/* Create PO — Approved only */}
             {status === "Approved" && (
               <button
                 type="button"
                 onClick={() => handleCreatePO(row.original)}
-                className="p-1.5 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 transition-colors"
-                title="Create Normal PO from this MR"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-colors border border-emerald-500/20"
+                title="Create PO from this MR"
               >
-                <ExternalLink size={14} />
+                <ExternalLink size={12} /> Create PO
               </button>
             )}
           </div>
@@ -833,6 +845,7 @@ export default function MaterialRequest() {
                 onValueChange={(v) => {
                   setH("companyId", v);
                   setH("projectId", "");
+                  setCart([blankCartItem()]);
                 }}
               >
                 <SelectTrigger className="h-9 gap-2">
@@ -855,7 +868,10 @@ export default function MaterialRequest() {
             <Field label="Project" required>
               <Select
                 value={header.projectId}
-                onValueChange={(v) => setH("projectId", v)}
+                onValueChange={(v) => {
+                  setH("projectId", v);
+                  setCart([blankCartItem()]);
+                }}
               >
                 <SelectTrigger className="h-9 gap-2">
                   <FolderOpen
@@ -994,6 +1010,11 @@ export default function MaterialRequest() {
               </CardTitle>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {cart.length} line item{cart.length !== 1 ? "s" : ""}
+                {header.projectId && (
+                  <span className="ml-2 text-primary font-medium">
+                    · Stock from project godown
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -1264,29 +1285,32 @@ export default function MaterialRequest() {
               {viewingRecord.Status === "Draft" && (
                 <>
                   <Button
-                    variant="outline"
+                    variant="default"
                     size="sm"
                     onClick={() => handleEdit(viewingRecord)}
-                    className="gap-1.5 h-8"
+                    className="gap-1.5 h-8 bg-primary hover:bg-primary/90 text-primary-foreground"
                   >
-                    <Edit3 size={13} /> Edit
+                    <Edit3 size={13} /> Update
                   </Button>
                 </>
               )}
               {(viewingRecord.Status === "Draft" ||
-                viewingRecord.Status === "Rejected") && (
+                viewingRecord.Status === "Rejected" ||
+                viewingRecord.Status === "Approved") && (
                 <Button
-                  variant="outline"
+                  variant="destructive"
                   size="sm"
+                  disabled={deleteMutation.isPending}
                   onClick={() => {
                     if (confirm("Delete this material request?")) {
                       deleteMutation.mutate(viewingRecord.MRId);
                       goToList();
                     }
                   }}
-                  className="gap-1.5 h-8 border-destructive/40 text-destructive hover:bg-destructive/10"
+                  className="gap-1.5 h-8"
                 >
-                  <Trash2 size={13} /> Delete
+                  <Trash2 size={13} />{" "}
+                  {deleteMutation.isPending ? "Deleting…" : "Delete"}
                 </Button>
               )}
               <Button

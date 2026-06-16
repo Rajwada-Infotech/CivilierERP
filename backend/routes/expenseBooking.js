@@ -1132,6 +1132,26 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
         });
       }
 
+      // Enforce: only one active expense booking per GRN at a time.
+      // If the previous booking was deleted (hard-deleted), no row remains, so
+      // this check passes and a fresh booking is allowed.
+      const dupCheck = await transaction
+        .request()
+        .input("DupGRNId", sql.Int, grnId).query(`
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ExpenseBooking
+          WHERE ESourceType = 'GRN'
+            AND ESourceId = @DupGRNId
+            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+        `);
+      if (Number(dupCheck.recordset[0]?.cnt) > 0) {
+        await transaction.rollback();
+        return res.status(409).json({
+          error:
+            "An expense booking already exists for this GRN. Delete the existing booking before creating a new one.",
+        });
+      }
+
       if (!grnGst.totals.receivedQty || grnGst.totals.receivedQty <= 0) {
         await transaction.rollback();
         return res.status(400).json({
@@ -1184,6 +1204,25 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
           error: `Cannot book expense: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used for expense booking.`,
         });
       }
+
+      // Enforce: only one active expense booking per PO at a time.
+      const poDupCheck = await transaction
+        .request()
+        .input("DupPOId", sql.Int, poId)
+        .input("DupPOSourceType", sql.NVarChar(20), ESourceType).query(`
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ExpenseBooking
+          WHERE ESourceType = @DupPOSourceType
+            AND ESourceId = @DupPOId
+            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+        `);
+      if (Number(poDupCheck.recordset[0]?.cnt) > 0) {
+        await transaction.rollback();
+        return res.status(409).json({
+          error:
+            "An expense booking already exists for this Purchase Order. Delete the existing booking before creating a new one.",
+        });
+      }
     }
 
     if (ESourceType === "WORK_DONE") {
@@ -1210,6 +1249,24 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
         await transaction.rollback();
         return res.status(400).json({
           error: `Cannot book expense: Work Done is "${wdStatus}". Only Approved Work Done entries can be used for expense booking.`,
+        });
+      }
+
+      // Enforce: only one active expense booking per Work Done entry at a time.
+      const wdDupCheck = await transaction
+        .request()
+        .input("DupWDId", sql.BigInt, workDoneId).query(`
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ExpenseBooking
+          WHERE ESourceType = 'WORK_DONE'
+            AND ESourceId = @DupWDId
+            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+        `);
+      if (Number(wdDupCheck.recordset[0]?.cnt) > 0) {
+        await transaction.rollback();
+        return res.status(409).json({
+          error:
+            "An expense booking already exists for this Work Done entry. Delete the existing booking before creating a new one.",
         });
       }
     }
