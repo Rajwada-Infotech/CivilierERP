@@ -397,8 +397,6 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
     const pool = getPool();
 
     // Enforce: a PO can only be raised against an Approved Material Request.
-    // Once partially ordered, further POs are still allowed against the same
-    // MR until it is fully covered (Status moves to 'Ordered').
     if (SourceMRId) {
       const mrId = parseInt(SourceMRId, 10);
       const mrCheck = await pool
@@ -413,7 +411,7 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
       }
 
       const mrStatus = mrCheck.recordset[0].Status;
-      if (!["Approved", "Partially Ordered"].includes(mrStatus)) {
+      if (mrStatus !== "Approved") {
         return res.status(400).json({
           error: `Cannot create a Purchase Order: Material Request is "${mrStatus}". Only Approved Material Requests can be used to raise a Purchase Order.`,
         });
@@ -554,56 +552,18 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
     await transaction.commit();
     await bumpCacheVersion("purchase-orders");
 
-    // If this PO was created from an MR, recalculate MR status based on how
-    // much of the MR's total requested qty is now covered by POs (best-effort).
+    // Mark the source MR as Ordered once a PO is raised against it.
     if (SourceMRId) {
       (async () => {
         try {
           const mrId = parseInt(SourceMRId, 10);
-
-          // Sum of all quantities requested on this MR
-          const mrQtyRes = await pool.request().input("MRId", sql.Int, mrId)
-            .query(`
-              SELECT ISNULL(SUM(Quantity), 0) AS TotalRequested
-              FROM dbo.MaterialRequestItems
-              WHERE MRId = @MRId
-            `);
-          const totalRequested =
-            parseFloat(mrQtyRes.recordset[0]?.TotalRequested) || 0;
-
-          // Sum of all quantities ordered across ALL POs sourced from this MR
-          // (includes the PO we just created since it was committed above)
-          const poQtyRes = await pool.request().input("MRId", sql.Int, mrId)
-            .query(`
-              SELECT ISNULL(SUM(poi.Quantity), 0) AS TotalOrdered
-              FROM dbo.PurchaseOrderItems poi
-              INNER JOIN dbo.PurchaseOrders po
-                ON poi.PurchaseOrderID = po.PurchaseOrderID
-              WHERE po.SourceMRId = @MRId
-                AND po.Status NOT IN ('Cancelled', 'Rejected')
-            `);
-          const totalOrdered =
-            parseFloat(poQtyRes.recordset[0]?.TotalOrdered) || 0;
-
-          // Determine new MR status
-          let newMRStatus;
-          if (totalRequested <= 0 || totalOrdered <= 0) {
-            newMRStatus = "Partially Ordered";
-          } else if (totalOrdered >= totalRequested) {
-            newMRStatus = "Ordered";
-          } else {
-            newMRStatus = "Partially Ordered";
-          }
-
           await pool
             .request()
             .input("mrId", sql.Int, mrId)
-            .input("user", sql.NVarChar(200), userEmail)
-            .input("newStatus", sql.NVarChar(50), newMRStatus).query(`
+            .input("user", sql.NVarChar(200), userEmail).query(`
               UPDATE dbo.MaterialRequests
-              SET Status = @newStatus, UpdatedBy = @user, UpdatedAt = GETDATE()
-              WHERE MRId = @mrId
-                AND Status IN ('Approved', 'Partially Ordered')
+              SET Status = 'Ordered', UpdatedBy = @user, UpdatedAt = GETDATE()
+              WHERE MRId = @mrId AND Status = 'Approved'
             `);
         } catch (e) {
           console.error("MR status update failed:", e.message);

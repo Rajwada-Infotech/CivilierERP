@@ -657,6 +657,29 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
   }
 
   const pool = await getPool();
+
+  // ── Guard: a GRN can only be raised against an Approved PO ────────────────
+  // Mirrors the MR → PO approval guard in purchaseOrders.js (POST /).
+  if (poId) {
+    const poStatusCheck = await pool
+      .request()
+      .input("POID", sql.Int, parseInt(poId, 10))
+      .query(
+        "SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+      );
+
+    if (poStatusCheck.recordset.length === 0) {
+      return res.status(404).json({ error: "Purchase Order not found" });
+    }
+
+    const poStatus = poStatusCheck.recordset[0].Status;
+    if (poStatus !== "Approved" && poStatus !== "Received") {
+      return res.status(400).json({
+        error: `Cannot create a GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`,
+      });
+    }
+  }
+
   const transaction = pool.transaction();
 
   try {
@@ -898,6 +921,28 @@ router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
   const grnId = parseInt(req.params.id, 10);
 
   const pool = await getPool();
+
+  // ── Guard: a GRN can only be linked to an Approved PO ──────────────────────
+  if (poId) {
+    const poStatusCheck = await pool
+      .request()
+      .input("POID", sql.Int, parseInt(poId, 10))
+      .query(
+        "SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+      );
+
+    if (poStatusCheck.recordset.length === 0) {
+      return res.status(404).json({ error: "Purchase Order not found" });
+    }
+
+    const poStatus = poStatusCheck.recordset[0].Status;
+    if (poStatus !== "Approved" && poStatus !== "Received") {
+      return res.status(400).json({
+        error: `Cannot update GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`,
+      });
+    }
+  }
+
   const transaction = pool.transaction();
   try {
     await transaction.begin();

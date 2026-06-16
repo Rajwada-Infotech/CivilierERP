@@ -482,6 +482,7 @@ router.get("/options", async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = grn.SupplierID
         WHERE
           (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
+          AND eb.EStatus = 'Approved'
           AND NOT EXISTS (
             SELECT 1 FROM dbo.DebitNote dn
             WHERE dn.bill_id = eb.Eid AND dn.is_active = 1
@@ -532,6 +533,7 @@ router.get("/options", async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster ahm2 ON ahm2.LHeadId = grn2.SupplierID
         WHERE
           eb.EEmiPayment = 1
+          AND eb.EStatus = 'Approved'
           AND ei.Status = 'Pending'
           AND NOT EXISTS (
             SELECT 1 FROM dbo.DebitNote dn
@@ -1150,6 +1152,66 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
         EBillingTermsData,
         EDiscountData,
       );
+    }
+
+    if (ESourceType === "PO" || ESourceType === "WO_PO") {
+      const poId = parseInt(ESourceId, 10);
+      if (!Number.isFinite(poId) || poId <= 0) {
+        await transaction.rollback();
+        return res
+          .status(400)
+          .json({ error: "Purchase Order source is required." });
+      }
+
+      // Enforce: an expense can only be booked against an Approved
+      // (or already partially-fulfilled / Received) Purchase Order.
+      const poStatusResult = await transaction
+        .request()
+        .input("POID", sql.Int, poId)
+        .query(
+          "SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+        );
+      const poStatus = poStatusResult.recordset[0]?.Status;
+      if (!poStatus) {
+        await transaction.rollback();
+        return res
+          .status(404)
+          .json({ error: "Linked Purchase Order not found." });
+      }
+      if (poStatus !== "Approved" && poStatus !== "Received") {
+        await transaction.rollback();
+        return res.status(400).json({
+          error: `Cannot book expense: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used for expense booking.`,
+        });
+      }
+    }
+
+    if (ESourceType === "WORK_DONE") {
+      const workDoneId = parseInt(ESourceId, 10);
+      if (!Number.isFinite(workDoneId) || workDoneId <= 0) {
+        await transaction.rollback();
+        return res.status(400).json({ error: "Work Done source is required." });
+      }
+
+      // Enforce: an expense can only be booked against an Approved
+      // Work Done certificate.
+      const wdStatusResult = await transaction
+        .request()
+        .input("WDID", sql.BigInt, workDoneId)
+        .query("SELECT Status FROM dbo.WorkDone WHERE ID = @WDID");
+      const wdStatus = wdStatusResult.recordset[0]?.Status;
+      if (!wdStatus) {
+        await transaction.rollback();
+        return res
+          .status(404)
+          .json({ error: "Linked Work Done entry not found." });
+      }
+      if (wdStatus !== "Approved") {
+        await transaction.rollback();
+        return res.status(400).json({
+          error: `Cannot book expense: Work Done is "${wdStatus}". Only Approved Work Done entries can be used for expense booking.`,
+        });
+      }
     }
 
     if (EDocTypeId) {
