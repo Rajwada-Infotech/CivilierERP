@@ -621,10 +621,11 @@ export default function MaterialRequest() {
               </button>
             )}
 
-            {/* Delete — Draft, Rejected, or Approved */}
+            {/* Delete — Draft, Pending, Rejected, or Approved */}
             {(status === "Draft" ||
               status === "Rejected" ||
-              status === "Approved") && (
+              status === "Approved" ||
+              status === "Pending") && (
               <button
                 type="button"
                 disabled={isDeleting}
@@ -1296,7 +1297,8 @@ export default function MaterialRequest() {
               )}
               {(viewingRecord.Status === "Draft" ||
                 viewingRecord.Status === "Rejected" ||
-                viewingRecord.Status === "Approved") && (
+                viewingRecord.Status === "Approved" ||
+                viewingRecord.Status === "Pending") && (
                 <Button
                   variant="destructive"
                   size="sm"
