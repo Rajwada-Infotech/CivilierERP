@@ -12,11 +12,11 @@
  */
 
 const express = require("express");
-const logger = require("../logger");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
+const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
@@ -33,7 +33,7 @@ async function getActiveWidgetKeys(pool) {
 }
 
 // ── GET /my — any authenticated user fetches their own allowed widgets ────────
-router.get("/my", async (req, res) => {
+router.get("/my", authMiddleware, async (req, res) => {
   try {
     const userId = req.user?.userId ?? req.user?.id;
     if (!userId) return res.status(401).json({ error: "Not authenticated" });
@@ -57,7 +57,7 @@ router.get("/my", async (req, res) => {
         if (Array.isArray(parsed)) {
           allowedWidgets = parsed.filter((w) => allWidgets.includes(w));
         }
-      } catch (parseErr) { logger.warn({ event: "WIDGET_RIGHTS_PARSE_ERROR", err: parseErr }, "Failed to parse WidgetsJson"); }
+      } catch {}
     }
 
     return res.json({ allowedWidgets, allWidgets });
@@ -68,7 +68,7 @@ router.get("/my", async (req, res) => {
 });
 
 // ── GET /users — admin: non-admin users for the dropdown ─────────────────────
-router.get("/users", adminOnly, async (req, res) => {
+router.get("/users", authMiddleware, adminOnly, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -88,7 +88,7 @@ router.get("/users", adminOnly, async (req, res) => {
 });
 
 // ── GET /:userId — admin: get a specific user's widget rights ─────────────────
-router.get("/:userId", adminOnly, async (req, res) => {
+router.get("/:userId", authMiddleware, adminOnly, async (req, res) => {
   try {
     const userId = parseInt(req.params.userId);
     if (!userId || isNaN(userId)) {
@@ -114,7 +114,7 @@ router.get("/:userId", adminOnly, async (req, res) => {
         if (Array.isArray(parsed)) {
           allowedWidgets = parsed.filter((w) => allWidgets.includes(w));
         }
-      } catch (parseErr) { logger.warn({ event: "WIDGET_RIGHTS_PARSE_ERROR", err: parseErr }, "Failed to parse WidgetsJson"); }
+      } catch {}
     }
 
     return res.json({ allowedWidgets, allWidgets });
@@ -125,7 +125,7 @@ router.get("/:userId", adminOnly, async (req, res) => {
 });
 
 // ── PUT /:userId — admin: save a user's widget rights ────────────────────────
-router.put("/:userId", adminOnly, async (req, res) => {
+router.put("/:userId", authMiddleware, adminOnly, async (req, res) => {
   try {
     const userId = parseInt(req.params.userId);
     if (!userId || isNaN(userId)) {

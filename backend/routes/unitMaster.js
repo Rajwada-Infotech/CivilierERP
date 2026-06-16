@@ -5,8 +5,6 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
-const { validateBody } = require("../middleware/validateBody");
-const { unitBodySchema } = require("../validation/masterDataSchemas");
 
 bumpCacheVersion("unit-master").catch(() => {});
 
@@ -80,7 +78,7 @@ router.get("/blocks", async (req, res) => {
 });
 
 // POST — add unit
-router.post("/", validateBody(unitBodySchema), async (req, res) => {
+router.post("/", async (req, res) => {
   const { ProjectId, BlockId, UnitName, IsActive } = req.body;
   const createdBy = req.user?.userId || null;
   try {
@@ -105,7 +103,7 @@ router.post("/", validateBody(unitBodySchema), async (req, res) => {
 });
 
 // PUT — update unit
-router.put("/:id", validateBody(unitBodySchema), async (req, res) => {
+router.put("/:id", async (req, res) => {
   const { id } = req.params;
   const { ProjectId, BlockId, UnitName, IsActive } = req.body;
   const updatedBy = req.user?.userId || null;
@@ -164,3 +162,6 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
+
+
+

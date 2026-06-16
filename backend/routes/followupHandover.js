@@ -2,8 +2,6 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
-const { validateBody } = require("../middleware/validate");
-const schemas = require("../validation/followupSchemas");
 
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -58,6 +56,7 @@ const CONDITION_OPTIONS = [
   "Minor Works",
 ];
 
+router.use(authMiddleware);
 router.use(checkPermissionForMethod("Followup", "Handover"));
 
 function requireUserName(req, res) {
@@ -324,9 +323,7 @@ router.get("/", async (req, res) => {
 });
 
 // ── POST / ────────────────────────────────────────────────────────────────────
-router.post("/",
-  validateBody(schemas.handoverCreate),
-async (req, res) => {
+router.post("/", async (req, res) => {
   const userName = requireUserName(req, res);
   if (!userName) return;
 
@@ -429,9 +426,7 @@ async (req, res) => {
 });
 
 // ── PUT /:id ──────────────────────────────────────────────────────────────────
-router.put("/:id",
-  validateBody(schemas.handoverUpdate),
-async (req, res) => {
+router.put("/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid Handover id" });
 

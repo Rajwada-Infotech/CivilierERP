@@ -2,14 +2,13 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
-const { validateBody } = require("../middleware/validate");
-const schemas = require("../validation/followupSchemas");
 const { logAudit } = require("../utils/auditLog");
 
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 
+router.use(authMiddleware);
 router.use(checkPermissionForMethod("Followup", "LegalMilestones"));
 
 const STEP_FIELDS = [
@@ -195,9 +194,7 @@ router.get("/", async (req, res) => {
 });
 
 // ── POST / ────────────────────────────────────────────────────────────────────
-router.post("/",
-  validateBody(schemas.legalMilestoneCreate),
-async (req, res) => {
+router.post("/", async (req, res) => {
   const userName = requireUserName(req, res);
   if (!userName) return;
 
@@ -261,9 +258,7 @@ async (req, res) => {
 });
 
 // ── PATCH /:id/step ───────────────────────────────────────────────────────────
-router.patch("/:id/step",
-  validateBody(schemas.legalMilestoneStepUpdate),
-async (req, res) => {
+router.patch("/:id/step", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
 
@@ -326,9 +321,7 @@ async (req, res) => {
 });
 
 // ── PUT /:id ──────────────────────────────────────────────────────────────────
-router.put("/:id",
-  validateBody(schemas.legalMilestoneUpdate),
-async (req, res) => {
+router.put("/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
 

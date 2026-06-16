@@ -5,8 +5,6 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
-const { validateBody } = require("../middleware/validateBody");
-const { uomBodySchema } = require("../validation/masterDataSchemas");
 
 // Bust stale cache on every deploy/restart so schema changes take effect immediately
 bumpCacheVersion("uom-master").catch(() => {});
@@ -38,7 +36,7 @@ router.post("/cache-bust", async (req, res) => {
 });
 
 // ADD UOM
-router.post("/", validateBody(uomBodySchema), async (req, res) => {
+router.post("/", async (req, res) => {
   const { UOMName, UOMCode, Symbol, Remarks, IsActive } = req.body;
   const createdBy = req.user?.userId || null;
 
@@ -67,7 +65,7 @@ router.post("/", validateBody(uomBodySchema), async (req, res) => {
 });
 
 // UPDATE UOM
-router.put("/:id", validateBody(uomBodySchema), async (req, res) => {
+router.put("/:id", async (req, res) => {
   const { id } = req.params;
   const { UOMName, UOMCode, Symbol, Remarks, IsActive } = req.body;
   const updatedBy = req.user?.userId || null;
@@ -190,3 +188,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
+
+
+
+

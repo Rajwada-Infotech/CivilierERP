@@ -452,15 +452,25 @@ export default function DocumentVaultPage() {
               Centralized document storage per applicant
             </p>
           </div>
-          <Button
-            onClick={() => {
-              setForm(EMPTY_UPLOAD);
-              setUploadOpen(true);
-            }}
-            className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto"
-          >
-            <Upload className="w-4 h-4" /> Upload Document
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              Refresh
+            </button>
+            <Button
+              onClick={() => {
+                setForm(EMPTY_UPLOAD);
+                setUploadOpen(true);
+              }}
+              className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto"
+            >
+              <Upload className="w-4 h-4" /> Upload Document
+            </Button>
+          </div>
         </div>
 
       <div className="dv-page">
@@ -541,15 +551,6 @@ export default function DocumentVaultPage() {
                 ? `${pagination.total} doc${pagination.total !== 1 ? "s" : ""}`
                 : ""}
             </span>
-            <button
-              onClick={() => refetch()}
-              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors"
-            >
-              <RefreshCw
-                style={{ width: 14, height: 14 }}
-                className={isFetching ? "animate-spin" : ""}
-              />
-            </button>
           </div>
         </div>
 

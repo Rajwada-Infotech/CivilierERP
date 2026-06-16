@@ -553,6 +553,12 @@ const CardMaster: React.FC = () => {
     status: f.status,
   });
 
+  const canSave =
+    !!form.bankId &&
+    form.cardNumber.replace(/\D/g, "").length >= 13 &&
+    form.cvv.length >= 3 &&
+    form.expiryDate.length === 5;
+
   const handleSave = async () => {
     if (!(await validate())) return;
     try {
@@ -719,45 +725,15 @@ const CardMaster: React.FC = () => {
         )}
 
         {/* Form */}
-        <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
-            <div className="flex items-center gap-3">
-              {editingId && (
-                <button
-                  onClick={handleReset}
-                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <RotateCcw size={15} />
-                  <span className="hidden sm:inline">Back</span>
-                </button>
-              )}
-              {editingId && <span className="text-border/60">|</span>}
-              <div>
-                <h2 className="font-heading font-semibold text-foreground text-sm">
-                  {editingId ? "Edit Card" : "Add Card"}
-                </h2>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  {editingId
-                    ? "Modify card details below."
-                    : "Register a new bank card."}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleReset}
-                className="px-4 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
-              >
-                <RotateCcw size={13} />
-                {editingId ? "Cancel" : "Reset"}
-              </button>
-              <button
-                onClick={handleSave}
-                className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60 flex items-center gap-2"
-              >
-                {editingId ? <Check size={14} /> : <Plus size={14} />}
-                {editingId ? "Update Card" : "Save Card"}
-              </button>
+        <div className="rounded-xl border border-border bg-card shadow-sm">
+          <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
+            <div>
+              <h2 className="text-sm font-heading font-semibold text-foreground">
+                {editingId ? "Edit Card" : "Add Card"}
+              </h2>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Fields marked <span className="text-destructive">*</span> are required
+              </p>
             </div>
           </div>
 
@@ -1198,6 +1174,34 @@ const CardMaster: React.FC = () => {
               </div>
             </div>
 
+          </div>
+
+          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
+            <p className="text-[11px] text-muted-foreground">
+              {canSave ? (
+                <span className="text-emerald-500 font-medium">Ready to save</span>
+              ) : (
+                "Fill in the required fields to save"
+              )}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleReset}
+                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+              >
+                <RotateCcw size={13} />
+                {editingId ? "Cancel" : "Reset"}
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={!canSave}
+                className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
+              >
+                {editingId ? <Check size={14} /> : <Plus size={14} />}
+                {editingId ? "Update Card" : "Save Card"}
+              </button>
+            </div>
           </div>
         </div>
 

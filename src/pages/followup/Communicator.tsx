@@ -152,6 +152,14 @@ export default function Communicator() {
             Send Email, SMS, or WhatsApp messages to applicants
           </p>
         </div>
+        <button
+          onClick={() => logsQuery.refetch()}
+          disabled={logsQuery.isFetching}
+          className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50 shrink-0"
+        >
+          <RefreshCw size={13} className={logsQuery.isFetching ? "animate-spin" : ""} />
+          Refresh
+        </button>
       </div>
 
       {/* Two-column layout */}
@@ -306,14 +314,6 @@ export default function Communicator() {
                 <ChevronDown size={11} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
               </div>
 
-              <button
-                onClick={() =>
-                  qc.invalidateQueries({ queryKey: ["followup-comm-logs"] })
-                }
-                className="p-1.5 hover:bg-muted rounded-md transition-colors"
-              >
-                <RefreshCw size={13} className="text-muted-foreground" />
-              </button>
             </div>
           </div>
 

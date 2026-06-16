@@ -1,6 +1,9 @@
-import api from "./axios";
+const BASE_URL = "/api/menu-type";
 
-const BASE_URL = "/menu-type";
+const getAuthHeaders = () => ({
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+});
 
 export interface MenuType {
   Id: number;
@@ -18,26 +21,50 @@ export interface MenuType {
 }
 
 export const getMenuTypes = async (): Promise<MenuType[]> => {
-  const res = await api.get<MenuType[]>(BASE_URL);
-  return res.data;
+  const res = await fetch(BASE_URL, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error(`GET failed: ${res.status}`);
+  return res.json();
 };
 
 export const addMenuType = async (data: Record<string, unknown>) => {
-  const res = await api.post(BASE_URL, data);
-  return res.data;
+  const res = await fetch(BASE_URL, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || "POST failed");
+  }
+  return res.json();
 };
 
 export const updateMenuType = async (
   id: number,
   data: Record<string, unknown>,
 ) => {
-  const res = await api.put(`${BASE_URL}/${id}`, data);
-  return res.data;
+  const res = await fetch(`${BASE_URL}/${id}`, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || "PUT failed");
+  }
+  return res.json();
 };
 
 export const deleteMenuType = async (id: number) => {
-  const res = await api.delete(`${BASE_URL}/${id}`);
-  return res.data;
+  const res = await fetch(`${BASE_URL}/${id}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || "DELETE failed");
+  }
+  return res.json();
 };
 
 /**

@@ -589,6 +589,28 @@ router.put("/:id", validateBody(paymentBodySchema), async (req, res) => {
     if (!userEmail) return;
 
     const pool = getPool();
+
+    // Enforce: a payment can only be linked to an Approved Expense Booking.
+    if (PExpenseRef) {
+      const ebCheck = await pool
+        .request()
+        .input("EDocNo", sql.NVarChar(100), PExpenseRef)
+        .query("SELECT EStatus FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo");
+
+      if (!ebCheck.recordset.length) {
+        return res
+          .status(404)
+          .json({ error: "Referenced Expense Booking not found." });
+      }
+
+      const ebStatus = ebCheck.recordset[0].EStatus;
+      if (ebStatus !== "Approved") {
+        return res.status(400).json({
+          error: `Cannot update payment: Expense Booking is "${ebStatus}". Only Approved Expense Bookings can be paid.`,
+        });
+      }
+    }
+
     await pool
       .request()
       .input("PPaymentID", sql.Int, id)
@@ -688,7 +710,10 @@ router.put("/:id/submit", async (req, res) => {
       userEmail,
       req.user?.role,
     );
-    await bumpCacheVersion("new-payment");
+    await Promise.all([
+      bumpCacheVersion("new-payment"),
+      bumpCacheVersion("brs"),
+    ]);
     res.json({ message: "Payment submitted for approval", ...result });
   } catch (err) {
     console.error("Payment submit error:", err.message);

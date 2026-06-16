@@ -278,6 +278,16 @@ const fmtDateTime = (d?: string | null) => {
 // ─── Attachment blob URL cache ────────────────────────────────────────────────
 
 const attachmentBlobUrlCache = new Map<string, string>();
+let attachmentCacheCleanupRegistered = false;
+
+const registerAttachmentCacheCleanup = () => {
+  if (attachmentCacheCleanupRegistered || typeof window === "undefined") return;
+  attachmentCacheCleanupRegistered = true;
+  window.addEventListener("pagehide", () => {
+    attachmentBlobUrlCache.forEach((blobUrl) => URL.revokeObjectURL(blobUrl));
+    attachmentBlobUrlCache.clear();
+  });
+};
 
 // ─── Priority / Status config ─────────────────────────────────────────────────
 
@@ -422,6 +432,7 @@ function AuthenticatedAttachmentImage({
         }
         const objectUrl = URL.createObjectURL(blob);
         attachmentBlobUrlCache.set(url, objectUrl);
+        registerAttachmentCacheCleanup();
         setSrc(objectUrl);
       })
       .catch(() => {
@@ -490,6 +501,7 @@ function openAttachmentViewer(url: string, filename: string) {
           else if (blob.type.startsWith("image/")) isPdf = false;
           blobUrl = URL.createObjectURL(blob);
           attachmentBlobUrlCache.set(url, blobUrl);
+          registerAttachmentCacheCleanup();
         }
       } catch {
         const p = win.document.createElement('p');
@@ -1581,16 +1593,6 @@ const MyTickets: React.FC = () => {
   });
 
   useTicketSync(refetch);
-
-  // 10.1: register pagehide cleanup inside component lifecycle so listener is always removed
-  useEffect(() => {
-    const cleanup = () => {
-      attachmentBlobUrlCache.forEach((blobUrl) => URL.revokeObjectURL(blobUrl));
-      attachmentBlobUrlCache.clear();
-    };
-    window.addEventListener("pagehide", cleanup);
-    return () => window.removeEventListener("pagehide", cleanup);
-  }, []);
 
   const tickets = useMemo(() => {
     let list = [...allTickets];
