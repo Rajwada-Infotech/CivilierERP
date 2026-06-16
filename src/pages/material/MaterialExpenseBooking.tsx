@@ -553,6 +553,10 @@ function DocSelectorPanel({
 
   const filteredPO = poList.filter((p) => {
     if (bookedPOIds?.has(p.PurchaseOrderID)) return false;
+    // Only Approved POs (or already-partially-received ones) can be used
+    // for expense booking. Draft / Pending / Rejected / Cancelled POs must
+    // not show up in the picker.
+    if (p.Status !== "Approved" && p.Status !== "Received") return false;
     if (
       filterCompanyId &&
       p.CompanyId &&
@@ -605,6 +609,9 @@ function DocSelectorPanel({
   });
   const filteredWOPO = woPOList.filter((p) => {
     if (bookedWOPOIds?.has(p.PurchaseOrderID)) return false;
+    // Only Approved WO-POs (or already-partially-received ones) can be used
+    // for expense booking.
+    if (p.Status !== "Approved" && p.Status !== "Received") return false;
     if (
       filterCompanyId &&
       p.CompanyId &&
@@ -636,6 +643,9 @@ function DocSelectorPanel({
   );
   const filteredGRN = grnList.filter((g) => {
     if (bookedGRNIds?.has(g.GRNID)) return false;
+    // Only Approved GRNs can be used for expense booking — matches the
+    // backend guard in expenseBooking.js (POST /).
+    if (g.Status !== "Approved") return false;
     if (
       filterCompanyId &&
       g.CompanyId &&

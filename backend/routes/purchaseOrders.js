@@ -66,6 +66,21 @@ const computeSubtotal = (items) => {
   }, 0);
 };
 
+// Resolve a FinYear.FId from its FName label (e.g. "2026-2027").
+// Returns null if no label was supplied or no matching row exists.
+const resolveFyId = async (pool, finYearLabel) => {
+  if (!finYearLabel) return null;
+  try {
+    const r = await pool
+      .request()
+      .input("FName", sql.NVarChar, finYearLabel)
+      .query("SELECT FId FROM dbo.FinYear WHERE FName = @FName");
+    return r.recordset[0]?.FId ?? null;
+  } catch {
+    return null;
+  }
+};
+
 // Build the UOM-id lookup map: name → id (used when syncing PurchaseOrderItems)
 const buildUomMap = async (pool) => {
   try {
@@ -380,7 +395,31 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
     if (!userEmail) return;
 
     const pool = getPool();
+
+    // Enforce: a PO can only be raised against an Approved Material Request.
+    if (SourceMRId) {
+      const mrId = parseInt(SourceMRId, 10);
+      const mrCheck = await pool
+        .request()
+        .input("MRId", sql.Int, mrId)
+        .query("SELECT Status FROM dbo.MaterialRequests WHERE MRId = @MRId");
+
+      if (!mrCheck.recordset.length) {
+        return res
+          .status(404)
+          .json({ error: "Source Material Request not found." });
+      }
+
+      const mrStatus = mrCheck.recordset[0].Status;
+      if (mrStatus !== "Approved") {
+        return res.status(400).json({
+          error: `Cannot create a Purchase Order: Material Request is "${mrStatus}". Only Approved Material Requests can be used to raise a Purchase Order.`,
+        });
+      }
+    }
+
     const uomMap = await buildUomMap(pool);
+    const fyId = await resolveFyId(pool, finYear);
 
     transaction = pool.transaction();
     await transaction.begin();
@@ -472,7 +511,8 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
               : SourceWDId
                 ? "WO_PO"
                 : "Direct"),
-      ).query(`
+      )
+      .input("FyId", sql.Int, fyId).query(`
         INSERT INTO dbo.PurchaseOrders (
           PurchaseOrderNo, PODate, ExpectedDeliveryDate, SupplierID, CompanyId,
           ProjectId, ItemDescription, Quantity, Unit, Rate,
@@ -483,7 +523,7 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
           SourceWOId, SourceWODocNo,
           SourceMRId, SourceMRDocNo,
           SourceWDId, SourceWDDocNo,
-          POType
+          POType, fy_id
         )
         OUTPUT INSERTED.PurchaseOrderID
         VALUES (
@@ -496,7 +536,7 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
           @SourceWOId, @SourceWODocNo,
           @SourceMRId, @SourceMRDocNo,
           @SourceWDId, @SourceWDDocNo,
-          @POType
+          @POType, @FyId
         )
       `);
 
@@ -512,56 +552,18 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
     await transaction.commit();
     await bumpCacheVersion("purchase-orders");
 
-    // If this PO was created from an MR, recalculate MR status based on how
-    // much of the MR's total requested qty is now covered by POs (best-effort).
+    // Mark the source MR as Ordered once a PO is raised against it.
     if (SourceMRId) {
       (async () => {
         try {
           const mrId = parseInt(SourceMRId, 10);
-
-          // Sum of all quantities requested on this MR
-          const mrQtyRes = await pool.request().input("MRId", sql.Int, mrId)
-            .query(`
-              SELECT ISNULL(SUM(Quantity), 0) AS TotalRequested
-              FROM dbo.MaterialRequestItems
-              WHERE MRId = @MRId
-            `);
-          const totalRequested =
-            parseFloat(mrQtyRes.recordset[0]?.TotalRequested) || 0;
-
-          // Sum of all quantities ordered across ALL POs sourced from this MR
-          // (includes the PO we just created since it was committed above)
-          const poQtyRes = await pool.request().input("MRId", sql.Int, mrId)
-            .query(`
-              SELECT ISNULL(SUM(poi.Quantity), 0) AS TotalOrdered
-              FROM dbo.PurchaseOrderItems poi
-              INNER JOIN dbo.PurchaseOrders po
-                ON poi.PurchaseOrderID = po.PurchaseOrderID
-              WHERE po.SourceMRId = @MRId
-                AND po.Status NOT IN ('Cancelled', 'Rejected')
-            `);
-          const totalOrdered =
-            parseFloat(poQtyRes.recordset[0]?.TotalOrdered) || 0;
-
-          // Determine new MR status
-          let newMRStatus;
-          if (totalRequested <= 0 || totalOrdered <= 0) {
-            newMRStatus = "Partially Ordered";
-          } else if (totalOrdered >= totalRequested) {
-            newMRStatus = "Ordered";
-          } else {
-            newMRStatus = "Partially Ordered";
-          }
-
           await pool
             .request()
             .input("mrId", sql.Int, mrId)
-            .input("user", sql.NVarChar(200), userEmail)
-            .input("newStatus", sql.NVarChar(50), newMRStatus).query(`
+            .input("user", sql.NVarChar(200), userEmail).query(`
               UPDATE dbo.MaterialRequests
-              SET Status = @newStatus, UpdatedBy = @user, UpdatedAt = GETDATE()
-              WHERE MRId = @mrId
-                AND Status IN ('Approved', 'Partially Ordered')
+              SET Status = 'Ordered', UpdatedBy = @user, UpdatedAt = GETDATE()
+              WHERE MRId = @mrId AND Status = 'Approved'
             `);
         } catch (e) {
           console.error("MR status update failed:", e.message);
@@ -624,6 +626,7 @@ router.put(
       Remarks,
       DocTypeId,
       DocNo,
+      finYear,
       POItems,
       Discount,
       GST,
@@ -649,6 +652,7 @@ router.put(
 
       const pool = getPool();
       const uomMap = await buildUomMap(pool);
+      const fyId = await resolveFyId(pool, finYear);
 
       transaction = pool.transaction();
       await transaction.begin();
@@ -692,7 +696,8 @@ router.put(
         .input("UpdatedAt", sql.DateTime2, new Date())
         .input("POItems", sql.NVarChar(sql.MAX), poItemsJson)
         .input("Discount", sql.NVarChar(sql.MAX), discountJson)
-        .input("GST", sql.NVarChar(sql.MAX), gstJson).query(`
+        .input("GST", sql.NVarChar(sql.MAX), gstJson)
+        .input("FyId", sql.Int, fyId).query(`
         UPDATE dbo.PurchaseOrders SET
           PurchaseOrderNo       = @PurchaseOrderNo,
           PODate                = @PODate,
@@ -718,7 +723,8 @@ router.put(
           UpdatedAt             = @UpdatedAt,
           POItems               = @POItems,
           Discount              = @Discount,
-          GST                   = @GST
+          GST                   = @GST,
+          fy_id                 = COALESCE(@FyId, fy_id)
         WHERE PurchaseOrderID = @PurchaseOrderID
       `);
 
