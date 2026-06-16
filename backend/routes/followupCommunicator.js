@@ -21,6 +21,7 @@ const PERMISSION_SUBMODULE = "Communicator";
 
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 50, validate: false }));
+router.use(authMiddleware);
 router.use(checkPermissionForMethod(PERMISSION_MODULE, PERMISSION_SUBMODULE));
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -421,7 +422,7 @@ router.get("/logs", async (req, res) => {
     limit = 50,
   } = req.query;
   const pageInt = Math.max(1, parseInt(page) || 1);
-  const limitInt = Math.min(200, Math.max(1, parseInt(limit) || 50));
+  const limitInt = Math.max(1, parseInt(limit) || 50);
   const offset = (pageInt - 1) * limitInt;
 
   // Build a shared WHERE clause and bind the same inputs on both requests

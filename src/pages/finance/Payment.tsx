@@ -2238,21 +2238,27 @@ const Payment: React.FC = () => {
             ? parseFloat(String(detail.ENetAmount))
             : (detail as any).EGrnTotalAmount
               ? parseFloat((detail as any).EGrnTotalAmount)
-              : detail.EAmount ?? null,
+              : (detail.EAmount ?? null),
           docType: detail.DocTypeName || detail.EDocumentType || "",
           // For GRN: baseAmount = pre-tax base (totalBase), rates from DB.
           // GST breakdown API will override these with precise per-item values.
           // If EGrnTotalAmount is set but breakdown hasn't loaded yet,
           // zero out GST rates to avoid double-counting on the incl-GST figure.
           baseAmount: (detail as any).EGrnTotalAmount
-            ? parseFloat((detail as any).EGrnTotalAmount)  // will be overridden by GRN breakdown
+            ? parseFloat((detail as any).EGrnTotalAmount) // will be overridden by GRN breakdown
             : (detail.EAmount ?? null),
           // Zero out GST rates for GRN records — the GRN breakdown fetch below
           // will set correct totalBase + rates. Without this, if the breakdown
           // API fails, cgstRate applied on EGrnTotalAmount (incl-GST) would double-count GST.
-          cgstRate: (detail as any).EGrnTotalAmount ? 0 : (detail.ECgstRate ?? null),
-          sgstRate: (detail as any).EGrnTotalAmount ? 0 : (detail.ESgstRate ?? null),
-          igstRate: (detail as any).EGrnTotalAmount ? 0 : (detail.EIgstRate ?? null),
+          cgstRate: (detail as any).EGrnTotalAmount
+            ? 0
+            : (detail.ECgstRate ?? null),
+          sgstRate: (detail as any).EGrnTotalAmount
+            ? 0
+            : (detail.ESgstRate ?? null),
+          igstRate: (detail as any).EGrnTotalAmount
+            ? 0
+            : (detail.EIgstRate ?? null),
           billingTermsData:
             detail.EBillingTermsData ?? detail.EDiscountData ?? null,
         }));
@@ -2456,6 +2462,10 @@ const Payment: React.FC = () => {
     }
 
     if (isDigitalMode) {
+      if (!form.bankId) {
+        toast.error("Please select a bank account.");
+        return false;
+      }
       if (form.mode === "NEFT" && !form.neftNumber.trim()) {
         toast.error("NEFT UTR number is required.");
         return false;
@@ -2632,25 +2642,38 @@ const Payment: React.FC = () => {
                 borderL: "border-l-emerald-500",
                 color: "text-emerald-500",
               },
-            ].map(({ label, value, icon: Icon, ring, bg, blob, borderL, color }) => (
-              <div
-                key={label}
-                className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${ring} ${borderL}`}
-              >
-                <div className={`absolute top-0 right-0 w-20 h-20 rounded-full opacity-10 -translate-y-4 translate-x-4 ${blob}`} />
-                <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
-                  <Icon size={16} />
+            ].map(
+              ({
+                label,
+                value,
+                icon: Icon,
+                ring,
+                bg,
+                blob,
+                borderL,
+                color,
+              }) => (
+                <div
+                  key={label}
+                  className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${ring} ${borderL}`}
+                >
+                  <div
+                    className={`absolute top-0 right-0 w-20 h-20 rounded-full opacity-10 -translate-y-4 translate-x-4 ${blob}`}
+                  />
+                  <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
+                    <Icon size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-lg font-bold font-heading text-foreground leading-none">
+                      {value}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+                      {label}
+                    </p>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-lg font-bold font-heading text-foreground leading-none">
-                    {value}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
-                    {label}
-                  </p>
-                </div>
-              </div>
-            ))}
+              ),
+            )}
           </div>
         )}
 

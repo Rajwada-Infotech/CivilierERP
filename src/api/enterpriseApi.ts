@@ -92,9 +92,14 @@ export const getEnterpriseOptions = async (
     ? `${BASE_URL}/options?${qs}`
     : `${BASE_URL}/options`;
   const res = await fetchWithAuth(url);
-  return handle<{ id: number; label: string; belongs_to: string | null }[]>(
-    res,
-  );
+  return handle<
+    {
+      id: number;
+      label: string;
+      belongs_to: string | null;
+      company_id: number | null;
+    }[]
+  >(res);
 };
 
 export interface CompanyDetail {

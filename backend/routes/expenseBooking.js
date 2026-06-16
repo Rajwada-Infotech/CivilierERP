@@ -1,5 +1,4 @@
 const express = require("express");
-const logger = require("../logger");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
@@ -483,6 +482,7 @@ router.get("/options", async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = grn.SupplierID
         WHERE
           (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
+          AND eb.EStatus = 'Approved'
           AND NOT EXISTS (
             SELECT 1 FROM dbo.DebitNote dn
             WHERE dn.bill_id = eb.Eid AND dn.is_active = 1
@@ -533,6 +533,7 @@ router.get("/options", async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster ahm2 ON ahm2.LHeadId = grn2.SupplierID
         WHERE
           eb.EEmiPayment = 1
+          AND eb.EStatus = 'Approved'
           AND ei.Status = 'Pending'
           AND NOT EXISTS (
             SELECT 1 FROM dbo.DebitNote dn
@@ -960,9 +961,6 @@ router.get("/:id", async (req, res) => {
         row.EBillingTermsData,
         row.EDiscountData,
       );
-      console.log(
-        `[/:id] Eid=${row.Eid} ESourceType=${_ESourceType} EGrnTotalAmount=${EGrnTotalAmount} stored=${row.ENetAmount} live=${liveENetAmount} billingTerms=${JSON.stringify(row.EBillingTermsData)}`,
-      );
     }
 
     res.json({ ...row, EGrnTotalAmount, ENetAmount: liveENetAmount });
@@ -1131,6 +1129,26 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
         });
       }
 
+      // Enforce: only one active expense booking per GRN at a time.
+      // If the previous booking was deleted (hard-deleted), no row remains, so
+      // this check passes and a fresh booking is allowed.
+      const dupCheck = await transaction
+        .request()
+        .input("DupGRNId", sql.Int, grnId).query(`
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ExpenseBooking
+          WHERE ESourceType = 'GRN'
+            AND ESourceId = @DupGRNId
+            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+        `);
+      if (Number(dupCheck.recordset[0]?.cnt) > 0) {
+        await transaction.rollback();
+        return res.status(409).json({
+          error:
+            "An expense booking already exists for this GRN. Delete the existing booking before creating a new one.",
+        });
+      }
+
       if (!grnGst.totals.receivedQty || grnGst.totals.receivedQty <= 0) {
         await transaction.rollback();
         return res.status(400).json({
@@ -1151,6 +1169,103 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
         EBillingTermsData,
         EDiscountData,
       );
+    }
+
+    if (ESourceType === "PO" || ESourceType === "WO_PO") {
+      const poId = parseInt(ESourceId, 10);
+      if (!Number.isFinite(poId) || poId <= 0) {
+        await transaction.rollback();
+        return res
+          .status(400)
+          .json({ error: "Purchase Order source is required." });
+      }
+
+      // Enforce: an expense can only be booked against an Approved
+      // (or already partially-fulfilled / Received) Purchase Order.
+      const poStatusResult = await transaction
+        .request()
+        .input("POID", sql.Int, poId)
+        .query(
+          "SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+        );
+      const poStatus = poStatusResult.recordset[0]?.Status;
+      if (!poStatus) {
+        await transaction.rollback();
+        return res
+          .status(404)
+          .json({ error: "Linked Purchase Order not found." });
+      }
+      if (poStatus !== "Approved" && poStatus !== "Received") {
+        await transaction.rollback();
+        return res.status(400).json({
+          error: `Cannot book expense: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used for expense booking.`,
+        });
+      }
+
+      // Enforce: only one active expense booking per PO at a time.
+      const poDupCheck = await transaction
+        .request()
+        .input("DupPOId", sql.Int, poId)
+        .input("DupPOSourceType", sql.NVarChar(20), ESourceType).query(`
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ExpenseBooking
+          WHERE ESourceType = @DupPOSourceType
+            AND ESourceId = @DupPOId
+            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+        `);
+      if (Number(poDupCheck.recordset[0]?.cnt) > 0) {
+        await transaction.rollback();
+        return res.status(409).json({
+          error:
+            "An expense booking already exists for this Purchase Order. Delete the existing booking before creating a new one.",
+        });
+      }
+    }
+
+    if (ESourceType === "WORK_DONE") {
+      const workDoneId = parseInt(ESourceId, 10);
+      if (!Number.isFinite(workDoneId) || workDoneId <= 0) {
+        await transaction.rollback();
+        return res.status(400).json({ error: "Work Done source is required." });
+      }
+
+      // Enforce: an expense can only be booked against an Approved
+      // Work Done certificate.
+      const wdStatusResult = await transaction
+        .request()
+        .input("WDID", sql.BigInt, workDoneId)
+        .query("SELECT Status FROM dbo.WorkDone WHERE ID = @WDID");
+      const wdStatus = wdStatusResult.recordset[0]?.Status;
+      if (!wdStatus) {
+        await transaction.rollback();
+        return res
+          .status(404)
+          .json({ error: "Linked Work Done entry not found." });
+      }
+      if (wdStatus !== "Approved") {
+        await transaction.rollback();
+        return res.status(400).json({
+          error: `Cannot book expense: Work Done is "${wdStatus}". Only Approved Work Done entries can be used for expense booking.`,
+        });
+      }
+
+      // Enforce: only one active expense booking per Work Done entry at a time.
+      const wdDupCheck = await transaction
+        .request()
+        .input("DupWDId", sql.BigInt, workDoneId).query(`
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ExpenseBooking
+          WHERE ESourceType = 'WORK_DONE'
+            AND ESourceId = @DupWDId
+            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+        `);
+      if (Number(wdDupCheck.recordset[0]?.cnt) > 0) {
+        await transaction.rollback();
+        return res.status(409).json({
+          error:
+            "An expense booking already exists for this Work Done entry. Delete the existing booking before creating a new one.",
+        });
+      }
     }
 
     if (EDocTypeId) {
@@ -1558,9 +1673,7 @@ router.put(
       let emiData = {};
       try {
         emiData = JSON.parse(existing.recordset[0]?.EEmiData || "{}");
-      } catch (parseErr) {
-        logger.warn({ event: "EMI_DATA_PARSE_ERROR", err: parseErr }, "Failed to parse EEmiData on schedule update");
-      }
+      } catch {}
 
       emiData.schedule = schedule;
 
@@ -1635,9 +1748,7 @@ router.put(
         let emiData = {};
         try {
           emiData = JSON.parse(parentRow.EEmiData || "{}");
-        } catch (parseErr) {
-          logger.warn({ event: "EMI_DATA_PARSE_ERROR", err: parseErr }, "Failed to parse EEmiData on schedule delete");
-        }
+        } catch {}
         emiData.enabled = false;
         if (deleteUnpaid && Array.isArray(emiData.schedule)) {
           emiData.schedule = emiData.schedule.filter(

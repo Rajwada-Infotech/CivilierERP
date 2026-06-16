@@ -254,6 +254,19 @@ const fmt = (n: number) =>
     maximumFractionDigits: 2,
   });
 
+// Derive a "YYYY-YYYY" financial-year label (Apr–Mar) from a date string.
+// Used as a fallback for older POs that have no fy_id / FinYearName set.
+const deriveFYFromDate = (dateStr?: string | null): string | null => {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  const year = d.getFullYear();
+  const month = d.getMonth(); // 0-indexed; Jan = 0
+  // April (3) onward → FY starts this year; Jan-Mar → FY started last year
+  const startYear = month >= 3 ? year : year - 1;
+  return `${startYear}-${startYear + 1}`;
+};
+
 // Input classes — matches existing app design tokens
 const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
@@ -741,18 +754,6 @@ export default function GRN() {
 
   // Derive the financial year string from a date string using Indian FY rule (Apr–Mar).
   // e.g. 2026-01-15 → "2025-2026",  2026-05-10 → "2026-2027"
-  const deriveFYFromDate = (
-    dateStr: string | null | undefined,
-  ): string | null => {
-    if (!dateStr) return null;
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return null;
-    const yr = d.getFullYear();
-    const mo = d.getMonth() + 1; // 1-based
-    const startYr = mo >= 4 ? yr : yr - 1;
-    return `${startYr}-${startYr + 1}`;
-  };
-
   const { data: uomsData = [] } = useQuery({
     queryKey: ["uomMaster"],
     queryFn: grnApi.getUoms,
@@ -810,9 +811,21 @@ export default function GRN() {
             String(po.PurchaseOrderID) === formData.poId
           )
             return true;
+          // Only Approved POs (or already-partially-received ones) can be
+          // used to raise a GRN. Draft / Pending / Rejected / Cancelled POs
+          // must not show up in the dropdown.
+          const status = (po as any).Status;
+          if (status !== "Approved" && status !== "Received") return false;
           if (selectedFinYear) {
-            const poFY = deriveFYFromDate((po as any).PODate);
-            if (poFY !== selectedFinYear) return false;
+            // Compare against FinYearName from the DB (same FName value the
+            // fin-year selector uses).  For older POs created before fy_id
+            // was wired up, FinYearName will be null — fall back to
+            // deriving the FY from PODate so they still appear under the
+            // correct financial year filter.
+            const poFY =
+              ((po as any).FinYearName as string | null | undefined) ||
+              deriveFYFromDate((po as any).PODate);
+            if (!poFY || poFY !== selectedFinYear) return false;
           }
           if (formData.projectId) {
             if (String((po as any).ProjectId ?? "") !== formData.projectId)

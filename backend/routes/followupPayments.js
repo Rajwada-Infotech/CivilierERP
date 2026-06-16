@@ -3,12 +3,11 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
-const { validateBody } = require("../middleware/validate");
-const schemas = require("../validation/followupSchemas");
 const rateLimit = require("express-rate-limit");
 
 const router = express.Router();
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false }));
+router.use(authMiddleware);
 
 const PERMISSION_MODULE = "Followup";
 const PERMISSION_SUBMODULE = "FinancePayments";
@@ -208,7 +207,6 @@ router.get(
 // Marks the milestone Paid when full amount is received.
 router.post(
   "/:termId/record",
-  validateBody(schemas.paymentRecord),
   checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "write"),
   async (req, res) => {
     try {

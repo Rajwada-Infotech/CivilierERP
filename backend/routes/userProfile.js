@@ -6,12 +6,6 @@ const { getPool, getPoolStats, sql } = require("../db");
 const bcrypt = require("bcrypt");
 const logger = require("../logger");
 const { normalizeRole } = require("../middleware/role");
-const { validateBody } = require("../middleware/validateBody");
-const {
-  profilePatchSchema,
-  changePasswordSchema,
-  uploadAvatarSchema,
-} = require("../validation/userSchemas");
 
 const SALT_ROUNDS = 12;
 
@@ -118,7 +112,7 @@ router.get("/:id/profile", async (req, res) => {
 });
 
 // ── PATCH profile (name only) ────────────────────────────────────────────────
-router.patch("/:id/profile", validateBody(profilePatchSchema), async (req, res) => {
+router.patch("/:id/profile", async (req, res) => {
   if (!isSelfOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
 
   const { name } = req.body;
@@ -140,7 +134,7 @@ router.patch("/:id/profile", validateBody(profilePatchSchema), async (req, res) 
 });
 
 // ── POST change-password ─────────────────────────────────────────────────────
-router.post("/:id/change-password", validateBody(changePasswordSchema), async (req, res) => {
+router.post("/:id/change-password", async (req, res) => {
   if (!isSelfOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
 
   const { current_password, new_password } = req.body;
@@ -243,7 +237,7 @@ router.get("/:id/activity", async (req, res) => {
 });
 
 // ── POST upload-avatar ───────────────────────────────────────────────────────
-router.post("/:id/upload-avatar", validateBody(uploadAvatarSchema), async (req, res) => {
+router.post("/:id/upload-avatar", async (req, res) => {
   if (!isSelfOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
 
   const { avatar } = req.body;
@@ -294,3 +288,7 @@ router.delete("/:id/avatar", async (req, res) => {
 });
 
 module.exports = router;
+
+
+
+

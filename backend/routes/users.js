@@ -1,5 +1,4 @@
 const express = require("express");
-const logger = require("../logger");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
@@ -8,13 +7,9 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { redisGet, redisSet, redisDel } = require("../redis");
 const { blacklistToken } = require("../middleware/blacklist");
+const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const allowRoles = require("../middleware/role");
-const { validateBody } = require("../middleware/validateBody");
-const {
-  userCreateSchema,
-  userUpdateSchema,
-} = require("../validation/userSchemas");
 const { normalizeRole: normalizeRoleFromRoleMiddleware } = allowRoles;
 const authMiddleware = require("../middleware/auth");
 
@@ -84,6 +79,9 @@ router.post("/login", async (req, res) => {
 
     const user = result.recordset[0];
     if (!user) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[Login] No user found for email:", normalizedEmail);
+      }
       if (!isLocal) await incrementLoginAttempts(attemptsKey, lockKey);
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -93,7 +91,11 @@ router.post("/login", async (req, res) => {
       return res.status(403).json({ error: "User inactive" });
     }
 
-    const match = await bcrypt.compare(incomingPassword, user.password);
+    const match = await bcrypt.compare(password, user.password);
+
+    if (process.env.NODE_ENV === "development") {
+      console.warn("[Login] bcrypt compare result:", { matched: match, email: normalizedEmail });
+    }
 
     if (!match) {
 
@@ -166,7 +168,7 @@ async function incrementLoginAttempts(attemptsKey, lockKey) {
 // ======================
 // LOGOUT
 // ======================
-router.post("/logout", async (req, res) => {
+router.post("/logout", authMiddleware, async (req, res) => {
   try {
     if (req.token && req.user?.exp) {
       await blacklistToken(req.token, req.user.exp);
@@ -185,6 +187,7 @@ router.post("/logout", async (req, res) => {
 // whether a RoleRights row exists for "Users / List" in the DB.
 router.get(
   "/",
+  authMiddleware,
   allowRoles(...PRIVILEGED_ROLES),
   async (req, res) => {
     try {
@@ -218,8 +221,8 @@ router.get(
 // ======================
 router.post(
   "/",
+  authMiddleware,
   checkPermission("Users", "List", "CanAdd"),
-  validateBody(userCreateSchema),
   async (req, res) => {
     const { name, email, RoleId, roleId, password, can_accept_tickets } = req.body;
     if (!password) {
@@ -261,8 +264,8 @@ router.post(
 // ======================
 router.put(
   "/:id",
+  authMiddleware,
   checkPermission("Users", "List", "CanEdit"),
-  validateBody(userUpdateSchema),
   async (req, res) => {
     const { id } = req.params;
     const { name, email, RoleId, roleId, discontinue, can_accept_tickets } = req.body;
@@ -330,6 +333,7 @@ router.put(
 // ======================
 router.delete(
   "/:id",
+  authMiddleware,
   checkPermission("Users", "List", "CanDelete"),
   async (req, res) => {
     const { id } = req.params;
@@ -406,6 +410,7 @@ router.delete(
 // ======================
 router.patch(
   "/:id/permissions",
+  authMiddleware,
   checkPermission("Users", "List", "CanEdit"),
   async (req, res) => {
     const { id } = req.params;
@@ -439,9 +444,7 @@ router.patch(
       try {
         const { userPermissionCache } = require("../middleware/permissions");
         userPermissionCache.invalidateUser(id);
-      } catch (cacheErr) {
-        logger.warn({ event: "PERM_CACHE_INVALIDATE_ERROR", userId: id, err: cacheErr }, "Permission cache invalidation failed");
-      }
+      } catch {}
 
       res.json({ message: "Permissions updated" });
     } catch (err) {
@@ -456,6 +459,7 @@ router.patch(
 // ======================
 router.patch(
   "/:id/ticket-access",
+  authMiddleware,
   checkPermission("Users", "List", "CanEdit"),
   async (req, res) => {
     const { id } = req.params;
@@ -499,6 +503,7 @@ router.patch(
 // ======================
 router.patch(
   "/:id/reset-password",
+  authMiddleware,
   checkPermission("Users", "List", "CanEdit"),
   async (req, res) => {
     const { id } = req.params;
@@ -528,3 +533,7 @@ router.patch(
 );
 
 module.exports = router;
+
+
+
+

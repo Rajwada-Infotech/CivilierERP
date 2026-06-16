@@ -657,6 +657,29 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
   }
 
   const pool = await getPool();
+
+  // ── Guard: a GRN can only be raised against an Approved PO ────────────────
+  // Mirrors the MR → PO approval guard in purchaseOrders.js (POST /).
+  if (poId) {
+    const poStatusCheck = await pool
+      .request()
+      .input("POID", sql.Int, parseInt(poId, 10))
+      .query(
+        "SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+      );
+
+    if (poStatusCheck.recordset.length === 0) {
+      return res.status(404).json({ error: "Purchase Order not found" });
+    }
+
+    const poStatus = poStatusCheck.recordset[0].Status;
+    if (poStatus !== "Approved" && poStatus !== "Received") {
+      return res.status(400).json({
+        error: `Cannot create a GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`,
+      });
+    }
+  }
+
   const transaction = pool.transaction();
 
   try {
@@ -765,8 +788,8 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
 
     const grnId = grnResult.recordset[0].GRNID;
 
-    await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
-
+    // IMPORTANT: use transaction.request() not pool.request() — the GRN row
+    // only exists inside this uncommitted transaction; pool sees nothing yet.
     await insertStockLedgerEntries(
       transaction,
       grnId,
@@ -776,6 +799,9 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
     );
 
     await transaction.commit();
+
+    // backPatchRecordId uses pool directly — must run after commit
+    await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
 
     // ── Update parent PO status ───────────────────────────────────────────────
     // Check if all ordered quantities are now received; set status accordingly.
@@ -892,6 +918,28 @@ router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
   const grnId = parseInt(req.params.id, 10);
 
   const pool = await getPool();
+
+  // ── Guard: a GRN can only be linked to an Approved PO ──────────────────────
+  if (poId) {
+    const poStatusCheck = await pool
+      .request()
+      .input("POID", sql.Int, parseInt(poId, 10))
+      .query(
+        "SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+      );
+
+    if (poStatusCheck.recordset.length === 0) {
+      return res.status(404).json({ error: "Purchase Order not found" });
+    }
+
+    const poStatus = poStatusCheck.recordset[0].Status;
+    if (poStatus !== "Approved" && poStatus !== "Received") {
+      return res.status(400).json({
+        error: `Cannot update GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`,
+      });
+    }
+  }
+
   const transaction = pool.transaction();
   try {
     await transaction.begin();
@@ -1090,6 +1138,13 @@ router.delete("/:id", async (req, res) => {
   try {
     await transaction.begin();
 
+    // Capture the linked POID before deleting so we can revert PO status after
+    const grnMeta = await pool
+      .request()
+      .input("GRNID", sql.Int, grnId)
+      .query("SELECT POID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID");
+    const linkedPOId = grnMeta.recordset[0]?.POID ?? null;
+
     await transaction
       .request()
       .input("RefID", sql.Int, grnId)
@@ -1112,6 +1167,59 @@ router.delete("/:id", async (req, res) => {
     await bumpCacheVersion("grns");
     await bumpCacheVersion("expense-booking-options");
     await bumpCacheVersion("stock-ledger");
+
+    // If this GRN was linked to a PO, recalculate PO status now that the GRN
+    // is gone. If no active GRNs remain, revert PO to 'Approved' so a new GRN
+    // can be raised. If GRNs remain but total received < PO total, also revert
+    // (partial-receipt case where a GRN was deleted mid-way).
+    if (linkedPOId) {
+      try {
+        const poRecheck = await pool
+          .request()
+          .input("POID", sql.Int, linkedPOId).query(`
+            SELECT
+              po.Status         AS POStatus,
+              po.TotalAmount    AS POTotalAmount,
+              ISNULL(SUM(grn.TotalAmount), 0) AS TotalReceived,
+              COUNT(grn.GRNID)  AS GRNCount
+            FROM dbo.PurchaseOrders po
+            LEFT JOIN dbo.GoodsReceiptNotes grn
+              ON grn.POID = po.PurchaseOrderID
+              AND ISNULL(grn.Status, '') != 'Rejected'
+            WHERE po.PurchaseOrderID = @POID
+            GROUP BY po.Status, po.TotalAmount
+          `);
+
+        if (poRecheck.recordset.length > 0) {
+          const poRow = poRecheck.recordset[0];
+          const totalOrdered = Number(poRow.POTotalAmount || 0);
+          const totalReceived = Number(poRow.TotalReceived || 0);
+          const grnCount = Number(poRow.GRNCount || 0);
+
+          // Revert to 'Approved' if: no GRNs left, or remaining GRNs don't
+          // fully cover the PO total — meaning it's no longer fully received.
+          const shouldRevert =
+            poRow.POStatus === "Received" &&
+            (grnCount === 0 || totalReceived < totalOrdered);
+
+          if (shouldRevert) {
+            await pool
+              .request()
+              .input("POID", sql.Int, linkedPOId)
+              .query(
+                "UPDATE dbo.PurchaseOrders SET Status = 'Approved', UpdatedAt = GETDATE() WHERE PurchaseOrderID = @POID AND Status = 'Received'",
+              );
+            await bumpCacheVersion("purchase-orders");
+          }
+        }
+      } catch (poErr) {
+        console.error(
+          "PO status revert after GRN delete failed (non-fatal):",
+          poErr.message,
+        );
+      }
+    }
+
     res.json({ message: "GRN deleted successfully" });
   } catch (err) {
     await transaction.rollback().catch(() => {});
