@@ -724,6 +724,18 @@ router.delete("/:id", authenticateToken, async (req, res) => {
     if (!check.recordset.length)
       return res.status(404).json({ error: "Not found" });
 
+    // Block deletion if a PO has been raised against this MR
+    const poCheck = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query(
+        "SELECT TOP 1 DocNo FROM dbo.PurchaseOrders WHERE SourceMRId = @id",
+      );
+    if (poCheck.recordset.length)
+      return res.status(409).json({
+        error: `Cannot delete: Purchase Order ${poCheck.recordset[0].DocNo} is linked to this Material Request.`,
+      });
+
     await pool
       .request()
       .input("id", sql.Int, id)
