@@ -514,7 +514,8 @@ router.post("/work-done", async (req, res) => {
       .input("CertifiedAmount", sql.Decimal(18, 2), certified)
       .input("Status", sql.NVarChar(50), body.Status || "Draft")
       .input("Remarks", sql.NVarChar(sql.MAX), body.Remarks || null)
-      .input("CreatedBy", sql.NVarChar(100), userEmail).query(`
+      .input("CreatedBy", sql.NVarChar(100), userEmail)
+      .input("CreatedAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.WorkDone
           (DocNo, DocTypeId, DocDate, CompanyId, ProjectId, FinYear, SupplierId,
            WorkOrderID, PeriodFrom, PeriodTo, DescriptionOfWork, QuantityDone,
@@ -525,7 +526,7 @@ router.post("/work-done", async (req, res) => {
           (@DocNo, @DocTypeId, @DocDate, @CompanyId, @ProjectId, @FinYear, @SupplierId,
            @WorkOrderID, @PeriodFrom, @PeriodTo, @DescriptionOfWork, @QuantityDone,
            @Unit, @RatePerUnit, @GrossAmount, @Deductions, @CertifiedAmount, @Status,
-           @Remarks, @CreatedBy, SYSDATETIME())
+           @Remarks, @CreatedBy, @CreatedAt)
       `);
 
     const newId = result.recordset[0].ID;
