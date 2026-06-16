@@ -1,6 +1,6 @@
 import api from "./axios";
 
-const BASE_URL = "/api/entry-type";
+const BASE_URL = "/entry-type";
 
 export const getEntryTypes = async () => {
   const res = await api.get(BASE_URL);

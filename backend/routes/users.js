@@ -16,6 +16,7 @@ const {
   userUpdateSchema,
 } = require("../validation/userSchemas");
 const { normalizeRole: normalizeRoleFromRoleMiddleware } = allowRoles;
+const authMiddleware = require("../middleware/auth");
 
 // Privileged roles that can always list users (Password Reset, User Management)
 const PRIVILEGED_ROLES = ["super_admin", "admin", "dba"];
@@ -146,6 +147,11 @@ router.post("/login", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+// ======================
+// AUTH REQUIRED BELOW THIS LINE
+// ======================
+router.use(authMiddleware);
 
 async function incrementLoginAttempts(attemptsKey, lockKey) {
   try {

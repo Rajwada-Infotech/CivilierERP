@@ -17,7 +17,7 @@ export interface SystemMetrics {
 }
 
 export const getSystemMetrics = async (): Promise<SystemMetrics> => {
-  const res = await api.get<SystemMetrics>("/api/system/metrics");
+  const res = await api.get<SystemMetrics>("/system/metrics");
   return res.data;
 };
 

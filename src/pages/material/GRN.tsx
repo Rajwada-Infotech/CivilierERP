@@ -788,7 +788,10 @@ export default function GRN() {
   useEffect(() => {
     if (editingId) return;
     const auto = findProjectGodownId(formData.projectId);
-    setFormData((prev) => ({ ...prev, godownId: auto }));
+    setFormData((prev) => {
+      if (prev.godownId === auto) return prev; // no change → no re-render
+      return { ...prev, godownId: auto };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.projectId, godowns]);
 

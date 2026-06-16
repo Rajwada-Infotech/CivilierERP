@@ -1,6 +1,6 @@
 import api from "./axios";
 
-const BASE_URL = "/api/menu-type";
+const BASE_URL = "/menu-type";
 
 export interface MenuType {
   Id: number;

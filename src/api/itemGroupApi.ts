@@ -1,6 +1,6 @@
 import api from "./axios";
 
-const BASE_URL = "/api/item-groups";
+const BASE_URL = "/item-groups";
 
 export const getItemGroups = async () => {
   const res = await api.get(BASE_URL);

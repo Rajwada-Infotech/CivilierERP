@@ -3,8 +3,8 @@ import type { PagePermission } from "@/contexts/types";
 
 export type { PagePermission };
 
-const BASE_URL = "/api/users";
-const RIGHTS_BASE_URL = "/api/user-rights";
+const BASE_URL = "/users";
+const RIGHTS_BASE_URL = "/user-rights";
 
 export interface User {
   id: number;
@@ -24,7 +24,7 @@ export interface User {
 // Login intentionally uses raw fetch — no auth header needed and the axios
 // instance's 401 interceptor would redirect before the response is read.
 export const loginUser = async (email: string, password: string) => {
-  const res = await fetch(`${BASE_URL}/login`, {
+  const res = await fetch(`/api${BASE_URL}/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
