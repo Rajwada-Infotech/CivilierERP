@@ -189,7 +189,7 @@ router.post("/", adminOnly, async (req, res) => {
             .input(
               "EnterpriseID",
               sql.Int,
-              f.enterpriseId ? parseInt(f.enterpriseId) : null,
+              f.companyId ? parseInt(f.companyId) : null,
             ).query(`
               INSERT INTO dbo.Godowns (GodownCode, GodownName, ShortDesc, ProjectID, EnterpriseID, IsMain, IsActive, IsDeleted)
               VALUES (@GodownCode, @GodownName, @ShortDesc, @ProjectID, @EnterpriseID, 0, 1, 0)
