@@ -1,6 +1,6 @@
 import api from "./axios";
 
-const BASE_URL = "/api/item-master";
+const BASE_URL = "/item-master";
 
 export interface DbItem {
   M_Id: string;

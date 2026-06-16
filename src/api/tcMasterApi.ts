@@ -1,6 +1,6 @@
 import api from "./axios";
 
-const BASE_URL = "/api/tc-master";
+const BASE_URL = "/tc-master";
 
 export const getTCRecords = async () => {
   const res = await api.get(BASE_URL);

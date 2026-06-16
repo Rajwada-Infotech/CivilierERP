@@ -1,7 +1,7 @@
 // src/api/grnApi.ts
 import api from "./axios";
 
-const BASE = "/api/grns";
+const BASE = "/grns";
 
 export interface Supplier {
   LHeadId: number;
@@ -163,14 +163,14 @@ export const previewNextGRNNumber = async (
 // ── Dropdown fetches ──────────────────────────────────────────────────────────
 
 export const getSuppliers = async (): Promise<Supplier[]> => {
-  const res = await api.get("/api/account-head", { params: { type: "S" } });
+  const res = await api.get("/account-head", { params: { type: "S" } });
   return Array.isArray(res.data) ? res.data : [];
 };
 
 export const getPurchaseOrders = async (
   fyId?: number | null,
 ): Promise<PurchaseOrder[]> => {
-  const res = await api.get("/api/purchase-orders", {
+  const res = await api.get("/purchase-orders", {
     params: { limit: 500, ...(fyId ? { fyId } : {}) },
   });
   return normalizeArray<PurchaseOrder>(res.data);
@@ -179,17 +179,17 @@ export const getPurchaseOrders = async (
 export const getPurchaseOrderById = async (
   id: number | string,
 ): Promise<PurchaseOrder> => {
-  const res = await api.get(`/api/purchase-orders/${id}`);
+  const res = await api.get(`/purchase-orders/${id}`);
   return res.data;
 };
 
 export const getItems = async (): Promise<Item[]> => {
-  const res = await api.get("/api/item-master");
+  const res = await api.get("/item-master");
   return Array.isArray(res.data) ? res.data : [];
 };
 
 export const getUoms = async (): Promise<UOM[]> => {
-  const res = await api.get("/api/uom-master");
+  const res = await api.get("/uom-master");
   return Array.isArray(res.data)
     ? res.data.filter((u: UOM) => u.IsActive !== false)
     : [];
@@ -198,7 +198,7 @@ export const getUoms = async (): Promise<UOM[]> => {
 export const getProjects = async (): Promise<
   { id: number; name: string; short_name: string | null }[]
 > => {
-  const res = await api.get("/api/enterprises/options", {
+  const res = await api.get("/enterprises/options", {
     params: { business_type: "P" },
   });
   return Array.isArray(res.data)
