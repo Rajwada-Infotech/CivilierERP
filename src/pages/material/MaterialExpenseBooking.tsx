@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -136,6 +142,7 @@ interface CompanyOption {
 interface ProjectOption {
   id: number;
   label: string;
+  company_id?: number | null;
 }
 interface GSTConfig {
   applicable: boolean;
@@ -1426,6 +1433,13 @@ export default function MaterialExpenseBooking() {
   const [view, setView] = useState<PageView>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<ExpenseRecord, "id">>(blankForm());
+
+  const filteredProjectOptions = useMemo(() => {
+    if (!form.companyId) return projectOptions;
+    return projectOptions.filter(
+      (p) => Number(p.company_id) === Number(form.companyId),
+    );
+  }, [projectOptions, form.companyId]);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteBlockInfo, setDeleteBlockInfo] = useState<{
     reason: "brs_cleared" | "has_payments" | "debit_note";
@@ -2514,13 +2528,14 @@ export default function MaterialExpenseBooking() {
                         </div>
                       </SelectTrigger>
                       <SelectContent>
-                        {projectOptions.length === 0 && !form.projectSite && (
-                          <SelectItem value="__none__" disabled>
-                            No projects found
-                          </SelectItem>
-                        )}
+                        {filteredProjectOptions.length === 0 &&
+                          !form.projectSite && (
+                            <SelectItem value="__none__" disabled>
+                              No projects found
+                            </SelectItem>
+                          )}
                         {form.projectSite &&
-                          !projectOptions.some(
+                          !filteredProjectOptions.some(
                             (p) => String(p.id) === form.projectSite,
                           ) && (
                             <SelectItem
@@ -2530,7 +2545,7 @@ export default function MaterialExpenseBooking() {
                               {form.projectName || form.projectSite}
                             </SelectItem>
                           )}
-                        {projectOptions.map((p) => (
+                        {filteredProjectOptions.map((p) => (
                           <SelectItem key={p.id} value={String(p.id)}>
                             {p.label}
                           </SelectItem>
