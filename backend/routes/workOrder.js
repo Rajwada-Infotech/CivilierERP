@@ -388,6 +388,25 @@ router.post("/", async (req, res) => {
   let transaction;
   try {
     const pool = getPool();
+
+    // Enforce: a Work Order can only be linked to an Approved BOQ.
+    if (BoqID) {
+      const boqCheck = await pool
+        .request()
+        .input("BoqID", sql.Int, parseInt(BoqID, 10))
+        .query("SELECT Status FROM dbo.BOQ WHERE BoqID = @BoqID");
+
+      if (!boqCheck.recordset.length) {
+        return res.status(404).json({ error: "Linked BOQ not found." });
+      }
+      const boqStatus = boqCheck.recordset[0].Status;
+      if (boqStatus !== "Approved") {
+        return res.status(400).json({
+          error: `Cannot create Work Order: BOQ is "${boqStatus}". Only Approved BOQs can be used to raise a Work Order.`,
+        });
+      }
+    }
+
     transaction = pool.transaction();
     await transaction.begin();
 
@@ -489,6 +508,25 @@ router.put("/:id", async (req, res) => {
     : null;
   try {
     const pool = getPool();
+
+    // Enforce: a Work Order can only be linked to an Approved BOQ.
+    if (BoqID) {
+      const boqCheck = await pool
+        .request()
+        .input("BoqID", sql.Int, parseInt(BoqID, 10))
+        .query("SELECT Status FROM dbo.BOQ WHERE BoqID = @BoqID");
+
+      if (!boqCheck.recordset.length) {
+        return res.status(404).json({ error: "Linked BOQ not found." });
+      }
+      const boqStatus = boqCheck.recordset[0].Status;
+      if (boqStatus !== "Approved") {
+        return res.status(400).json({
+          error: `Cannot update Work Order: BOQ is "${boqStatus}". Only Approved BOQs can be used to raise a Work Order.`,
+        });
+      }
+    }
+
     const result = await pool
       .request()
       .input("Id", sql.Int, id)
@@ -916,6 +954,24 @@ router.post("/:id/save-full", async (req, res) => {
       header.DocumentNumber ||
       null;
 
+    // Enforce: a Work Order can only be linked to an Approved BOQ.
+    if (header.BoqID) {
+      const boqCheck = await pool
+        .request()
+        .input("BoqID", sql.Int, parseInt(header.BoqID, 10))
+        .query("SELECT Status FROM dbo.BOQ WHERE BoqID = @BoqID");
+
+      if (!boqCheck.recordset.length) {
+        return res.status(404).json({ error: "Linked BOQ not found." });
+      }
+      const boqStatus = boqCheck.recordset[0].Status;
+      if (boqStatus !== "Approved") {
+        return res.status(400).json({
+          error: `Cannot save Work Order: BOQ is "${boqStatus}". Only Approved BOQs can be used to raise a Work Order.`,
+        });
+      }
+    }
+
     // 1. Update header
     const headerUpdate = await pool
       .request()
@@ -1176,7 +1232,13 @@ router.post("/:id/save-full", async (req, res) => {
 
     // Auto-submit: move Draft → Pending so it appears in approval inbox
     try {
-      await transition("work-orders", headerId, "Pending", req.user?.email, req.user?.role);
+      await transition(
+        "work-orders",
+        headerId,
+        "Pending",
+        req.user?.email,
+        req.user?.role,
+      );
       await bumpCacheVersion("work-orders");
     } catch (e) {
       console.warn("[WO auto-submit]", e.message);
@@ -1351,7 +1413,6 @@ router.post("/:id/save-full", async (req, res) => {
             lineCount: poItemsArr.length,
           });
         }
-
       }
       // Always bump purchase-orders cache — deletion of old draft WO-POs also
       // changes what users see in the PO list, even when no new POs are created.
@@ -1360,7 +1421,9 @@ router.post("/:id/save-full", async (req, res) => {
       // Non-fatal — WO save succeeded; log and surface in response
       console.error("[POST /:id/save-full WO-PO auto-create]", woPoErr.message);
       // Still try to bump cache so stale WO-PO deletions become visible
-      try { await bumpCacheVersion("purchase-orders"); } catch (_) {}
+      try {
+        await bumpCacheVersion("purchase-orders");
+      } catch (_) {}
     }
 
     res.json({

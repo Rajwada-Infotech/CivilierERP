@@ -204,7 +204,11 @@ router.post("/", validateBody(bankMasterCreateSchema), async (req, res) => {
       .input("LHeadStatus", sql.Bit, Boolean(BStatus) ? 1 : 0)
       .input("LHeadPaymentTerms", sql.NVarChar(100), "N/A")
       .input("LHeadCreditLimit", sql.Decimal(18, 2), 0)
-      .input("LBelongsTo", sql.Int, BLBelongsTo ?? null);
+      .input(
+        "LBelongsTo",
+        sql.Int,
+        BLBelongsTo != null ? Number(BLBelongsTo) : null,
+      );
 
     if (companyColumn === "LDescription") {
       request.input(
@@ -357,7 +361,7 @@ router.put("/:id", validateBody(bankMasterUpdateSchema), async (req, res) => {
       .input(
         "LBelongsTo",
         sql.Int,
-        BLBelongsTo !== undefined ? (BLBelongsTo ?? null) : undefined,
+        BLBelongsTo != null ? Number(BLBelongsTo) : null,
       );
 
     if (companyColumn === "LDescription") {

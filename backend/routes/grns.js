@@ -77,6 +77,23 @@ function normaliseGRNRow(row) {
   return row;
 }
 
+// Resolve the godown linked to a project (enterprise with business_type='P')
+// Returns null if no project-specific godown exists (caller should fall back to Main)
+async function resolveProjectGodownId(pool, projectId) {
+  if (!projectId) return null;
+  try {
+    const res = await pool
+      .request()
+      .input("ProjectID", sql.Int, parseInt(projectId, 10))
+      .query(
+        "SELECT TOP 1 GodownID FROM dbo.Godowns WHERE ProjectID = @ProjectID AND IsDeleted = 0 ORDER BY GodownID",
+      );
+    return res.recordset[0]?.GodownID || null;
+  } catch {
+    return null;
+  }
+}
+
 async function resolveMainGodownId(pool) {
   try {
     const res = await pool
@@ -629,7 +646,8 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
     finYear,
     parentDocNo = null, // DocNo of the parent PO or WO
     rootExBDocNo = null, // Root ExB DocNo when raised under Expense Booking
-    godownId = null, // Target godown for stock credit (null → Main Godown)
+    godownId = null, // Target godown for stock credit (null → resolve from project or Main)
+    projectId = null, // Project linked to this GRN (used for godown resolution)
   } = req.body;
 
   if (!grnDate || !supplierId) {
@@ -639,6 +657,29 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
   }
 
   const pool = await getPool();
+
+  // ── Guard: a GRN can only be raised against an Approved PO ────────────────
+  // Mirrors the MR → PO approval guard in purchaseOrders.js (POST /).
+  if (poId) {
+    const poStatusCheck = await pool
+      .request()
+      .input("POID", sql.Int, parseInt(poId, 10))
+      .query(
+        "SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+      );
+
+    if (poStatusCheck.recordset.length === 0) {
+      return res.status(404).json({ error: "Purchase Order not found" });
+    }
+
+    const poStatus = poStatusCheck.recordset[0].Status;
+    if (poStatus !== "Approved" && poStatus !== "Received") {
+      return res.status(400).json({
+        error: `Cannot create a GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`,
+      });
+    }
+  }
+
   const transaction = pool.transaction();
 
   try {
@@ -708,12 +749,50 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
 
     const grnId = grnResult.recordset[0].GRNID;
 
-    await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
+    // NOTE: backPatchRecordId runs on pool (outside transaction).
+    // Moved to after transaction.commit() to avoid lock contention.
 
-    // Use the godown sent by the client; fall back to Main Godown only if none given
-    const resolvedGodownId = godownId
-      ? parseInt(godownId, 10)
-      : await resolveMainGodownId(pool);
+    // Godown resolution priority:
+    // 1. Explicit godownId from client
+    // 2. Project's linked godown (when PO has a ProjectId)
+    // 3. Main Godown fallback
+    let resolvedGodownId = godownId ? parseInt(godownId, 10) : null;
+    if (!resolvedGodownId) {
+      // Try to get ProjectId from the PO if not provided in body
+      let resolvedProjectId = projectId ? parseInt(projectId, 10) : null;
+      if (!resolvedProjectId && poId) {
+        const poRow = await pool
+          .request()
+          .input("POID", sql.Int, parseInt(poId, 10))
+          .query(
+            "SELECT TOP 1 ProjectId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+          );
+        resolvedProjectId = poRow.recordset[0]?.ProjectId || null;
+      }
+      if (resolvedProjectId) {
+        resolvedGodownId = await resolveProjectGodownId(
+          pool,
+          resolvedProjectId,
+        );
+      }
+      if (!resolvedGodownId) {
+        resolvedGodownId = await resolveMainGodownId(pool);
+      }
+    }
+
+    // Also update the GRN row's GodownID to reflect the resolved godown
+    // (the INSERT above stored the raw client value; patch it now if it changed)
+    // IMPORTANT: use transaction.request() not pool.request() — the GRN row
+    // only exists inside this uncommitted transaction; pool sees nothing yet.
+    if (resolvedGodownId) {
+      await transaction
+        .request()
+        .input("GRNID", sql.Int, grnId)
+        .input("GodownID", sql.Int, resolvedGodownId)
+        .query(
+          "UPDATE dbo.GoodsReceiptNotes SET GodownID = @GodownID WHERE GRNID = @GRNID",
+        );
+    }
     await insertStockLedgerEntries(
       transaction,
       grnId,
@@ -723,6 +802,9 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
     );
 
     await transaction.commit();
+
+    // backPatchRecordId uses pool directly — must run after commit
+    await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
 
     // ── Update parent PO status ───────────────────────────────────────────────
     // Check if all ordered quantities are now received; set status accordingly.
@@ -808,6 +890,7 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
   } catch (err) {
     await transaction.rollback().catch(() => {});
     console.error("CREATE GRN FULL ERROR:", err);
+    if (res.headersSent) return; // timeout middleware may have already sent 503
     res.status(500).json({
       error: "Failed to create GRN",
       message: err.message,
@@ -838,6 +921,28 @@ router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
   const grnId = parseInt(req.params.id, 10);
 
   const pool = await getPool();
+
+  // ── Guard: a GRN can only be linked to an Approved PO ──────────────────────
+  if (poId) {
+    const poStatusCheck = await pool
+      .request()
+      .input("POID", sql.Int, parseInt(poId, 10))
+      .query(
+        "SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+      );
+
+    if (poStatusCheck.recordset.length === 0) {
+      return res.status(404).json({ error: "Purchase Order not found" });
+    }
+
+    const poStatus = poStatusCheck.recordset[0].Status;
+    if (poStatus !== "Approved" && poStatus !== "Received") {
+      return res.status(400).json({
+        error: `Cannot update GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`,
+      });
+    }
+  }
+
   const transaction = pool.transaction();
   try {
     await transaction.begin();
