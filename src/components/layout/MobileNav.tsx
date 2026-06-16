@@ -1399,7 +1399,7 @@ export const MobileNav: React.FC = () => {
                                     ? "Teal-accented slate"
                                     : t === "root"
                                       ? "Warm amber tone"
-                                      : "Bold crimson dark"}
+                                      : "Soft glass tone"}
                             </p>
                           </div>
                           {isSelected && (

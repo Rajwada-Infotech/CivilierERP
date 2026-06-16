@@ -1221,6 +1221,7 @@ export default function GRN() {
       poNumber: fullGrn.PONumber || "",
       poTotalAmount: Number(fullGrn.POTotalAmount ?? 0),
       poSubtotalAmount: Number(fullGrn.POSubtotalAmount ?? 0),
+      poReceivedAmount: Number(fullGrn.POTotalReceived ?? 0),
       remarks: fullGrn.Remarks || "",
       status: (fullGrn.Status as any) || "Draft",
       items: parsedItems.length ? parsedItems : [createEmptyItem()],
