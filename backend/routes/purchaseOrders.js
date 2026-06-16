@@ -927,6 +927,15 @@ router.delete("/:id", async (req, res) => {
       });
     }
 
+    // Capture SourceMRId before deleting so we can reset the MR afterwards
+    const poMeta = await pool
+      .request()
+      .input("PurchaseOrderID", sql.Int, id)
+      .query(
+        "SELECT SourceMRId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @PurchaseOrderID",
+      );
+    const sourceMRId = poMeta.recordset[0]?.SourceMRId ?? null;
+
     const result = await pool
       .request()
       .input("PurchaseOrderID", sql.Int, id)
@@ -937,6 +946,33 @@ router.delete("/:id", async (req, res) => {
     if (!checkRowsAffected(result, res, "Purchase order")) return;
 
     await bumpCacheVersion("purchase-orders");
+
+    // If this PO was raised from a Material Request, reset that MR back to
+    // 'Approved' so a new PO can be created against it — but only when no
+    // other active PO still references the same MR.
+    if (sourceMRId) {
+      try {
+        const remainingPOs = await pool
+          .request()
+          .input("MRId", sql.Int, sourceMRId).query(`
+            SELECT COUNT(*) AS cnt
+            FROM dbo.PurchaseOrders
+            WHERE SourceMRId = @MRId
+              AND ISNULL(Status, '') NOT IN ('Deleted', 'Rejected')
+          `);
+
+        if (Number(remainingPOs.recordset[0]?.cnt) === 0) {
+          await pool.request().input("MRId", sql.Int, sourceMRId).query(`
+              UPDATE dbo.MaterialRequests
+              SET Status = 'Approved', UpdatedAt = GETDATE()
+              WHERE MRId = @MRId AND Status = 'Ordered'
+            `);
+        }
+      } catch (mrErr) {
+        console.error("MR status reset failed (non-fatal):", mrErr.message);
+      }
+    }
+
     res.json({ message: "Purchase order deleted successfully" });
   } catch (err) {
     console.error("DELETE PurchaseOrders error:", err);
