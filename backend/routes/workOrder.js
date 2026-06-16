@@ -303,12 +303,18 @@ router.get(
       if (!id) return;
       const pool = getPool();
       const headerResult = await pool.request().input("Id", sql.Int, id).query(`
-        SELECT h.*, ec.name AS CompanyName, ep.name AS ProjectName, ahm.LHeadName AS ContractorName, ams.LHeadName AS SupplierName
+        SELECT h.*,
+          ec.name AS CompanyName, ep.name AS ProjectName,
+          ahm.LHeadName AS ContractorName, ams.LHeadName AS SupplierName,
+          td.Prefix AS DocTypePrefix, td.Description AS DocTypeDescription,
+          COALESCE(b.DocNo, b.BoqNo) AS BoqDocNo
         FROM dbo.WorkOrderHeader h
         LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
         LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
         LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
         LEFT JOIN dbo.AccountHeadMaster ams ON ams.LHeadId = h.SupplierId
+        LEFT JOIN dbo.TypeOfDoc         td  ON td.TypeOfDocId = h.DocTypeId
+        LEFT JOIN dbo.BOQ               b   ON b.BoqID = h.BoqID
         WHERE h.Id = @Id
       `);
       if (!headerResult.recordset.length)
