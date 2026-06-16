@@ -128,6 +128,10 @@ function TreeRow({
         className={`group border-b border-border transition-colors cursor-pointer ${
           activeEditId === node._id ? "bg-primary/5" : "hover:bg-muted/30"
         }`}
+        onClick={() => {
+          if (hasChildren) onToggle(node._id);
+          else onEdit(node);
+        }}
       >
         {/* Group Name */}
         <td className="py-2.5 px-4">
@@ -135,12 +139,11 @@ function TreeRow({
             className="flex items-center gap-2"
             style={{ paddingLeft: depth * 28 }}
           >
-            <button
-              onClick={() => hasChildren && onToggle(node._id)}
+            <div
               className={`w-5 h-5 flex items-center justify-center rounded text-muted-foreground transition-colors ${
                 hasChildren
-                  ? "hover:text-foreground hover:bg-muted cursor-pointer"
-                  : "opacity-0 cursor-default"
+                  ? "hover:text-foreground hover:bg-muted"
+                  : "opacity-0 pointer-events-none"
               }`}
             >
               {isExpanded ? (
@@ -148,7 +151,7 @@ function TreeRow({
               ) : (
                 <ChevronRight size={14} />
               )}
-            </button>
+            </div>
             {depth > 0 && (
               <span className="text-muted-foreground/30 text-xs">└</span>
             )}
@@ -195,7 +198,7 @@ function TreeRow({
           )}
         </td>
 
-        <td className="py-2.5 px-4 text-right">
+        <td className="py-2.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
               onClick={() => onView(node)}
