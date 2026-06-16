@@ -723,16 +723,6 @@ router.delete("/:id", authenticateToken, async (req, res) => {
       .query("SELECT Status FROM dbo.MaterialRequests WHERE MRId=@id");
     if (!check.recordset.length)
       return res.status(404).json({ error: "Not found" });
-    // Bug 2 — the view modal shows a Delete button for both Draft and Rejected.
-    // Backend now matches that intent; all other statuses are still blocked.
-    if (
-      !["Draft", "Rejected", "Approved", "Pending"].includes(
-        check.recordset[0].Status,
-      )
-    )
-      return res.status(409).json({
-        error: `Cannot delete a Material Request with status "${check.recordset[0].Status}". Only Draft, Pending, Rejected, or Approved requests can be deleted.`,
-      });
 
     await pool
       .request()
