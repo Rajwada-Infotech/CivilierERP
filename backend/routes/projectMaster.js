@@ -162,9 +162,17 @@ router.post("/", adminOnly, async (req, res) => {
         .input("name", sql.NVarChar(255), f.name || null)
         .input("btype", sql.NVarChar(10), "P")
         .query(
-          "SELECT TOP 1 id FROM dbo.enterprise WHERE name=@name AND business_type=@btype ORDER BY id DESC",
+          "SELECT TOP 1 id, company_id FROM dbo.enterprise WHERE name=@name AND business_type=@btype ORDER BY id DESC",
         );
       const newProjectId = projectRow.recordset[0]?.id;
+      // Always derive the godown's EnterpriseID from the project's own
+      // stored company_id column rather than trusting f.companyId from the
+      // request body — the form may omit it, which previously left
+      // EnterpriseID null/wrong and made the godown invisible in every
+      // company/project filter (see migration 105-fix-godown-enterprise-id).
+      const resolvedCompanyId =
+        projectRow.recordset[0]?.company_id ??
+        (f.companyId ? parseInt(f.companyId) : null);
       if (newProjectId) {
         const code = (f.code || f.name || "PRJ")
           .replace(/\s+/g, "_")
@@ -186,11 +194,7 @@ router.post("/", adminOnly, async (req, res) => {
             .input("GodownName", sql.NVarChar(255), godownName)
             .input("ShortDesc", sql.NVarChar(100), f.shortName || f.name)
             .input("ProjectID", sql.Int, newProjectId)
-            .input(
-              "EnterpriseID",
-              sql.Int,
-              f.companyId ? parseInt(f.companyId) : null,
-            ).query(`
+            .input("EnterpriseID", sql.Int, resolvedCompanyId).query(`
               INSERT INTO dbo.Godowns (GodownCode, GodownName, ShortDesc, ProjectID, EnterpriseID, IsMain, IsActive, IsDeleted)
               VALUES (@GodownCode, @GodownName, @ShortDesc, @ProjectID, @EnterpriseID, 0, 1, 0)
             `);
@@ -273,6 +277,29 @@ router.put("/:id", adminOnly, async (req, res) => {
       `);
     await bumpCacheVersion("enterprises");
     await bumpCacheVersion("project-master");
+
+    // Keep this project's dedicated godown in sync if its company changed —
+    // otherwise the godown silently drops out of company/project filters
+    // (same root cause as migration 105-fix-godown-enterprise-id).
+    try {
+      const projectId = parseInt(req.params.id);
+      const resolvedCompanyId = f.companyId ? parseInt(f.companyId) : null;
+      await pool
+        .request()
+        .input("ProjectID", sql.Int, projectId)
+        .input("EnterpriseID", sql.Int, resolvedCompanyId)
+        .query(
+          `UPDATE dbo.Godowns SET EnterpriseID=@EnterpriseID
+           WHERE ProjectID=@ProjectID AND IsDeleted=0`,
+        );
+      await bumpCacheVersion("godowns");
+    } catch (godownSyncErr) {
+      console.warn(
+        "[projectMaster] Godown EnterpriseID sync failed:",
+        godownSyncErr.message,
+      );
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

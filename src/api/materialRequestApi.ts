@@ -136,8 +136,12 @@ export const getMRProjects = () =>
 export const getMRFinYears = () =>
   fetchWithAuth(`${BASE}/fin-years`).then((r) => handleResponse<any[]>(r));
 
-export const getMRItemOptions = () =>
-  fetchWithAuth(`${BASE}/item-options`).then((r) => handleResponse<any[]>(r));
+export const getMRItemOptions = (projectId?: string | number | null) => {
+  const qs = projectId ? `?projectId=${projectId}` : "";
+  return fetchWithAuth(`${BASE}/item-options${qs}`).then((r) =>
+    handleResponse<any[]>(r),
+  );
+};
 
 export const getMRUomOptions = () =>
   fetchWithAuth(`${BASE}/uom-options`).then((r) => handleResponse<any[]>(r));

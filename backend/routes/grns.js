@@ -1134,6 +1134,13 @@ router.delete("/:id", async (req, res) => {
   try {
     await transaction.begin();
 
+    // Capture the linked POID before deleting so we can revert PO status after
+    const grnMeta = await pool
+      .request()
+      .input("GRNID", sql.Int, grnId)
+      .query("SELECT POID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID");
+    const linkedPOId = grnMeta.recordset[0]?.POID ?? null;
+
     await transaction
       .request()
       .input("RefID", sql.Int, grnId)
@@ -1156,6 +1163,59 @@ router.delete("/:id", async (req, res) => {
     await bumpCacheVersion("grns");
     await bumpCacheVersion("expense-booking-options");
     await bumpCacheVersion("stock-ledger");
+
+    // If this GRN was linked to a PO, recalculate PO status now that the GRN
+    // is gone. If no active GRNs remain, revert PO to 'Approved' so a new GRN
+    // can be raised. If GRNs remain but total received < PO total, also revert
+    // (partial-receipt case where a GRN was deleted mid-way).
+    if (linkedPOId) {
+      try {
+        const poRecheck = await pool
+          .request()
+          .input("POID", sql.Int, linkedPOId).query(`
+            SELECT
+              po.Status         AS POStatus,
+              po.TotalAmount    AS POTotalAmount,
+              ISNULL(SUM(grn.TotalAmount), 0) AS TotalReceived,
+              COUNT(grn.GRNID)  AS GRNCount
+            FROM dbo.PurchaseOrders po
+            LEFT JOIN dbo.GoodsReceiptNotes grn
+              ON grn.POID = po.PurchaseOrderID
+              AND ISNULL(grn.Status, '') != 'Rejected'
+            WHERE po.PurchaseOrderID = @POID
+            GROUP BY po.Status, po.TotalAmount
+          `);
+
+        if (poRecheck.recordset.length > 0) {
+          const poRow = poRecheck.recordset[0];
+          const totalOrdered = Number(poRow.POTotalAmount || 0);
+          const totalReceived = Number(poRow.TotalReceived || 0);
+          const grnCount = Number(poRow.GRNCount || 0);
+
+          // Revert to 'Approved' if: no GRNs left, or remaining GRNs don't
+          // fully cover the PO total — meaning it's no longer fully received.
+          const shouldRevert =
+            poRow.POStatus === "Received" &&
+            (grnCount === 0 || totalReceived < totalOrdered);
+
+          if (shouldRevert) {
+            await pool
+              .request()
+              .input("POID", sql.Int, linkedPOId)
+              .query(
+                "UPDATE dbo.PurchaseOrders SET Status = 'Approved', UpdatedAt = GETDATE() WHERE PurchaseOrderID = @POID AND Status = 'Received'",
+              );
+            await bumpCacheVersion("purchase-orders");
+          }
+        }
+      } catch (poErr) {
+        console.error(
+          "PO status revert after GRN delete failed (non-fatal):",
+          poErr.message,
+        );
+      }
+    }
+
     res.json({ message: "GRN deleted successfully" });
   } catch (err) {
     await transaction.rollback().catch(() => {});
