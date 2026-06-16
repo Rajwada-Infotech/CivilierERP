@@ -12,6 +12,7 @@ import {
   type SessionEvent,
   getUserActivityLogs,
   logUserActivity,
+  deleteActivityHistory,
   subscribeToActivityStream,
 } from "@/api/userActivityApi";
 
@@ -144,6 +145,11 @@ export const ActivityBrowserProvider: React.FC<{
   const clearAll = () => {
     setRawSessions([]);
     setActivity(EMPTY_ACTIVITY);
+  };
+
+  const clearHistory = async () => {
+    await deleteActivityHistory();
+    clearAll();
   };
 
   const clearDateFilters = () => {
@@ -371,6 +377,7 @@ export const ActivityBrowserProvider: React.FC<{
         recordLogout,
         recordAction,
         clearAll,
+        clearHistory,
         refresh,
       }}
     >
