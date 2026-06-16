@@ -40,6 +40,8 @@ type RecordsContextType = {
 const RecordsContext = createContext<RecordsContextType | null>(null);
 
 // Walk all pages of a paginated endpoint
+const MAX_PAGES = 500; // hard ceiling — guards against a malformed totalPages response
+
 async function fetchAllPages(
   baseUrl: string,
   signal: AbortSignal
@@ -48,7 +50,7 @@ async function fetchAllPages(
   let totalPages = 1;
   const all: Record<string, unknown>[] = [];
 
-  while (page <= totalPages) {
+  while (page <= totalPages && page <= MAX_PAGES) {
     const res = await fetchWithAuth(
       `${baseUrl}?page=${page}&limit=100`,
       { signal }
@@ -57,7 +59,10 @@ async function fetchAllPages(
     const json = await res.json();
     const rows = Array.isArray(json) ? json : (json.data ?? []);
     all.push(...rows);
-    totalPages = json.totalPages ?? 1;
+    const reportedTotal = Number(json.totalPages);
+    totalPages = Number.isFinite(reportedTotal) && reportedTotal > 0
+      ? reportedTotal
+      : 1;
     page++;
   }
   return all;
@@ -173,5 +178,3 @@ export { RecordsContext }
   
 // useRecords moved to src/hooks/useRecords.ts for HMR compatibility
 // import { useRecords } from '@/hooks/useRecords'
-
-

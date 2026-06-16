@@ -62,7 +62,6 @@ interface Contractor {
   LHeadAddress: string | null;
   LBelongsTo: number | null;
   LHeadStatus: boolean;
-  LBelongsTo: number | null;
   GroupName: string | null;
 }
 
@@ -440,7 +439,7 @@ const ContractorMaster: React.FC = () => {
       contractorType: c.contractorType ?? "",
       LHeadPaymentTerms: c.LHeadPaymentTerms ?? "",
       LHeadAddress: c.LHeadAddress ?? "",
-      LBelongsTo: c.LBelongsTo != null ? String(c.LBelongsTo) : "",
+      LBelongsTo: c.LBelongsTo ?? "",
       LHeadStatus: c.LHeadStatus,
     });
     setErrors({});
@@ -674,8 +673,8 @@ const ContractorMaster: React.FC = () => {
                   </label>
                   <TreeDropdown
                     variant="tree"
-                    value={form.LBelongsTo}
-                    onChange={(v) => setForm((p) => ({ ...p, LBelongsTo: v }))}
+                    value={String(form.LBelongsTo)}
+                    onChange={(v) => setForm((p) => ({ ...p, LBelongsTo: v === "" ? "" : Number(v) }))}
                     items={accountGroupTree}
                     allGroups={accountGroups}
                   />

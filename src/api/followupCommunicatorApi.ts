@@ -98,7 +98,7 @@ export const followupCommunicatorApi = {
   }): Promise<LogsResponse> => {
     const qs = new URLSearchParams(
       Object.entries(params)
-        .filter(([, v]) => v !== undefined && v !== "")
+        .filter(([, v]) => v !== undefined && v !== null)
         .map(([k, v]) => [k, String(v)]),
     ).toString();
     const res = await fetchWithAuth(`${BASE}/logs${qs ? "?" + qs : ""}`);

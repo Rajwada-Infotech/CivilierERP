@@ -169,7 +169,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
   icon,
   // tree
   items = [],
-  invalidParents = new Set(),
+  invalidParents = new Set<string>(),
   allGroups = [],
 }) => {
   const [open, setOpen] = useState(false);

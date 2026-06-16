@@ -21,17 +21,8 @@ export interface User {
   tenantId?: string | null;
 }
 
-// Login intentionally uses raw fetch — no auth header needed and the axios
-// instance's 401 interceptor would redirect before the response is read.
-export const loginUser = async (email: string, password: string) => {
-  const res = await fetch(`/api${BASE_URL}/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) throw new Error("Login failed");
-  return res.json();
-};
+// Login lives in authApi.ts (used by AuthContext) — see that file for the
+// canonical implementation, which preserves the backend's error message.
 
 export const getUsers = async (): Promise<User[]> => {
   const res = await api.get<User[]>(BASE_URL);
@@ -93,7 +84,6 @@ export const resetUserPassword = async (
 };
 
 export default {
-  loginUser,
   getUsers,
   addUser,
   updateUser,

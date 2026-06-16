@@ -159,6 +159,7 @@ interface POItem {
   SourceWDId?: number | null;
   SourceWDDocNo?: string | null;
   POType?: string | null;
+  POItems?: Record<string, unknown>[];
 }
 interface WOItem {
   Id: number;
