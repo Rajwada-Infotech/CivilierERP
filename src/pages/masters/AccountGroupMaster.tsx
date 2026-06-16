@@ -25,6 +25,7 @@ import {
   Layers,
   Eye,
   XCircle,
+  AlertCircle,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
 
@@ -338,6 +339,8 @@ const AccountGroupMaster: React.FC = () => {
     setErrors({});
   };
 
+  const canSave = form.name.trim() !== "" && form.code.trim() !== "";
+
   const handleSave = async () => {
     const e: Record<string, boolean> = {};
     if (!form.name.trim()) e.name = true;
@@ -470,48 +473,19 @@ const AccountGroupMaster: React.FC = () => {
 
         {/* ── Form card ── */}
         <div className="rounded-xl border border-border bg-card shadow-sm">
-          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
-            <div className="flex items-center gap-3">
-              {editingId && (
-                <button
-                  onClick={resetForm}
-                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <RotateCcw size={15} />
-                  <span className="hidden sm:inline">Back</span>
-                </button>
-              )}
-              {editingId && <span className="text-border/60">|</span>}
-              <h2 className="text-base font-heading font-semibold text-foreground">
-                {editingId ? "Edit Group" : "Add Account Group"}
+          {/* Card header — title only */}
+          <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
+            <div>
+              <h2 className="text-sm font-heading font-semibold text-foreground">
+                {editingId ? "Edit Account Group" : "Add Account Group"}
               </h2>
-            </div>
-            <div className="flex items-center gap-2">
-              {editingId && (
-                <button
-                  onClick={resetForm}
-                  className="px-5 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                >
-                  Cancel
-                </button>
-              )}
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60 flex items-center gap-2"
-              >
-                {saving ? (
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : editingId ? (
-                  <Check size={14} />
-                ) : (
-                  <Plus size={14} />
-                )}
-                {saving ? "Saving…" : editingId ? "Update Group" : "Save Group"}
-              </button>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Fields marked <span className="text-destructive">*</span> are required
+              </p>
             </div>
           </div>
 
+          {/* Form body */}
           <div className="px-5 sm:px-6 py-6 space-y-7">
             <div className="space-y-3">
               <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
@@ -540,7 +514,9 @@ const AccountGroupMaster: React.FC = () => {
                     }`}
                   />
                   {errors.name && (
-                    <p className="text-xs text-red-500 mt-1">Required</p>
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertCircle size={11} /> Required
+                    </p>
                   )}
                 </div>
 
@@ -564,11 +540,13 @@ const AccountGroupMaster: React.FC = () => {
                     }`}
                   />
                   {errors.code && (
-                    <p className="text-xs text-red-500 mt-1">Required</p>
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertCircle size={11} /> Required
+                    </p>
                   )}
                 </div>
 
-                {/* Parent Group — hierarchical collapsible dropdown */}
+                {/* Parent Group */}
                 <div className="space-y-1.5 col-span-2">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Parent Group
@@ -595,6 +573,38 @@ const AccountGroupMaster: React.FC = () => {
                   </p>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Card footer — actions */}
+          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
+            <p className="text-[11px] text-muted-foreground">
+              {canSave
+                ? <span className="text-emerald-500 font-medium">Ready to save</span>
+                : "Fill in the required fields to save"}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={resetForm}
+                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+              >
+                <RotateCcw size={13} />
+                {editingId ? "Cancel" : "Reset"}
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving || !canSave}
+                className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
+              >
+                {saving ? (
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : editingId ? (
+                  <Check size={14} />
+                ) : (
+                  <Plus size={14} />
+                )}
+                {saving ? "Saving…" : editingId ? "Update Group" : "Save Group"}
+              </button>
             </div>
           </div>
         </div>
