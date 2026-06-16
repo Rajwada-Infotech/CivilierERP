@@ -1284,12 +1284,12 @@ export default function GRN() {
       <Breadcrumbs items={["Dashboard", "Materials", "GRN"]} />
       <div className="space-y-6 mt-6 pb-10">
         {/* ── Page header ── */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-lg font-heading font-bold text-foreground leading-tight">
+            <h1 className="text-xl font-heading font-bold text-foreground">
               Goods Receipt Note
             </h1>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground mt-0.5">
               Record goods received against purchase orders
             </p>
           </div>

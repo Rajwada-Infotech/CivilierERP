@@ -1670,7 +1670,7 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <Toaster richColors position="top-right" />
+      <Toaster richColors position="top-right" closeButton />
       {/* ActivityBrowserProvider is always mounted so AuthSessionBridge is always inside it.
           The initialLoading gate moved inside the tree to avoid provider context being missing
           during hot-module-reload or React strict-mode double-renders. */}
