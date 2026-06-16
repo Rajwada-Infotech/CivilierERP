@@ -594,11 +594,12 @@ export default function MaterialRequest() {
     {
       id: "actions",
       header: "Actions",
+      size: 160,
       cell: ({ row }) => {
         const status = row.original.Status as string;
         const isDeleting = deleteMutation.isPending;
         return (
-          <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex items-center gap-1.5">
             {/* View — always visible */}
             <button
               type="button"
@@ -621,24 +622,19 @@ export default function MaterialRequest() {
               </button>
             )}
 
-            {/* Delete — Draft, Pending, Rejected, or Approved */}
-            {(status === "Draft" ||
-              status === "Rejected" ||
-              status === "Approved" ||
-              status === "Pending") && (
-              <button
-                type="button"
-                disabled={isDeleting}
-                onClick={() => {
-                  if (confirm("Delete this material request?"))
-                    deleteMutation.mutate(row.original.MRId);
-                }}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-destructive/10 hover:bg-destructive/20 text-destructive transition-colors border border-destructive/20 disabled:opacity-50"
-                title="Delete this request"
-              >
-                <Trash2 size={12} /> Delete
-              </button>
-            )}
+            {/* Delete — always visible */}
+            <button
+              type="button"
+              disabled={isDeleting}
+              onClick={() => {
+                if (confirm("Delete this material request?"))
+                  deleteMutation.mutate(row.original.MRId);
+              }}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-destructive/10 hover:bg-destructive/20 text-destructive transition-colors border border-destructive/20 disabled:opacity-50"
+              title="Delete this request"
+            >
+              <Trash2 size={12} /> Delete
+            </button>
 
             {/* Create PO — Approved only */}
             {status === "Approved" && (
@@ -1295,26 +1291,21 @@ export default function MaterialRequest() {
                   </Button>
                 </>
               )}
-              {(viewingRecord.Status === "Draft" ||
-                viewingRecord.Status === "Rejected" ||
-                viewingRecord.Status === "Approved" ||
-                viewingRecord.Status === "Pending") && (
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  disabled={deleteMutation.isPending}
-                  onClick={() => {
-                    if (confirm("Delete this material request?")) {
-                      deleteMutation.mutate(viewingRecord.MRId);
-                      goToList();
-                    }
-                  }}
-                  className="gap-1.5 h-8"
-                >
-                  <Trash2 size={13} />{" "}
-                  {deleteMutation.isPending ? "Deleting…" : "Delete"}
-                </Button>
-              )}
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={deleteMutation.isPending}
+                onClick={() => {
+                  if (confirm("Delete this material request?")) {
+                    deleteMutation.mutate(viewingRecord.MRId);
+                    goToList();
+                  }
+                }}
+                className="gap-1.5 h-8"
+              >
+                <Trash2 size={13} />{" "}
+                {deleteMutation.isPending ? "Deleting…" : "Delete"}
+              </Button>
               <Button
                 variant="ghost"
                 size="icon"
