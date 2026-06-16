@@ -10,6 +10,7 @@ import {
   Layers,
   MapPin,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
   X,
@@ -708,7 +709,7 @@ export function UnitSelectionPage() {
     queryFn: fetchOptions,
   });
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["followup-unit-selections", search, statusFilter, page],
     queryFn: () => fetchSelections(search, statusFilter, page),
   });
@@ -781,13 +782,23 @@ export function UnitSelectionPage() {
               Manage unit bookings and applicant selections
             </p>
           </div>
-          <Button
-            size="sm"
-            onClick={openCreate}
-            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-          >
-            <Plus size={14} /> New Selection
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              Refresh
+            </button>
+            <Button
+              size="sm"
+              onClick={openCreate}
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+            >
+              <Plus size={14} /> New Selection
+            </Button>
+          </div>
         </div>
 
         {/* ── KPI strip ── */}
