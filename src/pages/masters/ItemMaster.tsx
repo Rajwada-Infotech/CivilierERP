@@ -685,7 +685,7 @@ const ItemMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Item Master"]} />
-      <h1 className="text-2xl font-heading font-bold mb-6">Item Master</h1>
+      <h1 className="text-xl font-heading font-bold text-foreground">Item Master</h1>
 
       {/* ── Form ── */}
       <div className="rounded-xl border border-border bg-card p-6 mb-6">

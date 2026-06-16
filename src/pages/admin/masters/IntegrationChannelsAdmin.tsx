@@ -223,7 +223,7 @@ export default function IntegrationChannelsAdmin() {
             <Plug className="h-6 w-6 text-primary" />
           </div>
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Integration Channels</h1>
+            <h1 className="text-xl font-heading font-bold text-foreground">Integration Channels</h1>
             <p className="text-sm text-muted-foreground">
               Manage the channels available in the Communicator
             </p>
