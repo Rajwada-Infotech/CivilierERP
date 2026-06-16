@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -6,9 +6,8 @@ import {
   addRecord,
   updateRecord,
   deleteRecord,
-  getAccountGroups,
-  type AccountGroup,
 } from "@/api/accountHeadApi";
+import { getAccountGroups } from "@/api/accountApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   DataTable,
@@ -22,8 +21,6 @@ import {
   Check,
   Plus,
   Search,
-  ChevronDown,
-  ChevronRight,
   AlertCircle,
   Eye,
   XCircle,
@@ -34,10 +31,8 @@ import {
   MapPin,
   FileText,
   Printer,
-  Layers,
-  Folder,
-  FolderOpen,
 } from "lucide-react";
+import TreeDropdown from "@/components/common/TreeDropdown";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SUPPLIER_TYPE = "S";
@@ -104,6 +99,30 @@ interface Supplier {
   LHeadAddress: string | null;
   LBelongsTo: number | null;
   LHeadStatus: boolean;
+  GroupName: string | null;
+}
+
+interface AccountGroup {
+  _id: string;
+  name: string;
+  code: string;
+  parentId: string | null;
+}
+
+interface TreeNode extends AccountGroup {
+  children: TreeNode[];
+}
+
+function buildTree(items: AccountGroup[]): TreeNode[] {
+  const map: Record<string, TreeNode> = {};
+  items.forEach((i) => (map[i._id] = { ...i, children: [] }));
+  const roots: TreeNode[] = [];
+  items.forEach((i) => {
+    if (i.parentId && map[i.parentId])
+      map[i.parentId].children.push(map[i._id]);
+    else roots.push(map[i._id]);
+  });
+  return roots;
 }
 
 interface SupplierForm {
@@ -117,8 +136,8 @@ interface SupplierForm {
   LGSTType: string;
   LGSTState: string;
   LHeadAddress: string;
-  LBelongsTo: number | "";
   LHeadStatus: boolean;
+  LBelongsTo: string;
 }
 
 const EMPTY_FORM: SupplierForm = {
@@ -135,325 +154,6 @@ const EMPTY_FORM: SupplierForm = {
   LBelongsTo: "",
   LHeadStatus: true,
 };
-
-// ─── FlatDropdown ─────────────────────────────────────────────────────────────
-function FlatDropdown({
-  value,
-  onChange,
-  options,
-  placeholder = "Select\u2026",
-  icon,
-  error,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-  placeholder?: string;
-  icon?: React.ReactNode;
-  error?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const dropRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (dropRef.current && !dropRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const selected = options.find((o) => o.value === value);
-
-  return (
-    <div className="relative" ref={dropRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left ${error ? "border-red-400" : "border-border"}`}
-      >
-        {icon && <span className="shrink-0 text-muted-foreground">{icon}</span>}
-        <span className={`flex-1 truncate ${selected ? "text-foreground font-medium" : "text-muted-foreground/70"}`}>
-          {selected ? selected.label : placeholder}
-        </span>
-        <ChevronDown size={14} className={`text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg">
-          <div className="max-h-56 overflow-y-auto py-1">
-            <div
-              className={`px-3 py-2 text-sm cursor-pointer transition-colors ${!value ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted/60"}`}
-              onClick={() => { onChange(""); setOpen(false); }}
-            >
-              {placeholder}
-            </div>
-            <div className="border-t border-border/40 mb-1" />
-            {options.map((o) => (
-              <div
-                key={o.value}
-                className={`px-3 py-2 text-sm cursor-pointer transition-colors ${value === o.value ? "bg-primary/10 text-primary font-medium" : "text-foreground hover:bg-muted/60"}`}
-                onClick={() => { onChange(o.value); setOpen(false); }}
-              >
-                {o.label}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── AccountGroup TreeNode ─────────────────────────────────────────────────────
-// ─── AGTreeNode — uses string keys to avoid number/string coercion bugs ────────
-interface AGTreeNode {
-  id: string;
-  AGId: number;
-  Name: string;
-  ParentGroupId: number | null;
-  children: AGTreeNode[];
-}
-
-function buildAGTree(items: AccountGroup[]): AGTreeNode[] {
-  // Normalize every id to string so Set/map lookups are always consistent
-  const map: Record<string, AGTreeNode> = {};
-  items.forEach((i) => {
-    map[String(i.AGId)] = {
-      id: String(i.AGId),
-      AGId: i.AGId,
-      Name: i.Name,
-      ParentGroupId: i.ParentGroupId,
-      children: [],
-    };
-  });
-  const roots: AGTreeNode[] = [];
-  items.forEach((i) => {
-    const pid = i.ParentGroupId != null ? String(i.ParentGroupId) : null;
-    if (pid && map[pid]) {
-      map[pid].children.push(map[String(i.AGId)]);
-    } else {
-      roots.push(map[String(i.AGId)]);
-    }
-  });
-  return roots;
-}
-
-// ─── Recursive dropdown node ──────────────────────────────────────────────────
-function AGTreeDropdownNode({
-  node,
-  depth,
-  openNodes,
-  onToggleNode,
-  selectedId,
-  onSelect,
-}: {
-  node: AGTreeNode;
-  depth: number;
-  openNodes: Set<string>;
-  onToggleNode: (id: string) => void;
-  selectedId: string;
-  onSelect: (id: number) => void;
-}) {
-  const hasChildren = node.children.length > 0;
-  const isOpen = openNodes.has(node.id);
-  const isSelected = selectedId === node.id;
-
-  return (
-    <>
-      <div
-        className={`flex items-center select-none cursor-pointer transition-colors rounded-md mx-1 my-0.5 ${
-          isSelected
-            ? "bg-primary/10 text-primary"
-            : "hover:bg-muted/60 text-foreground"
-        }`}
-        style={{ paddingLeft: `${depth * 16 + 4}px` }}
-        onClick={() => {
-          if (hasChildren) {
-            onToggleNode(node.id);
-          } else {
-            onSelect(node.AGId);
-          }
-        }}
-      >
-        <span className={`w-5 h-5 flex items-center justify-center shrink-0 ${hasChildren ? "text-muted-foreground" : "opacity-0"}`}>
-          {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        </span>
-        <span className="mx-1.5 shrink-0">
-          {hasChildren ? (
-            <FolderOpen size={13} className="text-amber-500" />
-          ) : depth === 0 ? (
-            <Layers size={13} className="text-primary/60" />
-          ) : (
-            <Folder size={13} className="text-muted-foreground/50" />
-          )}
-        </span>
-        <span className={`text-sm flex-1 truncate py-2 ${depth === 0 ? "font-semibold" : "font-medium"}`}>
-          {node.Name}
-        </span>
-        {hasChildren && (
-          <span className="text-[10px] text-muted-foreground/50 shrink-0 mr-2">
-            {node.children.length}
-          </span>
-        )}
-        {hasChildren && (
-          <button
-            type="button"
-            className="mr-1 px-1.5 py-0.5 text-[10px] rounded border border-border/60 text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors shrink-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelect(node.AGId);
-            }}
-          >
-            select
-          </button>
-        )}
-      </div>
-
-      {hasChildren && isOpen && (
-        <div>
-          {node.children.map((child) => (
-            <AGTreeDropdownNode
-              key={child.id}
-              node={child}
-              depth={depth + 1}
-              openNodes={openNodes}
-              onToggleNode={onToggleNode}
-              selectedId={selectedId}
-              onSelect={onSelect}
-            />
-          ))}
-        </div>
-      )}
-    </>
-  );
-}
-
-// ─── GroupedAccordionDropdown ─────────────────────────────────────────────────
-function GroupedAccordionDropdown({
-  value,
-  onChange,
-  allGroups,
-  placeholder = "— No Group —",
-  error,
-}: {
-  value: number | "";
-  onChange: (v: number | "") => void;
-  allGroups: AccountGroup[];
-  placeholder?: string;
-  error?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  // Use string-keyed Set to avoid number/string identity mismatches
-  const [openNodes, setOpenNodes] = useState<Set<string>>(new Set());
-  const dropRef = useRef<HTMLDivElement>(null);
-
-  const tree = useMemo(() => buildAGTree(allGroups), [allGroups]);
-
-  // Normalize selectedId to string for consistent comparisons
-  const selectedIdStr = value !== "" ? String(value) : "";
-
-  // Close on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (dropRef.current && !dropRef.current.contains(e.target as Node))
-        setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  // Auto-expand all ancestors of the selected value when the dropdown opens
-  useEffect(() => {
-    if (!open || value === "") return;
-    const ancestors = new Set<string>();
-    const walk = (id: string) => {
-      const group = allGroups.find((g) => String(g.AGId) === id);
-      if (group?.ParentGroupId != null) {
-        const pid = String(group.ParentGroupId);
-        ancestors.add(pid);
-        walk(pid);
-      }
-    };
-    walk(String(value));
-    if (ancestors.size > 0)
-      setOpenNodes((prev) => new Set([...prev, ...ancestors]));
-  }, [open, value, allGroups]);
-
-  const toggleNode = (id: string) => {
-    setOpenNodes((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const selectedGroup = value !== "" ? allGroups.find((g) => g.AGId === value) : null;
-  const selectedHasChildren = selectedGroup
-    ? allGroups.some((g) => String(g.ParentGroupId) === String(selectedGroup.AGId))
-    : false;
-
-  return (
-    <div className="relative" ref={dropRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left ${
-          error ? "border-red-400" : "border-border"
-        }`}
-      >
-        {selectedGroup ? (
-          selectedHasChildren ? (
-            <FolderOpen size={14} className="text-amber-500 shrink-0" />
-          ) : (
-            <Folder size={14} className="text-muted-foreground/60 shrink-0" />
-          )
-        ) : (
-          <Layers size={14} className="text-primary/50 shrink-0" />
-        )}
-        <span className={`flex-1 truncate ${selectedGroup ? "text-foreground font-medium" : "text-muted-foreground/70"}`}>
-          {selectedGroup ? selectedGroup.Name : placeholder}
-        </span>
-        <ChevronDown
-          size={14}
-          className={`text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
-        />
-      </button>
-
-      {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg">
-          <div className="max-h-72 overflow-y-auto py-1">
-            {/* No Group */}
-            <div
-              className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer transition-colors border-b border-border/40 mb-1 ${
-                value === ""
-                  ? "bg-primary/10 text-primary font-medium"
-                  : "text-muted-foreground hover:bg-muted/60"
-              }`}
-              onClick={() => { onChange(""); setOpen(false); }}
-            >
-              <Layers size={13} className="shrink-0" />
-              <span>{placeholder}</span>
-            </div>
-
-            {/* Recursive tree */}
-            {tree.map((node) => (
-              <AGTreeDropdownNode
-                key={node.id}
-                node={node}
-                depth={0}
-                openNodes={openNodes}
-                onToggleNode={toggleNode}
-                selectedId={selectedIdStr}
-                onSelect={(id) => { onChange(id); setOpen(false); }}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
 const EXPORT_COLUMNS: ExportColumn[] = [
@@ -643,54 +343,28 @@ const SupplierMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  // ── Account Groups ─────────────────────────────────────────────────────────
-  const { data: accountGroups = [] } = useQuery<AccountGroup[]>({
+  const { data: groupsData } = useQuery({
     queryKey: ["account-groups"],
     queryFn: getAccountGroups,
     staleTime: 10 * 60 * 1000,
   });
 
-  // AGId → Name lookup for display
-  const groupNameById = useMemo(
-    () => new Map<number, string>(accountGroups.map((g) => [g.AGId, g.Name])),
+  const accountGroups: AccountGroup[] = useMemo(() => {
+    if (!Array.isArray(groupsData)) return [];
+    return (groupsData as any[])
+      .filter((item) => item.AGId != null && item.Name)
+      .map((item) => ({
+        _id: String(item.AGId),
+        name: item.Name as string,
+        code: item.Code || "",
+        parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
+      }));
+  }, [groupsData]);
+
+  const accountGroupTree = useMemo(
+    () => buildTree(accountGroups),
     [accountGroups],
   );
-
-  // Build { label: parentName, options: children[] } for <optgroup> dropdown
-  const groupedAccountGroups = useMemo(() => {
-    const byId = new Map<number, AccountGroup>(
-      accountGroups.map((g) => [g.AGId, g]),
-    );
-    const childrenOf = new Map<number, AccountGroup[]>();
-    const roots: AccountGroup[] = [];
-    for (const g of accountGroups) {
-      if (g.ParentGroupId === null) {
-        roots.push(g);
-      } else {
-        const list = childrenOf.get(g.ParentGroupId) ?? [];
-        list.push(g);
-        childrenOf.set(g.ParentGroupId, list);
-      }
-    }
-    const result: { label: string; options: AccountGroup[] }[] = [];
-    for (const root of roots) {
-      const kids = childrenOf.get(root.AGId);
-      if (kids && kids.length > 0) {
-        result.push({ label: root.Name, options: kids });
-      }
-    }
-    // Leaf roots (no children) + orphans go to "Other"
-    const uncategorised = [
-      ...roots.filter((r) => !childrenOf.has(r.AGId)),
-      ...accountGroups.filter(
-        (g) => g.ParentGroupId !== null && !byId.has(g.ParentGroupId),
-      ),
-    ];
-    if (uncategorised.length > 0) {
-      result.push({ label: "Other", options: uncategorised });
-    }
-    return result;
-  }, [accountGroups]);
 
   const suppliers: Supplier[] = useMemo(() => {
     if (!Array.isArray(rawData)) return [];
@@ -708,6 +382,7 @@ const SupplierMaster: React.FC = () => {
       LHeadAddress: item.LHeadAddress || null,
       LBelongsTo: item.LBelongsTo != null ? Number(item.LBelongsTo) : null,
       LHeadStatus: Boolean(item.LHeadStatus),
+      GroupName: item.GroupName ?? null,
     }));
   }, [rawData]);
 
@@ -730,7 +405,7 @@ const SupplierMaster: React.FC = () => {
     LBranchName: null,
     LGSTState: f.LGSTState || null,
     LCountry: "India",
-    LBelongsTo: f.LBelongsTo !== "" ? Number(f.LBelongsTo) : null,
+    LBelongsTo: f.LBelongsTo ? Number(f.LBelongsTo) : null,
     LDescription: null,
   });
 
@@ -782,7 +457,7 @@ const SupplierMaster: React.FC = () => {
       LGSTType: s.LGSTType ?? "",
       LGSTState: s.LGSTState ?? "",
       LHeadAddress: s.LHeadAddress ?? "",
-      LBelongsTo: s.LBelongsTo ?? "",
+      LBelongsTo: s.LBelongsTo != null ? String(s.LBelongsTo) : "",
       LHeadStatus: s.LHeadStatus,
     });
     setErrors({});
@@ -827,7 +502,7 @@ const SupplierMaster: React.FC = () => {
         <tr><td>GST Type</td><td>${s.LGSTType || "—"}</td></tr>
         <tr><td>GST State</td><td>${s.LGSTState || "—"}</td></tr>
         <tr><td>Category</td><td>${s.supplierCategory || "—"}</td></tr>
-        <tr><td>Group</td><td>${s.LBelongsTo != null ? (groupNameById.get(s.LBelongsTo) ?? "—") : "—"}</td></tr>
+        <tr><td>Group</td><td>${s.LBelongsTo != null ? (accountGroups.find((g) => g._id === String(s.LBelongsTo))?.name ?? "—") : "—"}</td></tr>
         <tr><td>Address</td><td>${s.LHeadAddress || "—"}</td></tr>
         <tr><td>Status</td><td>${s.LHeadStatus ? "Active" : "Inactive"}</td></tr>
       </table>
@@ -890,8 +565,6 @@ const SupplierMaster: React.FC = () => {
   // ── Shared field class ─────────────────────────────────────────────────────
   const inputCls =
     "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
-  const selectCls =
-    "w-full appearance-none pl-3 pr-9 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
 
   const totalPages = Math.max(Math.ceil(filtered.length / limit), 1);
   const paginated = filtered.slice((page - 1) * limit, page * limit);
@@ -928,7 +601,8 @@ const SupplierMaster: React.FC = () => {
                 {editingId ? "Edit Supplier" : "Add Supplier"}
               </h2>
               <p className="text-[11px] text-muted-foreground mt-0.5">
-                Fields marked <span className="text-destructive">*</span> are required
+                Fields marked <span className="text-destructive">*</span> are
+                required
               </p>
             </div>
           </div>
@@ -995,23 +669,30 @@ const SupplierMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Supplier Category
                   </label>
-                  <FlatDropdown
+                  <TreeDropdown
+                    variant="flat"
                     value={form.supplierCategory}
-                    onChange={(v) => setForm((p) => ({ ...p, supplierCategory: v }))}
-                    options={SUPPLIER_CATEGORIES.map((c) => ({ value: c, label: c }))}
-                    placeholder="Select category\u2026"
+                    onChange={(v) =>
+                      setForm((p) => ({ ...p, supplierCategory: v }))
+                    }
+                    options={SUPPLIER_CATEGORIES.map((c) => ({
+                      value: c,
+                      label: c,
+                    }))}
+                    placeholder="Select category…"
                   />
                 </div>
 
                 {/* Account Group */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                    <Layers size={11} className="text-primary" />
-                    Group Name
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Account Group
                   </label>
-                  <GroupedAccordionDropdown
+                  <TreeDropdown
+                    variant="tree"
                     value={form.LBelongsTo}
                     onChange={(v) => setForm((p) => ({ ...p, LBelongsTo: v }))}
+                    items={accountGroupTree}
                     allGroups={accountGroups}
                   />
                 </div>
@@ -1158,11 +839,12 @@ const SupplierMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     GST Type
                   </label>
-                  <FlatDropdown
+                  <TreeDropdown
+                    variant="flat"
                     value={form.LGSTType}
                     onChange={(v) => setForm((p) => ({ ...p, LGSTType: v }))}
                     options={GST_TYPES.map((t) => ({ value: t, label: t }))}
-                    placeholder="Select type\u2026"
+                    placeholder="Select type…"
                   />
                 </div>
 
@@ -1171,11 +853,12 @@ const SupplierMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     GST State
                   </label>
-                  <FlatDropdown
+                  <TreeDropdown
+                    variant="flat"
                     value={form.LGSTState}
                     onChange={(v) => setForm((p) => ({ ...p, LGSTState: v }))}
                     options={GST_STATES.map((s) => ({ value: s, label: s }))}
-                    placeholder="Select state\u2026"
+                    placeholder="Select state…"
                   />
                 </div>
               </div>
@@ -1210,9 +893,13 @@ const SupplierMaster: React.FC = () => {
           {/* Card footer — actions */}
           <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
             <p className="text-[11px] text-muted-foreground">
-              {canSave
-                ? <span className="text-emerald-500 font-medium">Ready to save</span>
-                : "Fill in the required fields to save"}
+              {canSave ? (
+                <span className="text-emerald-500 font-medium">
+                  Ready to save
+                </span>
+              ) : (
+                "Fill in the required fields to save"
+              )}
             </p>
             <div className="flex items-center gap-2">
               {editingId && (
@@ -1235,7 +922,11 @@ const SupplierMaster: React.FC = () => {
                 ) : (
                   <Plus size={14} />
                 )}
-                {saving ? "Saving…" : editingId ? "Update Supplier" : "Save Supplier"}
+                {saving
+                  ? "Saving…"
+                  : editingId
+                    ? "Update Supplier"
+                    : "Save Supplier"}
               </button>
             </div>
           </div>
@@ -1258,17 +949,22 @@ const SupplierMaster: React.FC = () => {
               />
             </div>
 
-            <FlatDropdown
+            <TreeDropdown
+              variant="flat"
               value={filterCategory}
               onChange={(v) => setFilterCategory(v)}
               options={SUPPLIER_CATEGORIES.map((c) => ({ value: c, label: c }))}
               placeholder="All Categories"
             />
 
-            <FlatDropdown
+            <TreeDropdown
+              variant="flat"
               value={filterStatus}
               onChange={(v) => setFilterStatus(v)}
-              options={[{ value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }]}
+              options={[
+                { value: "active", label: "Active" },
+                { value: "inactive", label: "Inactive" },
+              ]}
               placeholder="All Status"
             />
 
@@ -1390,7 +1086,9 @@ const SupplierMaster: React.FC = () => {
                   label: "Group Name",
                   value:
                     viewRecord.LBelongsTo != null
-                      ? (groupNameById.get(viewRecord.LBelongsTo) ?? "—")
+                      ? (accountGroups.find(
+                          (g) => g._id === String(viewRecord.LBelongsTo),
+                        )?.name ?? "—")
                       : "—",
                 },
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },

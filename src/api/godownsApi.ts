@@ -9,7 +9,6 @@ export interface Godown {
   ShortDesc: string | null;
   Description: string | null;
   Remarks: string | null;
-  IsMain: boolean;
   EnterpriseID: number | null;
   ProjectID: number | null;
   EnterpriseName: string | null;

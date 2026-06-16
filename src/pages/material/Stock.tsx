@@ -96,11 +96,6 @@ function GodownInfoCard({ godown }: { godown: Godown }) {
           <p className="text-sm font-heading font-bold text-foreground">
             {godown.GodownName}
           </p>
-          {godown.IsMain && (
-            <span className="text-[9px] bg-emerald-500/15 text-emerald-600 px-2 py-0.5 rounded-full font-bold tracking-wide uppercase">
-              Main Godown
-            </span>
-          )}
           {godown.GodownCode && (
             <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-mono">
               {godown.GodownCode}
@@ -425,14 +420,14 @@ export default function Stock() {
   });
   const godowns: Godown[] = godownsData?.data ?? [];
 
-  // Auto-select first project godown on load (skip Main Godown)
+  // Auto-select first godown on load
   React.useEffect(() => {
     if (
       !autoSelected.current &&
       godowns.length > 0 &&
       selectedGodownId === null
     ) {
-      const firstProject = godowns.find((g) => !g.IsMain) ?? null;
+      const firstProject = godowns[0] ?? null;
       if (firstProject) {
         setSelectedGodownId(firstProject.GodownID);
         autoSelected.current = true;
@@ -463,7 +458,6 @@ export default function Stock() {
   // Filter godowns: exclude Main Godown, then apply company/project filters
   const filteredGodowns = useMemo(() => {
     return godowns.filter((g) => {
-      if (g.IsMain) return false; // project godowns only
       const companyMatch = selectedCompany
         ? g.EnterpriseID === selectedCompany
         : true;
