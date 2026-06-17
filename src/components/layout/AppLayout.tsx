@@ -57,11 +57,7 @@ function useModuleActivityLogger() {
 
 // ── NavPanel wrapper — auto-expands when module changes ───────────────────────
 
-function NavPanelAutoExpand({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+function NavPanelAutoExpand({ children }: { children: React.ReactNode }) {
   const { activeModule } = useModule();
   const { setCollapsed } = useSidebarState();
   const prevModule = useRef<typeof activeModule>(activeModule);
@@ -100,9 +96,14 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
 
   // Strip = 64px, NavPanel = 224px (w-56), total = 288px
   const STRIP_W = 64;
-  const NAV_W   = 200;
-  const mainML  = isMobile ? 0 : isHome ? 0 : sidebarCollapsed ? STRIP_W : STRIP_W + NAV_W;
-
+  const NAV_W = 200;
+  const mainML = isMobile
+    ? 0
+    : isHome
+      ? 0
+      : sidebarCollapsed
+        ? STRIP_W
+        : STRIP_W + NAV_W;
 
   return (
     <SidebarContext.Provider value={sidebarValue}>
@@ -142,7 +143,10 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
                           initial={{ x: -NAV_W, opacity: 0 }}
                           animate={{ x: 0, opacity: 1 }}
                           exit={{ x: -NAV_W, opacity: 0 }}
-                          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                          transition={{
+                            duration: 0.3,
+                            ease: [0.16, 1, 0.3, 1],
+                          }}
                           style={{
                             position: "fixed",
                             top: 56,
@@ -156,7 +160,6 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
                         </motion.div>
                       )}
                     </AnimatePresence>
-
                   </>
                 )}
               </AnimatePresence>
@@ -172,7 +175,11 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
               }}
             >
               {/* Page-curve wrapper: 8px top gap + rounded-tl to mirror strip/sidebar shape */}
-              <div className={!isHome && !isMobile ? "pt-2 min-h-[calc(100vh-56px)]" : ""}>
+              <div
+                className={
+                  !isHome && !isMobile ? "pt-2 min-h-[calc(100vh-56px)]" : ""
+                }
+              >
                 <div
                   className={
                     !isHome && !isMobile
@@ -181,12 +188,17 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
                   }
                   style={{ opacity: moduleSwitching ? 0 : 1 }}
                 >
-                  {children}
+                  <ErrorBoundary>{children}</ErrorBoundary>
                 </div>
               </div>
             </main>
 
             <SlowConnectionBanner />
+
+            {/* Universal assistant — fixed-position, mounted once for every
+                page rendered through AppLayout. Suggested queries adapt to
+                the current page/module (see askCivilierQueries.ts). */}
+            <AskCivilierAI />
           </div>
         </NavPanelAutoExpand>
       </NavbarCollapseContext.Provider>

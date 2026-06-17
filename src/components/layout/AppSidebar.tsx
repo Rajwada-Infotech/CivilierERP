@@ -40,17 +40,77 @@ const userNavItems: NavItem[] = [
 // ── Module header metadata ────────────────────────────────────────────────────
 const MODULE_HEADER: Record<
   string,
-  { label: string; icon: React.ElementType; color: string; from: string; to: string }
+  {
+    label: string;
+    icon: React.ElementType;
+    color: string;
+    from: string;
+    to: string;
+  }
 > = {
-  finance:     { label: "Finance",      icon: Landmark,      color: "#6366f1", from: "from-indigo-500/30",  to: "to-indigo-500/0"  },
-  material:    { label: "Material",     icon: Package,       color: "#10b981", from: "from-emerald-500/30", to: "to-emerald-500/0" },
-  followup:    { label: "Follow-Up",    icon: Calendar,      color: "#818cf8", from: "from-indigo-400/30",  to: "to-indigo-400/0"  },
-  engineering: { label: "Engineering",  icon: Wrench,        color: "#f97316", from: "from-orange-500/30",  to: "to-orange-500/0"  },
-  ticket:      { label: "Ticket",       icon: MessageSquare, color: "#ec4899", from: "from-pink-500/30",    to: "to-pink-500/0"    },
-  admin:       { label: "Admin",        icon: ShieldCheck,   color: "#3b82f6", from: "from-blue-500/30",    to: "to-blue-500/0"    },
-  super_admin: { label: "Super Admin",  icon: Crown,         color: "#eab308", from: "from-yellow-500/30",  to: "to-yellow-500/0"  },
-  dba:         { label: "DBA",          icon: Database,      color: "#10b981", from: "from-emerald-500/30", to: "to-emerald-500/0" },
-  user:        { label: "Profile",      icon: User,          color: "#94a3b8", from: "from-slate-500/30",   to: "to-slate-500/0"   },
+  finance: {
+    label: "Finance",
+    icon: Landmark,
+    color: "#6366f1",
+    from: "from-indigo-500/30",
+    to: "to-indigo-500/0",
+  },
+  material: {
+    label: "Material",
+    icon: Package,
+    color: "#10b981",
+    from: "from-emerald-500/30",
+    to: "to-emerald-500/0",
+  },
+  followup: {
+    label: "Follow-Up",
+    icon: Calendar,
+    color: "#818cf8",
+    from: "from-indigo-400/30",
+    to: "to-indigo-400/0",
+  },
+  engineering: {
+    label: "Engineering",
+    icon: Wrench,
+    color: "#f97316",
+    from: "from-orange-500/30",
+    to: "to-orange-500/0",
+  },
+  ticket: {
+    label: "Ticket",
+    icon: MessageSquare,
+    color: "#ec4899",
+    from: "from-pink-500/30",
+    to: "to-pink-500/0",
+  },
+  admin: {
+    label: "Admin",
+    icon: ShieldCheck,
+    color: "#3b82f6",
+    from: "from-blue-500/30",
+    to: "to-blue-500/0",
+  },
+  super_admin: {
+    label: "Super Admin",
+    icon: Crown,
+    color: "#eab308",
+    from: "from-yellow-500/30",
+    to: "to-yellow-500/0",
+  },
+  dba: {
+    label: "DBA",
+    icon: Database,
+    color: "#10b981",
+    from: "from-emerald-500/30",
+    to: "to-emerald-500/0",
+  },
+  user: {
+    label: "Profile",
+    icon: User,
+    color: "#94a3b8",
+    from: "from-slate-500/30",
+    to: "to-slate-500/0",
+  },
 };
 
 // ── Approval count poller ─────────────────────────────────────────────────────
@@ -120,9 +180,13 @@ export const AppSidebar = () => {
   const role = currentUser?.role ?? "";
   const isAdminTier = ["super_admin", "admin", "dba"].includes(role);
 
-  const ADMIN_SETUP_PATHS = ["/masters/named-entry-type", "/masters/type-of-doc"];
+  const ADMIN_SETUP_PATHS = [
+    "/masters/named-entry-type",
+    "/masters/type-of-doc",
+  ];
 
-  const isSuperAdminPage = role === "super_admin" && location.pathname.startsWith("/superadmin");
+  const isSuperAdminPage =
+    role === "super_admin" && location.pathname.startsWith("/superadmin");
   const isDbaPage = isAdminTier && location.pathname.startsWith("/dba");
   const isAdminPage =
     isAdminTier &&
@@ -143,13 +207,20 @@ export const AppSidebar = () => {
     if (isUserProfilePage) return userNavItems;
     if (isAdminPage) return buildAdminNavItems(pendingApprovalCount);
     switch (activeModule) {
-      case "engineering": return engineeringNavItems;
-      case "finance":     return buildFinanceNavItems(overdueCount);
-      case "material":    return materialNavItems;
-      case "followup":    return followupNavItems;
-      case "ticket":      return buildTicketNavItems(isAdminTier);
-      case "admin":       return buildAdminNavItems(pendingApprovalCount);
-      default:            return [];
+      case "engineering":
+        return engineeringNavItems;
+      case "finance":
+        return buildFinanceNavItems(overdueCount);
+      case "material":
+        return materialNavItems;
+      case "followup":
+        return followupNavItems;
+      case "ticket":
+        return buildTicketNavItems(isAdminTier);
+      case "admin":
+        return buildAdminNavItems(pendingApprovalCount);
+      default:
+        return [];
     }
   };
 
@@ -170,136 +241,160 @@ export const AppSidebar = () => {
 
   return (
     <div className="h-full w-full flex flex-col py-2 bg-transparent">
-    <aside
-      className="relative flex-1 flex flex-col bg-sidebar"
-      style={{
-        borderTopLeftRadius: 20,
-        borderBottomLeftRadius: 20,
-        overflow: "hidden",
-        isolation: "isolate",
-        clipPath: "inset(0 0 0 0 round 20px 0 0 20px)",
-      }}
-    >
-
-      {/* ── Module-colored radial glow at top ────────────────────────────────── */}
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={resolvedKey + "-bg"}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.4 }}
-          className="absolute top-0 left-0 right-0 h-40 pointer-events-none z-0"
-          style={{
-            background: `radial-gradient(ellipse at 30% 0%, ${accentColor}1A 0%, transparent 70%)`,
-          }}
-        />
-      </AnimatePresence>
-
-      {/* ── Left accent stripe — fades at top & dissolves well before bottom curve */}
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={resolvedKey + "-stripe"}
-          initial={{ opacity: 0, scaleY: 0 }}
-          animate={{ opacity: 1, scaleY: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.35, ease: "easeOut" }}
-          className="absolute left-0 top-0 bottom-0 w-px pointer-events-none z-10"
-          style={{
-            background: `linear-gradient(to bottom, transparent 12%, ${accentColor}40 22%, ${accentColor}90 35%, ${accentColor}90 65%, ${accentColor}40 78%, transparent 88%)`,
-            transformOrigin: "top",
-            borderRadius: 20,
-          }}
-        />
-      </AnimatePresence>
-
-      {/* ── Fading right border ───────────────────────────────────────────────── */}
-      <div
-        className="absolute top-0 right-0 bottom-0 w-px pointer-events-none z-30"
+      <aside
+        className="relative flex-1 flex flex-col bg-sidebar"
         style={{
-          background:
-            "linear-gradient(to bottom, hsl(var(--sidebar-border)) 0%, hsl(var(--sidebar-border)) 55%, transparent 100%)",
+          borderTopLeftRadius: 20,
+          borderBottomLeftRadius: 20,
+          overflow: "hidden",
+          isolation: "isolate",
+          clipPath: "inset(0 0 0 0 round 20px 0 0 20px)",
         }}
-      />
-
-      {/* ── Module header ────────────────────────────────────────────────────── */}
-      {header && (
+      >
+        {/* ── Module-colored radial glow at top ────────────────────────────────── */}
         <AnimatePresence mode="wait">
           <motion.div
-            key={resolvedKey}
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 6 }}
-            transition={{ duration: 0.22, ease: "easeOut" }}
-            className="relative z-20 flex items-center gap-3 px-4 py-3.5 overflow-hidden"
+            key={resolvedKey + "-bg"}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4 }}
+            className="absolute top-0 left-0 right-0 h-40 pointer-events-none z-0"
+            style={{
+              background: `radial-gradient(ellipse at 30% 0%, ${accentColor}1A 0%, transparent 70%)`,
+            }}
+          />
+        </AnimatePresence>
+
+        {/* ── Left accent stripe — fades at top & dissolves well before bottom curve */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={resolvedKey + "-stripe"}
+            initial={{ opacity: 0, scaleY: 0 }}
+            animate={{ opacity: 1, scaleY: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.35, ease: "easeOut" }}
+            className="absolute left-0 top-0 bottom-0 w-px pointer-events-none z-10"
+            style={{
+              background: `linear-gradient(to bottom, transparent 12%, ${accentColor}40 22%, ${accentColor}90 35%, ${accentColor}90 65%, ${accentColor}40 78%, transparent 88%)`,
+              transformOrigin: "top",
+              borderRadius: 20,
+            }}
+          />
+        </AnimatePresence>
+
+        {/* ── Fading right border ───────────────────────────────────────────────── */}
+        <div
+          className="absolute top-0 right-0 bottom-0 w-px pointer-events-none z-30"
+          style={{
+            background:
+              "linear-gradient(to bottom, hsl(var(--sidebar-border)) 0%, hsl(var(--sidebar-border)) 55%, transparent 100%)",
+          }}
+        />
+
+        {/* ── Module header ────────────────────────────────────────────────────── */}
+        {header && (
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={resolvedKey}
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 6 }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+              className="relative z-20 flex items-center gap-3 px-4 py-3.5 overflow-hidden"
+            >
+              {/* Header inner glow */}
+              <div
+                className="absolute inset-0 pointer-events-none"
+                style={{
+                  background: `linear-gradient(135deg, ${accentColor}22 0%, transparent 60%)`,
+                }}
+              />
+              {/* Icon badge */}
+              <motion.div
+                whileHover={{ scale: 1.08 }}
+                className="relative z-10 w-7 h-7 rounded-lg flex items-center justify-center shrink-0 shadow-sm"
+                style={{
+                  background: `${accentColor}28`,
+                  color: accentColor,
+                  border: `1px solid ${accentColor}40`,
+                }}
+              >
+                <header.icon size={14} strokeWidth={2.2} />
+              </motion.div>
+              {/* Label */}
+              <span
+                className="relative z-10 text-[11px] font-bold tracking-widest uppercase"
+                style={{ color: accentColor }}
+              >
+                {header.label}
+              </span>
+            </motion.div>
+          </AnimatePresence>
+        )}
+
+        {/* ── Nav items ────────────────────────────────────────────────────────── */}
+        <motion.div
+          key={resolvedKey + "-nav"}
+          initial={{ opacity: 0, x: -8 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.2, ease: "easeOut", delay: 0.06 }}
+          className="relative z-10 flex-1 overflow-y-auto p-2 space-y-0.5"
+        >
+          <SidebarNav items={getNavItems()} collapsed={false} />
+        </motion.div>
+
+        {/* ── Footer ──────────────────────────────────────────────────────────── */}
+        <div className="bg-sidebar/80 backdrop-blur-sm h-16 flex items-center justify-center">
+          {/* Collapse — same size/style as expand button, rose accent */}
+          <motion.button
+            onClick={() => setCollapsed(true)}
+            initial={{ opacity: 0, scale: 0.6 }}
+            animate={{ opacity: 1, scale: 1 }}
+            whileHover={{ scale: 1.14 }}
+            whileTap={{ scale: 0.88 }}
+            transition={{ type: "spring", stiffness: 440, damping: 26 }}
+            className="relative flex items-center justify-center w-8 h-8 rounded-full border transition-colors duration-150"
+            style={{
+              background: "rgba(244,63,94,0.12)",
+              borderColor: "rgba(244,63,94,0.35)",
+              color: "#f43f5e",
+            }}
+            title="Collapse menu"
           >
-            {/* Header inner glow */}
-            <div
-              className="absolute inset-0 pointer-events-none"
-              style={{
-                background: `linear-gradient(135deg, ${accentColor}22 0%, transparent 60%)`,
+            {/* Inner sonar ring */}
+            <motion.span
+              className="absolute inset-0 rounded-full pointer-events-none"
+              animate={{
+                boxShadow: [
+                  "0 0 0 0px rgba(244,63,94,0.80)",
+                  "0 0 0 5px rgba(244,63,94,0)",
+                  "0 0 0 0px rgba(244,63,94,0.80)",
+                ],
+              }}
+              transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }}
+            />
+            {/* Outer sonar ring */}
+            <motion.span
+              className="absolute inset-0 rounded-full pointer-events-none"
+              animate={{
+                boxShadow: [
+                  "0 0 0 0px rgba(244,63,94,0.55)",
+                  "0 0 0 9px rgba(244,63,94,0)",
+                  "0 0 0 0px rgba(244,63,94,0.55)",
+                ],
+              }}
+              transition={{
+                duration: 1.8,
+                repeat: Infinity,
+                ease: "easeOut",
+                delay: 0.32,
               }}
             />
-            {/* Icon badge */}
-            <motion.div
-              whileHover={{ scale: 1.08 }}
-              className="relative z-10 w-7 h-7 rounded-lg flex items-center justify-center shrink-0 shadow-sm"
-              style={{ background: `${accentColor}28`, color: accentColor, border: `1px solid ${accentColor}40` }}
-            >
-              <header.icon size={14} strokeWidth={2.2} />
-            </motion.div>
-            {/* Label */}
-            <span
-              className="relative z-10 text-[11px] font-bold tracking-widest uppercase"
-              style={{ color: accentColor }}
-            >
-              {header.label}
-            </span>
-          </motion.div>
-        </AnimatePresence>
-      )}
-
-      {/* ── Nav items ────────────────────────────────────────────────────────── */}
-      <motion.div
-        key={resolvedKey + "-nav"}
-        initial={{ opacity: 0, x: -8 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.2, ease: "easeOut", delay: 0.06 }}
-        className="relative z-10 flex-1 overflow-y-auto p-2 space-y-0.5"
-      >
-        <SidebarNav items={getNavItems()} collapsed={false} />
-      </motion.div>
-
-      {/* ── Footer ──────────────────────────────────────────────────────────── */}
-      <div className="bg-sidebar/80 backdrop-blur-sm h-16 flex items-center justify-center">
-        {/* Collapse — same size/style as expand button, rose accent */}
-        <motion.button
-          onClick={() => setCollapsed(true)}
-          initial={{ opacity: 0, scale: 0.6 }}
-          animate={{ opacity: 1, scale: 1 }}
-          whileHover={{ scale: 1.14 }}
-          whileTap={{ scale: 0.88 }}
-          transition={{ type: "spring", stiffness: 440, damping: 26 }}
-          className="relative flex items-center justify-center w-8 h-8 rounded-full border transition-colors duration-150"
-          style={{ background: "rgba(244,63,94,0.12)", borderColor: "rgba(244,63,94,0.35)", color: "#f43f5e" }}
-          title="Collapse menu"
-        >
-          {/* Inner sonar ring */}
-          <motion.span
-            className="absolute inset-0 rounded-full pointer-events-none"
-            animate={{ boxShadow: ["0 0 0 0px rgba(244,63,94,0.80)", "0 0 0 5px rgba(244,63,94,0)", "0 0 0 0px rgba(244,63,94,0.80)"] }}
-            transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }}
-          />
-          {/* Outer sonar ring */}
-          <motion.span
-            className="absolute inset-0 rounded-full pointer-events-none"
-            animate={{ boxShadow: ["0 0 0 0px rgba(244,63,94,0.55)", "0 0 0 9px rgba(244,63,94,0)", "0 0 0 0px rgba(244,63,94,0.55)"] }}
-            transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut", delay: 0.32 }}
-          />
-          <ChevronLeft size={13} strokeWidth={2.4} />
-        </motion.button>
-      </div>
-    </aside>
+            <ChevronLeft size={13} strokeWidth={2.4} />
+          </motion.button>
+        </div>
+      </aside>
     </div>
   );
 };
