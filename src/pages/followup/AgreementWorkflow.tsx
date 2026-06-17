@@ -66,6 +66,7 @@ interface OptionItem {
   SelectionNo?: string;
   UnitNo?: string;
   ApplicantId?: number;
+  CompanyId?: number;
 }
 
 interface MetaOptions {
@@ -100,6 +101,14 @@ interface WorkflowRecord {
   OverallStatus: string;
   Notes: string | null;
   [key: string]: unknown;
+}
+
+interface WorkflowStepPayload {
+  stepField: string;
+  status: string;
+  doneDate?: string;
+  notes?: string;
+  signatureId?: number;
 }
 
 interface ListResponse {
@@ -200,7 +209,7 @@ function filterProjectsByCompany(
 ): OptionItem[] {
   if (!companyId) return projects;
   return projects.filter(
-    (p) => String((p as Record<string, unknown>).CompanyId) === companyId,
+    (p) => String(p.CompanyId) === companyId,
   );
 }
 
@@ -231,7 +240,7 @@ function WorkflowStepper({
   onStepUpdate,
 }: {
   record: WorkflowRecord;
-  onStepUpdate: (id: number, step: unknown) => void;
+  onStepUpdate: (id: number, step: WorkflowStepPayload) => void;
 }) {
   const [editingStep, setEditingStep] = useState<string | null>(null);
   const [form, setForm] = useState({ status: "", doneDate: "", notes: "" });
@@ -454,7 +463,7 @@ function MobileCard({
   onToggle: () => void;
   onDelete: () => void;
   onAudit: () => void;
-  onStepUpdate: (id: number, step: unknown) => void;
+  onStepUpdate: (id: number, step: WorkflowStepPayload) => void;
 }) {
   return (
     <div className="border border-border rounded-xl overflow-hidden bg-card mb-2">
@@ -573,7 +582,7 @@ export default function AgreementWorkflowPage() {
   });
 
   const stepMutation = useMutation({
-    mutationFn: ({ id, step }: { id: number; step: unknown }) =>
+    mutationFn: ({ id, step }: { id: number; step: WorkflowStepPayload }) =>
       updateWorkflowStep(id, step),
     onSuccess: () => {
       toast.success("Step updated");

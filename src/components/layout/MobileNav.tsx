@@ -781,8 +781,8 @@ export const MobileNav: React.FC = () => {
     dark: "#818cf8",
     light: "#7c3aed",
     midnight: "#2dd4bf",
-    sepia: "#f59e0b",
-    crimson: "#fb7185",
+    root: "#f59e0b",
+    glass: "#fb7185",
   };
 
   const tabs: Array<{ id: "nav" | "setup" | "theme"; label: string }> = [
@@ -1397,9 +1397,9 @@ export const MobileNav: React.FC = () => {
                                   ? "Clean bright"
                                   : t === "midnight"
                                     ? "Teal-accented slate"
-                                    : t === "sepia"
+                                    : t === "root"
                                       ? "Warm amber tone"
-                                      : "Bold crimson dark"}
+                                      : "Soft glass tone"}
                             </p>
                           </div>
                           {isSelected && (
