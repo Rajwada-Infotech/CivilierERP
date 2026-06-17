@@ -312,7 +312,8 @@
    Tailwind class → white icon. Light theme needs a reset to keep the native
    dark icon visible on its white background. */
 [data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator,
-[data-theme="light"] input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+[data-theme="light"]
+    input[type="datetime-local"]::-webkit-calendar-picker-indicator,
 [data-theme="light"] input[type="month"]::-webkit-calendar-picker-indicator,
 [data-theme="light"] input[type="week"]::-webkit-calendar-picker-indicator,
 [data-theme="light"] input[type="time"]::-webkit-calendar-picker-indicator {
@@ -334,15 +335,18 @@
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
-    box-shadow: 0 2px 6px rgba(239,68,68,0.45) !important;
-    transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease !important;
-    animation: toast-close-pop 0.25s cubic-bezier(0.34,1.56,0.64,1) both !important;
+    box-shadow: 0 2px 6px rgba(239, 68, 68, 0.45) !important;
+    transition:
+        transform 0.15s ease,
+        background 0.15s ease,
+        box-shadow 0.15s ease !important;
+    animation: toast-close-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both !important;
 }
 
 [data-sonner-toast] [data-close-button]:hover {
     background: #dc2626 !important;
     transform: scale(1.2) !important;
-    box-shadow: 0 3px 10px rgba(239,68,68,0.6) !important;
+    box-shadow: 0 3px 10px rgba(239, 68, 68, 0.6) !important;
 }
 
 [data-sonner-toast] [data-close-button]:active {
@@ -356,6 +360,12 @@
 }
 
 @keyframes toast-close-pop {
-    from { transform: scale(0); opacity: 0; }
-    to   { transform: scale(1); opacity: 1; }
+    from {
+        transform: scale(0);
+        opacity: 0;
+    }
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
 }
