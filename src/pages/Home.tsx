@@ -37,6 +37,7 @@ import {
   type ApprovalInboxItem,
   type TaskSummary,
 } from "@/api/homeDashboardApi";
+import AskCivilierAI from "@/components/AskCivilierAI";
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
 // These mirror the logic in TopNavbar / auth.utils so the home page
@@ -1331,6 +1332,8 @@ export default function HomePage() {
           <div className="w-10 h-px bg-border/40" />
         </motion.div>
       </div>
+
+      <AskCivilierAI />
     </div>
   );
 }

@@ -412,7 +412,7 @@ const CreateTicket = () => {
             <ArrowLeft size={14} />
           </Button>
           <div>
-            <h1 className="text-xl font-bold text-foreground">
+            <h1 className="text-xl font-heading font-bold text-foreground">
               New Support Ticket
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">

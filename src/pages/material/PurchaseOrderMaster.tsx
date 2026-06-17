@@ -2143,7 +2143,7 @@ const PurchaseOrderMaster: React.FC = () => {
             <ArrowLeft size={16} />
           </button>
           <div>
-            <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
+            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
               <ShoppingCart size={18} className="text-primary" />
               {viewMode === "create"
                 ? "New Purchase Order"

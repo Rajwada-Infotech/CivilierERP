@@ -275,7 +275,7 @@ export default function DBADashboard() {
           <Database className="text-emerald-500" size={22} />
         </div>
         <div>
-          <h1 className="text-xl font-bold">DBA Console</h1>
+          <h1 className="text-xl font-heading font-bold text-foreground">DBA Console</h1>
           <p className="text-sm text-muted-foreground">
             Database access · Table browser · Query runner
           </p>
