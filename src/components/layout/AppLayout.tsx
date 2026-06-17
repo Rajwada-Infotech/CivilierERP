@@ -8,6 +8,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useModule } from "@/contexts/ModuleContext";
 import { useActivityBrowser } from "@/contexts/ActivityBrowserContext";
 import SlowConnectionBanner from "@/components/SlowConnectionBanner";
+import AskCivilierAI from "@/components/AskCivilierAI";
 import {
   SidebarContext,
   NavbarCollapseContext,
@@ -156,6 +157,11 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
             </div>
           </main>
           <SlowConnectionBanner />
+
+          {/* Universal assistant — fixed-position, mounted once for every
+              page rendered through AppLayout. Suggested queries adapt to
+              the current page/module (see askCivilierQueries.ts). */}
+          <AskCivilierAI />
         </div>
       </NavbarCollapseContext.Provider>
     </SidebarContext.Provider>
