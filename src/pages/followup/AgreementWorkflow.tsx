@@ -66,6 +66,7 @@ interface OptionItem {
   SelectionNo?: string;
   UnitNo?: string;
   ApplicantId?: number;
+  CompanyId?: number;
 }
 
 interface MetaOptions {
@@ -100,6 +101,14 @@ interface WorkflowRecord {
   OverallStatus: string;
   Notes: string | null;
   [key: string]: unknown;
+}
+
+interface WorkflowStepPayload {
+  stepField: string;
+  status: string;
+  doneDate?: string;
+  notes?: string;
+  signatureId?: number;
 }
 
 interface ListResponse {
@@ -200,7 +209,7 @@ function filterProjectsByCompany(
 ): OptionItem[] {
   if (!companyId) return projects;
   return projects.filter(
-    (p) => String((p as Record<string, unknown>).CompanyId) === companyId,
+    (p) => String(p.CompanyId) === companyId,
   );
 }
 
@@ -231,7 +240,7 @@ function WorkflowStepper({
   onStepUpdate,
 }: {
   record: WorkflowRecord;
-  onStepUpdate: (id: number, step: unknown) => void;
+  onStepUpdate: (id: number, step: WorkflowStepPayload) => void;
 }) {
   const [editingStep, setEditingStep] = useState<string | null>(null);
   const [form, setForm] = useState({ status: "", doneDate: "", notes: "" });
@@ -454,7 +463,7 @@ function MobileCard({
   onToggle: () => void;
   onDelete: () => void;
   onAudit: () => void;
-  onStepUpdate: (id: number, step: unknown) => void;
+  onStepUpdate: (id: number, step: WorkflowStepPayload) => void;
 }) {
   return (
     <div className="border border-border rounded-xl overflow-hidden bg-card mb-2">
@@ -573,7 +582,7 @@ export default function AgreementWorkflowPage() {
   });
 
   const stepMutation = useMutation({
-    mutationFn: ({ id, step }: { id: number; step: unknown }) =>
+    mutationFn: ({ id, step }: { id: number; step: WorkflowStepPayload }) =>
       updateWorkflowStep(id, step),
     onSuccess: () => {
       toast.success("Step updated");
@@ -618,14 +627,24 @@ export default function AgreementWorkflowPage() {
           <h1 className="text-xl font-heading font-bold text-foreground">Agreement Workflow</h1>
           <p className="text-xs text-muted-foreground mt-0.5">Track and manage agreement workflow steps per applicant</p>
         </div>
-        <Button
-          onClick={() => setDialogOpen(true)}
-          className="gradient-accent text-white rounded-[9px] gap-1.5 font-semibold text-sm px-5 py-2 h-auto shrink-0"
-        >
-          <Plus size={15} />
-          <span className="hidden sm:inline">New Workflow</span>
-          <span className="sm:hidden">New</span>
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+            Refresh
+          </button>
+          <Button
+            onClick={() => setDialogOpen(true)}
+            className="gradient-accent text-white rounded-[9px] gap-1.5 font-semibold text-sm px-5 py-2 h-auto shrink-0"
+          >
+            <Plus size={15} />
+            <span className="hidden sm:inline">New Workflow</span>
+            <span className="sm:hidden">New</span>
+          </Button>
+        </div>
       </div>
 
       {/* ── Toolbar ── */}
@@ -679,16 +698,6 @@ export default function AgreementWorkflowPage() {
           ))}
         </select>
 
-        <button
-          onClick={() => refetch()}
-          title="Refresh"
-          className="h-[34px] px-2.5 rounded-[9px] border border-border bg-background flex items-center hover:bg-muted transition-colors"
-        >
-          <RefreshCw
-            size={14}
-            className={`text-muted-foreground${isFetching ? " animate-spin" : ""}`}
-          />
-        </button>
       </div>
 
       {/* ── Mobile card list (hidden on md+) ── */}

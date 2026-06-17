@@ -14,6 +14,7 @@ import {
   useSidebarState,
   useNavbarCollapse,
 } from "./layoutContexts";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 // ─── Sidebar Context ──────────────────────────────────────────────────────────
 
@@ -149,7 +150,9 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
               className="p-4 md:p-6 transition-opacity duration-300"
               style={{ opacity: moduleSwitching ? 0 : 1 }}
             >
-              {children}
+              <ErrorBoundary>
+                {children}
+              </ErrorBoundary>
             </div>
           </main>
           <SlowConnectionBanner />

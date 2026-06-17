@@ -283,7 +283,7 @@ router.get("/", authenticateToken, async (req, res) => {
     await ensureTablesExist(pool);
 
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, parseInt(req.query.limit) || 10);
+    const limit = Math.min(500, parseInt(req.query.limit) || 10);
     const offset = (page - 1) * limit;
     const search = req.query.search || "";
     const statusFilter = req.query.status || ""; // exact status filter from dashboard

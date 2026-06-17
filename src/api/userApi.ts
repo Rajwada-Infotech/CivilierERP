@@ -1,3 +1,7 @@
+import type { PagePermission } from "@/contexts/types";
+
+export type { PagePermission };
+
 const BASE_URL = "/api/users";
 const RIGHTS_BASE_URL = "/api/user-rights";
 
@@ -6,9 +10,6 @@ const getAuthHeaders = () => ({
   Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
 });
 
-// ======================
-// TYPES
-// ======================
 export interface User {
   id: number;
   name: string;
@@ -24,23 +25,8 @@ export interface User {
   tenantId?: string | null;
 }
 
-import type { PagePermission } from "@/contexts/types";
-export type { PagePermission };
-
-// ======================
-// AUTH & USER MANAGEMENT
-// ======================
-export const loginUser = async (email: string, password: string) => {
-  const res = await fetch(`${BASE_URL}/login`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) throw new Error("Login failed");
-  return res.json(); // returns { success, token, user }
-};
+// Login lives in authApi.ts (used by AuthContext); keep that as the canonical
+// implementation so backend error messages are preserved consistently.
 
 export const getUsers = async (): Promise<User[]> => {
   const res = await fetch(BASE_URL, {
@@ -84,13 +70,6 @@ export const deleteUser = async (id: number) => {
   return res.json();
 };
 
-// ======================
-// MENU RIGHTS / PERMISSIONS (New)
-// ======================
-
-/**
- * Get non-admin users for Menu Rights dropdown
- */
 export const getUsersForRights = async (): Promise<
   { id: number; name: string; role: string }[]
 > => {
@@ -101,9 +80,6 @@ export const getUsersForRights = async (): Promise<
   return res.json();
 };
 
-/**
- * Get user permissions from dbo.UserPageRightsJson
- */
 export const getUserPermissions = async (
   userId: number,
 ): Promise<PagePermission[]> => {
@@ -115,9 +91,6 @@ export const getUserPermissions = async (
   return data.rightsJson || [];
 };
 
-/**
- * Save permissions to dbo.UserPageRightsJson
- */
 export const saveUserPermissions = async (
   userId: number,
   permissions: PagePermission[],
@@ -153,7 +126,6 @@ export const resetUserPassword = async (
 };
 
 export default {
-  loginUser,
   getUsers,
   addUser,
   updateUser,

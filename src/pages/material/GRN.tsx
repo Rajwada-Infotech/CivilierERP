@@ -789,7 +789,10 @@ export default function GRN() {
   useEffect(() => {
     if (editingId) return;
     const auto = findProjectGodownId(formData.projectId);
-    setFormData((prev) => ({ ...prev, godownId: auto }));
+    setFormData((prev) => {
+      if (prev.godownId === auto) return prev; // no change → no re-render
+      return { ...prev, godownId: auto };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.projectId, godowns]);
 
@@ -1231,6 +1234,7 @@ export default function GRN() {
       poNumber: fullGrn.PONumber || "",
       poTotalAmount: Number(fullGrn.POTotalAmount ?? 0),
       poSubtotalAmount: Number(fullGrn.POSubtotalAmount ?? 0),
+      poReceivedAmount: Number(fullGrn.POTotalReceived ?? 0),
       remarks: fullGrn.Remarks || "",
       status: (fullGrn.Status as any) || "Draft",
       items: parsedItems.length ? parsedItems : [createEmptyItem()],
