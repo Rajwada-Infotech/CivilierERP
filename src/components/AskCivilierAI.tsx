@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Bot,
   X,
   ArrowLeft,
+  ArrowRight,
   Sparkles,
   Package,
   BarChart3,
@@ -16,12 +18,14 @@ import {
 // ─── Stub data ─────────────────────────────────────────────────────────────
 // Placeholder suggested prompts. Once the in-house LLM is wired up these
 // will be generated dynamically (recent context, role, live module data)
-// instead of this static list.
+// instead of this static list. `route` is real — it's the actual page the
+// query data lives on today, so "Open <module>" always works.
 
 interface SuggestedQuery {
   id: string;
   label: string;
   module: string;
+  route: string;
   icon: React.ElementType;
   accent: string;
 }
@@ -31,6 +35,7 @@ const SUGGESTED_QUERIES: SuggestedQuery[] = [
     id: "q1",
     label: "Show pending GRNs awaiting invoice this week",
     module: "Material",
+    route: "/material/grn",
     icon: Package,
     accent: "#8b5cf6",
   },
@@ -38,6 +43,7 @@ const SUGGESTED_QUERIES: SuggestedQuery[] = [
     id: "q2",
     label: "Summarize today's payments by mode",
     module: "Finance",
+    route: "/payments",
     icon: BarChart3,
     accent: "#3b82f6",
   },
@@ -45,6 +51,7 @@ const SUGGESTED_QUERIES: SuggestedQuery[] = [
     id: "q3",
     label: "List open work orders on active projects",
     module: "Engineering",
+    route: "/engineering/work-order",
     icon: Wrench,
     accent: "#ec4899",
   },
@@ -52,6 +59,7 @@ const SUGGESTED_QUERIES: SuggestedQuery[] = [
     id: "q4",
     label: "How many bookings were confirmed this month?",
     module: "Followup",
+    route: "/followup/sales/bookings",
     icon: Users,
     accent: "#6366f1",
   },
@@ -59,6 +67,7 @@ const SUGGESTED_QUERIES: SuggestedQuery[] = [
     id: "q5",
     label: "What's waiting in my approval inbox right now?",
     module: "Approvals",
+    route: "/admin/approval/inbox",
     icon: FileCheck,
     accent: "#f59e0b",
   },
@@ -66,6 +75,7 @@ const SUGGESTED_QUERIES: SuggestedQuery[] = [
     id: "q6",
     label: "Show urgent tickets still unresolved",
     module: "Tickets",
+    route: "/ticket",
     icon: Ticket,
     accent: "#f97316",
   },
@@ -96,6 +106,7 @@ function Mascot({ pose, size }: { pose: "tablet" | "thumbsup"; size: number }) {
 // ─── Floating launcher ─────────────────────────────────────────────────────
 
 export default function AskCivilierAI() {
+  const navigate = useNavigate();
   const [stage, setStage] = useState<Stage>("idle");
   const [selected, setSelected] = useState<SuggestedQuery | null>(null);
 
@@ -108,6 +119,12 @@ export default function AskCivilierAI() {
     } else {
       setStage("teaser");
     }
+  };
+
+  const goToModule = (q: SuggestedQuery) => {
+    setStage("idle");
+    setSelected(null);
+    navigate(q.route);
   };
 
   return (
@@ -271,12 +288,20 @@ export default function AskCivilierAI() {
                     <p className="text-[11px] text-muted-foreground/75 leading-relaxed">
                       Got it. CivilierAI is still warming up — once connected,
                       it'll pull this straight from your live data instead of a
-                      canned reply.
+                      canned reply. For now, here's where that data lives:
                     </p>
                   </div>
                   <button
+                    onClick={() => goToModule(selected)}
+                    style={{ background: selected.accent }}
+                    className="mt-3 w-full flex items-center justify-center gap-1.5 rounded-xl text-white text-[11.5px] font-heading font-bold tracking-tight py-2.5 hover:opacity-90 transition-opacity"
+                  >
+                    Open {selected.module}
+                    <ArrowRight size={13} />
+                  </button>
+                  <button
                     onClick={() => setStage("list")}
-                    className="mt-3 w-full rounded-xl border border-border/60 text-[11px] font-heading font-bold tracking-tight py-2 text-muted-foreground/70 hover:bg-muted/30 transition-colors"
+                    className="mt-2 w-full rounded-xl border border-border/60 text-[11px] font-heading font-bold tracking-tight py-2 text-muted-foreground/70 hover:bg-muted/30 transition-colors"
                   >
                     Ask another
                   </button>
