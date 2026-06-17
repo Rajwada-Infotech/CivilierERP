@@ -11,7 +11,6 @@ const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const allowRoles = require("../middleware/role");
 const { normalizeRole: normalizeRoleFromRoleMiddleware } = allowRoles;
-const authMiddleware = require("../middleware/auth");
 
 // Privileged roles that can always list users (Password Reset, User Management)
 const PRIVILEGED_ROLES = ["super_admin", "admin", "dba"];
