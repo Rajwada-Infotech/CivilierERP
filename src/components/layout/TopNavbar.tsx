@@ -1065,42 +1065,6 @@ export const TopNavbar = () => {
               <span>Widgets</span>
             </button>
 
-            {/* ── Redesigned Module Dropdown ── */}
-            <Dropdown
-              open={moduleOpen}
-              onClose={closeModule}
-              className="right-0 p-0 overflow-hidden"
-              style={{ minWidth: "22rem" }}
-              trigger={
-                <button
-                  onClick={toggleMod}
-                  className={navBtnCls(moduleOpen)}
-                  disabled={moduleSwitching}
-                >
-                  <LayoutGrid
-                    size={16}
-                    className={moduleSwitching ? "animate-spin" : ""}
-                  />
-                  <span>{switchingTo ? `${switchingTo}…` : "Module"}</span>
-                  <ChevronDown
-                    size={13}
-                    className={`transition-transform duration-200 ${moduleOpen ? "rotate-180" : ""} ${moduleSwitching ? "opacity-0" : ""}`}
-                  />
-                </button>
-              }
-            >
-              <ModuleDropdownContent
-                moduleOptions={moduleOptions}
-                activeModule={activeModule}
-                isAdminPage={isAdminPage}
-                isDbaPage={isDbaPage}
-                isAdmin={isAdmin}
-                isDba={isDba}
-                handleModuleSwitch={handleModuleSwitch}
-                onNavigate={navigate}
-                onClose={closeModule}
-              />
-            </Dropdown>
           </div>
 
           <ReminderBell />
