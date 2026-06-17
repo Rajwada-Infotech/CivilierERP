@@ -149,6 +149,11 @@ router.post("/login", async (req, res) => {
   }
 });
 
+// ======================
+// AUTH REQUIRED BELOW THIS LINE
+// ======================
+router.use(authMiddleware);
+
 async function incrementLoginAttempts(attemptsKey, lockKey) {
   try {
     const attempts = parseInt((await redisGet(attemptsKey)) || "0") + 1;

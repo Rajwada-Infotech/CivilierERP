@@ -24,21 +24,23 @@ export const getSystemMetrics = async (): Promise<SystemMetrics> => {
   }
   return res.json();
 };
-
-export const fetchMetrics = async (baseURL: string, token?: string): Promise<SystemMetrics> => {
-  const url = `${baseURL.replace(/\/$/, '')}/api/system/metrics`;
-  const headers: Record<string, string> = { 
-    'Content-Type': 'application/json',
-    ...(token && { Authorization: `Bearer ${token}` })
+export const fetchMetrics = async (
+  baseURL: string,
+  token?: string,
+): Promise<SystemMetrics> => {
+  const url = `${baseURL.replace(/\/$/, "")}/api/system/metrics`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(token && { Authorization: `Bearer ${token}` }),
   };
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout
 
   try {
-    const response = await fetch(url, { 
-      headers, 
-      signal: controller.signal 
+    const response = await fetch(url, {
+      headers,
+      signal: controller.signal,
     });
     clearTimeout(timeoutId);
 
@@ -49,13 +51,16 @@ export const fetchMetrics = async (baseURL: string, token?: string): Promise<Sys
     return await response.json();
   } catch (error) {
     clearTimeout(timeoutId);
-    if (error instanceof Error && 'name' in error && error.name === 'AbortError') {
-      throw new Error('Request timeout (8s)');
+    if (
+      error instanceof Error &&
+      "name" in error &&
+      error.name === "AbortError"
+    ) {
+      throw new Error("Request timeout (8s)");
     }
     throw error;
   }
 };
-
 export const getDemoMetrics = () => {
   if (!import.meta.env.DEV) {
     throw new Error("Demo metrics are available only in development");
@@ -74,4 +79,3 @@ export const getDemoMetrics = () => {
     lastUpdated: Date.now(),
   };
 };
-

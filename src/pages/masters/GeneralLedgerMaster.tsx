@@ -26,6 +26,7 @@ import {
   Folder,
   FolderOpen,
   Layers,
+  RotateCcw,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -575,14 +576,13 @@ const GeneralLedgerMaster: React.FC = () => {
                 : "Fill in the required fields to save"}
             </p>
             <div className="flex items-center gap-2">
-              {editingId && (
-                <button
-                  onClick={resetForm}
-                  className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                >
-                  Cancel
-                </button>
-              )}
+              <button
+                onClick={resetForm}
+                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+              >
+                <RotateCcw size={13} />
+                {editingId ? "Cancel" : "Reset"}
+              </button>
               <button
                 onClick={handleSave}
                 disabled={saving || !canSave}

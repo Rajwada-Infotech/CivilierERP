@@ -1729,11 +1729,11 @@ const DetailModal: React.FC<DetailModalProps> = ({
   };
 
   const itemsTotal = (record.BoqItems ?? []).reduce(
-    (s, r) => s + (parseFloat(String(r.LineAmount ?? r.amount ?? 0)) || 0),
+    (s, r) => s + (r.amount || 0),
     0,
   );
   const activitiesTotal = (record.BoqActivities ?? []).reduce(
-    (s, r) => s + (parseFloat(String(r.LineAmount ?? r.amount ?? 0)) || 0),
+    (s, r) => s + (r.amount || 0),
     0,
   );
 
@@ -2641,4 +2641,3 @@ export default function BOQ() {
     </>
   );
 }
-
