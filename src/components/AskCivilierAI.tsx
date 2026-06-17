@@ -1,85 +1,20 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
+import { Bot, X, ArrowLeft, ArrowRight, Sparkles } from "lucide-react";
+import { useModule } from "@/contexts/ModuleContext";
 import {
-  Bot,
-  X,
-  ArrowLeft,
-  ArrowRight,
-  Sparkles,
-  Package,
-  BarChart3,
-  Wrench,
-  Users,
-  FileCheck,
-  Ticket,
-} from "lucide-react";
+  type SuggestedQuery,
+  getSuggestedQueries,
+  getContextLabel,
+} from "@/constants/askCivilierQueries";
 
-// ─── Stub data ─────────────────────────────────────────────────────────────
-// Placeholder suggested prompts. Once the in-house LLM is wired up these
-// will be generated dynamically (recent context, role, live module data)
-// instead of this static list. `route` is real — it's the actual page the
-// query data lives on today, so "Open <module>" always works.
-
-interface SuggestedQuery {
-  id: string;
-  label: string;
-  module: string;
-  route: string;
-  icon: React.ElementType;
-  accent: string;
-}
-
-const SUGGESTED_QUERIES: SuggestedQuery[] = [
-  {
-    id: "q1",
-    label: "Show pending GRNs awaiting invoice this week",
-    module: "Material",
-    route: "/material/grn",
-    icon: Package,
-    accent: "#8b5cf6",
-  },
-  {
-    id: "q2",
-    label: "Summarize today's payments by mode",
-    module: "Finance",
-    route: "/payments",
-    icon: BarChart3,
-    accent: "#3b82f6",
-  },
-  {
-    id: "q3",
-    label: "List open work orders on active projects",
-    module: "Engineering",
-    route: "/engineering/work-order",
-    icon: Wrench,
-    accent: "#ec4899",
-  },
-  {
-    id: "q4",
-    label: "How many bookings were confirmed this month?",
-    module: "Followup",
-    route: "/followup/sales/bookings",
-    icon: Users,
-    accent: "#6366f1",
-  },
-  {
-    id: "q5",
-    label: "What's waiting in my approval inbox right now?",
-    module: "Approvals",
-    route: "/admin/approval/inbox",
-    icon: FileCheck,
-    accent: "#f59e0b",
-  },
-  {
-    id: "q6",
-    label: "Show urgent tickets still unresolved",
-    module: "Tickets",
-    route: "/ticket",
-    icon: Ticket,
-    accent: "#f97316",
-  },
-];
+// ─── Context-aware suggestions ─────────────────────────────────────────────
+// AskCivilierAI is mounted once, globally (see AppLayout), so the queries it
+// surfaces are resolved per page/module from src/constants/askCivilierQueries.ts
+// rather than hardcoded here. Once the in-house LLM is wired up these will
+// also be informed by recent context, role, and live module data — but
+// `route` is real today, so "Open <module>" always works.
 
 type Stage = "idle" | "teaser" | "list" | "answer";
 
@@ -107,10 +42,22 @@ function Mascot({ pose, size }: { pose: "tablet" | "thumbsup"; size: number }) {
 
 export default function AskCivilierAI() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { activeModule } = useModule();
   const [stage, setStage] = useState<Stage>("idle");
   const [selected, setSelected] = useState<SuggestedQuery | null>(null);
 
   const open = stage !== "idle";
+
+  // Resolved fresh per page/module — see src/constants/askCivilierQueries.ts.
+  const suggestedQueries = useMemo(
+    () => getSuggestedQueries(location.pathname, activeModule),
+    [location.pathname, activeModule],
+  );
+  const contextLabel = useMemo(
+    () => getContextLabel(location.pathname, activeModule),
+    [location.pathname, activeModule],
+  );
 
   const toggleOrb = () => {
     if (open) {
@@ -126,6 +73,15 @@ export default function AskCivilierAI() {
     setSelected(null);
     navigate(q.route);
   };
+
+  // If the user navigates away (e.g. via the sidebar) while the panel is
+  // open, collapse back to the teaser rather than leaving a stale list/
+  // answer from the page they just left.
+  useEffect(() => {
+    setStage((prev) => (prev === "idle" ? prev : "teaser"));
+    setSelected(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
 
   return (
     <div className="fixed bottom-6 right-5 sm:right-7 z-[55] flex flex-col items-end gap-3">
@@ -168,16 +124,6 @@ export default function AskCivilierAI() {
               </button>
 
               <div className="flex-1 flex items-center gap-3 pl-5 pr-5">
-                <div className="shrink-0 -my-1">
-                  <AnimatePresence mode="wait">
-                    <Mascot
-                      pose={stage === "answer" ? "thumbsup" : "tablet"}
-                      size={
-                        stage === "teaser" ? 44 : stage === "list" ? 52 : 60
-                      }
-                    />
-                  </AnimatePresence>
-                </div>
                 <div className="min-w-0">
                   <p className="font-heading font-bold text-[13px] text-foreground tracking-tight">
                     CivilierAI
@@ -187,6 +133,16 @@ export default function AskCivilierAI() {
                       ? "Noted — thanks!"
                       : "In-house assistant · preview"}
                   </p>
+                </div>
+                <div className="shrink-0 -my-1">
+                  <AnimatePresence mode="wait">
+                    <Mascot
+                      pose={stage === "answer" ? "thumbsup" : "tablet"}
+                      size={
+                        stage === "teaser" ? 44 : stage === "list" ? 52 : 60
+                      }
+                    />
+                  </AnimatePresence>
                 </div>
               </div>
             </div>
@@ -203,9 +159,9 @@ export default function AskCivilierAI() {
                   className="px-4 py-4"
                 >
                   <p className="text-xs text-muted-foreground/70 leading-relaxed mb-3.5">
-                    Hi! I'll soon be able to answer questions about your live
-                    Finance, Material, Engineering and Followup data — right
-                    here on the home page.
+                    {contextLabel
+                      ? `Hi! I'll soon be able to answer questions about your live ${contextLabel} data — right here, wherever you are in CivilierERP.`
+                      : "Hi! I'll soon be able to answer questions about your live Finance, Material, Engineering and Followup data — right here, wherever you are in CivilierERP."}
                   </p>
                   <button
                     onClick={() => setStage("list")}
@@ -227,10 +183,10 @@ export default function AskCivilierAI() {
                   className="px-3 py-3 max-h-[340px] overflow-y-auto"
                 >
                   <p className="px-1.5 pb-2 text-[10px] font-heading font-bold uppercase tracking-[0.18em] text-muted-foreground/45">
-                    Try asking
+                    {contextLabel ? `Try asking · ${contextLabel}` : "Try asking"}
                   </p>
                   <div className="flex flex-col gap-1.5">
-                    {SUGGESTED_QUERIES.map((q, i) => (
+                    {suggestedQueries.map((q, i) => (
                       <motion.button
                         key={q.id}
                         initial={{ opacity: 0, y: -14 }}
