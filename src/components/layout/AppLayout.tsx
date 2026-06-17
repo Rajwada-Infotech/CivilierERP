@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { TopNavbar } from "./TopNavbar";
 import { AppSidebar } from "./AppSidebar";
+import { ModuleStrip } from "./ModuleStrip";
 import { MobileNav } from "./MobileNav";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useModule } from "@/contexts/ModuleContext";
@@ -13,23 +14,17 @@ import {
   SidebarContext,
   NavbarCollapseContext,
   useSidebarState,
-  useNavbarCollapse,
 } from "./layoutContexts";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
-// ─── Sidebar Context ──────────────────────────────────────────────────────────
-
-// ─── Home page detection helper ───────────────────────────────────────────────
+// ── Home page detection ───────────────────────────────────────────────────────
 
 function useIsHomePage() {
   const location = useLocation();
-  return location.pathname === "/" || location.pathname === "/home";
+  return location.pathname === "/" || location.pathname.startsWith("/home");
 }
 
-// ─── Module Activity Logger ───────────────────────────────────────────────────
-// Fires recordAction("read") whenever the user navigates to a new page,
-// capturing which module/resource they accessed and the exact route.
-// Skips home, login, and the activity browser itself to avoid log spam.
+// ── Module Activity Logger ────────────────────────────────────────────────────
 
 const SKIP_LOG_PREFIXES = ["/", "/home", "/login", "/admin/activity-browser"];
 
@@ -37,57 +32,58 @@ function useModuleActivityLogger() {
   const location = useLocation();
   const { activeModule } = useModule();
   const { recordAction } = useActivityBrowser();
-
-  // Track last-logged path so rapid React re-renders don't duplicate entries
   const lastLoggedPath = useRef<string | null>(null);
 
   useEffect(() => {
     const path = location.pathname;
-
-    // Skip paths that aren't meaningful module pages
     if (
       SKIP_LOG_PREFIXES.some(
         (prefix) =>
           path === prefix || (prefix !== "/" && path.startsWith(prefix)),
       )
-    ) {
+    )
       return;
-    }
-
-    // Don't re-log if the path hasn't changed (e.g. query-string-only update)
     if (lastLoggedPath.current === path) return;
     lastLoggedPath.current = path;
-
-    // Derive a human-readable resource label from the active module + path
     const resource = activeModule ? `${activeModule}:${path}` : path;
-
     recordAction({
       method: "GET",
       url: path,
       actionType: "read",
       resource,
       details: `Navigated to ${path}`,
-    }).catch(() => {
-      // fire-and-forget — never block navigation
-    });
-    // recordAction is stable (useCallback with no deps that change), so
-    // we can safely omit it from the array. activeModule intentionally
-    // excluded: we only want to log when the PATH changes, not when the
-    // module label re-derives from the same path.
+    }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 }
 
-// ─── AppLayout ────────────────────────────────────────────────────────────────
+// ── NavPanel wrapper — auto-expands when module changes ───────────────────────
+
+function NavPanelAutoExpand({ children }: { children: React.ReactNode }) {
+  const { activeModule } = useModule();
+  const { setCollapsed } = useSidebarState();
+  const prevModule = useRef<typeof activeModule>(activeModule);
+
+  useEffect(() => {
+    if (activeModule && activeModule !== prevModule.current) {
+      setCollapsed(false);
+    }
+    prevModule.current = activeModule;
+  }, [activeModule, setCollapsed]);
+
+  return <>{children}</>;
+}
+
+// ── AppLayout ─────────────────────────────────────────────────────────────────
 
 export const AppLayout = ({ children }: { children: React.ReactNode }) => {
+  // `collapsed` now means the nav PANEL is hidden (only strip shows)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
   const isMobile = useIsMobile();
   const { moduleSwitching } = useModule();
   const isHome = useIsHomePage();
 
-  // Log every page navigation to UserActivityLog
   useModuleActivityLogger();
 
   const sidebarValue = useMemo(
@@ -100,69 +96,113 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
     [navCollapsed],
   );
 
-  // On home page sidebar is completely hidden; compute main margin accordingly
-  const mainMargin = isMobile
-    ? "ml-0"
+  // Strip = 64px, NavPanel = 224px (w-56), total = 288px
+  const STRIP_W = 64;
+  const NAV_W = 200;
+  const mainML = isMobile
+    ? 0
     : isHome
-      ? "ml-0"
+      ? 0
       : sidebarCollapsed
-        ? "ml-16"
-        : "ml-56";
+        ? STRIP_W
+        : STRIP_W + NAV_W;
 
   return (
     <SidebarContext.Provider value={sidebarValue}>
       <NavbarCollapseContext.Provider value={navbarValue}>
-        <div className="min-h-screen bg-background">
-          <TopNavbar />
+        <NavPanelAutoExpand>
+          <div className="min-h-screen bg-background">
+            <TopNavbar />
 
-          {/* Desktop sidebar — hidden on home page with slide animation */}
-          {!isMobile && (
-            <AnimatePresence>
-              {!isHome && (
-                <motion.div
-                  key="sidebar"
-                  initial={{ x: -224, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  exit={{ x: -224, opacity: 0 }}
-                  transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                  style={{
-                    position: "fixed",
-                    top: 56,
-                    left: 0,
-                    bottom: 0,
-                    zIndex: 40,
-                  }}
-                >
-                  <AppSidebar />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          )}
+            {!isMobile && (
+              <AnimatePresence>
+                {!isHome && (
+                  <>
+                    {/* ── Module strip (w-72px, flush left) ── */}
+                    <motion.div
+                      key="module-strip"
+                      initial={{ x: -STRIP_W, opacity: 0 }}
+                      animate={{ x: 0, opacity: 1 }}
+                      exit={{ x: -STRIP_W, opacity: 0 }}
+                      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                      style={{
+                        position: "fixed",
+                        top: 56,
+                        left: 0,
+                        bottom: 0,
+                        width: STRIP_W,
+                        zIndex: 40,
+                      }}
+                    >
+                      <ModuleStrip />
+                    </motion.div>
 
-          {/* Mobile nav — always present, sidebar visibility handled internally */}
-          {isMobile && <MobileNav />}
+                    {/* ── Nav panel (w-56, left: 72px) — shown when not collapsed ── */}
+                    <AnimatePresence>
+                      {!sidebarCollapsed && (
+                        <motion.div
+                          key="nav-panel"
+                          initial={{ x: -NAV_W, opacity: 0 }}
+                          animate={{ x: 0, opacity: 1 }}
+                          exit={{ x: -NAV_W, opacity: 0 }}
+                          transition={{
+                            duration: 0.3,
+                            ease: [0.16, 1, 0.3, 1],
+                          }}
+                          style={{
+                            position: "fixed",
+                            top: 56,
+                            left: STRIP_W,
+                            bottom: 0,
+                            width: NAV_W,
+                            zIndex: 40,
+                          }}
+                        >
+                          <AppSidebar />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </>
+                )}
+              </AnimatePresence>
+            )}
 
-          <main
-            className={`pt-14 transition-[margin-left] duration-300 ease-in-out min-h-screen ${mainMargin} ${
-              isMobile ? "pb-16" : ""
-            }`}
-          >
-            <div
-              className="p-4 md:p-6 transition-opacity duration-300"
-              style={{ opacity: moduleSwitching ? 0 : 1 }}
+            {isMobile && <MobileNav />}
+
+            <main
+              className={`pt-14 min-h-screen ${isMobile ? "pb-16" : ""}`}
+              style={{
+                marginLeft: mainML,
+                transition: "margin-left 300ms cubic-bezier(0.16, 1, 0.3, 1)",
+              }}
             >
-              <ErrorBoundary>
-                {children}
-              </ErrorBoundary>
-            </div>
-          </main>
-          <SlowConnectionBanner />
+              {/* Page-curve wrapper: 8px top gap + rounded-tl to mirror strip/sidebar shape */}
+              <div
+                className={
+                  !isHome && !isMobile ? "pt-2 min-h-[calc(100vh-56px)]" : ""
+                }
+              >
+                <div
+                  className={
+                    !isHome && !isMobile
+                      ? "rounded-tl-[20px] min-h-[calc(100vh-64px)] p-4 md:p-6 transition-opacity duration-300 bg-background"
+                      : "p-4 md:p-6 transition-opacity duration-300"
+                  }
+                  style={{ opacity: moduleSwitching ? 0 : 1 }}
+                >
+                  <ErrorBoundary>{children}</ErrorBoundary>
+                </div>
+              </div>
+            </main>
 
-          {/* Universal assistant — fixed-position, mounted once for every
-              page rendered through AppLayout. Suggested queries adapt to
-              the current page/module (see askCivilierQueries.ts). */}
-          <AskCivilierAI />
-        </div>
+            <SlowConnectionBanner />
+
+            {/* Universal assistant — fixed-position, mounted once for every
+                page rendered through AppLayout. Suggested queries adapt to
+                the current page/module (see askCivilierQueries.ts). */}
+            <AskCivilierAI />
+          </div>
+        </NavPanelAutoExpand>
       </NavbarCollapseContext.Provider>
     </SidebarContext.Provider>
   );
