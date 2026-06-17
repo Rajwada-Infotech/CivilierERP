@@ -301,3 +301,61 @@ export const getProjects = async (): Promise<
       )
     : [];
 };
+
+// ── GRN from Stock Transfer ───────────────────────────────────────────────────
+
+export interface GRNFromTransferPayload {
+  remarks?: string;
+  supplierId?: number | null;
+}
+
+export interface GRNFromTransferResult {
+  message: string;
+  grnId: number;
+  grnNo: string;
+  docNo: string;
+  sourceTransferDocNo: string;
+  toGodownName: string;
+}
+
+/**
+ * Create a GRN directly from a Stock Transfer document.
+ * The backend maps TransferItems → GRNItems and targets ToGodownID.
+ */
+export const createGRNFromTransfer = async (
+  transferId: number,
+  payload: GRNFromTransferPayload = {},
+): Promise<GRNFromTransferResult> => {
+  const res = await fetchWithAuth(`/api/grns/from-transfer/${transferId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(
+      err.error || `Failed to create GRN from transfer: ${res.status}`,
+    );
+  }
+  return res.json();
+};
+
+export interface TransferGRNSummary {
+  GRNID: number;
+  GRNNo: string;
+  DocNo: string;
+  GRNDate: string;
+  Status: string;
+  TotalAmount: number;
+  SourceTransferDocNo: string;
+}
+
+/** Fetch all GRNs linked to a specific Stock Transfer (for badge/status display). */
+export const getGRNsByTransfer = async (
+  transferId: number,
+): Promise<TransferGRNSummary[]> => {
+  const res = await fetchWithAuth(`/api/grns/by-transfer/${transferId}`);
+  if (!res.ok)
+    throw new Error(`Failed to fetch GRNs for transfer: ${res.status}`);
+  return res.json();
+};
