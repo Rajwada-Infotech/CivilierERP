@@ -9,11 +9,13 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useModule } from "@/contexts/ModuleContext";
 import { useActivityBrowser } from "@/contexts/ActivityBrowserContext";
 import SlowConnectionBanner from "@/components/SlowConnectionBanner";
+import AskCivilierAI from "@/components/AskCivilierAI";
 import {
   SidebarContext,
   NavbarCollapseContext,
   useSidebarState,
 } from "./layoutContexts";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 // ── Home page detection ───────────────────────────────────────────────────────
 
@@ -94,13 +96,13 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
     [navCollapsed],
   );
 
-  // Strip = 64px, NavPanel = 224px (w-56), total = 288px
+  // Strip = 64px, NavPanel = 200px, total = 264px
   const STRIP_W = 64;
   const NAV_W = 200;
   const mainML = isMobile
     ? 0
     : isHome
-      ? 0
+      ? STRIP_W
       : sidebarCollapsed
         ? STRIP_W
         : STRIP_W + NAV_W;
@@ -113,56 +115,49 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
             <TopNavbar />
 
             {!isMobile && (
-              <AnimatePresence>
-                {!isHome && (
-                  <>
-                    {/* ── Module strip (w-72px, flush left) ── */}
+              <>
+                {/* ── Module strip — always visible on desktop ── */}
+                <motion.div
+                  key="module-strip"
+                  initial={{ x: -STRIP_W, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ x: -STRIP_W, opacity: 0 }}
+                  transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                  style={{
+                    position: "fixed",
+                    top: 56,
+                    left: 0,
+                    bottom: 0,
+                    width: STRIP_W,
+                    zIndex: 40,
+                  }}
+                >
+                  <ModuleStrip />
+                </motion.div>
+
+                {/* ── Nav panel — only on module pages, not home ── */}
+                <AnimatePresence>
+                  {!isHome && !sidebarCollapsed && (
                     <motion.div
-                      key="module-strip"
-                      initial={{ x: -STRIP_W, opacity: 0 }}
+                      key="nav-panel"
+                      initial={{ x: -NAV_W, opacity: 0 }}
                       animate={{ x: 0, opacity: 1 }}
-                      exit={{ x: -STRIP_W, opacity: 0 }}
+                      exit={{ x: -NAV_W, opacity: 0 }}
                       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
                       style={{
                         position: "fixed",
                         top: 56,
-                        left: 0,
+                        left: STRIP_W,
                         bottom: 0,
-                        width: STRIP_W,
+                        width: NAV_W,
                         zIndex: 40,
                       }}
                     >
-                      <ModuleStrip />
+                      <AppSidebar />
                     </motion.div>
-
-                    {/* ── Nav panel (w-56, left: 72px) — shown when not collapsed ── */}
-                    <AnimatePresence>
-                      {!sidebarCollapsed && (
-                        <motion.div
-                          key="nav-panel"
-                          initial={{ x: -NAV_W, opacity: 0 }}
-                          animate={{ x: 0, opacity: 1 }}
-                          exit={{ x: -NAV_W, opacity: 0 }}
-                          transition={{
-                            duration: 0.3,
-                            ease: [0.16, 1, 0.3, 1],
-                          }}
-                          style={{
-                            position: "fixed",
-                            top: 56,
-                            left: STRIP_W,
-                            bottom: 0,
-                            width: NAV_W,
-                            zIndex: 40,
-                          }}
-                        >
-                          <AppSidebar />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </>
-                )}
-              </AnimatePresence>
+                  )}
+                </AnimatePresence>
+              </>
             )}
 
             {isMobile && <MobileNav />}
