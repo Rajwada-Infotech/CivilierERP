@@ -32,14 +32,14 @@ const REQUIRED_TABLES = [
   },
   {
     table: "FollowupAgreementWorkflows",
-    migration: "104-create-followup-agreement-workflows.sql",
+    migration: "108-create-followup-agreement-workflows.sql",
   },
   {
     table: "FollowupSalesDeeds",
     migration: "066-followup-salesdeed-table.sql",
   },
   { table: "FollowupBookings", migration: "080-create-followup-bookings.sql" },
-  { table: "FollowupAuditLog", migration: "103-create-followup-audit-log.sql" },
+  { table: "FollowupAuditLog", migration: "107-create-followup-audit-log.sql" },
 ];
 
 // ── Legal Milestone steps ────────────────────────────────────────────────────
@@ -351,15 +351,26 @@ async function runEscalation() {
     );
   } catch (err) {
     console.error("[EscalationEngine] Error:", err.message);
+    // Re-throw so callers (the manual POST /api/followup-escalation/run
+    // endpoint, in particular) see the real failure instead of this
+    // function quietly resolving and the route reporting success: true.
+    // The scheduled calls below catch this themselves so a transient
+    // failure here never crashes the process.
+    throw err;
   }
 }
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 function startEscalationEngine() {
-  // Run immediately on startup, then on interval
-  runEscalation();
-  setInterval(runEscalation, INTERVAL_MS);
+  // Run immediately on startup, then on interval. runEscalation() now
+  // rethrows on failure (see above) so the manual /run endpoint can surface
+  // real errors — these two background call sites need their own catch so
+  // a failure here doesn't become an unhandled promise rejection.
+  runEscalation().catch(() => {});
+  setInterval(() => {
+    runEscalation().catch(() => {});
+  }, INTERVAL_MS);
   console.log(
     `[EscalationEngine] Started — interval: ${INTERVAL_MS / 1000 / 60} min`,
   );
