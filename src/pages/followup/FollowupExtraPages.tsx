@@ -265,7 +265,7 @@ function ScopedLogPage({
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-heading font-bold text-foreground">
+          <h1 className="text-xl font-heading font-bold text-foreground">
             {title}
           </h1>
           <p className="text-muted-foreground mt-1">{description}</p>
@@ -571,7 +571,7 @@ function ReportPage({
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-heading font-bold text-foreground">
+          <h1 className="text-xl font-heading font-bold text-foreground">
             {title}
           </h1>
           <p className="text-muted-foreground mt-1">{description}</p>

@@ -1307,7 +1307,7 @@ export default function DailyProgressReport() {
         <Breadcrumbs items={["Engineering", "Daily Progress Report"]} />
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
+            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
               <ClipboardList size={22} className="text-primary" />
               Daily Progress Report
             </h1>

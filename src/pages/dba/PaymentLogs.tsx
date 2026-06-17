@@ -227,7 +227,7 @@ export default function PaymentLogs() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold flex items-center gap-2">
+          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
             <Receipt size={20} className="text-emerald-500" /> Payment Logs
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">

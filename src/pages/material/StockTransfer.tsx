@@ -18,6 +18,8 @@ import {
   FolderKanban,
   Package,
   ChevronDown,
+  FileText,
+  ExternalLink,
 } from "lucide-react";
 import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getInventoryMaster } from "@/api/inventoryMasterApi";
@@ -26,8 +28,14 @@ import {
   getStockTransfers,
   type StockTransfer,
 } from "@/api/stockTransferApi";
+import {
+  createGRNFromTransfer,
+  getGRNsByTransfer,
+  type TransferGRNSummary,
+} from "@/api/grnApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { toast } from "sonner";
 
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(n ?? 0);
@@ -432,6 +440,180 @@ function ItemSearchRow({
   );
 }
 
+// ─── Make GRN from Transfer Modal ────────────────────────────────────────────
+function MakeGRNModal({
+  transfer,
+  onClose,
+  onSuccess,
+}: {
+  transfer: StockTransfer;
+  onClose: () => void;
+  onSuccess: (grnNo: string) => void;
+}) {
+  const [remarks, setRemarks] = useState(
+    `Auto-generated from Stock Transfer ${transfer.DocNo}`,
+  );
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleCreate = async () => {
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const result = await createGRNFromTransfer(transfer.TransferID, {
+        remarks,
+      });
+      onSuccess(result.grnNo);
+    } catch (err: any) {
+      setError(err.message || "Failed to create GRN");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/40">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-emerald-500/10">
+              <FileText size={16} className="text-emerald-600" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">
+                Create GRN from Transfer
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Ref: {transfer.DocNo}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-muted transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Route summary */}
+        <div className="px-5 pt-4 flex items-center gap-2 text-xs">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-orange-500/10 text-orange-600 border border-orange-400/20">
+            <Warehouse size={10} /> {transfer.FromGodownName}
+          </span>
+          <ArrowRight size={12} className="text-muted-foreground" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-400/20">
+            <Warehouse size={10} /> {transfer.ToGodownName}
+          </span>
+          <span className="ml-auto text-muted-foreground">
+            {fmtDate(transfer.TransferDate)}
+          </span>
+        </div>
+
+        {/* Items preview */}
+        <div className="px-5 pt-3 pb-2">
+          <p className="text-xs font-semibold text-muted-foreground mb-2">
+            Items ({transfer.TransferItems.length})
+          </p>
+          <div className="rounded-lg border border-border overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/40 border-b border-border">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">
+                    Item
+                  </th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">
+                    Qty
+                  </th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">
+                    UOM
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {transfer.TransferItems.map((item, i) => (
+                  <tr
+                    key={i}
+                    className="border-b border-border last:border-0 hover:bg-muted/20"
+                  >
+                    <td className="px-3 py-2 text-foreground">
+                      {item.itemName || item.itemId}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">
+                      {fmtNum(item.qty)}
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {item.uom || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Remarks */}
+        <div className="px-5 pb-4">
+          <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+            Remarks
+          </label>
+          <textarea
+            value={remarks}
+            onChange={(e) => setRemarks(e.target.value)}
+            rows={2}
+            className="w-full text-xs rounded-lg border border-border bg-background px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+
+        {/* Info note */}
+        <div className="mx-5 mb-4 flex items-start gap-2 rounded-lg bg-blue-500/5 border border-blue-400/20 px-3 py-2.5 text-xs text-blue-700 dark:text-blue-400">
+          <AlertCircle size={12} className="mt-0.5 shrink-0" />
+          <span>
+            Stock will be credited to <strong>{transfer.ToGodownName}</strong>.
+            The GRN is created in Draft/Pending status and follows the normal
+            approval workflow.
+          </span>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="mx-5 mb-3 flex items-start gap-2 rounded-lg bg-destructive/10 border border-destructive/30 px-3 py-2.5 text-xs text-destructive">
+            <AlertCircle size={12} className="mt-0.5 shrink-0" />
+            {error}
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="px-5 py-4 border-t border-border flex items-center justify-end gap-2.5 bg-muted/20">
+          <button
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="px-4 py-2 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleCreate}
+            disabled={isSubmitting}
+            className="px-4 py-2 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium transition-colors disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {isSubmitting ? (
+              <>
+                <RefreshCw size={11} className="animate-spin" /> Creating…
+              </>
+            ) : (
+              <>
+                <FileText size={11} /> Create GRN
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Transfer History ─────────────────────────────────────────────────────────
 function TransferHistory() {
   const { data, isLoading, refetch, isFetching } = useQuery({
@@ -441,106 +623,193 @@ function TransferHistory() {
   });
   const transfers: StockTransfer[] = data?.data ?? [];
 
+  const [grnModalTransfer, setGrnModalTransfer] =
+    useState<StockTransfer | null>(null);
+  const [successGrnNo, setSuccessGrnNo] = useState<string | null>(null);
+  // Track which transfers already have a GRN (transferId → GRN summary[])
+  const [grnMap, setGrnMap] = useState<Record<number, TransferGRNSummary[]>>(
+    {},
+  );
+
+  // After data loads, fetch GRN status for each transfer in background
+  useEffect(() => {
+    if (!transfers.length) return;
+    transfers.forEach((t) => {
+      getGRNsByTransfer(t.TransferID)
+        .then((grns) => {
+          if (grns.length) {
+            setGrnMap((prev) => ({ ...prev, [t.TransferID]: grns }));
+          }
+        })
+        .catch(() => {
+          /* non-fatal */
+        });
+    });
+  }, [transfers.length]);
+
+  const handleGRNSuccess = (grnNo: string) => {
+    setSuccessGrnNo(grnNo);
+    setGrnModalTransfer(null);
+    refetch();
+  };
+
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="px-5 py-3 border-b border-border flex items-center justify-between">
-        <div>
-          <p className="text-sm font-heading font-semibold text-foreground">
-            Transfer History
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Recent godown-to-godown stock movements
-          </p>
+    <>
+      {grnModalTransfer && (
+        <MakeGRNModal
+          transfer={grnModalTransfer}
+          onClose={() => setGrnModalTransfer(null)}
+          onSuccess={handleGRNSuccess}
+        />
+      )}
+
+      {successGrnNo && (
+        <div className="mb-3 flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-400">
+          <CheckCircle2 size={15} />
+          GRN <strong>{successGrnNo}</strong> created successfully from
+          transfer.
+          <button
+            onClick={() => setSuccessGrnNo(null)}
+            className="ml-auto p-0.5 hover:opacity-60 transition-opacity"
+          >
+            <X size={12} />
+          </button>
         </div>
-        <button
-          onClick={() => refetch()}
-          disabled={isFetching}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
-        >
-          <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />{" "}
-          Refresh
-        </button>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead className="border-b border-border bg-muted/40">
-            <tr>
-              {["Doc No", "Date", "From", "To", "Items", "Status", "By"].map(
-                (h) => (
+      )}
+
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+          <div>
+            <p className="text-sm font-heading font-semibold text-foreground">
+              Transfer History
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Recent godown-to-godown stock movements
+            </p>
+          </div>
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />{" "}
+            Refresh
+          </button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="border-b border-border bg-muted/40">
+              <tr>
+                {[
+                  "Doc No",
+                  "Date",
+                  "From",
+                  "To",
+                  "Items",
+                  "Status",
+                  "By",
+                  "GRN",
+                ].map((h) => (
                   <th
                     key={h}
                     className="px-4 py-3 text-left font-semibold text-muted-foreground"
                   >
                     {h}
                   </th>
-                ),
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i} className="border-b border-border">
-                  {Array.from({ length: 7 }).map((_, j) => (
-                    <td key={j} className="px-4 py-3">
-                      <div className="h-3 bg-muted rounded animate-pulse" />
-                    </td>
-                  ))}
-                </tr>
-              ))
-            ) : transfers.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={7}
-                  className="px-4 py-12 text-center text-muted-foreground"
-                >
-                  No transfers yet.
-                </td>
+                ))}
               </tr>
-            ) : (
-              transfers.map((t) => (
-                <tr
-                  key={t.TransferID}
-                  className="border-b border-border hover:bg-muted/20 transition-colors"
-                >
-                  <td className="px-4 py-3 font-mono text-primary font-semibold">
-                    {t.DocNo}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                    {fmtDate(t.TransferDate)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-orange-500/10 text-orange-600 border border-orange-400/20">
-                      <Warehouse size={9} /> {t.FromGodownName}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-600 border border-emerald-400/20">
-                      <Warehouse size={9} /> {t.ToGodownName}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {t.TransferItems.length} item
-                    {t.TransferItems.length !== 1 ? "s" : ""}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div>
-                      <ApprovalStatusChain
-                        table="StockTransfers"
-                        recordId={t.TransferID}
-                      />
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">
-                    {t.CreatedBy?.split("@")[0] || "—"}
+            </thead>
+            <tbody>
+              {isLoading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i} className="border-b border-border">
+                    {Array.from({ length: 8 }).map((_, j) => (
+                      <td key={j} className="px-4 py-3">
+                        <div className="h-3 bg-muted rounded animate-pulse" />
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              ) : transfers.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="px-4 py-12 text-center text-muted-foreground"
+                  >
+                    No transfers yet.
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                transfers.map((t) => {
+                  const linkedGRNs = grnMap[t.TransferID] ?? [];
+                  const hasGRN = linkedGRNs.length > 0;
+                  return (
+                    <tr
+                      key={t.TransferID}
+                      className="border-b border-border hover:bg-muted/20 transition-colors"
+                    >
+                      <td className="px-4 py-3 font-mono text-primary font-semibold">
+                        {t.DocNo}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                        {fmtDate(t.TransferDate)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-orange-500/10 text-orange-600 border border-orange-400/20">
+                          <Warehouse size={9} /> {t.FromGodownName}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-600 border border-emerald-400/20">
+                          <Warehouse size={9} /> {t.ToGodownName}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {t.TransferItems.length} item
+                        {t.TransferItems.length !== 1 ? "s" : ""}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div>
+                          <ApprovalStatusChain
+                            table="StockTransfers"
+                            recordId={t.TransferID}
+                          />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">
+                        {t.CreatedBy?.split("@")[0] || "—"}
+                      </td>
+                      {/* ── GRN column ── */}
+                      <td className="px-4 py-3">
+                        {hasGRN ? (
+                          <div className="flex flex-col gap-0.5">
+                            {linkedGRNs.map((g) => (
+                              <span
+                                key={g.GRNID}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-violet-500/10 text-violet-600 border border-violet-400/20 font-mono whitespace-nowrap"
+                              >
+                                <FileText size={9} /> {g.GRNNo || g.DocNo}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setGrnModalTransfer(t)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium border border-emerald-400/40 text-emerald-700 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/15 transition-colors whitespace-nowrap"
+                          >
+                            <FileText size={9} /> Make GRN
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
