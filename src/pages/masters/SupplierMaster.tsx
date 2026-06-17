@@ -38,13 +38,7 @@ import TreeDropdown from "@/components/common/TreeDropdown";
 const SUPPLIER_TYPE = "S";
 
 const SUPPLIER_CATEGORIES = ["Goods", "Services", "Both"] as const;
-const GST_TYPES = [
-  "Regular",
-  "Composition",
-  "Unregistered",
-  "SEZ",
-  "Deemed Export",
-] as const;
+const GST_TYPES = ["Registered", "Unregistered"] as const;
 const GST_STATES = [
   "Andaman and Nicobar Islands",
   "Andhra Pradesh",
@@ -441,9 +435,19 @@ const SupplierMaster: React.FC = () => {
   });
 
   const saving = createMut.isPending || updateMut.isPending;
-  const canSave = form.LHeadName.trim() !== "";
+  const canSave =
+    form.LHeadName.trim() !== "" &&
+    form.LHeadPan.trim() !== "" &&
+    (form.LGSTType !== "Registered" || form.LGST.trim() !== "");
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+  const normalizeGSTType = (t: string | null): string => {
+    if (!t) return "";
+    if (t === "Unregistered") return "Unregistered";
+    // Legacy values (Regular, Composition, SEZ, Deemed Export) all imply a registered GSTIN
+    return "Registered";
+  };
+
   const startEdit = (s: Supplier) => {
     setEditingId(s.LHeadId);
     setForm({
@@ -454,7 +458,7 @@ const SupplierMaster: React.FC = () => {
       LGST: s.LGST ?? "",
       LHeadPan: s.LHeadPan ?? "",
       supplierCategory: s.supplierCategory ?? "",
-      LGSTType: s.LGSTType ?? "",
+      LGSTType: normalizeGSTType(s.LGSTType),
       LGSTState: s.LGSTState ?? "",
       LHeadAddress: s.LHeadAddress ?? "",
       LBelongsTo: s.LBelongsTo != null ? String(s.LBelongsTo) : "",
@@ -473,6 +477,8 @@ const SupplierMaster: React.FC = () => {
   const handleSave = () => {
     const e: Partial<Record<keyof SupplierForm, boolean>> = {};
     if (!form.LHeadName.trim()) e.LHeadName = true;
+    if (!form.LHeadPan.trim()) e.LHeadPan = true;
+    if (form.LGSTType === "Registered" && !form.LGST.trim()) e.LGST = true;
     if (Object.keys(e).length) {
       setErrors(e);
       return;
@@ -796,42 +802,29 @@ const SupplierMaster: React.FC = () => {
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-x-6 gap-y-5">
-                {/* GST Number */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    GST Number
-                  </label>
-                  <input
-                    value={form.LGST}
-                    onChange={(e) =>
-                      setForm((p) => ({
-                        ...p,
-                        LGST: e.target.value.toUpperCase(),
-                      }))
-                    }
-                    placeholder="e.g. 27AAPFU0939F1ZV"
-                    maxLength={15}
-                    className={`${inputCls} font-mono`}
-                  />
-                </div>
-
                 {/* PAN */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    PAN Number
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    PAN Number <span className="text-destructive">*</span>
                   </label>
                   <input
                     value={form.LHeadPan}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setForm((p) => ({
                         ...p,
                         LHeadPan: e.target.value.toUpperCase(),
-                      }))
-                    }
+                      }));
+                      setErrors((p) => ({ ...p, LHeadPan: false }));
+                    }}
                     placeholder="e.g. AAPFU0939F"
                     maxLength={10}
-                    className={`${inputCls} font-mono`}
+                    className={`${inputCls} font-mono ${errors.LHeadPan ? "border-red-400" : ""}`}
                   />
+                  {errors.LHeadPan && (
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertCircle size={11} /> Required
+                    </p>
+                  )}
                 </div>
 
                 {/* GST Type */}
@@ -842,11 +835,45 @@ const SupplierMaster: React.FC = () => {
                   <TreeDropdown
                     variant="flat"
                     value={form.LGSTType}
-                    onChange={(v) => setForm((p) => ({ ...p, LGSTType: v }))}
+                    onChange={(v) => {
+                      setForm((p) => ({
+                        ...p,
+                        LGSTType: v,
+                        LGST: v === "Registered" ? p.LGST : "",
+                      }));
+                      setErrors((p) => ({ ...p, LGST: false }));
+                    }}
                     options={GST_TYPES.map((t) => ({ value: t, label: t }))}
                     placeholder="Select type…"
                   />
                 </div>
+
+                {/* GST Number — only when Registered */}
+                {form.LGSTType === "Registered" && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                      GST Number <span className="text-destructive">*</span>
+                    </label>
+                    <input
+                      value={form.LGST}
+                      onChange={(e) => {
+                        setForm((p) => ({
+                          ...p,
+                          LGST: e.target.value.toUpperCase(),
+                        }));
+                        setErrors((p) => ({ ...p, LGST: false }));
+                      }}
+                      placeholder="e.g. 27AAPFU0939F1ZV"
+                      maxLength={15}
+                      className={`${inputCls} font-mono ${errors.LGST ? "border-red-400" : ""}`}
+                    />
+                    {errors.LGST && (
+                      <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                        <AlertCircle size={11} /> Required
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* GST State */}
                 <div className="space-y-1.5">
