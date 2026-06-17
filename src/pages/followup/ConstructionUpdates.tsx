@@ -478,7 +478,7 @@ export function ConstructionUpdatesPage() {
 
   const projectItems: ComboItem[] = useMemo(
     () =>
-      filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map(
+      filterProjectsByCompany(meta?.projects ?? [] as any[], form.CompanyId).map(
         (p) => ({
           value: String(p.Id),
           label: p.Name,

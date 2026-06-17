@@ -7,7 +7,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
 
-// Bust cache on startup so IsMain filter takes effect immediately
+// Bust cache on startup so the IsProjectDefault computation takes effect immediately
 bumpCacheVersion("godowns").catch(() => {});
 
 // ─── GET all godowns ──────────────────────────────────────────────────────────
@@ -21,11 +21,26 @@ router.get("/", cache("godowns", 120), async (req, res) => {
         g.EnterpriseID, g.ProjectID, g.Location,
         g.IsActive, g.IsDeleted, g.CreatedAt, g.UpdatedAt,
         e.name AS EnterpriseName,
-        p.name AS ProjectName
+        p.name AS ProjectName,
+        -- A project's "default" godown is the one auto-created when the
+        -- project itself was created (see projectMaster.js). There's no
+        -- dedicated flag for this, but it's always the earliest godown
+        -- row for that ProjectID, so we identify it by CreatedAt order.
+        -- The singleton IsMain concept was removed (migration 104); this
+        -- replaces it with a per-project equivalent.
+        CASE
+          WHEN g.ProjectID IS NOT NULL AND g.GodownID = (
+            SELECT TOP 1 g2.GodownID
+            FROM dbo.Godowns g2
+            WHERE g2.ProjectID = g.ProjectID AND g2.IsDeleted = 0
+            ORDER BY g2.CreatedAt ASC, g2.GodownID ASC
+          ) THEN CAST(1 AS BIT)
+          ELSE CAST(0 AS BIT)
+        END AS IsProjectDefault
       FROM dbo.Godowns g
       LEFT JOIN dbo.enterprise e ON e.id = g.EnterpriseID
       LEFT JOIN dbo.enterprise p ON p.id = g.ProjectID AND p.business_type = 'P'
-      WHERE g.IsDeleted = 0 AND g.IsMain = 0
+      WHERE g.IsDeleted = 0
       ORDER BY g.GodownName
     `);
     res.json({ data: result.recordset, total: result.recordset.length });

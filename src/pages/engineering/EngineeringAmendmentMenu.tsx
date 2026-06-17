@@ -382,6 +382,8 @@ function AmendmentSubRows({
   queryClient: ReturnType<typeof useQueryClient>;
 }) {
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<Amendment | null>(null);
+  const [rejectNote, setRejectNote] = useState("");
 
   const query = useQuery({
     queryKey: ["amendments", docType, String(docId)],
@@ -416,9 +418,12 @@ function AmendmentSubRows({
   });
 
   const rejectMut = useMutation({
-    mutationFn: rejectAmendment,
+    mutationFn: ({ id, note }: { id: number; note: string }) =>
+      rejectAmendment(id, note),
     onSuccess: () => {
       toast.warning("Amendment rejected");
+      setRejectTarget(null);
+      setRejectNote("");
       queryClient.invalidateQueries({
         queryKey: ["amendments", docType, String(docId)],
       });
@@ -538,7 +543,10 @@ function AmendmentSubRows({
                   </button>
                   <button
                     type="button"
-                    onClick={() => rejectMut.mutate(a.Id)}
+                    onClick={() => {
+                      setRejectTarget(a);
+                      setRejectNote("");
+                    }}
                     className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 text-rose-500 transition"
                     title="Reject"
                   >
@@ -577,6 +585,70 @@ function AmendmentSubRows({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={!!rejectTarget}
+        onOpenChange={(o) => {
+          if (!rejectMut.isPending && !o) {
+            setRejectTarget(null);
+            setRejectNote("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reject Amendment</DialogTitle>
+            <DialogDescription>
+              Provide a reason before rejecting this amendment.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>
+              Rejection Note <span className="text-destructive">*</span>
+            </Label>
+            <Textarea
+              rows={3}
+              value={rejectNote}
+              onChange={(e) => setRejectNote(e.target.value)}
+              placeholder="Reason for rejection (required)"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={rejectMut.isPending}
+              onClick={() => {
+                setRejectTarget(null);
+                setRejectNote("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={
+                !rejectNote.trim() || rejectMut.isPending || !rejectTarget
+              }
+              onClick={() => {
+                if (rejectTarget)
+                  rejectMut.mutate({
+                    id: rejectTarget.Id,
+                    note: rejectNote.trim(),
+                  });
+              }}
+            >
+              {rejectMut.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Rejecting…
+                </>
+              ) : (
+                "Confirm Reject"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
