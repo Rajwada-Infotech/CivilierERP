@@ -213,6 +213,14 @@ router.post("/", async (req, res) => {
       });
     }
 
+    // ── PAN is mandatory for suppliers ──
+    if (LHeadType === "S" && !(LHeadPan && LHeadPan.trim())) {
+      return res.status(400).json({
+        error: "PAN Number is mandatory for suppliers.",
+        code: "MISSING_PAN",
+      });
+    }
+
     const pool = getPool();
     const columnMeta = await getAccountHeadColumnMeta();
     const request = pool
@@ -515,6 +523,14 @@ router.put("/:id", async (req, res) => {
       return res.status(400).json({
         error: "Please select an Account Group before saving a Ledger Account.",
         code: "MISSING_ACCOUNT_GROUP",
+      });
+    }
+
+    // ── PAN is mandatory for suppliers ──
+    if (LHeadType === "S" && !(LHeadPan && LHeadPan.trim())) {
+      return res.status(400).json({
+        error: "PAN Number is mandatory for suppliers.",
+        code: "MISSING_PAN",
       });
     }
 
