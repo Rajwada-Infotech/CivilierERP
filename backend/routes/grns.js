@@ -722,44 +722,21 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
     const docSerial =
       parts.length >= 1 ? parseInt(parts[parts.length - 1], 10) || null : null;
 
-    const grnResult = await transaction
-      .request()
-      .input("GRNNo", sql.NVarChar(50), finalDocNo)
-      .input("GRNDate", sql.Date, grnDate)
-      .input("SupplierID", sql.Int, supplierId)
-      .input("POID", sql.Int, poId || null)
-      .input("GRNItems", sql.NVarChar(sql.MAX), JSON.stringify(grnItems || []))
-      .input("Status", sql.NVarChar(50), status || "Draft")
-      .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
-      .input("DocTypeId", sql.Int, resolvedDocTypeId || null)
-      .input("DocNo", sql.NVarChar(100), finalDocNo)
-      .input("DocYear", sql.SmallInt, docYear)
-      .input("DocSerial", sql.Int, docSerial)
-      .input("ParentDocNo", sql.NVarChar(100), parentDocNo)
-      .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo)
-      .input("TotalAmount", sql.Decimal(18, 2), computeGRNTotal(grnItems))
-      .input("GodownID", sql.Int, godownId ? parseInt(godownId, 10) : null)
-      .input("CreatedDate", sql.DateTime2, new Date()).query(`
-        INSERT INTO GoodsReceiptNotes
-          (GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks,
-           DocTypeId, DocNo, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
-           TotalAmount, GodownID, CreatedDate)
-        OUTPUT INSERTED.GRNID
-        VALUES
-          (@GRNNo, @GRNDate, @SupplierID, @POID, @GRNItems, @Status, @Remarks,
-           @DocTypeId, @DocNo, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
-           @TotalAmount, @GodownID, @CreatedDate)
-      `);
-
-    const grnId = grnResult.recordset[0].GRNID;
-
-    // NOTE: backPatchRecordId runs on pool (outside transaction).
-    // Moved to after transaction.commit() to avoid lock contention.
-
-    // Godown resolution priority:
+    // Godown resolution priority (resolved BEFORE the insert so the row is
+    // written correctly the first time):
     // 1. Explicit godownId from client
     // 2. Project's linked godown (when PO has a ProjectId)
     // 3. Main Godown fallback
+    // NOTE: this used to run AFTER the insert, then patch GodownID via a
+    // separate `pool.request()` UPDATE on the same row. That UPDATE ran on a
+    // different pooled connection than the still-open `transaction`, which
+    // already held an exclusive lock on this row from the INSERT below.
+    // The UPDATE would block waiting on that lock, but the only thing that
+    // could release the lock (transaction.commit()) was sequenced AFTER the
+    // UPDATE — a self-deadlock that hung until the client request timeout
+    // fired (ETIMEOUT), every single time a GRN was created. Resolving the
+    // godown first and inserting it directly removes the second statement
+    // — and the deadlock — entirely.
     let resolvedGodownId = godownId ? parseInt(godownId, 10) : null;
     if (!resolvedGodownId) {
       // Try to get ProjectId from the PO if not provided in body
@@ -784,19 +761,39 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
       }
     }
 
-    // Also update the GRN row's GodownID to reflect the resolved godown
-    // (the INSERT above stored the raw client value; patch it now if it changed)
+    const grnResult = await transaction
+      .request()
+      .input("GRNNo", sql.NVarChar(50), finalDocNo)
+      .input("GRNDate", sql.Date, grnDate)
+      .input("SupplierID", sql.Int, supplierId)
+      .input("POID", sql.Int, poId || null)
+      .input("GRNItems", sql.NVarChar(sql.MAX), JSON.stringify(grnItems || []))
+      .input("Status", sql.NVarChar(50), status || "Draft")
+      .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
+      .input("DocTypeId", sql.Int, resolvedDocTypeId || null)
+      .input("DocNo", sql.NVarChar(100), finalDocNo)
+      .input("DocYear", sql.SmallInt, docYear)
+      .input("DocSerial", sql.Int, docSerial)
+      .input("ParentDocNo", sql.NVarChar(100), parentDocNo)
+      .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo)
+      .input("TotalAmount", sql.Decimal(18, 2), computeGRNTotal(grnItems))
+      .input("GodownID", sql.Int, resolvedGodownId)
+      .input("CreatedDate", sql.DateTime2, new Date()).query(`
+        INSERT INTO GoodsReceiptNotes
+          (GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks,
+           DocTypeId, DocNo, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
+           TotalAmount, GodownID, CreatedDate)
+        OUTPUT INSERTED.GRNID
+        VALUES
+          (@GRNNo, @GRNDate, @SupplierID, @POID, @GRNItems, @Status, @Remarks,
+           @DocTypeId, @DocNo, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
+           @TotalAmount, @GodownID, @CreatedDate)
+      `);
+
+    const grnId = grnResult.recordset[0].GRNID;
+
     // IMPORTANT: use transaction.request() not pool.request() — the GRN row
     // only exists inside this uncommitted transaction; pool sees nothing yet.
-    if (resolvedGodownId) {
-      await transaction
-        .request()
-        .input("GRNID", sql.Int, grnId)
-        .input("GodownID", sql.Int, resolvedGodownId)
-        .query(
-          "UPDATE dbo.GoodsReceiptNotes SET GodownID = @GodownID WHERE GRNID = @GRNID",
-        );
-    }
     await insertStockLedgerEntries(
       transaction,
       grnId,
@@ -894,7 +891,7 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
   } catch (err) {
     await transaction.rollback().catch(() => {});
     console.error("CREATE GRN FULL ERROR:", err);
-    if (res.headersSent) return; // timeout middleware may have already sent 503
+    if (res.headersSent) return; // timeout middleware already sent 503
     res.status(500).json({
       error: "Failed to create GRN",
       message: err.message,
@@ -991,8 +988,14 @@ router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
         "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
       );
 
-    // Preserve the godown that was set when the GRN was created
-    const grnGodownRes = await pool
+    // Preserve the godown that was set when the GRN was created.
+    // Must read via `transaction`, not `pool` — the UPDATE above is still
+    // uncommitted and holds a lock on this row on the transaction's
+    // connection. A read from a different pooled connection would block
+    // waiting on that lock until transaction.commit() runs, but commit()
+    // is sequenced after this read — the same self-deadlock as the POST
+    // handler's old GodownID UPDATE, just with a SELECT instead.
+    const grnGodownRes = await transaction
       .request()
       .input("GID", sql.Int, grnId)
       .query(
@@ -1016,6 +1019,7 @@ router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
   } catch (err) {
     await transaction.rollback().catch(() => {});
     console.error("UPDATE GRN ERROR:", err);
+    if (res.headersSent) return; // timeout middleware already sent 503
     res.status(500).json({
       error: "Failed to update GRN",
       message: err.message,

@@ -30,6 +30,7 @@ import {
   exportToXlsx,
   exportToPdf,
   type ExportColumn,
+  type PdfStatCard,
 } from "@/lib/export";
 import { toast } from "sonner";
 
@@ -52,6 +53,8 @@ export interface ExportMenuProps {
   companyName?: string;
   /** Base64 or URL logo from enterprise master — shown in PDF header */
   logoBase64?: string;
+  /** Summary stat cards rendered below the PDF header band */
+  stats?: PdfStatCard[];
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -65,6 +68,7 @@ export function ExportMenu({
   disabled = false,
   companyName,
   logoBase64,
+  stats,
 }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState<"pdf" | "xlsx" | "csv" | null>(null);
@@ -114,6 +118,7 @@ export function ExportMenu({
           subtitle,
           companyName,
           logoBase64,
+          stats,
         }),
     },
     {

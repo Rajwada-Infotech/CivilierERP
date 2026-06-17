@@ -63,7 +63,7 @@ export const FinYearProvider = ({ children }: { children: ReactNode }) => {
 
   const finYears: FinYear[] = Array.isArray(dbData)
     ? dbData
-        .map((item: any) => ({
+        .map((item: any): FinYear => ({
           id: String(item.FId),
           year: item.FName || "",
           startDate: item.FStartDate ? toLocalDateStr(item.FStartDate) : "",
