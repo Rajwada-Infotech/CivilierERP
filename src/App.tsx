@@ -160,6 +160,9 @@ const UnitOfMeasurementMaster = lazy(
   () => import("./pages/material/UnitOfMeasurementMaster"),
 );
 const InventoryMaster = lazy(() => import("./pages/material/InventoryMaster"));
+const AccessCardMaster = lazy(
+  () => import("./pages/material/AccessCardMaster"),
+);
 const Stock = lazy(() => import("./pages/material/Stock"));
 const StockTransfer = lazy(() => import("./pages/material/StockTransfer"));
 const EnterpriseMasterPage = lazy(
@@ -309,6 +312,16 @@ const AgreementWorkflowPage = lazy(
 );
 const DocumentVaultPage = lazy(() => import("./pages/followup/DocumentVault"));
 const CommunicatorPage = lazy(() => import("./pages/followup/Communicator"));
+const ApplicantsPipelinePage = lazy(() =>
+  import("./pages/followup/FollowupPipelinePage").then((module) => ({
+    default: module.ApplicantsPage,
+  })),
+);
+const UnitSelectionPipelinePage = lazy(() =>
+  import("./pages/followup/FollowupPipelinePage").then((module) => ({
+    default: module.UnitSelectionPage,
+  })),
+);
 const FollowupPaymentsPage = lazy(() =>
   import("./pages/followup/FinancePayments").then((module) => ({
     default: module.FinancePaymentsPage,
@@ -919,6 +932,27 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/followup/sales/pipeline/applicants"
+        element={
+          <ProtectedRoute>
+            <ApplicantsPipelinePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/sales/pipeline/unit-selections"
+        element={
+          <ProtectedRoute>
+            <UnitSelectionPipelinePage />
+          </ProtectedRoute>
+        }
+      />
+      {/* Note: FollowupPipelinePage also exports an "agreements" entity
+          (AgreementsPage) hitting the same /api/followup-agreements
+          endpoint as the bespoke page below. Intentionally not routed
+          here to avoid two divergent CRUD UIs against the same data —
+          /followup/agreement/agreements (Agreements.tsx) is canonical. */}
 
       {/* MASTERS */}
       <Route
@@ -1226,6 +1260,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/masters/access-card"
+        element={
+          <ProtectedRoute>
+            <AccessCardMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/masters/tds"
         element={
           <ProtectedRoute>
@@ -1333,14 +1375,11 @@ function AppRoutes() {
       />
 
       {/* DBA CONSOLE */}
-      <Route
-        path="/dba/:userId?"
-        element={
-          <ProtectedRoute>
-            <DBADashboard />
-          </ProtectedRoute>
-        }
-      />
+      {/* Static paths declared before the dynamic :userId? route below —
+          this used to rely on React Router's path-ranking to disambiguate
+          /dba/control-panel etc. from /dba/:userId?. Declaring statics
+          first removes that dependency so route order can't silently
+          break this if these routes are ever moved into a nested <Route>. */}
       <Route
         path="/dba/control-panel"
         element={
@@ -1370,6 +1409,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <PaymentLogs />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dba/:userId?"
+        element={
+          <ProtectedRoute>
+            <DBADashboard />
           </ProtectedRoute>
         }
       />

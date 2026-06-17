@@ -149,6 +149,7 @@ interface POForm {
   remarks: string;
   docTypeId: number | null;
   docNo: string;
+  status: string;
 }
 
 interface DropdownOption {
@@ -237,6 +238,7 @@ const EMPTY_FORM = (): POForm => ({
   remarks: "",
   docTypeId: null,
   docNo: "",
+  status: "Draft",
 });
 
 // ─── Shared styles (matching WorkOrderMaster) ─────────────────────────────────
@@ -1529,6 +1531,7 @@ const PurchaseOrderMaster: React.FC = () => {
       remarks: raw.Remarks ?? "",
       docTypeId,
       docNo,
+      status: raw.Status ?? "Draft",
     });
 
     // Restore line items from POItems (full record) or legacy fields
