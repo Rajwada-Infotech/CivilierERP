@@ -9,7 +9,10 @@ const { getPool, sql } = require("../db");
 // Only the expense-booking branch populates GrnTotalAmount and BillingTermsData.
 const NULL_EXTRA = `
   CAST(NULL AS DECIMAL(18,2)) AS GrnTotalAmount,
-  CAST(NULL AS NVARCHAR(MAX)) AS BillingTermsData,`;
+  CAST(NULL AS NVARCHAR(MAX)) AS BillingTermsData,
+  CAST(NULL AS NVARCHAR(100)) AS SourceTransferDocNo,
+  CAST(NULL AS NVARCHAR(255)) AS FromGodownName,
+  CAST(NULL AS NVARCHAR(255)) AS ToGodownName,`;
 
 router.get("/", async (req, res) => {
   try {
@@ -126,7 +129,11 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)                     AS ContractorName,
           s.LHeadName                               AS SupplierName,
           grn.TotalAmount                           AS Amount,
-          ${NULL_EXTRA}
+          CAST(NULL AS DECIMAL(18,2))               AS GrnTotalAmount,
+          CAST(NULL AS NVARCHAR(MAX))               AS BillingTermsData,
+          grn.SourceTransferDocNo                   AS SourceTransferDocNo,
+          fg.GodownName                             AS FromGodownName,
+          tg.GodownName                             AS ToGodownName,
           CAST(ISNULL(po.PurchaseOrderNo, '') AS NVARCHAR(255)) AS CreatedBy,
           ISNULL((
             SELECT TOP 1 ApproverEmail
@@ -164,6 +171,9 @@ router.get("/", async (req, res) => {
         FROM dbo.GoodsReceiptNotes grn
         LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId = grn.SupplierID
         LEFT JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
+        LEFT JOIN dbo.StockTransfers st ON st.TransferID = grn.SourceTransferID
+        LEFT JOIN dbo.Godowns fg ON fg.GodownID = st.FromGodownID
+        LEFT JOIN dbo.Godowns tg ON tg.GodownID = st.ToGodownID
         WHERE grn.Status = 'Pending'
       `);
     }
@@ -191,6 +201,9 @@ router.get("/", async (req, res) => {
           END                      AS GrnTotalAmount,
           -- Billing terms JSON so the frontend can apply them on top of GrnTotalAmount.
           eb.EBillingTermsData     AS BillingTermsData,
+          CAST(NULL AS NVARCHAR(100)) AS SourceTransferDocNo,
+          CAST(NULL AS NVARCHAR(255)) AS FromGodownName,
+          CAST(NULL AS NVARCHAR(255)) AS ToGodownName,
           CAST(ISNULL(u_created.name, CAST(eb.ECreatedBy AS NVARCHAR(255))) AS NVARCHAR(255))  AS CreatedBy,
           CAST(ISNULL(u_approved.name, '') AS NVARCHAR(255))                                    AS ApprovedBy,
           ''                       AS ApprovedAt,

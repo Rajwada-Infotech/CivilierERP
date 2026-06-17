@@ -22,6 +22,8 @@ import {
   Inbox,
   CheckCircle2,
   XCircle,
+  ArrowLeftRight,
+  Warehouse,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -45,6 +47,10 @@ interface InboxItem {
   // expense-booking only — null for all other modules
   GrnTotalAmount: number | null;
   BillingTermsData: string | null;
+  // goods-receipt (transfer GRNs) — null for non-transfer GRNs
+  SourceTransferDocNo: string | null;
+  FromGodownName: string | null;
+  ToGodownName: string | null;
 }
 
 // ─── Module config ────────────────────────────────────────────────────────────
@@ -350,9 +356,26 @@ const InboxRow: React.FC<{
           <StatusBadge status={item.Status} />
         </div>
 
-        {/* Row 2: party + date */}
+        {/* Row 2: party / transfer route + date */}
         <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-          <span className="truncate">{party}</span>
+          {item.Module === "goods-receipt" && item.SourceTransferDocNo ? (
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <span className="font-mono text-[11px] font-semibold text-violet-600 dark:text-violet-400 truncate">
+                {item.SourceTransferDocNo}
+              </span>
+              {item.FromGodownName && item.ToGodownName && (
+                <span className="flex items-center gap-1 text-[10px] truncate">
+                  <Warehouse size={9} className="shrink-0 text-orange-500" />
+                  <span className="truncate">{item.FromGodownName}</span>
+                  <ArrowLeftRight size={8} className="shrink-0" />
+                  <Warehouse size={9} className="shrink-0 text-emerald-500" />
+                  <span className="truncate">{item.ToGodownName}</span>
+                </span>
+              )}
+            </div>
+          ) : (
+            <span className="truncate">{party}</span>
+          )}
           <span className="shrink-0">{fmtDate(item.RecordDate)}</span>
         </div>
 
@@ -401,8 +424,28 @@ const InboxRow: React.FC<{
         {/* Col 2 — Date */}
         <p className="text-xs text-foreground">{fmtDate(item.RecordDate)}</p>
 
-        {/* Col 3 — Party */}
-        <p className="text-xs text-foreground truncate">{party}</p>
+        {/* Col 3 — Party / Transfer route */}
+        {item.Module === "goods-receipt" && item.SourceTransferDocNo ? (
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">
+              Transfer ref
+            </span>
+            <span className="font-mono text-xs font-semibold text-violet-600 dark:text-violet-400 truncate">
+              {item.SourceTransferDocNo}
+            </span>
+            {item.FromGodownName && item.ToGodownName && (
+              <span className="flex items-center gap-1 text-[10px] text-muted-foreground truncate">
+                <Warehouse size={9} className="shrink-0 text-orange-500" />
+                <span className="truncate">{item.FromGodownName}</span>
+                <ArrowLeftRight size={8} className="shrink-0" />
+                <Warehouse size={9} className="shrink-0 text-emerald-500" />
+                <span className="truncate">{item.ToGodownName}</span>
+              </span>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-foreground truncate">{party}</p>
+        )}
 
         {/* Col 4 — Amount */}
         <p className="text-xs font-mono font-semibold text-foreground">
@@ -581,7 +624,7 @@ const ApprovalInbox: React.FC = () => {
                 {[
                   "Module / Ref",
                   "Date",
-                  "Party",
+                  "Party / Transfer",
                   "Amount",
                   "Approved/Rejected By",
                   "Status",
