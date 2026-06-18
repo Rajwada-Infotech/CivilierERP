@@ -349,7 +349,11 @@ function PaymentHistoryTable({
                   className="border-b border-border/50 hover:bg-muted/20 transition-colors"
                 >
                   <td className="px-4 py-3 font-mono text-xs text-violet-600 font-semibold whitespace-nowrap">
-                    {r.RPDocNo || "—"}
+                    {r.RPDocNo || (
+                      <span className="text-muted-foreground/50 text-[10px] italic">
+                        No doc no
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs font-semibold text-foreground whitespace-nowrap">
                     {r.RPReceivedFrom}
@@ -403,7 +407,11 @@ function PaymentHistoryTable({
                   Payment Receipt
                 </p>
                 <p className="font-mono font-bold text-foreground">
-                  {viewing.RPDocNo || "—"}
+                  {viewing.RPDocNo || (
+                    <span className="text-muted-foreground italic text-sm">
+                      No doc no
+                    </span>
+                  )}
                 </p>
               </div>
               <button
@@ -506,11 +514,36 @@ export default function Payment() {
     staleTime: 60_000,
   });
   const orders: SaleOrder[] = soData?.data ?? [];
-  // Only approved orders are eligible for payment
-  const eligibleOrders = orders.filter((o) =>
-    ["Approved", "Approval · Approved", "Completed"].some((s) =>
-      o.Status?.includes("Approved"),
-    ),
+  const { data: paymentsData, isLoading: paymentsLoading } = useQuery({
+    queryKey: ["received-payments"],
+    queryFn: () => getReceivedPayments(1, 100),
+    staleTime: 30_000,
+  });
+  const paymentHistory: ReceivedPaymentRecord[] = paymentsData?.data ?? [];
+
+  // Doc numbers of sale orders that already have an active (non-Rejected) payment
+  const paidSaleOrderDocNos = useMemo(() => {
+    const s = new Set<string>();
+    paymentHistory.forEach((r) => {
+      if (
+        (r.RPRemarks?.includes("[SalePayment]") ||
+          r.RPReceivedFrom?.startsWith("SO-")) &&
+        r.RPStatus !== "Rejected"
+      ) {
+        if (r.RPReceivedFrom) s.add(r.RPReceivedFrom);
+      }
+    });
+    return s;
+  }, [paymentHistory]);
+
+  // Only approved orders that don't already have an active payment
+  const eligibleOrders = useMemo(
+    () =>
+      orders.filter(
+        (o) =>
+          o.Status?.includes("Approved") && !paidSaleOrderDocNos.has(o.DocNo),
+      ),
+    [orders, paidSaleOrderDocNos],
   );
 
   const { data: banksRaw, isLoading: banksLoading } = useQuery({
@@ -519,13 +552,6 @@ export default function Payment() {
     staleTime: 120_000,
   });
   const banks: BankRecord[] = (banksRaw ?? []).filter((b) => b.BStatus);
-
-  const { data: paymentsData, isLoading: paymentsLoading } = useQuery({
-    queryKey: ["received-payments"],
-    queryFn: () => getReceivedPayments(1, 100),
-    staleTime: 30_000,
-  });
-  const paymentHistory: ReceivedPaymentRecord[] = paymentsData?.data ?? [];
 
   // ── Form state ────────────────────────────────────────────────────────────
   const [selectedOrder, setSelectedOrder] = useState<SaleOrder | null>(null);

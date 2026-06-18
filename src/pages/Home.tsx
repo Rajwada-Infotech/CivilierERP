@@ -984,8 +984,13 @@ export default function HomePage() {
                     accent: sal?.pendingApproval ? "#f59e0b" : undefined,
                   },
                   {
-                    label: "This month (₹L)",
-                    value: Math.round((sal?.thisMonthAmount ?? 0) / 100000),
+                    label: "This month",
+                    value: (() => {
+                      const amt = sal?.thisMonthAmount ?? 0;
+                      if (amt === 0) return "₹0";
+                      if (amt < 100000) return `₹${(amt / 1000).toFixed(1)}K`;
+                      return `₹${(amt / 100000).toFixed(2)}L`;
+                    })(),
                     accent: "#06b6d4",
                     icon: TrendingUp,
                   },
