@@ -162,6 +162,8 @@ const UnitOfMeasurementMaster = lazy(
 const InventoryMaster = lazy(() => import("./pages/material/InventoryMaster"));
 const Stock = lazy(() => import("./pages/material/Stock"));
 const StockTransfer = lazy(() => import("./pages/material/StockTransfer"));
+const SaleOrder = lazy(() => import("./pages/sales/SaleOrder"));
+const SalesPayment = lazy(() => import("./pages/sales/Payment"));
 const EnterpriseMasterPage = lazy(
   () => import("./pages/admin/masters/EnterpriseMaster"),
 );
@@ -1150,6 +1152,24 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <StockTransfer />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* SALES */}
+      <Route
+        path="/sales/sale-order"
+        element={
+          <ProtectedRoute>
+            <SaleOrder />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/sales/payment"
+        element={
+          <ProtectedRoute>
+            <SalesPayment />
           </ProtectedRoute>
         }
       />
