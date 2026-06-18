@@ -16,7 +16,7 @@ import {
   MessageSquare,
   Package,
   ShieldCheck,
-  ShoppingCart,
+  ShelvingUnit,
   User,
   Wrench,
 } from "lucide-react";
@@ -87,7 +87,7 @@ const MODULE_HEADER: Record<
   },
   sales: {
     label: "Sales",
-    icon: ShoppingCart,
+    icon: ShelvingUnit,
     color: "#a855f7",
     from: "from-purple-500/30",
     to: "to-purple-500/0",

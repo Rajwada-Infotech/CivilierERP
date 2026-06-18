@@ -34,7 +34,7 @@ import {
   ClipboardCheck,
   ShieldCheck,
   History,
-  ShoppingCart,
+  ShelvingUnit,
 } from "lucide-react";
 import type { Module } from "@/contexts/ModuleContext";
 
@@ -588,7 +588,7 @@ export const MODULE_QUERIES: Record<NonNullable<Module>, SuggestedQuery[]> = {
       label: "Show recent sale orders",
       module: "Sales",
       route: "/sales/sale-order",
-      icon: ShoppingCart,
+      icon: ShelvingUnit,
       accent: "#a855f7",
     },
   ],
