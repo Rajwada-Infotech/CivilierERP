@@ -16,6 +16,7 @@ import {
   MessageSquare,
   Package,
   ShieldCheck,
+  ShoppingCart,
   User,
   Wrench,
 } from "lucide-react";
@@ -29,6 +30,7 @@ import { buildAdminNavItems } from "./sidebars/AdminSidebar";
 import { dbaNavItems } from "./sidebars/DbaSidebar";
 import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
 import { buildTicketNavItems } from "./sidebars/TicketSidebar";
+import { salesNavItems } from "./sidebars/SalesSidebar";
 import { SidebarNav, NavItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar ──────────────────────────────────────────────────────────────
@@ -82,6 +84,13 @@ const MODULE_HEADER: Record<
     color: "#ec4899",
     from: "from-pink-500/30",
     to: "to-pink-500/0",
+  },
+  sales: {
+    label: "Sales",
+    icon: ShoppingCart,
+    color: "#a855f7",
+    from: "from-purple-500/30",
+    to: "to-purple-500/0",
   },
   admin: {
     label: "Admin",
@@ -217,6 +226,8 @@ export const AppSidebar = () => {
         return followupNavItems;
       case "ticket":
         return buildTicketNavItems(isAdminTier);
+      case "sales":
+        return salesNavItems;
       case "admin":
         return buildAdminNavItems(pendingApprovalCount);
       default:
