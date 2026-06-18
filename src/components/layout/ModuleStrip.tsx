@@ -20,19 +20,6 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./layoutContexts";
 
-// ── 4-pointed sparkle logo ────────────────────────────────────────────────────
-
-const SparkleIcon = ({ size = 18 }: { size?: number }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    <path d="M12 2C12 2 13.2 8.8 15.5 10.5C17.8 12.2 24 12 24 12C24 12 17.8 11.8 15.5 13.5C13.2 15.2 12 22 12 22C12 22 10.8 15.2 8.5 13.5C6.2 11.8 0 12 0 12C0 12 6.2 12.2 8.5 10.5C10.8 8.8 12 2 12 2Z" />
-  </svg>
-);
 
 // ── Module definitions ────────────────────────────────────────────────────────
 // ringRgb: raw "r,g,b" used to build valid RGBA strings at runtime
@@ -184,13 +171,19 @@ export const ModuleStrip: React.FC = () => {
           />
 
           {/* ── Logo / Sparkle section ─────────────────────────────────────── */}
-          <div className="relative z-10 flex justify-center items-center pt-5 pb-6">
+          <div className="relative z-10 flex justify-center items-center pt-5 pb-5">
             <motion.div
               animate={{ rotate: [0, 8, -8, 0], scale: [1, 1.08, 1] }}
               transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-              className="text-primary"
             >
-              <SparkleIcon size={20} />
+              <img
+                src="/loader.gif"
+                alt="CivilierERP"
+                width={50}
+                height={50}
+                className="object-contain select-none pointer-events-none"
+                draggable={false}
+              />
             </motion.div>
           </div>
 

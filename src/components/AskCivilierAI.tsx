@@ -84,7 +84,7 @@ export default function AskCivilierAI() {
   }, [location.pathname]);
 
   return (
-    <div className="fixed bottom-6 right-5 sm:right-7 z-[55] flex flex-col items-end gap-3">
+    <div className="fixed left-5 md:left-auto md:right-7 z-[55] flex flex-col items-start md:items-end gap-3" style={{ bottom: "max(1.25rem, env(safe-area-inset-bottom, 1.25rem))" }}>
       {/* ── Panel ── */}
       <AnimatePresence>
         {open && (
@@ -272,7 +272,7 @@ export default function AskCivilierAI() {
       <motion.button
         onClick={toggleOrb}
         whileTap={{ scale: 0.92 }}
-        className="relative w-14 h-14 rounded-full flex items-center justify-center shrink-0"
+        className="relative w-12 h-12 rounded-full flex items-center justify-center shrink-0"
         title="CivilierAI"
       >
         {!open && (
