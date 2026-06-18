@@ -1,7 +1,7 @@
 // FIX: updateItemGroup and deleteItemGroup were missing Authorization headers.
 // Every PUT and DELETE was getting a 401 from the backend silently.
 
-const BASE_URL = "/item-groups";
+const BASE_URL = "/api/item-groups";
 
 const getAuthHeaders = () => ({
   "Content-Type": "application/json",
