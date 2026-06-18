@@ -86,8 +86,8 @@ const Dropdown = ({
       {trigger}
       <div
         style={style}
-        className={`absolute top-full mt-2.5 z-50 rounded-2xl border border-border bg-card shadow-2xl transition-all duration-200 origin-top
-          ${open ? "opacity-100 scale-100 pointer-events-auto translate-y-0" : "opacity-0 scale-95 pointer-events-none -translate-y-1"} ${className || ""}`}
+        className={`absolute top-full mt-2.5 z-50 rounded-2xl border border-border/60 bg-card/95 backdrop-blur-2xl shadow-2xl transition-all duration-200 origin-top overflow-visible
+          ${open ? "opacity-100 scale-100 pointer-events-auto translate-y-0" : "opacity-0 scale-95 pointer-events-none -translate-y-2"} ${className || ""}`}
       >
         {children}
       </div>
@@ -286,24 +286,6 @@ const engineeringSetupItems = [
     path: "/masters/activity",
     color: "text-green-400",
   },
-  {
-    icon: HardHat,
-    label: "Contractors",
-    path: "/masters/contractors",
-    color: "text-yellow-500",
-  },
-  {
-    icon: ClipboardList,
-    label: "Work Order",
-    path: "/engineering/work-order",
-    color: "text-orange-400",
-  },
-  {
-    icon: Layers,
-    label: "BOQ",
-    path: "/engineering/boq",
-    color: "text-indigo-400",
-  },
 ];
 
 const adminSetupItems = [
@@ -360,70 +342,177 @@ const SetupDropdown = ({
   setupAvailable: boolean;
   navigate: (p: string) => void;
   location: { pathname: string };
-}) => (
-  <Dropdown
-    open={open}
-    onClose={onClose}
-    className="origin-top-left left-0"
-    style={{ minWidth: "20rem" }}
-    trigger={
-      <button
-        onClick={onToggle}
-        className={`nav-pill-btn ${open ? "nav-pill-btn--active" : ""}`}
+}) => {
+  const modVars = {
+    "--mod-h": (colorStyle as any)["--mod-h"],
+    "--mod-s": (colorStyle as any)["--mod-s"],
+    "--mod-l": (colorStyle as any)["--mod-l"],
+  } as React.CSSProperties;
+
+  return (
+    <Dropdown
+      open={open}
+      onClose={onClose}
+      className="origin-top-left left-0"
+      style={{ minWidth: "22rem", ...modVars }}
+      trigger={
+        <button
+          onClick={onToggle}
+          className={`nav-pill-btn ${open ? "nav-pill-btn--active" : ""}`}
+          style={open ? {
+            background: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.12)",
+            borderColor: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.4)",
+            color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))",
+            ...modVars,
+          } : modVars}
+        >
+          <SlidersHorizontal size={13} />
+          <span>Setup</span>
+          <ChevronDown
+            size={12}
+            className={`transition-transform duration-300 opacity-60 ${open ? "rotate-180" : ""}`}
+          />
+        </button>
+      }
+    >
+      {/* ── Gradient header ── */}
+      <div
+        className="relative px-4 pt-4 pb-3.5 overflow-hidden rounded-t-2xl"
+        style={{
+          background: `linear-gradient(135deg,
+            hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.18) 0%,
+            hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.06) 60%,
+            transparent 100%)`,
+          borderBottom: `1px solid hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.18)`,
+        }}
       >
-        <SlidersHorizontal size={13} />
-        <span>Setup</span>
-        <ChevronDown
-          size={12}
-          className={`transition-transform duration-200 opacity-60 ${open ? "rotate-180" : ""}`}
+        {/* radial bloom */}
+        <div
+          className="absolute -top-6 -left-4 w-32 h-32 rounded-full pointer-events-none"
+          style={{
+            background: `radial-gradient(circle, hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.22) 0%, transparent 70%)`,
+            filter: "blur(16px)",
+          }}
         />
-      </button>
-    }
-  >
-    <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-      <div className="flex items-center gap-2">
-        <Settings size={13} className="text-muted-foreground" />
-        <span className="text-[10px] font-heading font-semibold text-foreground uppercase tracking-wider">
-          Setup
-        </span>
-      </div>
-      <span
-        className="text-[10px] font-heading px-2 py-0.5 rounded-full border"
-        style={colorStyle}
-      >
-        {moduleLabel}
-      </span>
-    </div>
-    <div className="p-3">
-      <div className="grid grid-cols-4 gap-2">
-        {items.map(({ icon: Icon, label, path, color }) => (
-          <button
-            key={path}
-            onClick={() => {
-              navigate(path);
-              onClose();
-            }}
-            className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all duration-150 active:scale-95
-              ${
-                location.pathname === path
-                  ? "border-primary/40 bg-primary/[0.06]"
-                  : "border-transparent hover:border-border hover:bg-muted/60"
-              }`}
-          >
+        <div className="relative flex items-center justify-between">
+          <div className="flex items-center gap-3">
             <div
-              className={`w-8 h-8 rounded-lg flex items-center justify-center bg-muted/50 group-hover:bg-muted transition-colors ${location.pathname === path ? "bg-primary/10" : ""}`}
+              className="w-9 h-9 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+              style={{
+                background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.2)`,
+                border: `1.5px solid hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.4)`,
+                boxShadow: `0 4px 14px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.3), inset 0 1px 0 hsl(0 0% 100% / 0.1)`,
+                color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l))`,
+              }}
             >
-              <Icon size={15} className={color} />
+              <Settings size={15} strokeWidth={2} />
             </div>
-            <span className="text-[9px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2">
-              {label}
-            </span>
-          </button>
-        ))}
+            <div>
+              <p className="text-[11px] font-heading font-bold text-foreground uppercase tracking-widest leading-none">
+                Setup
+              </p>
+              <p
+                className="text-[10px] font-heading mt-0.5 leading-none"
+                style={{ color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)` }}
+              >
+                Configure {moduleLabel}
+              </p>
+            </div>
+          </div>
+          <span
+            className="text-[10px] font-heading font-semibold px-2.5 py-1 rounded-full border tracking-wide"
+            style={{
+              color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l))`,
+              borderColor: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35)`,
+              background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.12)`,
+            }}
+          >
+            {moduleLabel}
+          </span>
+        </div>
       </div>
-    </div>
-  </Dropdown>
-);
+
+      {/* ── Items grid ── */}
+      <div className="p-3">
+        <div className={`grid grid-cols-4 gap-2 ${open ? "setup-grid-open" : ""}`}>
+          {items.map(({ icon: Icon, label, path, color }, i) => {
+            const isActivePath = location.pathname === path;
+            return (
+              <button
+                key={path}
+                onClick={() => { navigate(path); onClose(); }}
+                className={`setup-item group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all duration-200 active:scale-[0.93] cursor-pointer
+                  ${isActivePath ? "shadow-sm" : "border-transparent hover:border-border hover:bg-muted/50"}`}
+                style={{
+                  animationDelay: `${i * 35}ms`,
+                  ...(isActivePath ? {
+                    borderColor: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.45)`,
+                    background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.08)`,
+                  } : {}),
+                }}
+              >
+                <div className="relative w-9 h-9 flex items-center justify-center">
+                  <div
+                    className={`absolute inset-0 rounded-xl transition-all duration-200 ${isActivePath ? "" : "bg-muted/60 group-hover:bg-muted"}`}
+                    style={isActivePath ? { background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.16)` } : undefined}
+                  />
+                  <div
+                    className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                    style={{ boxShadow: `0 0 0 1.5px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35), 0 4px 12px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.2)` }}
+                  />
+                  <div
+                    className="setup-icon-shimmer absolute inset-0 rounded-xl pointer-events-none opacity-0 group-hover:opacity-100"
+                    style={{
+                      background: `linear-gradient(105deg, transparent 30%, hsl(0 0% 100% / 0.12) 50%, transparent 70%)`,
+                      backgroundSize: "200% 100%",
+                    }}
+                  />
+                  <Icon
+                    size={16}
+                    className={`relative z-10 ${color} transition-transform duration-200 group-hover:scale-110`}
+                    strokeWidth={isActivePath ? 2.5 : 2}
+                  />
+                </div>
+                <span
+                  className={`text-[9px] font-heading text-center leading-tight line-clamp-2 transition-colors duration-150
+                    ${isActivePath ? "font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
+                  style={isActivePath ? { color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l))` } : undefined}
+                >
+                  {label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Footer ── */}
+      <div
+        className="px-4 py-2.5 rounded-b-2xl flex items-center justify-between"
+        style={{
+          borderTop: `1px solid hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.12)`,
+          background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.04)`,
+        }}
+      >
+        <p className="text-[9px] text-muted-foreground font-heading">
+          {items.length} configuration{items.length !== 1 ? "s" : ""}
+        </p>
+        <div className="flex items-center gap-1">
+          <div
+            className="w-1.5 h-1.5 rounded-full"
+            style={{ background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.7)` }}
+          />
+          <p
+            className="text-[9px] font-heading font-medium"
+            style={{ color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)` }}
+          >
+            {moduleLabel} Module
+          </p>
+        </div>
+      </div>
+    </Dropdown>
+  );
+};
 
 // ─── User Menu ────────────────────────────────────────────────────────────────
 
@@ -496,6 +585,10 @@ const UserMenuContent: React.FC<{
 
 // ─── TopNavbar ────────────────────────────────────────────────────────────────
 
+// Module-level flag: true until TopNavbar mounts for the first time.
+// Persists across React remounts (route changes) within the same page session.
+let _pillNavFirstMount = true;
+
 export const TopNavbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -503,6 +596,15 @@ export const TopNavbar = () => {
   const { currentUser } = useAuth();
   const { navCollapsed, setNavCollapsed } = useNavbarCollapse();
   const { handleLogout, overlay: logoutOverlay } = useGracefulLogout();
+
+  // Track first-mount so remounts skip the entrance animation.
+  const isFirstMount = useRef(_pillNavFirstMount);
+  const prevNavCollapsed = useRef(false);
+
+  useEffect(() => {
+    _pillNavFirstMount = false;
+    isFirstMount.current = false;
+  }, []);
 
   const isHome =
     location.pathname === "/" || location.pathname.startsWith("/home");
@@ -617,6 +719,18 @@ export const TopNavbar = () => {
 
   const isActive = (path: string) => location.pathname === path;
 
+  // Animate in on first load or after explicit collapse→expand; static on remounts.
+  const expanding = !navCollapsed && prevNavCollapsed.current;
+  const pillNavClass = navCollapsed
+    ? "pill-nav-collapse"
+    : isFirstMount.current || expanding
+      ? "pill-nav-expand"
+      : "pill-nav-static";
+
+  useEffect(() => {
+    prevNavCollapsed.current = navCollapsed;
+  });
+
   return (
     <>
       {logoutOverlay}
@@ -666,7 +780,7 @@ export const TopNavbar = () => {
           }
           100% {
             opacity: 1;
-            clip-path: inset(0% 0% 0% 0% round 99px);
+            clip-path: none;
             transform: translateX(-50%) scaleY(1);
             filter: blur(0px);
           }
@@ -699,6 +813,44 @@ export const TopNavbar = () => {
           animation: genie-collapse 0.3s cubic-bezier(0.4, 0, 1, 1) forwards;
           pointer-events: none;
         }
+        /* Static — nav already expanded, no animation (used on remounts) */
+        .pill-nav-static {
+          opacity: 1;
+          transform: translateX(-50%) scaleY(1);
+          filter: blur(0px);
+        }
+
+        /* setup item staggered entrance */
+        @keyframes setup-item-in {
+          from {
+            opacity: 0;
+            transform: translateY(8px) scale(0.88);
+            filter: blur(3px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            filter: blur(0px);
+          }
+        }
+        .setup-grid-open .setup-item {
+          animation: setup-item-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+        }
+
+        /* icon shimmer on hover */
+        @keyframes icon-shimmer {
+          0%   { background-position: -100% 0; }
+          100% { background-position: 200% 0; }
+        }
+        .setup-item:hover .setup-icon-shimmer {
+          animation: icon-shimmer 0.6s linear;
+        }
+
+        /* sidebar toggle — rotating arc ring */
+        @keyframes spin-ring {
+          from { transform: rotate(0deg); }
+          to   { transform: rotate(360deg); }
+        }
       `}</style>
 
       <header className="fixed top-0 left-0 right-0 h-14 z-50 flex items-center px-3 sm:px-4 gap-3 border-b border-border bg-card/90 backdrop-blur-xl">
@@ -715,8 +867,7 @@ export const TopNavbar = () => {
 
         {/* ── Center pill nav — absolute center of the header ── */}
         <nav
-          key={navCollapsed ? "nav-hidden" : "nav-visible"}
-          className={`hidden md:flex items-center gap-0.5 absolute left-1/2 ${navCollapsed ? "pill-nav-collapse" : "pill-nav-expand"}`}
+          className={`hidden md:flex items-center gap-0.5 absolute left-1/2 ${pillNavClass}`}
           style={{
             background: "hsl(var(--muted) / 0.6)",
             border: "1px solid hsl(var(--border))",
@@ -765,17 +916,32 @@ export const TopNavbar = () => {
         {/* ── Right actions ── */}
         <div className="hidden md:flex items-center gap-1.5 ml-auto shrink-0">
           {/* Collapse sidebar toggle */}
-          <button
-            onClick={() => setNavCollapsed(!navCollapsed)}
-            title={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="w-8 h-8 rounded-full flex items-center justify-center border border-border bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-all duration-150 active:scale-90"
-          >
-            {navCollapsed ? (
-              <PanelLeftOpen size={15} />
-            ) : (
-              <PanelLeftClose size={15} />
+          <div className="relative shrink-0">
+            {/* Ping ring — only when collapsed, draws attention to re-open */}
+            {navCollapsed && (
+              <span className="absolute inset-0 rounded-full animate-ping bg-primary/30 pointer-events-none" />
             )}
-          </button>
+            {/* Rotating conic-gradient arc ring */}
+            <span
+              className="absolute -inset-[2px] rounded-full pointer-events-none opacity-70"
+              style={{
+                background:
+                  "conic-gradient(from 0deg, transparent 60%, hsl(var(--primary) / 0.7) 80%, transparent 100%)",
+                animation: "spin-ring 3s linear infinite",
+              }}
+            />
+            <button
+              onClick={() => setNavCollapsed(!navCollapsed)}
+              title={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              className="relative z-10 w-8 h-8 rounded-full flex items-center justify-center border border-border bg-muted hover:bg-primary/10 hover:border-primary/40 hover:text-primary text-muted-foreground transition-all duration-200 active:scale-90 hover:scale-105"
+            >
+              {navCollapsed ? (
+                <PanelLeftOpen size={15} />
+              ) : (
+                <PanelLeftClose size={15} />
+              )}
+            </button>
+          </div>
 
           <ReminderBell />
           <ThemeSwitcher
