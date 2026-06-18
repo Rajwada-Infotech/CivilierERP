@@ -5,6 +5,7 @@ import { LogoFull } from "../Logo";
 import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavbarCollapse } from "./layoutContexts";
+import { useTheme } from "@/contexts/ThemeContext";
 import { ReminderBell } from "@/components/navbar/ReminderBell";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
 import {
@@ -597,6 +598,10 @@ export const TopNavbar = () => {
   const { navCollapsed, setNavCollapsed } = useNavbarCollapse();
   const { handleLogout, overlay: logoutOverlay } = useGracefulLogout();
 
+  // "light" is the only light-background theme; everything else is dark
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
+
   // Track first-mount so remounts skip the entrance animation.
   const isFirstMount = useRef(_pillNavFirstMount);
   const prevNavCollapsed = useRef(false);
@@ -746,7 +751,7 @@ export const TopNavbar = () => {
           font-size: 0.8125rem;
           font-weight: 500;
           font-family: var(--font-heading, inherit);
-          color: hsl(var(--foreground));
+          color: hsl(var(--foreground) / 0.70);
           background: transparent;
           border: 1px solid transparent;
           transition: background 150ms, border-color 150ms, color 150ms;
@@ -754,12 +759,14 @@ export const TopNavbar = () => {
           cursor: pointer;
         }
         .nav-pill-btn:hover {
-          background: hsl(var(--muted));
-          border-color: hsl(var(--border));
+          background: rgba(128,128,128,0.15);
+          border-color: rgba(128,128,128,0.20);
+          color: hsl(var(--foreground));
         }
         .nav-pill-btn--active {
-          background: hsl(var(--muted));
-          border-color: hsl(var(--border));
+          background: rgba(128,128,128,0.15);
+          border-color: rgba(128,128,128,0.20);
+          color: hsl(var(--foreground));
         }
 
         /* pill nav genie — expand: pinched sliver → full pill */
@@ -868,18 +875,26 @@ export const TopNavbar = () => {
         {/* ── Center pill nav — absolute center of the header ── */}
         <nav
           className={`hidden md:flex items-center gap-0.5 absolute left-1/2 ${pillNavClass}`}
-          style={{
-            background: "hsl(var(--sidebar))",
-            border: "1px solid hsl(var(--sidebar-border) / 0.4)",
+          style={isDark ? {
             borderRadius: "9999px",
             padding: "0.25rem",
-            backdropFilter: "blur(16px)",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.28)",
+            background: "rgba(15, 17, 26, 0.52)",
+            border: "1px solid rgba(255,255,255,0.13)",
+            boxShadow: "0 2px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.10)",
+            backdropFilter: "blur(22px) saturate(160%)",
+            WebkitBackdropFilter: "blur(22px) saturate(160%)",
+          } : {
+            borderRadius: "9999px",
+            padding: "0.25rem",
+            background: "rgba(255,255,255,0.42)",
+            border: "1px solid rgba(255,255,255,0.65)",
+            boxShadow: "0 2px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.85)",
+            backdropFilter: "blur(22px) saturate(180%)",
+            WebkitBackdropFilter: "blur(22px) saturate(180%)",
           }}
         >
-          {/* Dot grid + glow — clipped to pill, mirrors ModuleStrip internals */}
+          {/* Dot grid + glow — clipped to pill */}
           <div className="absolute inset-0 rounded-full overflow-hidden pointer-events-none z-0">
-            {/* Dot grid */}
             <div
               style={{
                 position: "absolute",
@@ -889,7 +904,6 @@ export const TopNavbar = () => {
                 backgroundSize: "14px 14px",
               }}
             />
-            {/* Top radial glow — same as ModuleStrip's top bloom */}
             <div
               style={{
                 position: "absolute",
@@ -900,7 +914,7 @@ export const TopNavbar = () => {
             />
           </div>
 
-          {/* Content — sits above dot grid */}
+          {/* Content — sits above glow */}
           <div className="relative z-10 flex items-center gap-0.5">
             {!isHome && setupConfig.available && (
               <SetupDropdown
