@@ -8,6 +8,7 @@ import {
   Landmark,
   MessageSquare,
   Package,
+  ShelvingUnit,
   ShieldCheck,
   Wrench,
 } from "lucide-react";
@@ -37,20 +38,78 @@ const SparkleIcon = ({ size = 18 }: { size?: number }) => (
 // ringRgb: raw "r,g,b" used to build valid RGBA strings at runtime
 
 const MODULES = [
-  { id: "finance"     as Module, icon: Landmark,      label: "Finance",      desc: "Ledger, payments & BRS",       color: "#6366f1", bg: "rgba(99,102,241,0.22)",  ringRgb: "99,102,241"   },
-  { id: "material"    as Module, icon: Package,        label: "Material",     desc: "GRN, PO & inventory",          color: "#10b981", bg: "rgba(16,185,129,0.22)",  ringRgb: "16,185,129"   },
-  { id: "followup"    as Module, icon: Calendar,       label: "Follow-Up",    desc: "Sales, agreements & CRM",      color: "#818cf8", bg: "rgba(129,140,248,0.22)", ringRgb: "129,140,248"  },
-  { id: "engineering" as Module, icon: Wrench,         label: "Engineering",  desc: "Projects, work orders & site", color: "#f97316", bg: "rgba(249,115,22,0.22)",  ringRgb: "249,115,22"   },
-  { id: "ticket"      as Module, icon: MessageSquare,  label: "Ticket",       desc: "Support & issue tracking",     color: "#ec4899", bg: "rgba(236,72,153,0.22)",  ringRgb: "236,72,153"   },
+  {
+    id: "finance" as Module,
+    icon: Landmark,
+    label: "Finance",
+    desc: "Ledger, payments & BRS",
+    color: "#6366f1",
+    bg: "rgba(99,102,241,0.22)",
+    ringRgb: "99,102,241",
+  },
+  {
+    id: "material" as Module,
+    icon: Package,
+    label: "Material",
+    desc: "GRN, PO & inventory",
+    color: "#10b981",
+    bg: "rgba(16,185,129,0.22)",
+    ringRgb: "16,185,129",
+  },
+  {
+    id: "followup" as Module,
+    icon: Calendar,
+    label: "Follow-Up",
+    desc: "Sales, agreements & CRM",
+    color: "#818cf8",
+    bg: "rgba(129,140,248,0.22)",
+    ringRgb: "129,140,248",
+  },
+  {
+    id: "engineering" as Module,
+    icon: Wrench,
+    label: "Engineering",
+    desc: "Projects, work orders & site",
+    color: "#f97316",
+    bg: "rgba(249,115,22,0.22)",
+    ringRgb: "249,115,22",
+  },
+  {
+    id: "ticket" as Module,
+    icon: MessageSquare,
+    label: "Ticket",
+    desc: "Support & issue tracking",
+    color: "#ec4899",
+    bg: "rgba(236,72,153,0.22)",
+    ringRgb: "236,72,153",
+  },
+  {
+    id: "sales" as Module,
+    icon: ShelvingUnit,
+    label: "Sales",
+    desc: "Sale orders & payments",
+    color: "#a855f7",
+    bg: "rgba(168,85,247,0.22)",
+    ringRgb: "168,85,247",
+  },
 ];
 
 const ADMIN_MODULE = {
-  id: "admin" as Module, icon: ShieldCheck, label: "Admin",
+  id: "admin" as Module,
+  icon: ShieldCheck,
+  label: "Admin",
   desc: "Users, rights & configuration",
-  color: "#3b82f6", bg: "rgba(59,130,246,0.22)", ringRgb: "59,130,246",
+  color: "#3b82f6",
+  bg: "rgba(59,130,246,0.22)",
+  ringRgb: "59,130,246",
 };
 
-type TooltipState = { id: string; label: string; desc: string; y: number } | null;
+type TooltipState = {
+  id: string;
+  label: string;
+  desc: string;
+  y: number;
+} | null;
 
 // ── ModuleStrip ───────────────────────────────────────────────────────────────
 
@@ -67,7 +126,6 @@ export const ModuleStrip: React.FC = () => {
   // Regular modules always shown; admin only for admin-tier users
   const regularItems = MODULES;
   const adminItems = isAdminTier ? [ADMIN_MODULE] : [];
-
 
   const handleSwitch = async (mod: NonNullable<Module>) => {
     setTooltip(null);
@@ -96,20 +154,22 @@ export const ModuleStrip: React.FC = () => {
   return (
     <>
       {/* ── Outer wrapper — tiny left gap (2px), small right gap, py for oval ── */}
-      <div className="h-full w-full flex flex-col py-2" style={{ paddingLeft: 4, paddingRight: 4 }}>
-
+      <div
+        className="h-full w-full flex flex-col py-2"
+        style={{ paddingLeft: 4, paddingRight: 4 }}
+      >
         {/* ── Inner oval pill strip (fully rounded top + bottom) ───────────── */}
         <div
           className="relative flex-1 flex flex-col overflow-hidden
             bg-sidebar border border-sidebar-border/40
             shadow-[0_8px_32px_rgba(0,0,0,0.28)] rounded-[28px]"
         >
-
           {/* Dot-grid overlay */}
           <div
             className="absolute inset-0 pointer-events-none z-0"
             style={{
-              backgroundImage: "radial-gradient(circle, hsl(var(--foreground) / 0.10) 1px, transparent 1px)",
+              backgroundImage:
+                "radial-gradient(circle, hsl(var(--foreground) / 0.10) 1px, transparent 1px)",
               backgroundSize: "14px 14px",
             }}
           />
@@ -117,7 +177,10 @@ export const ModuleStrip: React.FC = () => {
           {/* Top radial glow */}
           <div
             className="absolute top-0 left-0 right-0 h-28 pointer-events-none z-0"
-            style={{ background: "radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.22) 0%, transparent 70%)" }}
+            style={{
+              background:
+                "radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.22) 0%, transparent 70%)",
+            }}
           />
 
           {/* ── Logo / Sparkle section ─────────────────────────────────────── */}
@@ -154,7 +217,10 @@ export const ModuleStrip: React.FC = () => {
               {/* Top line */}
               <div
                 className="w-px h-5"
-                style={{ background: "linear-gradient(to bottom, transparent, rgba(129,140,248,0.6))" }}
+                style={{
+                  background:
+                    "linear-gradient(to bottom, transparent, rgba(129,140,248,0.6))",
+                }}
               />
               {/* Pulsing dot — subtle, no scale change, just opacity + soft glow */}
               <motion.div
@@ -168,12 +234,19 @@ export const ModuleStrip: React.FC = () => {
                     "0 0 0px rgba(129,140,248,0)",
                   ],
                 }}
-                transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                }}
               />
               {/* Bottom line */}
               <div
                 className="w-px h-5"
-                style={{ background: "linear-gradient(to top, transparent, rgba(129,140,248,0.6))" }}
+                style={{
+                  background:
+                    "linear-gradient(to top, transparent, rgba(129,140,248,0.6))",
+                }}
               />
             </div>
           )}
@@ -215,13 +288,34 @@ export const ModuleStrip: React.FC = () => {
                   {/* Sonar rings — explicit RGBA, high opacity for all-theme visibility */}
                   <motion.span
                     className="absolute inset-0 rounded-full"
-                    animate={{ boxShadow: ["0 0 0 0px rgba(99,102,241,0.85)", "0 0 0 5px rgba(99,102,241,0)", "0 0 0 0px rgba(99,102,241,0.85)"] }}
-                    transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }}
+                    animate={{
+                      boxShadow: [
+                        "0 0 0 0px rgba(99,102,241,0.85)",
+                        "0 0 0 5px rgba(99,102,241,0)",
+                        "0 0 0 0px rgba(99,102,241,0.85)",
+                      ],
+                    }}
+                    transition={{
+                      duration: 1.8,
+                      repeat: Infinity,
+                      ease: "easeOut",
+                    }}
                   />
                   <motion.span
                     className="absolute inset-0 rounded-full"
-                    animate={{ boxShadow: ["0 0 0 0px rgba(99,102,241,0.55)", "0 0 0 9px rgba(99,102,241,0)", "0 0 0 0px rgba(99,102,241,0.55)"] }}
-                    transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut", delay: 0.32 }}
+                    animate={{
+                      boxShadow: [
+                        "0 0 0 0px rgba(99,102,241,0.55)",
+                        "0 0 0 9px rgba(99,102,241,0)",
+                        "0 0 0 0px rgba(99,102,241,0.55)",
+                      ],
+                    }}
+                    transition={{
+                      duration: 1.8,
+                      repeat: Infinity,
+                      ease: "easeOut",
+                      delay: 0.32,
+                    }}
                   />
                   <ChevronRight size={13} strokeWidth={2.4} />
                 </motion.button>
@@ -299,9 +393,9 @@ function IconButton({
   const { icon: Icon, color, bg, ringRgb } = item;
 
   // Build valid RGBA strings for each animation phase
-  const ringSolid  = `rgba(${ringRgb},0.80)`;  // visible at origin
-  const ringFade   = `rgba(${ringRgb},0.00)`;  // transparent at max spread
-  const ringGlow   = `rgba(${ringRgb},0.55)`;  // icon drop-shadow
+  const ringSolid = `rgba(${ringRgb},0.80)`; // visible at origin
+  const ringFade = `rgba(${ringRgb},0.00)`; // transparent at max spread
+  const ringGlow = `rgba(${ringRgb},0.55)`; // icon drop-shadow
 
   // 36px ring — margin-based centering avoids CSS transform conflict with framer-motion
   const D = 36;
@@ -329,7 +423,15 @@ function IconButton({
               exit={{ scale: 0.5, opacity: 0 }}
               transition={{ type: "spring", stiffness: 480, damping: 28 }}
               className="absolute rounded-full pointer-events-none"
-              style={{ width: D, height: D, top: "50%", left: "50%", marginTop: -C, marginLeft: -C, background: bg }}
+              style={{
+                width: D,
+                height: D,
+                top: "50%",
+                left: "50%",
+                marginTop: -C,
+                marginLeft: -C,
+                background: bg,
+              }}
             />
           )}
         </AnimatePresence>
@@ -338,7 +440,15 @@ function IconButton({
         {!isActive && (
           <span
             className="absolute rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-            style={{ width: D, height: D, top: "50%", left: "50%", marginTop: -C, marginLeft: -C, background: "hsl(var(--sidebar-accent))" }}
+            style={{
+              width: D,
+              height: D,
+              top: "50%",
+              left: "50%",
+              marginTop: -C,
+              marginLeft: -C,
+              background: "hsl(var(--sidebar-accent))",
+            }}
           />
         )}
 
@@ -348,16 +458,47 @@ function IconButton({
             {/* Inner ring: 0px → 5px spread */}
             <motion.span
               className="absolute rounded-full pointer-events-none"
-              style={{ width: D, height: D, top: "50%", left: "50%", marginTop: -C, marginLeft: -C }}
-              animate={{ boxShadow: [`0 0 0 0px ${ringSolid}`, `0 0 0 5px ${ringFade}`, `0 0 0 0px ${ringSolid}`] }}
+              style={{
+                width: D,
+                height: D,
+                top: "50%",
+                left: "50%",
+                marginTop: -C,
+                marginLeft: -C,
+              }}
+              animate={{
+                boxShadow: [
+                  `0 0 0 0px ${ringSolid}`,
+                  `0 0 0 5px ${ringFade}`,
+                  `0 0 0 0px ${ringSolid}`,
+                ],
+              }}
               transition={{ duration: 2, repeat: Infinity, ease: "easeOut" }}
             />
             {/* Outer ring: 0px → 9px spread, delayed */}
             <motion.span
               className="absolute rounded-full pointer-events-none"
-              style={{ width: D, height: D, top: "50%", left: "50%", marginTop: -C, marginLeft: -C }}
-              animate={{ boxShadow: [`0 0 0 0px ${ringGlow}`, `0 0 0 9px ${ringFade}`, `0 0 0 0px ${ringGlow}`] }}
-              transition={{ duration: 2, repeat: Infinity, ease: "easeOut", delay: 0.38 }}
+              style={{
+                width: D,
+                height: D,
+                top: "50%",
+                left: "50%",
+                marginTop: -C,
+                marginLeft: -C,
+              }}
+              animate={{
+                boxShadow: [
+                  `0 0 0 0px ${ringGlow}`,
+                  `0 0 0 9px ${ringFade}`,
+                  `0 0 0 0px ${ringGlow}`,
+                ],
+              }}
+              transition={{
+                duration: 2,
+                repeat: Infinity,
+                ease: "easeOut",
+                delay: 0.38,
+              }}
             />
           </>
         )}
