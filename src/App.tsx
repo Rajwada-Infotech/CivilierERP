@@ -160,11 +160,10 @@ const UnitOfMeasurementMaster = lazy(
   () => import("./pages/material/UnitOfMeasurementMaster"),
 );
 const InventoryMaster = lazy(() => import("./pages/material/InventoryMaster"));
-const AccessCardMaster = lazy(
-  () => import("./pages/material/AccessCardMaster"),
-);
 const Stock = lazy(() => import("./pages/material/Stock"));
 const StockTransfer = lazy(() => import("./pages/material/StockTransfer"));
+const SaleOrder = lazy(() => import("./pages/sales/SaleOrder"));
+const SalesPayment = lazy(() => import("./pages/sales/Payment"));
 const EnterpriseMasterPage = lazy(
   () => import("./pages/admin/masters/EnterpriseMaster"),
 );
@@ -1157,6 +1156,24 @@ function AppRoutes() {
         }
       />
 
+      {/* SALES */}
+      <Route
+        path="/sales/sale-order"
+        element={
+          <ProtectedRoute>
+            <SaleOrder />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/sales/payment"
+        element={
+          <ProtectedRoute>
+            <SalesPayment />
+          </ProtectedRoute>
+        }
+      />
+
       {/* ENGINEERING */}
       <Route
         path="/engineering"
@@ -1256,14 +1273,6 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <CardMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/access-card"
-        element={
-          <ProtectedRoute>
-            <AccessCardMaster />
           </ProtectedRoute>
         }
       />

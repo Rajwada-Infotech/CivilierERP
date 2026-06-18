@@ -96,6 +96,12 @@ const MODULE_OPTIONS = [
     icon: "🔄",
     desc: "Moving stock between sites",
   },
+  {
+    id: "SaleOrder",
+    label: "Sale Order",
+    icon: "🛍️",
+    desc: "Inter-company / inter-project item sales",
+  },
 ] as const;
 
 type ModuleId = (typeof MODULE_OPTIONS)[number]["id"];
@@ -124,6 +130,12 @@ const MODULE_GROUPS = [
     label: "Engineering",
     icon: "⚙️",
     modules: ["WorkOrderHeader"],
+  },
+  {
+    id: "sales",
+    label: "Sales",
+    icon: "🛍️",
+    modules: ["SaleOrder"],
   },
 ] as const;
 

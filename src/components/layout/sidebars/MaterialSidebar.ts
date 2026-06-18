@@ -25,6 +25,9 @@ export const materialNavItems: NavItem[] = [
   { label: "Stock", icon: ArrowLeftRight, path: "/material/stock" },
   { label: "Transfer", icon: Repeat2, path: "/material/stock-transfer" },
   { label: "Debit Note", icon: ClipboardList, path: "/material/debit-note" },
-  { label: "Amendment Menu", icon: FilePenLine, path: "/material/amendment-menu" },
-  { label: "Access Card Master", icon: IdCard, path: "/masters/access-card" },
+  {
+    label: "Amendment Menu",
+    icon: FilePenLine,
+    path: "/material/amendment-menu",
+  },
 ];

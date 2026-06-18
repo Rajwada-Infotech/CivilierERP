@@ -24,6 +24,8 @@ import {
   XCircle,
   ArrowLeftRight,
   Warehouse,
+  ShoppingCart,
+  Building2,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -134,6 +136,13 @@ const MODULE_CONFIG: Record<
     navPath: "/material/issues",
     apiEndpoint: "/api/material-issues",
     label: "Material Issues",
+  },
+  "sale-orders": {
+    icon: ShoppingCart,
+    color: "text-fuchsia-500 bg-fuchsia-500/10",
+    navPath: "/sales/sale-order",
+    apiEndpoint: "/api/sale-orders",
+    label: "Sale Orders",
   },
 };
 
@@ -275,6 +284,7 @@ const ModuleTab: React.FC<{
       }`}
     >
       {Icon && <Icon size={12} />}
+      <span>{label}</span>
       {count > 0 && (
         <span
           className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
@@ -373,6 +383,23 @@ const InboxRow: React.FC<{
                 </span>
               )}
             </div>
+          ) : item.Module === "sale-orders" ? (
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <span className="flex items-center gap-1 text-[11px] font-semibold text-foreground truncate">
+                <span className="truncate">{item.ContractorName}</span>
+                <ArrowLeftRight size={8} className="shrink-0" />
+                <span className="truncate">{item.SupplierName}</span>
+              </span>
+              {item.FromGodownName && item.ToGodownName && (
+                <span className="flex items-center gap-1 text-[10px] truncate">
+                  <Warehouse size={9} className="shrink-0 text-orange-500" />
+                  <span className="truncate">{item.FromGodownName}</span>
+                  <ArrowLeftRight size={8} className="shrink-0" />
+                  <Warehouse size={9} className="shrink-0 text-emerald-500" />
+                  <span className="truncate">{item.ToGodownName}</span>
+                </span>
+              )}
+            </div>
           ) : (
             <span className="truncate">{party}</span>
           )}
@@ -432,6 +459,28 @@ const InboxRow: React.FC<{
             </span>
             <span className="font-mono text-xs font-semibold text-violet-600 dark:text-violet-400 truncate">
               {item.SourceTransferDocNo}
+            </span>
+            {item.FromGodownName && item.ToGodownName && (
+              <span className="flex items-center gap-1 text-[10px] text-muted-foreground truncate">
+                <Warehouse size={9} className="shrink-0 text-orange-500" />
+                <span className="truncate">{item.FromGodownName}</span>
+                <ArrowLeftRight size={8} className="shrink-0" />
+                <Warehouse size={9} className="shrink-0 text-emerald-500" />
+                <span className="truncate">{item.ToGodownName}</span>
+              </span>
+            )}
+          </div>
+        ) : item.Module === "sale-orders" ? (
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="flex items-center gap-1 text-[11px] font-semibold text-foreground truncate">
+              <Building2 size={9} className="shrink-0 text-blue-500" />
+              <span className="truncate">{item.ContractorName}</span>
+              <ArrowLeftRight
+                size={8}
+                className="shrink-0 text-muted-foreground"
+              />
+              <Building2 size={9} className="shrink-0 text-violet-500" />
+              <span className="truncate">{item.SupplierName}</span>
             </span>
             {item.FromGodownName && item.ToGodownName && (
               <span className="flex items-center gap-1 text-[10px] text-muted-foreground truncate">
@@ -531,7 +580,7 @@ const ApprovalInbox: React.FC = () => {
                 <Inbox className="text-primary" /> Approval Inbox
               </h1>
               {totalCount > 0 && (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full leading-none">
+                <span className="bg-red-500 text-white text-[11px] font-bold min-w-[22px] h-[22px] flex items-center justify-center rounded-full leading-none">
                   {totalCount}
                 </span>
               )}
@@ -555,7 +604,10 @@ const ApprovalInbox: React.FC = () => {
         </div>
 
         {/* Module filter tabs — scrollable on mobile */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+        <div
+          className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none [&::-webkit-scrollbar]:hidden"
+          style={{ scrollbarWidth: "none" }}
+        >
           <ModuleTab
             module={null}
             label="All"

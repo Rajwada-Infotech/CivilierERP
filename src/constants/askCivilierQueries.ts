@@ -34,6 +34,7 @@ import {
   ClipboardCheck,
   ShieldCheck,
   History,
+  ShelvingUnit,
 } from "lucide-react";
 import type { Module } from "@/contexts/ModuleContext";
 
@@ -581,6 +582,16 @@ export const MODULE_QUERIES: Record<NonNullable<Module>, SuggestedQuery[]> = {
       accent: "#f97316",
     },
   ],
+  sales: [
+    {
+      id: "mod-sales-orders",
+      label: "Show recent sale orders",
+      module: "Sales",
+      route: "/sales/sale-order",
+      icon: ShelvingUnit,
+      accent: "#a855f7",
+    },
+  ],
   admin: [
     {
       id: "mod-admin-approvals",
@@ -692,6 +703,7 @@ const MODULE_LABELS: Record<NonNullable<Module>, string> = {
   followup: "Followup",
   engineering: "Engineering",
   ticket: "Tickets",
+  sales: "Sales",
   admin: "Admin",
 };
 
