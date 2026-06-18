@@ -275,6 +275,7 @@ const ModuleTab: React.FC<{
       }`}
     >
       {Icon && <Icon size={12} />}
+      <span>{label}</span>
       {count > 0 && (
         <span
           className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
@@ -531,7 +532,7 @@ const ApprovalInbox: React.FC = () => {
                 <Inbox className="text-primary" /> Approval Inbox
               </h1>
               {totalCount > 0 && (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full leading-none">
+                <span className="bg-red-500 text-white text-[11px] font-bold min-w-[22px] h-[22px] flex items-center justify-center rounded-full leading-none">
                   {totalCount}
                 </span>
               )}
@@ -555,7 +556,7 @@ const ApprovalInbox: React.FC = () => {
         </div>
 
         {/* Module filter tabs — scrollable on mobile */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: "none" }}>
           <ModuleTab
             module={null}
             label="All"
