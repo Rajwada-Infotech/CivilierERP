@@ -25,7 +25,7 @@ router.get("/", authMiddleware, cache(CACHE_NS, 60), async (req, res) => {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT Id AS id, Name AS name, type,
-             modules, LevelsJson AS levels,
+             modules, LevelsData AS levels,
              active,
              CreatedAt AS createdAt, CreatedBy AS createdBy
       FROM dbo.ApprovalWorkflows
@@ -75,7 +75,7 @@ router.post("/", authMiddleware, async (req, res) => {
       .input("Name", sql.NVarChar(255), name.trim())
       .input("type", sql.NVarChar(50), type)
       .input("modules", sql.NVarChar(sql.MAX), JSON.stringify(modules))
-      .input("LevelsJson", sql.NVarChar(sql.MAX), JSON.stringify(levels))
+      .input("LevelsData", sql.NVarChar(sql.MAX), JSON.stringify(levels))
       .input("active", sql.Bit, active ? 1 : 0)
       .input("CreatedBy", sql.NVarChar(100), req.user?.name || null)
       // Legacy NOT NULL columns that must be populated
@@ -83,14 +83,14 @@ router.post("/", authMiddleware, async (req, res) => {
       .input("LevelCount", sql.Int, levels.length)
       .input("Status", sql.NVarChar(20), "Active").query(`
         INSERT INTO dbo.ApprovalWorkflows
-          (Name, type, modules, LevelsJson, active, CreatedBy, CreatedAt,
+          (Name, type, modules, LevelsData, active, CreatedBy, CreatedAt,
            Module, Levels, Status)
         OUTPUT
           INSERTED.Id, INSERTED.Name, INSERTED.type,
-          INSERTED.modules, INSERTED.LevelsJson,
+          INSERTED.modules, INSERTED.LevelsData,
           INSERTED.active, INSERTED.CreatedAt
         VALUES
-          (@Name, @type, @modules, @LevelsJson, @active, @CreatedBy, SYSDATETIME(),
+          (@Name, @type, @modules, @LevelsData, @active, @CreatedBy, SYSDATETIME(),
            @Module, @LevelCount, @Status)
       `);
 
@@ -101,7 +101,7 @@ router.post("/", authMiddleware, async (req, res) => {
       name: row.Name,
       type: row.type,
       modules: parseJson(row.modules),
-      levels: parseJson(row.LevelsJson),
+      levels: parseJson(row.LevelsData),
       active: !!row.active,
       createdAt: row.CreatedAt,
     });
@@ -127,7 +127,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
       .input("Name", sql.NVarChar(255), name?.trim() || null)
       .input("type", sql.NVarChar(50), type)
       .input("modules", sql.NVarChar(sql.MAX), JSON.stringify(modules))
-      .input("LevelsJson", sql.NVarChar(sql.MAX), JSON.stringify(levels))
+      .input("LevelsData", sql.NVarChar(sql.MAX), JSON.stringify(levels))
       .input("active", sql.Bit, active ? 1 : 0)
       .input("UpdatedBy", sql.NVarChar(100), req.user?.name || null)
       // Keep legacy NOT NULL columns in sync
@@ -137,7 +137,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
           Name       = @Name,
           type       = @type,
           modules    = @modules,
-          LevelsJson = @LevelsJson,
+          LevelsData = @LevelsData,
           active     = @active,
           UpdatedBy  = @UpdatedBy,
           UpdatedAt  = SYSDATETIME(),
@@ -216,6 +216,7 @@ router.get("/trail", authMiddleware, async (req, res) => {
     StockTransfers: { workflowId: "StockTransfer" },
     BOQ: { workflowId: "BOQ" },
     WorkDone: { workflowId: "WorkDone" },
+    SaleOrders: { workflowId: "SaleOrder" },
   };
 
   const entry = MODULE_TABLE_MAP[module];
@@ -231,7 +232,7 @@ router.get("/trail", authMiddleware, async (req, res) => {
     const wfResult = await pool
       .request()
       .input("WorkflowId", sql.NVarChar(100), entry.workflowId).query(`
-        SELECT TOP 1 Id, Name, type, LevelsJson, active
+        SELECT TOP 1 Id, Name, type, LevelsData AS LevelsJson, active
         FROM dbo.ApprovalWorkflows
         WHERE active = 1
           AND modules LIKE '%' + @WorkflowId + '%'
@@ -261,16 +262,20 @@ router.get("/trail", authMiddleware, async (req, res) => {
     const workflowType = wfRow?.type || "sequential";
 
     // For sequential/any: collapse to latest entry per level
-    const auditRows = workflowType === "parallel"
-      ? allAuditRows
-      : Object.values(
-          allAuditRows.reduce((acc, row) => {
-            if (!acc[row.Level] || new Date(row.ActionAt) > new Date(acc[row.Level].ActionAt)) {
-              acc[row.Level] = row;
-            }
-            return acc;
-          }, {})
-        ).sort((a, b) => a.Level - b.Level);
+    const auditRows =
+      workflowType === "parallel"
+        ? allAuditRows
+        : Object.values(
+            allAuditRows.reduce((acc, row) => {
+              if (
+                !acc[row.Level] ||
+                new Date(row.ActionAt) > new Date(acc[row.Level].ActionAt)
+              ) {
+                acc[row.Level] = row;
+              }
+              return acc;
+            }, {}),
+          ).sort((a, b) => a.Level - b.Level);
 
     // 3. Merge workflow levels with audit entries
     const steps = workflowLevels.map((lvl, idx) => {
@@ -285,16 +290,24 @@ router.get("/trail", authMiddleware, async (req, res) => {
           status: r.ActionStatus,
           actionAt: r.ActionAt,
         }));
-        const allApproved = approvers.length > 0 && approvers.every((a) => a.status === "Approved");
+        const allApproved =
+          approvers.length > 0 &&
+          approvers.every((a) => a.status === "Approved");
         const anyRejected = approvers.some((a) => a.status === "Rejected");
-        const latestActor = [...approvers]
-          .filter((a) => a.status === "Approved" || a.status === "Rejected")
-          .sort((a, b) => new Date(b.actionAt) - new Date(a.actionAt))[0] || null;
+        const latestActor =
+          [...approvers]
+            .filter((a) => a.status === "Approved" || a.status === "Rejected")
+            .sort((a, b) => new Date(b.actionAt) - new Date(a.actionAt))[0] ||
+          null;
         return {
           level: levelNum,
           label: lvl.label || `Level ${levelNum}`,
           userIds: lvl.userIds || [],
-          status: anyRejected ? "Rejected" : allApproved ? "Approved" : "Pending",
+          status: anyRejected
+            ? "Rejected"
+            : allApproved
+              ? "Approved"
+              : "Pending",
           approverEmail: latestActor?.email || null,
           approverName: latestActor?.name || null,
           role: latestActor?.role || null,
@@ -307,8 +320,13 @@ router.get("/trail", authMiddleware, async (req, res) => {
 
       if (workflowType === "any") {
         // First to act wins
-        const actor = levelRows.find((r) => r.ActionStatus === "Approved" || r.ActionStatus === "Rejected")
-          || levelRows[0] || null;
+        const actor =
+          levelRows.find(
+            (r) =>
+              r.ActionStatus === "Approved" || r.ActionStatus === "Rejected",
+          ) ||
+          levelRows[0] ||
+          null;
         return {
           level: levelNum,
           label: lvl.label || `Level ${levelNum}`,

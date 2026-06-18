@@ -37,6 +37,11 @@ const MODULE_MAP = {
     pk: "IssueId",
     status: "Status",
   },
+  "sale-orders": {
+    table: "dbo.SaleOrders",
+    pk: "SaleOrderID",
+    status: "Status",
+  },
 };
 
 const MODULE_DOC_LINKS = {
@@ -92,20 +97,50 @@ async function validateApprovalModuleMap(log = console) {
   return missing;
 }
 
+// Map route-slug (used by transition()/getWorkflow() callers) → the
+// workflowId stored in ApprovalWorkflows.modules JSON array by the
+// Approval Setup UI (src/pages/admin/ApprovalSetup.tsx MODULE_OPTIONS)
+// and read back by the /api/approval-workflows/trail endpoint.
+const WORKFLOW_ID_MAP = {
+  "expense-booking": "Expenses",
+  "purchase-orders": "PurchaseOrders",
+  "work-orders": "WorkOrderHeader",
+  boq: "BOQ",
+  "work-done": "WorkDone",
+  grn: "GRN",
+  "goods-receipt": "GRN",
+  payments: "NewPayment",
+  "material-requests": "MaterialRequests",
+  "material-issues": "MaterialIssues",
+  "sale-orders": "SaleOrder",
+};
+
 /**
  * Fetch the active workflow for a module.
  * Returns null if none configured.
  */
 async function getWorkflow(module) {
   const pool = getPool();
-  const result = await pool.request().input("Module", sql.NVarChar(100), module)
-    .query(`
-      SELECT TOP 1 Id, Levels
+  const workflowId = WORKFLOW_ID_MAP[module] || module;
+  const result = await pool
+    .request()
+    .input("WorkflowId", sql.NVarChar(100), workflowId).query(`
+      SELECT TOP 1 Id, LevelsData AS LevelsJson
       FROM dbo.ApprovalWorkflows
-      WHERE Module = @Module AND Status = 'Active'
+      WHERE active = 1
+        AND modules LIKE '%' + @WorkflowId + '%'
       ORDER BY CreatedAt DESC
     `);
-  return result.recordset[0] ?? null;
+  const row = result.recordset[0];
+  if (!row) return null;
+
+  let levels = [];
+  try {
+    levels = row.LevelsJson ? JSON.parse(row.LevelsJson) : [];
+  } catch {
+    levels = [];
+  }
+  return { Id: row.Id, Levels: levels.length || 1 };
 }
 
 /**
@@ -305,6 +340,7 @@ module.exports = {
   transition,
   guardEdit,
   getWorkflow,
+  getApprovedLevelCount,
   getRecordStatus,
   validateApprovalModuleMap,
 };
