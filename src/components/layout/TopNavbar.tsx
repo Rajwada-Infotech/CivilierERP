@@ -869,58 +869,81 @@ export const TopNavbar = () => {
         <nav
           className={`hidden md:flex items-center gap-0.5 absolute left-1/2 ${pillNavClass}`}
           style={{
-            background: "hsl(var(--muted) / 0.6)",
-            border: "1px solid hsl(var(--border))",
+            background: "hsl(var(--sidebar))",
+            border: "1px solid hsl(var(--sidebar-border) / 0.4)",
             borderRadius: "9999px",
             padding: "0.25rem",
-            backdropFilter: "blur(8px)",
+            backdropFilter: "blur(16px)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.28)",
           }}
         >
-          {!isHome && setupConfig.available && (
-            <SetupDropdown
-              open={setupOpen}
-              onClose={closeSetup}
-              onToggle={toggleSetup}
-              items={setupConfig.items}
-              moduleLabel={setupConfig.label}
-              colorStyle={setupConfig.colorStyle}
-              setupAvailable={setupConfig.available}
-              navigate={navigate}
-              location={location}
+          {/* Dot grid + glow — clipped to pill, mirrors ModuleStrip internals */}
+          <div className="absolute inset-0 rounded-full overflow-hidden pointer-events-none z-0">
+            {/* Dot grid */}
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                backgroundImage:
+                  "radial-gradient(circle, hsl(var(--foreground) / 0.10) 1px, transparent 1px)",
+                backgroundSize: "14px 14px",
+              }}
             />
-          )}
+            {/* Top radial glow — same as ModuleStrip's top bloom */}
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                background:
+                  "radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.22) 0%, transparent 70%)",
+              }}
+            />
+          </div>
 
-          <button
-            onClick={() => {
-              navigate("/reports");
-              closeAll();
-            }}
-            className={`nav-pill-btn ${isActive("/reports") ? "nav-pill-btn--active" : ""}`}
-          >
-            <BarChart3 size={13} />
-            <span>Reports</span>
-          </button>
+          {/* Content — sits above dot grid */}
+          <div className="relative z-10 flex items-center gap-0.5">
+            {!isHome && setupConfig.available && (
+              <SetupDropdown
+                open={setupOpen}
+                onClose={closeSetup}
+                onToggle={toggleSetup}
+                items={setupConfig.items}
+                moduleLabel={setupConfig.label}
+                colorStyle={setupConfig.colorStyle}
+                setupAvailable={setupConfig.available}
+                navigate={navigate}
+                location={location}
+              />
+            )}
 
-          <button
-            onClick={() => {
-              navigate("/widgets");
-              closeAll();
-            }}
-            className={`nav-pill-btn ${isActive("/widgets") ? "nav-pill-btn--active" : ""}`}
-          >
-            <Puzzle size={13} />
-            <span>Widgets</span>
-          </button>
+            <button
+              onClick={() => {
+                navigate("/reports");
+                closeAll();
+              }}
+              className={`nav-pill-btn ${isActive("/reports") ? "nav-pill-btn--active" : ""}`}
+            >
+              <BarChart3 size={13} />
+              <span>Reports</span>
+            </button>
+
+            <button
+              onClick={() => {
+                navigate("/widgets");
+                closeAll();
+              }}
+              className={`nav-pill-btn ${isActive("/widgets") ? "nav-pill-btn--active" : ""}`}
+            >
+              <Puzzle size={13} />
+              <span>Widgets</span>
+            </button>
+          </div>
         </nav>
 
         {/* ── Right actions ── */}
         <div className="hidden md:flex items-center gap-1.5 ml-auto shrink-0">
           {/* Collapse sidebar toggle */}
           <div className="relative shrink-0">
-            {/* Ping ring — only when collapsed, draws attention to re-open */}
-            {navCollapsed && (
-              <span className="absolute inset-0 rounded-full animate-ping bg-primary/30 pointer-events-none" />
-            )}
             {/* Rotating conic-gradient arc ring */}
             <span
               className="absolute -inset-[2px] rounded-full pointer-events-none opacity-70"
@@ -933,7 +956,7 @@ export const TopNavbar = () => {
             <button
               onClick={() => setNavCollapsed(!navCollapsed)}
               title={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className="relative z-10 w-8 h-8 rounded-full flex items-center justify-center border border-border bg-muted hover:bg-primary/10 hover:border-primary/40 hover:text-primary text-muted-foreground transition-all duration-200 active:scale-90 hover:scale-105"
+              className="relative z-10 w-8 h-8 rounded-full flex items-center justify-center border border-border bg-muted hover:bg-muted/80 text-foreground transition-all duration-200 active:scale-90 hover:scale-105"
             >
               {navCollapsed ? (
                 <PanelLeftOpen size={15} />
