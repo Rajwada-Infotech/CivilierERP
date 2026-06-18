@@ -351,18 +351,14 @@ const SetupDropdown = ({
     trigger={
       <button
         onClick={onToggle}
-        disabled={!setupAvailable}
-        title={!setupAvailable ? "Select a module to access Setup" : ""}
-        className={`nav-pill-btn ${open ? "nav-pill-btn--active" : ""} ${!setupAvailable ? "opacity-30 cursor-not-allowed" : ""}`}
+        className={`nav-pill-btn ${open ? "nav-pill-btn--active" : ""}`}
       >
         <SlidersHorizontal size={13} />
         <span>Setup</span>
-        {setupAvailable && (
-          <ChevronDown
-            size={12}
-            className={`transition-transform duration-200 opacity-60 ${open ? "rotate-180" : ""}`}
-          />
-        )}
+        <ChevronDown
+          size={12}
+          className={`transition-transform duration-200 opacity-60 ${open ? "rotate-180" : ""}`}
+        />
       </button>
     }
   >
@@ -489,6 +485,9 @@ export const TopNavbar = () => {
   const { currentUser } = useAuth();
   const { navCollapsed, setNavCollapsed } = useNavbarCollapse();
   const { handleLogout, overlay: logoutOverlay } = useGracefulLogout();
+
+  const isHome =
+    location.pathname === "/" || location.pathname.startsWith("/home");
 
   const [setupOpen, setSetupOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
@@ -708,17 +707,19 @@ export const TopNavbar = () => {
             backdropFilter: "blur(8px)",
           }}
         >
-          <SetupDropdown
-            open={setupOpen}
-            onClose={closeSetup}
-            onToggle={toggleSetup}
-            items={setupConfig.items}
-            moduleLabel={setupConfig.label}
-            colorStyle={setupConfig.colorStyle}
-            setupAvailable={setupConfig.available}
-            navigate={navigate}
-            location={location}
-          />
+          {!isHome && setupConfig.available && (
+            <SetupDropdown
+              open={setupOpen}
+              onClose={closeSetup}
+              onToggle={toggleSetup}
+              items={setupConfig.items}
+              moduleLabel={setupConfig.label}
+              colorStyle={setupConfig.colorStyle}
+              setupAvailable={setupConfig.available}
+              navigate={navigate}
+              location={location}
+            />
+          )}
 
           <button
             onClick={() => {
