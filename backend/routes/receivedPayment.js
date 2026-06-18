@@ -34,17 +34,10 @@ async function invalidateReceivedPaymentWorkflowCaches() {
 }
 
 async function hasNewColumns(pool) {
-<<<<<<< HEAD
   // 1. In-process memo — fastest path for warm requests
   if (_hasNewCols !== null) return _hasNewCols;
 
   // 2. Redis — survives across cold starts within the same deployment
-=======
-  // 1. In-process memo &#65533; fastest path for warm requests
-  if (_hasNewCols !== null) return _hasNewCols;
-
-  // 2. Redis &#65533; survives across cold starts within the same deployment
->>>>>>> 84d852ccfd3173514bc9dd5043d46b00a877b0af
   try {
     const { redisGet, redisSet } = require("../redis");
     const cached = await redisGet(HAS_NEW_COLS_REDIS_KEY);
@@ -53,28 +46,17 @@ async function hasNewColumns(pool) {
       return _hasNewCols;
     }
   } catch {
-<<<<<<< HEAD
     // Redis unavailable — fall through to DB probe
   }
 
   // 3. DB probe — only on true first-ever cold start or after Redis flush
-=======
-    // Redis unavailable &#65533; fall through to DB probe
-  }
-
-  // 3. DB probe &#65533; only on true first-ever cold start or after Redis flush
->>>>>>> 84d852ccfd3173514bc9dd5043d46b00a877b0af
   const r = await pool.request().query(`
     SELECT COUNT(*) AS cnt FROM sys.columns
     WHERE object_id = OBJECT_ID('dbo.ReceivedPayment') AND name = 'RPDocNo'
   `);
   _hasNewCols = r.recordset[0].cnt > 0;
 
-<<<<<<< HEAD
   // Store in Redis for 24 h
-=======
-  // Store in Redis for 24 h &#65533; schema changes require a deploy anyway
->>>>>>> 84d852ccfd3173514bc9dd5043d46b00a877b0af
   try {
     const { redisSet } = require("../redis");
     await redisSet(HAS_NEW_COLS_REDIS_KEY, _hasNewCols ? "1" : "0", 86400);
