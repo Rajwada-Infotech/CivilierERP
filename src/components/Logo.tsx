@@ -8,8 +8,8 @@ const rand = () => CHARS[Math.floor(Math.random() * CHARS.length)];
 
 function useMatrixVersion(target: string) {
   const [display, setDisplay] = useState(target);
-  const frameRef = useRef<NodeJS.Timeout | null>(null);
-  const cycleRef = useRef<NodeJS.Timeout | null>(null);
+  const frameRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cycleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scramble = () => {
     // How many steps to reveal each char
