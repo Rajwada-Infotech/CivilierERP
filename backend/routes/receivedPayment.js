@@ -34,10 +34,17 @@ async function invalidateReceivedPaymentWorkflowCaches() {
 }
 
 async function hasNewColumns(pool) {
+<<<<<<< HEAD
   // 1. In-process memo — fastest path for warm requests
   if (_hasNewCols !== null) return _hasNewCols;
 
   // 2. Redis — survives across cold starts within the same deployment
+=======
+  // 1. In-process memo &#65533; fastest path for warm requests
+  if (_hasNewCols !== null) return _hasNewCols;
+
+  // 2. Redis &#65533; survives across cold starts within the same deployment
+>>>>>>> 84d852ccfd3173514bc9dd5043d46b00a877b0af
   try {
     const { redisGet, redisSet } = require("../redis");
     const cached = await redisGet(HAS_NEW_COLS_REDIS_KEY);
@@ -46,17 +53,28 @@ async function hasNewColumns(pool) {
       return _hasNewCols;
     }
   } catch {
+<<<<<<< HEAD
     // Redis unavailable — fall through to DB probe
   }
 
   // 3. DB probe — only on true first-ever cold start or after Redis flush
+=======
+    // Redis unavailable &#65533; fall through to DB probe
+  }
+
+  // 3. DB probe &#65533; only on true first-ever cold start or after Redis flush
+>>>>>>> 84d852ccfd3173514bc9dd5043d46b00a877b0af
   const r = await pool.request().query(`
     SELECT COUNT(*) AS cnt FROM sys.columns
     WHERE object_id = OBJECT_ID('dbo.ReceivedPayment') AND name = 'RPDocNo'
   `);
   _hasNewCols = r.recordset[0].cnt > 0;
 
+<<<<<<< HEAD
   // Store in Redis for 24 h
+=======
+  // Store in Redis for 24 h &#65533; schema changes require a deploy anyway
+>>>>>>> 84d852ccfd3173514bc9dd5043d46b00a877b0af
   try {
     const { redisSet } = require("../redis");
     await redisSet(HAS_NEW_COLS_REDIS_KEY, _hasNewCols ? "1" : "0", 86400);
@@ -156,6 +174,34 @@ router.post("/", async (req, res) => {
         parentDocNo: null,
         rootExBDocNo: null,
       });
+    } else if (
+      RPRemarks?.includes("[SalePayment]") &&
+      RPReceivedFrom?.startsWith("SO-")
+    ) {
+      // &#9472;&#9472; Sale payment: check for duplicate, then generate SP-YYYYMMDD-NNN &#9472;&#9472;
+      const dupCheck = await pool
+        .request()
+        .input("saleOrderDocNo", sql.NVarChar(255), RPReceivedFrom).query(`
+          SELECT COUNT(1) AS cnt FROM dbo.ReceivedPayment
+          WHERE RPReceivedFrom = @saleOrderDocNo
+            AND RPRemarks LIKE '%[SalePayment]%'
+            AND RPStatus NOT IN ('Rejected')
+        `);
+      if (Number(dupCheck.recordset[0].cnt) > 0) {
+        return res.status(409).json({
+          error: `A payment against sale order ${RPReceivedFrom} already exists. Only one active payment per sale order is allowed.`,
+        });
+      }
+      const dateStr = (
+        RPDocDate || new Date().toISOString().slice(0, 10)
+      ).replace(/-/g, "");
+      const seqRes = await pool.request().query(`
+        SELECT COUNT(1)+1 AS N FROM dbo.ReceivedPayment
+        WHERE CAST(RPCreatedAt AS DATE) = CAST(GETDATE() AS DATE)
+          AND RPRemarks LIKE '%[SalePayment]%'
+      `);
+      const seq = String(seqRes.recordset[0].N).padStart(3, "0");
+      finalDocNo = `SP-${dateStr}-${seq}`;
     }
 
     // ── Sale-Invoice workflow validations ─────────────────────────────────────

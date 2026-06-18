@@ -28,6 +28,8 @@ import {
   CreditCard,
   Wrench,
   LineChart,
+  ShoppingCart,
+  Receipt,
 } from "lucide-react";
 import {
   fetchHomeDashboard,
@@ -36,6 +38,7 @@ import {
   type RecentGRN,
   type ApprovalInboxItem,
   type TaskSummary,
+  type SalesSummaryData,
 } from "@/api/homeDashboardApi";
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
@@ -60,6 +63,7 @@ function getAccessibleModules(role: UserRoleStr) {
       approvals: true,
       admin: true,
       dba: role === "dba",
+      sales: true,
     };
   }
   if (role === "engineer") {
@@ -72,6 +76,7 @@ function getAccessibleModules(role: UserRoleStr) {
       approvals: false, // approval inbox is admin-gated
       admin: false,
       dba: false,
+      sales: false,
     };
   }
   // role === "user" — per-page pagePermissions from DB
@@ -89,6 +94,7 @@ function getAccessibleModules(role: UserRoleStr) {
     approvals: false,
     admin: false,
     dba: false,
+    sales: false,
   };
 }
 
@@ -110,6 +116,7 @@ function deriveUserModuleAccess(
     approvals: false,
     admin: false,
     dba: false,
+    sales: false,
   };
 }
 
@@ -594,6 +601,7 @@ export default function HomePage() {
   const tick = data?.tickets;
   const eng = data?.engineering;
   const fol = data?.followup;
+  const sal = data?.sales;
   const pendingApprovals = data?.pendingApprovals ?? [];
 
   const lastUpdated = dataUpdatedAt
@@ -944,6 +952,42 @@ export default function HomePage() {
                     value: fin?.cheques?.pendingCount ?? 0,
                     accent: fin?.cheques?.pendingCount ? "#ef4444" : undefined,
                     icon: CreditCard,
+                  },
+                ]}
+              />
+            )}
+
+            {/* Sales */}
+            {access.sales && (
+              <ModuleCard
+                title="Sales"
+                href="/sales/sale-order"
+                icon={ShoppingCart}
+                accent="#7c3aed"
+                delay={nextDelay()}
+                loading={isLoading}
+                stats={[
+                  {
+                    label: "Total orders",
+                    value: sal?.total ?? 0,
+                    accent: "#7c3aed",
+                  },
+                  {
+                    label: "Approved",
+                    value: sal?.approved ?? 0,
+                    accent: "#10b981",
+                    icon: CheckCircle2,
+                  },
+                  {
+                    label: "Pending approval",
+                    value: sal?.pendingApproval ?? 0,
+                    accent: sal?.pendingApproval ? "#f59e0b" : undefined,
+                  },
+                  {
+                    label: "This month (₹L)",
+                    value: Math.round((sal?.thisMonthAmount ?? 0) / 100000),
+                    accent: "#06b6d4",
+                    icon: TrendingUp,
                   },
                 ]}
               />
