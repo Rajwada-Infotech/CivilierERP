@@ -122,7 +122,7 @@ export const NavGroup = ({
             >
               <span>{child.label}</span>
               {child.badge && (
-                <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">
+                <span className="bg-red-500 text-white text-[9px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full">
                   {child.badge}
                 </span>
               )}

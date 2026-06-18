@@ -280,6 +280,24 @@ const engineeringSetupItems: SetupItem[] = [
     path: "/masters/activity",
     color: "text-green-400",
   },
+  {
+    icon: HardHat,
+    label: "Contractors",
+    path: "/masters/contractors",
+    color: "text-yellow-500",
+  },
+  {
+    icon: ClipboardList,
+    label: "Work Order",
+    path: "/engineering/work-order",
+    color: "text-orange-400",
+  },
+  {
+    icon: Layers,
+    label: "BOQ",
+    path: "/engineering/boq",
+    color: "text-indigo-400",
+  },
 ];
 
 const adminSetupItems: SetupItem[] = [
