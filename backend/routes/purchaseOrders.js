@@ -213,6 +213,10 @@ const PO_SELECT = `
     po.SourceMRDocNo,
     po.SourceWDId,
     po.SourceWDDocNo,
+    po.SourceSaleOrderId,
+    po.SourceSaleOrderDocNo,
+    po.SourceSaleInvoiceId,
+    po.SourceSaleInvoiceDocNo,
     po.POType,
     td.Prefix             AS DocTypePrefix,
     td.Description        AS DocTypeDescription
@@ -248,6 +252,10 @@ router.get(
 
       const fyId = req.query.fyId ? parseInt(req.query.fyId, 10) : null;
 
+      const sourceSaleInvoiceId = req.query.sourceSaleInvoiceId
+        ? parseInt(req.query.sourceSaleInvoiceId, 10)
+        : null;
+
       // ?poType=WO_PO  → show only WO-POs
       // ?poType=Direct → show only direct POs (excludes WO-POs)
       // (no param)     → show ALL types (default: includes WO-POs)
@@ -258,6 +266,8 @@ router.get(
       const whereConditions = [];
       if (sourceWOId) whereConditions.push("po.SourceWOId = @sourceWOId");
       if (fyId) whereConditions.push("po.fy_id = @fyId");
+      if (sourceSaleInvoiceId)
+        whereConditions.push("po.SourceSaleInvoiceId = @sourceSaleInvoiceId");
       if (poTypeFilter) whereConditions.push("po.POType = @poTypeFilter");
       const whereClause = whereConditions.length
         ? `WHERE ${whereConditions.join(" AND ")}`
@@ -269,6 +279,7 @@ router.get(
         .input("limit", sql.Int, limit)
         .input("sourceWOId", sql.Int, sourceWOId)
         .input("fyId", sql.Int, fyId)
+        .input("sourceSaleInvoiceId", sql.Int, sourceSaleInvoiceId)
         .input("poTypeFilter", sql.NVarChar(20), poTypeFilter).query(`
         SELECT *, COUNT(*) OVER() AS _total FROM (
           ${PO_SELECT}
@@ -376,6 +387,11 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
     SourceWDId,
     SourceWDDocNo,
     POType,
+    // ── Sale-Order workflow fields (Migration 111) ──
+    SourceSaleOrderId,
+    SourceSaleOrderDocNo,
+    SourceSaleInvoiceId,
+    SourceSaleInvoiceDocNo,
   } = req.body;
 
   const poItemsArray = Array.isArray(POItems)
@@ -395,6 +411,29 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
     if (!userEmail) return;
 
     const pool = getPool();
+
+    // Enforce: a PO can only be raised against a paid Sale Invoice
+    // (Sale Order workflow — Migration 111).
+    if (SourceSaleInvoiceId) {
+      const siId = parseInt(SourceSaleInvoiceId, 10);
+      const siCheck = await pool
+        .request()
+        .input("SIId", sql.Int, siId)
+        .query(
+          "SELECT SaleInvoiceID, PaymentStatus, Amount FROM dbo.SaleInvoices WHERE SaleInvoiceID = @SIId AND IsDeleted = 0",
+        );
+
+      if (!siCheck.recordset.length) {
+        return res.status(404).json({ error: "Source Sale Invoice not found." });
+      }
+
+      const siStatus = siCheck.recordset[0].PaymentStatus;
+      if (siStatus !== "Paid") {
+        return res.status(400).json({
+          error: `Cannot create Purchase Order: Sale Invoice is "${siStatus}". Only fully Paid Sale Invoices can be used to raise a Purchase Order.`,
+        });
+      }
+    }
 
     // Enforce: a PO can only be raised against an Approved Material Request.
     if (SourceMRId) {
@@ -500,17 +539,32 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
         SourceWDId ? parseInt(SourceWDId, 10) : null,
       )
       .input("SourceWDDocNo", sql.NVarChar(100), SourceWDDocNo || null)
+      // ── Sale-Order workflow (Migration 111) ──────────────────────────────
+      .input(
+        "SourceSaleOrderId",
+        sql.Int,
+        SourceSaleOrderId ? parseInt(SourceSaleOrderId, 10) : null,
+      )
+      .input("SourceSaleOrderDocNo", sql.NVarChar(100), SourceSaleOrderDocNo || null)
+      .input(
+        "SourceSaleInvoiceId",
+        sql.Int,
+        SourceSaleInvoiceId ? parseInt(SourceSaleInvoiceId, 10) : null,
+      )
+      .input("SourceSaleInvoiceDocNo", sql.NVarChar(100), SourceSaleInvoiceDocNo || null)
       .input(
         "POType",
         sql.NVarChar(20),
         POType ||
-          (SourceWOId
+          (SourceSaleInvoiceId
+            ? "SaleOrder"
+            : SourceWOId
             ? "WO_PO"
             : SourceMRId
-              ? "Normal"
-              : SourceWDId
-                ? "WO_PO"
-                : "Direct"),
+            ? "Normal"
+            : SourceWDId
+            ? "WO_PO"
+            : "Direct"),
       )
       .input("FyId", sql.Int, fyId).query(`
         INSERT INTO dbo.PurchaseOrders (
@@ -523,6 +577,8 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
           SourceWOId, SourceWODocNo,
           SourceMRId, SourceMRDocNo,
           SourceWDId, SourceWDDocNo,
+          SourceSaleOrderId, SourceSaleOrderDocNo,
+          SourceSaleInvoiceId, SourceSaleInvoiceDocNo,
           POType, fy_id
         )
         OUTPUT INSERTED.PurchaseOrderID
@@ -536,6 +592,8 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
           @SourceWOId, @SourceWODocNo,
           @SourceMRId, @SourceMRDocNo,
           @SourceWDId, @SourceWDDocNo,
+          @SourceSaleOrderId, @SourceSaleOrderDocNo,
+          @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo,
           @POType, @FyId
         )
       `);
