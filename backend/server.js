@@ -92,6 +92,8 @@ const ALL_ROUTES = [
   { path: "/api/new-payment", file: "./routes/newPayment" },
   { path: "/api/received-payment", file: "./routes/receivedPayment" },
   { path: "/api/purchase-orders", file: "./routes/purchaseOrders" },
+  { path: "/api/customer-sale-orders", file: "./routes/customerSaleOrders" },
+  { path: "/api/sale-invoices",        file: "./routes/saleInvoices" },
   { path: "/api/tenants", file: "./routes/tenants" },
   { path: "/api/work-orders", file: "./routes/workOrder" },
   { path: "/api/user-profile", file: "./routes/userProfile" },
