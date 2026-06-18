@@ -239,8 +239,7 @@ router.get(
   },
 );
 
-router.get(
-  "/options",
+const optionsHandler = [
   checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
   async (req, res) => {
     try {
@@ -250,7 +249,10 @@ router.get(
       res.status(500).json({ error: "Failed to load applicant options" });
     }
   },
-);
+];
+
+router.get("/options", ...optionsHandler);
+router.get("/meta/options", ...optionsHandler);
 
 router.get(
   "/",
