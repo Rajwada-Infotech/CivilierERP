@@ -270,9 +270,9 @@ export const AppSidebar = () => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.4 }}
-            className="absolute top-0 left-0 right-0 h-40 pointer-events-none z-0"
+            className="absolute top-0 left-0 right-0 h-14 pointer-events-none z-0"
             style={{
-              background: `radial-gradient(ellipse at 30% 0%, ${accentColor}1A 0%, transparent 70%)`,
+              background: `radial-gradient(ellipse at 30% 0%, ${accentColor}2A 0%, transparent 100%)`,
             }}
           />
         </AnimatePresence>
