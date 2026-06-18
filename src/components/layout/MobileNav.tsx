@@ -86,7 +86,7 @@ const MODULE_META: Record<
     route: string;
   }
 > = {
-  __none__: { h: 240, s: 6, l: 55, icon: Grip, label: "Menu", route: "/home" },
+  __none__: { h: 242, s: 65, l: 58, icon: Grip, label: "Menu", route: "/home" },
   finance: {
     h: 217,
     s: 91,
@@ -808,37 +808,25 @@ export const MobileNav: React.FC = () => {
           right: "max(1.25rem, env(safe-area-inset-right, 1.25rem))",
         }}
       >
-        {activeModule && !isAdminPage && (
-          <span
-            className="absolute inset-0 rounded-2xl animate-pulse"
-            style={{
-              background: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.25)`,
-              filter: "blur(8px)",
-              transform: "scale(1.3)",
-            }}
-          />
-        )}
+        <span
+          className="absolute inset-0 rounded-2xl animate-pulse"
+          style={{
+            background: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.25)`,
+            filter: "blur(8px)",
+            transform: "scale(1.3)",
+          }}
+        />
         <span
           className="relative flex items-center gap-2 px-4 py-3 rounded-2xl text-sm font-semibold shadow-2xl"
-          style={
-            activeModule || isAdminPage
-              ? {
-                  background: `linear-gradient(135deg, hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%), hsl(${activeMod.h} ${activeMod.s}% ${Math.max(activeMod.l - 12, 20)}%))`,
-                  color: "white",
-                }
-              : {
-                  background: "hsl(var(--card))",
-                  color: "hsl(var(--foreground))",
-                  border: "1px solid hsl(var(--border))",
-                }
-          }
+          style={{
+            background: `linear-gradient(135deg, hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%), hsl(${activeMod.h} ${activeMod.s}% ${Math.max(activeMod.l - 12, 20)}%))`,
+            color: "white",
+          }}
         >
           <Grip size={16} />
-          {(activeModule || isAdminPage) && (
-            <span className="text-xs tracking-wide font-heading">
-              {activeMod.label}
-            </span>
-          )}
+          <span className="text-xs tracking-wide font-heading">
+            {activeMod.label}
+          </span>
         </span>
       </button>
 
