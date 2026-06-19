@@ -1,6 +1,7 @@
 ﻿import { useEffect, useState, useMemo } from "react";
 import { useUserMap } from "@/hooks/useUserMap";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FinanceShell } from "@/components/finance/FinanceShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   CreditCard,
@@ -237,30 +238,23 @@ export default function Transactions() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Transactions"]} />
-      <div className="relative space-y-8 mt-6">
-
-        {/* ── Page header ──────────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Transactions
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              View all payments, purchase orders, receipts and journal entries
-            </p>
-          </div>
+      <FinanceShell
+        title="Transactions"
+        subtitle="All payments, purchase orders, receipts and journal entries"
+        action={
           <button
             onClick={() => fetchData()}
             disabled={loading}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50 shrink-0"
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors disabled:opacity-50"
+            style={{ color: "#818cf8" }}
           >
             <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
             Refresh
           </button>
-        </div>
-
+        }
+      >
         {error && (
-          <div className="px-4 py-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
+          <div className="px-4 py-3 rounded-xl bg-destructive/10 border border-destructive/30 text-destructive text-sm">
             {error}
           </div>
         )}
@@ -357,7 +351,7 @@ export default function Transactions() {
           </div>
         )}
 
-      </div>
+      </FinanceShell>
     </>
   );
 }
