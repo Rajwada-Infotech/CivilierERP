@@ -50,7 +50,7 @@ function getCell(row: Record<string, unknown>, col: ExportColumn): string {
 function sanitizeForPdf(value: string): string {
   return value
     .replace(/₹/g, "Rs.")
-    .replace(/[─━─\u2500-\u257F]/g, "-")
+    .replace(/[\u2500-\u257F]/g, "-")
     .replace(/[^\u0020-\u00FF]/g, "?");
 }
 
@@ -213,8 +213,8 @@ export async function exportToPdf(
 
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
 
-  const pageW = doc.internal.pageSize.getWidth();   // 841.89
-  const pageH = doc.internal.pageSize.getHeight();  // 595.28
+  const pageW = doc.internal.pageSize.getWidth(); // 841.89
+  const pageH = doc.internal.pageSize.getHeight(); // 595.28
   const marginX = 36;
 
   const now = new Date();
