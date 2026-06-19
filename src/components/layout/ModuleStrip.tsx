@@ -19,6 +19,7 @@ import {
 } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./layoutContexts";
+import { useTheme } from "@/contexts/ThemeContext";
 
 
 // ── Module definitions ────────────────────────────────────────────────────────
@@ -105,6 +106,8 @@ export const ModuleStrip: React.FC = () => {
   const { collapsed, setCollapsed } = useSidebarState();
   const navigate = useNavigate();
   const { currentUser } = useAuth();
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
   const role = currentUser?.role ?? "";
   const isAdminTier = ["super_admin", "admin", "dba"].includes(role);
 
@@ -147,9 +150,20 @@ export const ModuleStrip: React.FC = () => {
       >
         {/* ── Inner oval pill strip (fully rounded top + bottom) ───────────── */}
         <div
-          className="relative flex-1 flex flex-col overflow-hidden
-            bg-sidebar border border-sidebar-border/40
-            shadow-[0_8px_32px_rgba(0,0,0,0.28)] rounded-[28px]"
+          className="relative flex-1 flex flex-col overflow-hidden rounded-[28px]"
+          style={isDark ? {
+            background: "rgba(15, 17, 26, 0.52)",
+            border: "1px solid rgba(255,255,255,0.13)",
+            boxShadow: "0 2px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.10)",
+            backdropFilter: "blur(22px) saturate(160%)",
+            WebkitBackdropFilter: "blur(22px) saturate(160%)",
+          } : {
+            background: "rgba(255,255,255,0.42)",
+            border: "1px solid rgba(255,255,255,0.65)",
+            boxShadow: "0 2px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.85)",
+            backdropFilter: "blur(22px) saturate(180%)",
+            WebkitBackdropFilter: "blur(22px) saturate(180%)",
+          }}
         >
           {/* Dot-grid overlay */}
           <div

@@ -423,7 +423,8 @@ export async function fetchHomeDashboard(
         : [];
   })();
   const soNow = new Date();
-  const soMonthStart = new Date(soNow.getFullYear(), soNow.getMonth(), 1);
+  // Use YYYY-MM prefix for safe UTC-safe month comparison
+  const soMonthPrefix = `${soNow.getFullYear()}-${String(soNow.getMonth() + 1).padStart(2, "0")}`;
   const sales: SalesSummaryData = {
     total: soList.length,
     approved: soList.filter((o) =>
@@ -435,7 +436,10 @@ export async function fetchHomeDashboard(
       ),
     ).length,
     thisMonthAmount: soList
-      .filter((o) => new Date(o.OrderDate ?? o.CreatedAt ?? "") >= soMonthStart)
+      .filter((o) => {
+        const d = o.OrderDate ?? o.CreatedAt ?? "";
+        return typeof d === "string" ? d.startsWith(soMonthPrefix) : false;
+      })
       .reduce((sum, o) => sum + (Number(o.TotalAmount) || 0), 0),
     totalAmount: soList.reduce(
       (sum, o) => sum + (Number(o.TotalAmount) || 0),
