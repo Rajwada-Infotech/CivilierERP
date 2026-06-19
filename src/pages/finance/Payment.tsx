@@ -3217,9 +3217,9 @@ const Payment: React.FC = () => {
                         else gross = Math.max(0, gross - amt);
                       }
 
-                      // Net Payable = gross after all term adjustments
-                      const roundOff = 0;
-                      const net = Math.round(gross * 100) / 100;
+                      // Net Payable = gross after all term adjustments, rounded to nearest rupee
+                      const net = Math.round(gross);
+                      const roundOff = net - gross;
 
                       const hasGst = cgst + sgst + igst > 0;
                       const hasTerms =

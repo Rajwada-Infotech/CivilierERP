@@ -180,7 +180,7 @@ const TaskCard = ({ task, onClick }: { task: Task; onClick: () => void }) => {
             <div
               className="h-full rounded-full transition-all"
               style={{
-                width: `${totalCount > 0 ? (metCount / totalCount) * 100 : 0}%`,
+                width: `${(metCount / totalCount) * 100}%`,
                 background: "hsl(var(--primary))",
               }}
             />
