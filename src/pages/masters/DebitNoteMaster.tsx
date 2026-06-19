@@ -13,6 +13,7 @@ import {
   IndianRupee,
   Receipt,
   CheckCircle2,
+  ChevronDown,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -156,7 +157,7 @@ function makeBillRenderer(
             <select
               value={group.billNumber}
               onChange={(e) => handleBillSelect(e.target.value)}
-              className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all
+              className={`w-full appearance-none pl-8 pr-8 py-2 rounded-lg text-sm font-body bg-muted border transition-all
                 focus:outline-none focus:ring-2 focus:ring-primary text-foreground
                 ${error && !group.billNumber ? "border-destructive" : "border-border"}`}
             >
@@ -188,6 +189,10 @@ function makeBillRenderer(
                 </option>
               )}
             </select>
+            <ChevronDown
+              size={14}
+              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
           </div>
 
           {/* Show selected option details */}
@@ -717,19 +722,25 @@ const DebitNoteMaster: React.FC = () => {
         <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-2">
           Financial Year
         </label>
-        <select
-          value={selectedFinYear ?? ""}
-          onChange={(e) => setSelectedFinYear(e.target.value || "")}
-          className="w-full rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-        >
-          <option value="">— All Years —</option>
-          {finYears.map((fy) => (
-            <option key={fy.id} value={fy.year}>
-              {fy.year}
-              {fy.status === "Active" ? " (Active)" : ""}
-            </option>
-          ))}
-        </select>
+        <div className="relative">
+          <select
+            value={selectedFinYear ?? ""}
+            onChange={(e) => setSelectedFinYear(e.target.value || "")}
+            className="w-full appearance-none rounded-lg border border-border bg-muted px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="">— All Years —</option>
+            {finYears.map((fy) => (
+              <option key={fy.id} value={fy.year}>
+                {fy.year}
+                {fy.status === "Active" ? " (Active)" : ""}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            size={14}
+            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+          />
+        </div>
         {selectedFinYear ? (
           <p className="text-[11px] text-muted-foreground mt-1.5">
             Showing unpaid expense bookings for{" "}

@@ -16,8 +16,6 @@ services:
       - ${CIVILIER_ENV_FILE:-backend/.env}
     environment:
       NODE_ENV: production
-      DB_SERVER: sqlserver
-      DB_PORT: 1433
       REDIS_HOST: redis
       REDIS_PORT: 6379
     expose:
