@@ -22,12 +22,17 @@ router.get("/", async (req, res) => {
   try {
     const pool = getPool();
 
-    const now    = new Date();
-    const fyYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
-    const from      = req.query.from       || `${fyYear}-04-01`;
-    const to        = req.query.to         || `${fyYear + 1}-03-31`;
-    const companyId = req.query.companyId  ? parseInt(req.query.companyId,  10) : null;
-    const projectId = req.query.projectId  ? parseInt(req.query.projectId,  10) : null;
+    const now = new Date();
+    const fyYear =
+      now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    const from = req.query.from || `${fyYear}-04-01`;
+    const to = req.query.to || `${fyYear + 1}-03-31`;
+    const companyId = req.query.companyId
+      ? parseInt(req.query.companyId, 10)
+      : null;
+    const projectId = req.query.projectId
+      ? parseInt(req.query.projectId, 10)
+      : null;
 
     // ── 1. Account groups ────────────────────────────────────────────────────
     const groupsRes = await pool.request().query(`
@@ -38,17 +43,27 @@ router.get("/", async (req, res) => {
     `);
 
     if (!groupsRes.recordset.length) {
-      return res.json({ rows: [], summary: { totalDebit: 0, totalCredit: 0, openingDebit: 0, openingCredit: 0 }, asOf: new Date().toISOString(), from, to });
+      return res.json({
+        rows: [],
+        summary: {
+          totalDebit: 0,
+          totalCredit: 0,
+          openingDebit: 0,
+          openingCredit: 0,
+        },
+        asOf: new Date().toISOString(),
+        from,
+        to,
+      });
     }
 
     // ── 2. Entity-level totals (one row per AccountHeadMaster entry) ─────────
     const headsRes = await pool
       .request()
-      .input("from",      sql.Date, from)
-      .input("to",        sql.Date, to)
-      .input("companyId", sql.Int,  companyId)
-      .input("projectId", sql.Int,  projectId)
-      .query(`
+      .input("from", sql.Date, from)
+      .input("to", sql.Date, to)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId).query(`
         /* ── Suppliers (S) ──────────────────────────────────────────────────
            credit = approved PurchaseOrders
            debit  = approved NewPayments linked via ExpenseBooking → GRN      */
@@ -67,6 +82,8 @@ router.get("/", async (req, res) => {
             WHERE grn.SupplierID = ahm.LHeadId
               AND np.Status IN ('Approved','Completed')
               AND CAST(np.PDate AS DATE) < @from
+              AND (@companyId IS NULL OR np.PCompanyId = @companyId)
+              AND (@projectId IS NULL OR np.PProjectId = @projectId)
           ), 0) AS opening_debit,
 
           ISNULL((
@@ -88,6 +105,8 @@ router.get("/", async (req, res) => {
             WHERE grn.SupplierID = ahm.LHeadId
               AND np.Status IN ('Approved','Completed')
               AND CAST(np.PDate AS DATE) BETWEEN @from AND @to
+              AND (@companyId IS NULL OR np.PCompanyId = @companyId)
+              AND (@projectId IS NULL OR np.PProjectId = @projectId)
           ), 0) AS txn_debit,
 
           ISNULL((
@@ -119,6 +138,8 @@ router.get("/", async (req, res) => {
               AND eb.ESourceType IN ('WO_PO','WORK_DONE','PO')
               AND np.Status IN ('Approved','Completed')
               AND CAST(np.PDate AS DATE) < @from
+              AND (@companyId IS NULL OR np.PCompanyId = @companyId)
+              AND (@projectId IS NULL OR np.PProjectId = @projectId)
           ), 0),
 
           ISNULL((
@@ -127,6 +148,8 @@ router.get("/", async (req, res) => {
             WHERE eb.EName = ahm.LHeadName
               AND eb.ESourceType IN ('WO_PO','WORK_DONE','PO')
               AND CAST(eb.ECreatedAt AS DATE) < @from
+              AND (@companyId IS NULL OR eb.ECompanyId = @companyId)
+              AND (@projectId IS NULL OR eb.EProjectId = @projectId)
           ), 0),
 
           ISNULL((
@@ -137,6 +160,8 @@ router.get("/", async (req, res) => {
               AND eb.ESourceType IN ('WO_PO','WORK_DONE','PO')
               AND np.Status IN ('Approved','Completed')
               AND CAST(np.PDate AS DATE) BETWEEN @from AND @to
+              AND (@companyId IS NULL OR np.PCompanyId = @companyId)
+              AND (@projectId IS NULL OR np.PProjectId = @projectId)
           ), 0),
 
           ISNULL((
@@ -145,6 +170,8 @@ router.get("/", async (req, res) => {
             WHERE eb.EName = ahm.LHeadName
               AND eb.ESourceType IN ('WO_PO','WORK_DONE','PO')
               AND CAST(eb.ECreatedAt AS DATE) BETWEEN @from AND @to
+              AND (@companyId IS NULL OR eb.ECompanyId = @companyId)
+              AND (@projectId IS NULL OR eb.EProjectId = @projectId)
           ), 0)
 
         FROM dbo.AccountHeadMaster ahm
@@ -169,6 +196,8 @@ router.get("/", async (req, res) => {
             WHERE np.PBankID = ahm.LHeadId
               AND np.Status IN ('Approved','Completed')
               AND CAST(np.PDate AS DATE) BETWEEN @from AND @to
+              AND (@companyId IS NULL OR np.PCompanyId = @companyId)
+              AND (@projectId IS NULL OR np.PProjectId = @projectId)
           ), 0) AS txn_debit,
 
           ISNULL((
@@ -177,6 +206,8 @@ router.get("/", async (req, res) => {
             WHERE rp.RPDepositBankId = ahm.LHeadId
               AND rp.RPStatus IN ('Approved','Completed')
               AND CAST(rp.RPDocDate AS DATE) BETWEEN @from AND @to
+              AND (@companyId IS NULL OR rp.RPCompanyId = @companyId)
+              AND (@projectId IS NULL OR rp.RPProjectId = @projectId)
           ), 0) AS txn_credit
 
         FROM dbo.AccountHeadMaster ahm
@@ -196,6 +227,8 @@ router.get("/", async (req, res) => {
                 OR rp.RPCustomerName = ahm.LHeadName)
               AND rp.RPStatus IN ('Approved','Completed')
               AND CAST(rp.RPDocDate AS DATE) BETWEEN @from AND @to
+              AND (@companyId IS NULL OR rp.RPCompanyId = @companyId)
+              AND (@projectId IS NULL OR rp.RPProjectId = @projectId)
           ), 0)
         FROM dbo.AccountHeadMaster ahm
         WHERE ahm.LHeadType = 'A' AND ahm.LBelongsTo IS NOT NULL
@@ -213,24 +246,30 @@ router.get("/", async (req, res) => {
     const heads = headsRes.recordset;
 
     // ── 3. Build group map ───────────────────────────────────────────────────
-    const TYPE_LABEL = { S: "Supplier", C: "Contractor", B: "Bank", A: "Customer", GL: "General Ledger" };
+    const TYPE_LABEL = {
+      S: "Supplier",
+      C: "Contractor",
+      B: "Bank",
+      A: "Customer",
+      GL: "General Ledger",
+    };
 
     const groupMap = new Map();
     for (const g of groupsRes.recordset) {
       // Normalise to numbers — SQL Server can return ParentGroupId as string
-      const id  = Number(g.AGId);
+      const id = Number(g.AGId);
       const pid = g.ParentGroupId != null ? Number(g.ParentGroupId) : null;
       groupMap.set(id, {
         id,
-        name:         g.Name,
-        code:         g.Code || null,
-        parentId:     pid,
-        isGroup:      true,
-        entities:     [],
-        children:     [],
-        opening:      { debit: 0, credit: 0 },
+        name: g.Name,
+        code: g.Code || null,
+        parentId: pid,
+        isGroup: true,
+        entities: [],
+        children: [],
+        opening: { debit: 0, credit: 0 },
         transactions: { debit: 0, credit: 0 },
-        closing:      { debit: 0, credit: 0 },
+        closing: { debit: 0, credit: 0 },
       });
     }
 
@@ -239,29 +278,29 @@ router.get("/", async (req, res) => {
       const g = groupMap.get(Number(h.groupId));
       if (!g) continue;
 
-      const od = Number(h.opening_debit  || 0);
+      const od = Number(h.opening_debit || 0);
       const oc = Number(h.opening_credit || 0);
-      const td = Number(h.txn_debit      || 0);
-      const tc = Number(h.txn_credit     || 0);
+      const td = Number(h.txn_debit || 0);
+      const tc = Number(h.txn_credit || 0);
 
       g.entities.push({
-        id:           h.id,
-        name:         h.name,
-        type:         h.type,
-        typeLabel:    TYPE_LABEL[h.type] || h.type,
-        isGroup:      false,
-        children:     [],
-        opening:      { debit: od, credit: oc },
+        id: h.id,
+        name: h.name,
+        type: h.type,
+        typeLabel: TYPE_LABEL[h.type] || h.type,
+        isGroup: false,
+        children: [],
+        opening: { debit: od, credit: oc },
         transactions: { debit: td, credit: tc },
-        closing:      { debit: od + td, credit: oc + tc },
+        closing: { debit: od + td, credit: oc + tc },
       });
 
-      g.opening.debit       += od;
-      g.opening.credit      += oc;
-      g.transactions.debit  += td;
+      g.opening.debit += od;
+      g.opening.credit += oc;
+      g.transactions.debit += td;
       g.transactions.credit += tc;
-      g.closing.debit       += od + td;
-      g.closing.credit      += oc + tc;
+      g.closing.debit += od + td;
+      g.closing.credit += oc + tc;
     }
 
     // ── 4. Build tree (attach child groups to parents) ───────────────────────
@@ -278,12 +317,12 @@ router.get("/", async (req, res) => {
     function rollUp(node) {
       for (const child of node.children) {
         rollUp(child);
-        node.opening.debit       += child.opening.debit;
-        node.opening.credit      += child.opening.credit;
-        node.transactions.debit  += child.transactions.debit;
+        node.opening.debit += child.opening.debit;
+        node.opening.credit += child.opening.credit;
+        node.transactions.debit += child.transactions.debit;
         node.transactions.credit += child.transactions.credit;
-        node.closing.debit       += child.closing.debit;
-        node.closing.credit      += child.closing.credit;
+        node.closing.debit += child.closing.debit;
+        node.closing.credit += child.closing.credit;
       }
     }
     roots.forEach(rollUp);
@@ -291,14 +330,14 @@ router.get("/", async (req, res) => {
     // Convert to frontend shape (entities become leaf children)
     function toFrontend(node, level = 0) {
       return {
-        id:           node.id,
-        name:         node.name,
-        code:         node.code,
+        id: node.id,
+        name: node.name,
+        code: node.code,
         level,
-        isGroup:      true,
-        opening:      node.opening,
+        isGroup: true,
+        opening: node.opening,
         transactions: node.transactions,
-        closing:      node.closing,
+        closing: node.closing,
         children: [
           ...node.entities.map((e) => ({ ...e, level: level + 1 })),
           ...node.children.map((c) => toFrontend(c, level + 1)),
@@ -309,11 +348,14 @@ router.get("/", async (req, res) => {
     const rows = roots.map((r) => toFrontend(r, 0));
 
     // ── 5. Summary ───────────────────────────────────────────────────────────
-    let totalDebit = 0, totalCredit = 0, openingDebit = 0, openingCredit = 0;
+    let totalDebit = 0,
+      totalCredit = 0,
+      openingDebit = 0,
+      openingCredit = 0;
     for (const h of heads) {
-      totalDebit    += Number(h.txn_debit      || 0);
-      totalCredit   += Number(h.txn_credit     || 0);
-      openingDebit  += Number(h.opening_debit  || 0);
+      totalDebit += Number(h.txn_debit || 0);
+      totalCredit += Number(h.txn_credit || 0);
+      openingDebit += Number(h.opening_debit || 0);
       openingCredit += Number(h.opening_credit || 0);
     }
 
