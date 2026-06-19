@@ -195,6 +195,12 @@ async function createApp() {
   const app = express();
   app.locals.startupTime = new Date().toISOString();
 
+  // Exactly one reverse proxy hop sits in front of this process: the nginx
+  // container. nginx forwards the real client/ALB IP via X-Forwarded-For,
+  // so trust 1 hop — not `true`, which would trust any spoofed header from
+  // anywhere and defeat rate limiting and IP-based checks below.
+  app.set("trust proxy", 1);
+
   app.disable("x-powered-by");
   app.use(requestLogger);
   app.use(addRequestTiming);

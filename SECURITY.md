@@ -2,20 +2,21 @@
 
 ## Supported Versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+CivilierERP is deployed as a single rolling application rather than
+distributed under separate version lines. Security fixes are applied to
+the `main` branch only, which reflects the current production deployment.
+There are no older release lines to support.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+| Branch | Supported          |
+| ------ | ------------------- |
+| main   | :white_check_mark: |
 
 ## Reporting a Vulnerability
 
-Use this section to tell people how to report a vulnerability.
+Please report security vulnerabilities privately using GitHub's
+[private vulnerability reporting](https://github.com/Rajwada-Infotech/CivilierERP/security/advisories/new)
+("Report a vulnerability" under the repository's Security tab) rather than
+opening a public issue.
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+Please do not disclose the issue publicly until it has been reviewed and a
+fix has been deployed.
