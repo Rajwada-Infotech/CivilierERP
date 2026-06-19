@@ -9,7 +9,6 @@ export interface Godown {
   ShortDesc: string | null;
   Description: string | null;
   Remarks: string | null;
-  IsMain: boolean;
   EnterpriseID: number | null;
   ProjectID: number | null;
   EnterpriseName: string | null;
@@ -19,6 +18,8 @@ export interface Godown {
   IsDeleted: boolean;
   CreatedAt: string;
   UpdatedAt: string | null;
+  /** True for the one godown auto-created when its project was created. */
+  IsProjectDefault: boolean;
 }
 
 export interface GodownsResponse {
@@ -46,6 +47,7 @@ export interface CreateGodownPayload {
   Remarks?: string;
   EnterpriseID?: number | null;
   ProjectID?: number | null;
+  Location?: string;
   IsActive?: boolean;
 }
 

@@ -442,6 +442,26 @@ router.post("/work-done", async (req, res) => {
     transaction = pool.transaction();
     await transaction.begin();
 
+    // Enforce: Work Done can only be recorded against an Approved Work Order.
+    if (toIntOrNull(body.WorkOrderID)) {
+      const woCheck = await transaction
+        .request()
+        .input("WOId", sql.Int, toIntOrNull(body.WorkOrderID))
+        .query("SELECT Status FROM dbo.WorkOrderHeader WHERE Id = @WOId");
+
+      if (!woCheck.recordset.length) {
+        await transaction.rollback();
+        return res.status(404).json({ error: "Linked Work Order not found." });
+      }
+      const woStatus = woCheck.recordset[0].Status;
+      if (woStatus !== "Approved") {
+        await transaction.rollback();
+        return res.status(400).json({
+          error: `Cannot record Work Done: Work Order is "${woStatus}". Only Approved Work Orders can have Work Done recorded against them.`,
+        });
+      }
+    }
+
     // Period overlap guard
     if (toIntOrNull(body.WorkOrderID) && body.PeriodFrom && body.PeriodTo) {
       const overlapCheck = await pool
@@ -494,7 +514,8 @@ router.post("/work-done", async (req, res) => {
       .input("CertifiedAmount", sql.Decimal(18, 2), certified)
       .input("Status", sql.NVarChar(50), body.Status || "Draft")
       .input("Remarks", sql.NVarChar(sql.MAX), body.Remarks || null)
-      .input("CreatedBy", sql.NVarChar(100), userEmail).query(`
+      .input("CreatedBy", sql.NVarChar(100), userEmail)
+      .input("CreatedAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.WorkDone
           (DocNo, DocTypeId, DocDate, CompanyId, ProjectId, FinYear, SupplierId,
            WorkOrderID, PeriodFrom, PeriodTo, DescriptionOfWork, QuantityDone,
@@ -505,7 +526,7 @@ router.post("/work-done", async (req, res) => {
           (@DocNo, @DocTypeId, @DocDate, @CompanyId, @ProjectId, @FinYear, @SupplierId,
            @WorkOrderID, @PeriodFrom, @PeriodTo, @DescriptionOfWork, @QuantityDone,
            @Unit, @RatePerUnit, @GrossAmount, @Deductions, @CertifiedAmount, @Status,
-           @Remarks, @CreatedBy, SYSDATETIME())
+           @Remarks, @CreatedBy, @CreatedAt)
       `);
 
     const newId = result.recordset[0].ID;
@@ -519,7 +540,13 @@ router.post("/work-done", async (req, res) => {
 
     // Auto-submit: move Draft → Pending so it appears in approval inbox
     try {
-      await transition("work-done", newId, "Pending", req.user?.email, req.user?.role);
+      await transition(
+        "work-done",
+        newId,
+        "Pending",
+        req.user?.email,
+        req.user?.role,
+      );
       await bumpCacheVersion(WORK_DONE_CACHE);
     } catch (e) {
       console.warn("[Work Done auto-submit]", e.message);
@@ -563,6 +590,24 @@ router.put("/work-done/:id", async (req, res) => {
       body.CertifiedAmount != null
         ? toNumber(body.CertifiedAmount)
         : gross - deductions;
+
+    // Enforce: Work Done can only be linked to an Approved Work Order.
+    if (toIntOrNull(body.WorkOrderID)) {
+      const woCheck = await pool
+        .request()
+        .input("WOId", sql.Int, toIntOrNull(body.WorkOrderID))
+        .query("SELECT Status FROM dbo.WorkOrderHeader WHERE Id = @WOId");
+
+      if (!woCheck.recordset.length) {
+        return res.status(404).json({ error: "Linked Work Order not found." });
+      }
+      const woStatus = woCheck.recordset[0].Status;
+      if (woStatus !== "Approved") {
+        return res.status(400).json({
+          error: `Cannot update Work Done: Work Order is "${woStatus}". Only Approved Work Orders can have Work Done recorded against them.`,
+        });
+      }
+    }
 
     // Period overlap guard (exclude self)
     if (toIntOrNull(body.WorkOrderID) && body.PeriodFrom && body.PeriodTo) {
@@ -653,10 +698,19 @@ router.put("/work-done/:id", async (req, res) => {
     // Re-submit to Pending if still in Draft/Rejected
     try {
       const pool = getPool();
-      const r = await pool.request().input("id", sql.Int, parseInt(req.params.id, 10)).query(`SELECT Status FROM dbo.WorkDone WHERE ID = @id`);
+      const r = await pool
+        .request()
+        .input("id", sql.Int, parseInt(req.params.id, 10))
+        .query(`SELECT Status FROM dbo.WorkDone WHERE ID = @id`);
       const st = r.recordset[0]?.Status;
       if (st === "Draft" || st === "Rejected") {
-        await transition("work-done", parseInt(req.params.id, 10), "Pending", req.user?.email, req.user?.role);
+        await transition(
+          "work-done",
+          parseInt(req.params.id, 10),
+          "Pending",
+          req.user?.email,
+          req.user?.role,
+        );
         await bumpCacheVersion(WORK_DONE_CACHE);
       }
     } catch (e) {
@@ -960,7 +1014,3 @@ router.get(
 );
 
 module.exports = router;
-
-
-
-

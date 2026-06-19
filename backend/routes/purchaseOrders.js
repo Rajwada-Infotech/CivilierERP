@@ -66,6 +66,21 @@ const computeSubtotal = (items) => {
   }, 0);
 };
 
+// Resolve a FinYear.FId from its FName label (e.g. "2026-2027").
+// Returns null if no label was supplied or no matching row exists.
+const resolveFyId = async (pool, finYearLabel) => {
+  if (!finYearLabel) return null;
+  try {
+    const r = await pool
+      .request()
+      .input("FName", sql.NVarChar, finYearLabel)
+      .query("SELECT FId FROM dbo.FinYear WHERE FName = @FName");
+    return r.recordset[0]?.FId ?? null;
+  } catch {
+    return null;
+  }
+};
+
 // Build the UOM-id lookup map: name → id (used when syncing PurchaseOrderItems)
 const buildUomMap = async (pool) => {
   try {
@@ -179,6 +194,15 @@ const PO_SELECT = `
     po.ParentDocNo,
     po.RootExBDocNo,
     po.fy_id,
+    COALESCE(
+      fy.FName,
+      (SELECT TOP 1 fyWO.FName
+       FROM dbo.WorkOrderHeader woh
+       JOIN dbo.FinYear fyWO
+         ON woh.DocumentDate >= fyWO.FStartDate
+        AND woh.DocumentDate <= fyWO.FEndDate
+       WHERE woh.Id = po.SourceWOId)
+    )                     AS FinYearName,
     po.SequenceNo,
     po.POItems,
     po.Discount,
@@ -189,6 +213,10 @@ const PO_SELECT = `
     po.SourceMRDocNo,
     po.SourceWDId,
     po.SourceWDDocNo,
+    po.SourceSaleOrderId,
+    po.SourceSaleOrderDocNo,
+    po.SourceSaleInvoiceId,
+    po.SourceSaleInvoiceDocNo,
     po.POType,
     td.Prefix             AS DocTypePrefix,
     td.Description        AS DocTypeDescription
@@ -196,6 +224,7 @@ const PO_SELECT = `
   LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId    = po.SupplierID
   LEFT JOIN dbo.enterprise        co ON co.id         = po.CompanyId
   LEFT JOIN dbo.enterprise        pr ON pr.id         = po.ProjectId
+  LEFT JOIN dbo.FinYear           fy ON fy.FId        = po.fy_id
   LEFT JOIN dbo.TypeOfDoc         td ON td.TypeOfDocId = po.DocTypeId
 `;
 
@@ -223,6 +252,10 @@ router.get(
 
       const fyId = req.query.fyId ? parseInt(req.query.fyId, 10) : null;
 
+      const sourceSaleInvoiceId = req.query.sourceSaleInvoiceId
+        ? parseInt(req.query.sourceSaleInvoiceId, 10)
+        : null;
+
       // ?poType=WO_PO  → show only WO-POs
       // ?poType=Direct → show only direct POs (excludes WO-POs)
       // (no param)     → show ALL types (default: includes WO-POs)
@@ -233,6 +266,8 @@ router.get(
       const whereConditions = [];
       if (sourceWOId) whereConditions.push("po.SourceWOId = @sourceWOId");
       if (fyId) whereConditions.push("po.fy_id = @fyId");
+      if (sourceSaleInvoiceId)
+        whereConditions.push("po.SourceSaleInvoiceId = @sourceSaleInvoiceId");
       if (poTypeFilter) whereConditions.push("po.POType = @poTypeFilter");
       const whereClause = whereConditions.length
         ? `WHERE ${whereConditions.join(" AND ")}`
@@ -244,6 +279,7 @@ router.get(
         .input("limit", sql.Int, limit)
         .input("sourceWOId", sql.Int, sourceWOId)
         .input("fyId", sql.Int, fyId)
+        .input("sourceSaleInvoiceId", sql.Int, sourceSaleInvoiceId)
         .input("poTypeFilter", sql.NVarChar(20), poTypeFilter).query(`
         SELECT *, COUNT(*) OVER() AS _total FROM (
           ${PO_SELECT}
@@ -351,6 +387,11 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
     SourceWDId,
     SourceWDDocNo,
     POType,
+    // ── Sale-Order workflow fields (Migration 111) ──
+    SourceSaleOrderId,
+    SourceSaleOrderDocNo,
+    SourceSaleInvoiceId,
+    SourceSaleInvoiceDocNo,
   } = req.body;
 
   const poItemsArray = Array.isArray(POItems)
@@ -370,7 +411,54 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
     if (!userEmail) return;
 
     const pool = getPool();
+
+    // Enforce: a PO can only be raised against a paid Sale Invoice
+    // (Sale Order workflow — Migration 111).
+    if (SourceSaleInvoiceId) {
+      const siId = parseInt(SourceSaleInvoiceId, 10);
+      const siCheck = await pool
+        .request()
+        .input("SIId", sql.Int, siId)
+        .query(
+          "SELECT SaleInvoiceID, PaymentStatus, Amount FROM dbo.SaleInvoices WHERE SaleInvoiceID = @SIId AND IsDeleted = 0",
+        );
+
+      if (!siCheck.recordset.length) {
+        return res.status(404).json({ error: "Source Sale Invoice not found." });
+      }
+
+      const siStatus = siCheck.recordset[0].PaymentStatus;
+      if (siStatus !== "Paid") {
+        return res.status(400).json({
+          error: `Cannot create Purchase Order: Sale Invoice is "${siStatus}". Only fully Paid Sale Invoices can be used to raise a Purchase Order.`,
+        });
+      }
+    }
+
+    // Enforce: a PO can only be raised against an Approved Material Request.
+    if (SourceMRId) {
+      const mrId = parseInt(SourceMRId, 10);
+      const mrCheck = await pool
+        .request()
+        .input("MRId", sql.Int, mrId)
+        .query("SELECT Status FROM dbo.MaterialRequests WHERE MRId = @MRId");
+
+      if (!mrCheck.recordset.length) {
+        return res
+          .status(404)
+          .json({ error: "Source Material Request not found." });
+      }
+
+      const mrStatus = mrCheck.recordset[0].Status;
+      if (mrStatus !== "Approved") {
+        return res.status(400).json({
+          error: `Cannot create a Purchase Order: Material Request is "${mrStatus}". Only Approved Material Requests can be used to raise a Purchase Order.`,
+        });
+      }
+    }
+
     const uomMap = await buildUomMap(pool);
+    const fyId = await resolveFyId(pool, finYear);
 
     transaction = pool.transaction();
     await transaction.begin();
@@ -451,18 +539,34 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
         SourceWDId ? parseInt(SourceWDId, 10) : null,
       )
       .input("SourceWDDocNo", sql.NVarChar(100), SourceWDDocNo || null)
+      // ── Sale-Order workflow (Migration 111) ──────────────────────────────
+      .input(
+        "SourceSaleOrderId",
+        sql.Int,
+        SourceSaleOrderId ? parseInt(SourceSaleOrderId, 10) : null,
+      )
+      .input("SourceSaleOrderDocNo", sql.NVarChar(100), SourceSaleOrderDocNo || null)
+      .input(
+        "SourceSaleInvoiceId",
+        sql.Int,
+        SourceSaleInvoiceId ? parseInt(SourceSaleInvoiceId, 10) : null,
+      )
+      .input("SourceSaleInvoiceDocNo", sql.NVarChar(100), SourceSaleInvoiceDocNo || null)
       .input(
         "POType",
         sql.NVarChar(20),
         POType ||
-          (SourceWOId
+          (SourceSaleInvoiceId
+            ? "SaleOrder"
+            : SourceWOId
             ? "WO_PO"
             : SourceMRId
-              ? "Normal"
-              : SourceWDId
-                ? "WO_PO"
-                : "Direct"),
-      ).query(`
+            ? "Normal"
+            : SourceWDId
+            ? "WO_PO"
+            : "Direct"),
+      )
+      .input("FyId", sql.Int, fyId).query(`
         INSERT INTO dbo.PurchaseOrders (
           PurchaseOrderNo, PODate, ExpectedDeliveryDate, SupplierID, CompanyId,
           ProjectId, ItemDescription, Quantity, Unit, Rate,
@@ -473,7 +577,9 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
           SourceWOId, SourceWODocNo,
           SourceMRId, SourceMRDocNo,
           SourceWDId, SourceWDDocNo,
-          POType
+          SourceSaleOrderId, SourceSaleOrderDocNo,
+          SourceSaleInvoiceId, SourceSaleInvoiceDocNo,
+          POType, fy_id
         )
         OUTPUT INSERTED.PurchaseOrderID
         VALUES (
@@ -486,7 +592,9 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
           @SourceWOId, @SourceWODocNo,
           @SourceMRId, @SourceMRDocNo,
           @SourceWDId, @SourceWDDocNo,
-          @POType
+          @SourceSaleOrderId, @SourceSaleOrderDocNo,
+          @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo,
+          @POType, @FyId
         )
       `);
 
@@ -502,56 +610,18 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
     await transaction.commit();
     await bumpCacheVersion("purchase-orders");
 
-    // If this PO was created from an MR, recalculate MR status based on how
-    // much of the MR's total requested qty is now covered by POs (best-effort).
+    // Mark the source MR as Ordered once a PO is raised against it.
     if (SourceMRId) {
       (async () => {
         try {
           const mrId = parseInt(SourceMRId, 10);
-
-          // Sum of all quantities requested on this MR
-          const mrQtyRes = await pool.request().input("MRId", sql.Int, mrId)
-            .query(`
-              SELECT ISNULL(SUM(Quantity), 0) AS TotalRequested
-              FROM dbo.MaterialRequestItems
-              WHERE MRId = @MRId
-            `);
-          const totalRequested =
-            parseFloat(mrQtyRes.recordset[0]?.TotalRequested) || 0;
-
-          // Sum of all quantities ordered across ALL POs sourced from this MR
-          // (includes the PO we just created since it was committed above)
-          const poQtyRes = await pool.request().input("MRId", sql.Int, mrId)
-            .query(`
-              SELECT ISNULL(SUM(poi.Quantity), 0) AS TotalOrdered
-              FROM dbo.PurchaseOrderItems poi
-              INNER JOIN dbo.PurchaseOrders po
-                ON poi.PurchaseOrderID = po.PurchaseOrderID
-              WHERE po.SourceMRId = @MRId
-                AND po.Status NOT IN ('Cancelled', 'Rejected')
-            `);
-          const totalOrdered =
-            parseFloat(poQtyRes.recordset[0]?.TotalOrdered) || 0;
-
-          // Determine new MR status
-          let newMRStatus;
-          if (totalRequested <= 0 || totalOrdered <= 0) {
-            newMRStatus = "Partially Ordered";
-          } else if (totalOrdered >= totalRequested) {
-            newMRStatus = "Ordered";
-          } else {
-            newMRStatus = "Partially Ordered";
-          }
-
           await pool
             .request()
             .input("mrId", sql.Int, mrId)
-            .input("user", sql.NVarChar(200), userEmail)
-            .input("newStatus", sql.NVarChar(50), newMRStatus).query(`
+            .input("user", sql.NVarChar(200), userEmail).query(`
               UPDATE dbo.MaterialRequests
-              SET Status = @newStatus, UpdatedBy = @user, UpdatedAt = GETDATE()
-              WHERE MRId = @mrId
-                AND Status IN ('Approved', 'Partially Ordered')
+              SET Status = 'Ordered', UpdatedBy = @user, UpdatedAt = GETDATE()
+              WHERE MRId = @mrId AND Status = 'Approved'
             `);
         } catch (e) {
           console.error("MR status update failed:", e.message);
@@ -614,6 +684,7 @@ router.put(
       Remarks,
       DocTypeId,
       DocNo,
+      finYear,
       POItems,
       Discount,
       GST,
@@ -639,6 +710,7 @@ router.put(
 
       const pool = getPool();
       const uomMap = await buildUomMap(pool);
+      const fyId = await resolveFyId(pool, finYear);
 
       transaction = pool.transaction();
       await transaction.begin();
@@ -682,7 +754,8 @@ router.put(
         .input("UpdatedAt", sql.DateTime2, new Date())
         .input("POItems", sql.NVarChar(sql.MAX), poItemsJson)
         .input("Discount", sql.NVarChar(sql.MAX), discountJson)
-        .input("GST", sql.NVarChar(sql.MAX), gstJson).query(`
+        .input("GST", sql.NVarChar(sql.MAX), gstJson)
+        .input("FyId", sql.Int, fyId).query(`
         UPDATE dbo.PurchaseOrders SET
           PurchaseOrderNo       = @PurchaseOrderNo,
           PODate                = @PODate,
@@ -708,7 +781,8 @@ router.put(
           UpdatedAt             = @UpdatedAt,
           POItems               = @POItems,
           Discount              = @Discount,
-          GST                   = @GST
+          GST                   = @GST,
+          fy_id                 = COALESCE(@FyId, fy_id)
         WHERE PurchaseOrderID = @PurchaseOrderID
       `);
 
@@ -911,6 +985,15 @@ router.delete("/:id", async (req, res) => {
       });
     }
 
+    // Capture SourceMRId before deleting so we can reset the MR afterwards
+    const poMeta = await pool
+      .request()
+      .input("PurchaseOrderID", sql.Int, id)
+      .query(
+        "SELECT SourceMRId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @PurchaseOrderID",
+      );
+    const sourceMRId = poMeta.recordset[0]?.SourceMRId ?? null;
+
     const result = await pool
       .request()
       .input("PurchaseOrderID", sql.Int, id)
@@ -921,6 +1004,33 @@ router.delete("/:id", async (req, res) => {
     if (!checkRowsAffected(result, res, "Purchase order")) return;
 
     await bumpCacheVersion("purchase-orders");
+
+    // If this PO was raised from a Material Request, reset that MR back to
+    // 'Approved' so a new PO can be created against it — but only when no
+    // other active PO still references the same MR.
+    if (sourceMRId) {
+      try {
+        const remainingPOs = await pool
+          .request()
+          .input("MRId", sql.Int, sourceMRId).query(`
+            SELECT COUNT(*) AS cnt
+            FROM dbo.PurchaseOrders
+            WHERE SourceMRId = @MRId
+              AND ISNULL(Status, '') NOT IN ('Deleted', 'Rejected')
+          `);
+
+        if (Number(remainingPOs.recordset[0]?.cnt) === 0) {
+          await pool.request().input("MRId", sql.Int, sourceMRId).query(`
+              UPDATE dbo.MaterialRequests
+              SET Status = 'Approved', UpdatedAt = GETDATE()
+              WHERE MRId = @MRId AND Status = 'Ordered'
+            `);
+        }
+      } catch (mrErr) {
+        console.error("MR status reset failed (non-fatal):", mrErr.message);
+      }
+    }
+
     res.json({ message: "Purchase order deleted successfully" });
   } catch (err) {
     console.error("DELETE PurchaseOrders error:", err);

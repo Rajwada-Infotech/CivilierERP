@@ -343,6 +343,9 @@ export interface CompanyDetails {
   state: string | null;
   pincode: string | null;
   gst_no: string | null;
+  email: string | null;
+  phone_number: string | null;
+  logo: string | null;
 }
 
 export const getCompanyDetails = (
@@ -361,6 +364,9 @@ export const getCompanyDetails = (
         state: data.state ?? null,
         pincode: data.pincode ?? null,
         gst_no: data.gst_no ?? null,
+        email: data.email ?? null,
+        phone_number: data.phone_number ?? null,
+        logo: data.logo ?? null,
       };
     })
     .catch(() => null);

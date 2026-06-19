@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -10,7 +10,6 @@ import {
   Plus,
   Edit2,
   Trash2,
-  RotateCcw,
   Check,
   X,
   Hash,
@@ -21,10 +20,10 @@ import {
   Eye,
   Printer,
   Search,
-  ChevronDown,
   AlertCircle,
   XCircle,
 } from "lucide-react";
+import TreeDropdown from "@/components/common/TreeDropdown";
 
 import {
   getBanks,
@@ -36,11 +35,37 @@ import {
   type CompanyOption,
 } from "@/api/bankMasterApi";
 
+import { getAccountGroups } from "@/api/accountApi";
+
 import {
   DataTable,
   type ColumnDef,
   type ExportColumn,
 } from "@/components/ui/DataTable";
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+interface AccountGroup {
+  _id: string;
+  name: string;
+  code: string;
+  parentId: string | null;
+}
+
+interface TreeNode extends AccountGroup {
+  children: TreeNode[];
+}
+
+function buildTree(items: AccountGroup[]): TreeNode[] {
+  const map: Record<string, TreeNode> = {};
+  items.forEach((i) => (map[i._id] = { ...i, children: [] }));
+  const roots: TreeNode[] = [];
+  items.forEach((i) => {
+    if (i.parentId && map[i.parentId])
+      map[i.parentId].children.push(map[i._id]);
+    else roots.push(map[i._id]);
+  });
+  return roots;
+}
 
 // ─── Zod Schema ─────────────────────────────────────────────────────────────
 const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
@@ -70,7 +95,9 @@ const bankFormSchema = z.object({
       "Opening balance must be 0 or greater",
     ),
   address: z.string(),
+  groupId: z.number().nullable(),
   status: z.boolean(),
+  accountGroupId: z.string(),
 });
 
 type FormState = z.infer<typeof bankFormSchema>;
@@ -87,7 +114,9 @@ const EMPTY: FormState = {
   holderName: "",
   openingBalance: "",
   address: "",
+  groupId: null,
   status: true,
+  accountGroupId: "",
 };
 
 // ─── Export Columns ─────────────────────────────────────────────────────────
@@ -101,6 +130,10 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Bank Type", accessor: "bankType" },
   { header: "Holder Name", accessor: "holderName" },
   { header: "Opening Balance", accessor: "openingBalance" },
+  {
+    header: "Group",
+    accessor: (r) => (r.BLBelongsTo != null ? String(r.BLBelongsTo) : "—"),
+  },
   { header: "Address", accessor: "address" },
   { header: "Status", accessor: (r) => (r.BActive ? "Active" : "Inactive") },
 ];
@@ -326,6 +359,29 @@ const BankMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: groupsData } = useQuery({
+    queryKey: ["account-groups"],
+    queryFn: getAccountGroups,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const accountGroups: AccountGroup[] = useMemo(() => {
+    if (!Array.isArray(groupsData)) return [];
+    return (groupsData as any[])
+      .filter((item) => item.AGId != null && item.Name)
+      .map((item) => ({
+        _id: String(item.AGId),
+        name: item.Name as string,
+        code: item.Code || "",
+        parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
+      }));
+  }, [groupsData]);
+
+  const accountGroupTree = useMemo(
+    () => buildTree(accountGroups),
+    [accountGroups],
+  );
+
   const dbBanks: BankRecord[] = Array.isArray(dbData) ? dbData : [];
 
   const {
@@ -334,7 +390,7 @@ const BankMaster: React.FC = () => {
     reset,
     setValue,
     watch,
-    formState: { errors },
+    formState: { errors, isValid },
   } = useForm<FormState>({
     resolver: zodResolver(bankFormSchema),
     defaultValues: EMPTY,
@@ -342,6 +398,7 @@ const BankMaster: React.FC = () => {
   });
 
   const form = watch();
+  const canSave = isValid;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [viewRow, setViewRow] = useState<BankRecord | null>(null);
@@ -352,7 +409,6 @@ const BankMaster: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState("");
   const [page, setPage] = useState(1);
   const limit = 10;
-
 
   // ─── Filtered list ────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -367,8 +423,7 @@ const BankMaster: React.FC = () => {
         (b.BCompanyName ?? "").toLowerCase().includes(q);
       const matchType = !filterBankType || b.BBankType === filterBankType;
       const matchStatus =
-        !filterStatus ||
-        (filterStatus === "active" ? b.BStatus : !b.BStatus);
+        !filterStatus || (filterStatus === "active" ? b.BStatus : !b.BStatus);
       return matchSearch && matchType && matchStatus;
     });
   }, [dbBanks, search, filterBankType, filterStatus]);
@@ -392,6 +447,7 @@ const BankMaster: React.FC = () => {
     BAddress: f.address.trim() || null,
     BStatus: f.status,
     BCompanyName: f.companyName.trim() || null,
+    LBelongsTo: f.accountGroupId ? Number(f.accountGroupId) : null,
   });
 
   const handleSave = async (values: FormState) => {
@@ -424,7 +480,12 @@ const BankMaster: React.FC = () => {
       openingBalance:
         item.BOpeningBalance != null ? String(item.BOpeningBalance) : "",
       address: item.BAddress || "",
+      groupId: item.BLBelongsTo ?? null,
       status: Boolean(item.BStatus),
+      accountGroupId:
+        (item as any).LBelongsTo != null
+          ? String((item as any).LBelongsTo)
+          : "",
     });
     setEditingId(String(item.BId));
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -468,6 +529,7 @@ const BankMaster: React.FC = () => {
         <tr><td>Bank Type</td><td>${bank.BBankType || "—"}</td></tr>
         <tr><td>Account Holder</td><td>${bank.BAccountHolderName || "—"}</td></tr>
         <tr><td>Opening Balance</td><td>₹ ${Number(bank.BOpeningBalance || 0).toLocaleString("en-IN")}</td></tr>
+        <tr><td>Group</td><td>${bank.BLBelongsTo != null ? (accountGroups.find((g) => g._id === String(bank.BLBelongsTo))?.name ?? "—") : "—"}</td></tr>
         <tr><td>Address</td><td>${bank.BAddress || "—"}</td></tr>
         <tr><td>Status</td><td>${bank.BStatus ? "Active" : "Inactive"}</td></tr>
       </table>
@@ -519,41 +581,16 @@ const BankMaster: React.FC = () => {
 
         {/* ── Form Card ── */}
         <div className="rounded-xl border border-border bg-card shadow-sm">
-          {/* Card Header */}
-          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
-            <div className="flex items-center gap-3">
-              {editingId && (
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <RotateCcw size={15} />
-                  <span className="hidden sm:inline">Back</span>
-                </button>
-              )}
-              {editingId && <span className="text-border/60">|</span>}
-              <h2 className="text-base font-heading font-semibold text-foreground">
+          {/* Card header — title only */}
+          <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
+            <div>
+              <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? "Edit Bank" : "Add Bank"}
               </h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleReset}
-                className="px-4 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
-              >
-                <RotateCcw size={13} />
-                {editingId ? "Cancel" : "Reset"}
-              </button>
-              <button
-                type="button"
-                onClick={handleSubmit(handleSave)}
-                className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white flex items-center gap-2"
-              >
-                {editingId ? <Check size={14} /> : <Plus size={14} />}
-                {editingId ? "Update Bank" : "Save Bank"}
-              </button>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Fields marked <span className="text-destructive">*</span> are
+                required
+              </p>
             </div>
           </div>
 
@@ -574,27 +611,19 @@ const BankMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Company Name
                   </label>
-                  <div className="relative">
-                    <Building2
-                      size={13}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                    <select
-                      {...register("companyName")}
-                      className={`${selectCls} pl-8`}
-                    >
-                      <option value="">Select Company...</option>
-                      {companies.map((c) => (
-                        <option key={c.id} value={c.label}>
-                          {c.label}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
+                  <TreeDropdown
+                    variant="flat"
+                    value={form.companyName}
+                    onChange={(v) =>
+                      setValue("companyName", v, { shouldValidate: true })
+                    }
+                    options={companies.map((c) => ({
+                      value: c.label,
+                      label: c.label,
+                    }))}
+                    placeholder="Select Company…"
+                    icon={<Building2 size={13} />}
+                  />
                 </div>
 
                 {/* Bank Name */}
@@ -733,20 +762,15 @@ const BankMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Account Type
                   </label>
-                  <div className="relative">
-                    <select {...register("accountType")} className={selectCls}>
-                      <option value="">Select Account Type...</option>
-                      {ACCOUNT_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
+                  <TreeDropdown
+                    variant="flat"
+                    value={form.accountType}
+                    onChange={(v) =>
+                      setValue("accountType", v, { shouldValidate: true })
+                    }
+                    options={ACCOUNT_TYPES.map((t) => ({ value: t, label: t }))}
+                    placeholder="Select Account Type…"
+                  />
                 </div>
 
                 {/* Bank Type */}
@@ -754,20 +778,31 @@ const BankMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Bank Type
                   </label>
-                  <div className="relative">
-                    <select {...register("bankType")} className={selectCls}>
-                      <option value="">Select Bank Type...</option>
-                      {BANK_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
+                  <TreeDropdown
+                    variant="flat"
+                    value={form.bankType}
+                    onChange={(v) =>
+                      setValue("bankType", v, { shouldValidate: true })
+                    }
+                    options={BANK_TYPES.map((t) => ({ value: t, label: t }))}
+                    placeholder="Select Bank Type…"
+                  />
+                </div>
+
+                {/* Account Group */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Account Group
+                  </label>
+                  <TreeDropdown
+                    variant="tree"
+                    value={form.accountGroupId}
+                    onChange={(v) =>
+                      setValue("accountGroupId", v, { shouldValidate: true })
+                    }
+                    items={accountGroupTree}
+                    allGroups={accountGroups}
+                  />
                 </div>
 
                 {/* Opening Balance */}
@@ -849,6 +884,39 @@ const BankMaster: React.FC = () => {
               </span>
             </div>
           </div>
+
+          {/* Card footer — actions */}
+          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
+            <p className="text-[11px] text-muted-foreground">
+              {canSave ? (
+                <span className="text-emerald-500 font-medium">
+                  Ready to save
+                </span>
+              ) : (
+                "Fill in the required fields to save"
+              )}
+            </p>
+            <div className="flex items-center gap-2">
+              {editingId && (
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleSubmit(handleSave)}
+                disabled={!canSave}
+                className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
+              >
+                {editingId ? <Check size={14} /> : <Plus size={14} />}
+                {editingId ? "Update Bank" : "Save Bank"}
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* ── Table Section ── */}
@@ -868,40 +936,24 @@ const BankMaster: React.FC = () => {
               />
             </div>
 
-            <div className="relative">
-              <select
-                value={filterBankType}
-                onChange={(e) => setFilterBankType(e.target.value)}
-                className="appearance-none text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-              >
-                <option value="">All Types</option>
-                {BANK_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={12}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
+            <TreeDropdown
+              variant="flat"
+              value={filterBankType}
+              onChange={(v) => setFilterBankType(v)}
+              options={BANK_TYPES.map((t) => ({ value: t, label: t }))}
+              placeholder="All Types"
+            />
 
-            <div className="relative">
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="appearance-none text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-              >
-                <option value="">All Status</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-              <ChevronDown
-                size={12}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
+            <TreeDropdown
+              variant="flat"
+              value={filterStatus}
+              onChange={(v) => setFilterStatus(v)}
+              options={[
+                { value: "active", label: "Active" },
+                { value: "inactive", label: "Inactive" },
+              ]}
+              placeholder="All Status"
+            />
 
             {(search || filterBankType || filterStatus) && (
               <button
@@ -915,7 +967,6 @@ const BankMaster: React.FC = () => {
                 <X size={11} /> Clear
               </button>
             )}
-
           </div>
 
           {/* Table */}
@@ -1002,6 +1053,15 @@ const BankMaster: React.FC = () => {
                   mono: true,
                 },
                 { label: "Address", value: viewRow.BAddress },
+                {
+                  label: "Group Name",
+                  value:
+                    viewRow.BLBelongsTo != null
+                      ? (accountGroups.find(
+                          (g) => g._id === String(viewRow.BLBelongsTo),
+                        )?.name ?? "—")
+                      : "—",
+                },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">

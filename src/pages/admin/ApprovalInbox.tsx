@@ -22,6 +22,10 @@ import {
   Inbox,
   CheckCircle2,
   XCircle,
+  ArrowLeftRight,
+  Warehouse,
+  ShoppingCart,
+  Building2,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -45,6 +49,10 @@ interface InboxItem {
   // expense-booking only — null for all other modules
   GrnTotalAmount: number | null;
   BillingTermsData: string | null;
+  // goods-receipt (transfer GRNs) — null for non-transfer GRNs
+  SourceTransferDocNo: string | null;
+  FromGodownName: string | null;
+  ToGodownName: string | null;
 }
 
 // ─── Module config ────────────────────────────────────────────────────────────
@@ -128,6 +136,13 @@ const MODULE_CONFIG: Record<
     navPath: "/material/issues",
     apiEndpoint: "/api/material-issues",
     label: "Material Issues",
+  },
+  "sale-orders": {
+    icon: ShoppingCart,
+    color: "text-fuchsia-500 bg-fuchsia-500/10",
+    navPath: "/sales/sale-order",
+    apiEndpoint: "/api/sale-orders",
+    label: "Sale Orders",
   },
 };
 
@@ -328,7 +343,7 @@ const InboxRow: React.FC<{
   );
 
   return (
-    <>
+    <div>
       {/* ── Mobile card (< md) ─────────────────────────────────────────── */}
       <div className="md:hidden border-b border-border last:border-0 px-4 py-3.5 space-y-3">
         {/* Row 1: module + status */}
@@ -351,9 +366,43 @@ const InboxRow: React.FC<{
           <StatusBadge status={item.Status} />
         </div>
 
-        {/* Row 2: party + date */}
+        {/* Row 2: party / transfer route + date */}
         <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-          <span className="truncate">{party}</span>
+          {item.Module === "goods-receipt" && item.SourceTransferDocNo ? (
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <span className="font-mono text-[11px] font-semibold text-violet-600 dark:text-violet-400 truncate">
+                {item.SourceTransferDocNo}
+              </span>
+              {item.FromGodownName && item.ToGodownName && (
+                <span className="flex items-center gap-1 text-[10px] truncate">
+                  <Warehouse size={9} className="shrink-0 text-orange-500" />
+                  <span className="truncate">{item.FromGodownName}</span>
+                  <ArrowLeftRight size={8} className="shrink-0" />
+                  <Warehouse size={9} className="shrink-0 text-emerald-500" />
+                  <span className="truncate">{item.ToGodownName}</span>
+                </span>
+              )}
+            </div>
+          ) : item.Module === "sale-orders" ? (
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <span className="flex items-center gap-1 text-[11px] font-semibold text-foreground truncate">
+                <span className="truncate">{item.ContractorName}</span>
+                <ArrowLeftRight size={8} className="shrink-0" />
+                <span className="truncate">{item.SupplierName}</span>
+              </span>
+              {item.FromGodownName && item.ToGodownName && (
+                <span className="flex items-center gap-1 text-[10px] truncate">
+                  <Warehouse size={9} className="shrink-0 text-orange-500" />
+                  <span className="truncate">{item.FromGodownName}</span>
+                  <ArrowLeftRight size={8} className="shrink-0" />
+                  <Warehouse size={9} className="shrink-0 text-emerald-500" />
+                  <span className="truncate">{item.ToGodownName}</span>
+                </span>
+              )}
+            </div>
+          ) : (
+            <span className="truncate">{party}</span>
+          )}
           <span className="shrink-0">{fmtDate(item.RecordDate)}</span>
         </div>
 
@@ -402,8 +451,50 @@ const InboxRow: React.FC<{
         {/* Col 2 — Date */}
         <p className="text-xs text-foreground">{fmtDate(item.RecordDate)}</p>
 
-        {/* Col 3 — Party */}
-        <p className="text-xs text-foreground truncate">{party}</p>
+        {/* Col 3 — Party / Transfer route */}
+        {item.Module === "goods-receipt" && item.SourceTransferDocNo ? (
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">
+              Transfer ref
+            </span>
+            <span className="font-mono text-xs font-semibold text-violet-600 dark:text-violet-400 truncate">
+              {item.SourceTransferDocNo}
+            </span>
+            {item.FromGodownName && item.ToGodownName && (
+              <span className="flex items-center gap-1 text-[10px] text-muted-foreground truncate">
+                <Warehouse size={9} className="shrink-0 text-orange-500" />
+                <span className="truncate">{item.FromGodownName}</span>
+                <ArrowLeftRight size={8} className="shrink-0" />
+                <Warehouse size={9} className="shrink-0 text-emerald-500" />
+                <span className="truncate">{item.ToGodownName}</span>
+              </span>
+            )}
+          </div>
+        ) : item.Module === "sale-orders" ? (
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="flex items-center gap-1 text-[11px] font-semibold text-foreground truncate">
+              <Building2 size={9} className="shrink-0 text-blue-500" />
+              <span className="truncate">{item.ContractorName}</span>
+              <ArrowLeftRight
+                size={8}
+                className="shrink-0 text-muted-foreground"
+              />
+              <Building2 size={9} className="shrink-0 text-violet-500" />
+              <span className="truncate">{item.SupplierName}</span>
+            </span>
+            {item.FromGodownName && item.ToGodownName && (
+              <span className="flex items-center gap-1 text-[10px] text-muted-foreground truncate">
+                <Warehouse size={9} className="shrink-0 text-orange-500" />
+                <span className="truncate">{item.FromGodownName}</span>
+                <ArrowLeftRight size={8} className="shrink-0" />
+                <Warehouse size={9} className="shrink-0 text-emerald-500" />
+                <span className="truncate">{item.ToGodownName}</span>
+              </span>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-foreground truncate">{party}</p>
+        )}
 
         {/* Col 4 — Amount */}
         <p className="text-xs font-mono font-semibold text-foreground">
@@ -434,7 +525,7 @@ const InboxRow: React.FC<{
           {actions}
         </div>
       </div>
-    </>
+    </div>
   );
 };
 
@@ -489,7 +580,7 @@ const ApprovalInbox: React.FC = () => {
                 <Inbox className="text-primary" /> Approval Inbox
               </h1>
               {totalCount > 0 && (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full leading-none">
+                <span className="bg-red-500 text-white text-[11px] font-bold min-w-[22px] h-[22px] flex items-center justify-center rounded-full leading-none">
                   {totalCount}
                 </span>
               )}
@@ -513,7 +604,10 @@ const ApprovalInbox: React.FC = () => {
         </div>
 
         {/* Module filter tabs — scrollable on mobile */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+        <div
+          className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none [&::-webkit-scrollbar]:hidden"
+          style={{ scrollbarWidth: "none" }}
+        >
           <ModuleTab
             module={null}
             label="All"
@@ -582,7 +676,7 @@ const ApprovalInbox: React.FC = () => {
                 {[
                   "Module / Ref",
                   "Date",
-                  "Party",
+                  "Party / Transfer",
                   "Amount",
                   "Approved/Rejected By",
                   "Status",

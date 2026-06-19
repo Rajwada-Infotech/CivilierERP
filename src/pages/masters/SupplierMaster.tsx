@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -7,17 +7,20 @@ import {
   updateRecord,
   deleteRecord,
 } from "@/api/accountHeadApi";
+import { getAccountGroups } from "@/api/accountApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { DataTable, type ColumnDef, type ExportColumn } from "@/components/ui/DataTable";
+import {
+  DataTable,
+  type ColumnDef,
+  type ExportColumn,
+} from "@/components/ui/DataTable";
 import {
   Pencil,
   Trash2,
   X,
   Check,
-  RotateCcw,
   Plus,
   Search,
-  ChevronDown,
   AlertCircle,
   Eye,
   XCircle,
@@ -29,18 +32,13 @@ import {
   FileText,
   Printer,
 } from "lucide-react";
+import TreeDropdown from "@/components/common/TreeDropdown";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SUPPLIER_TYPE = "S";
 
 const SUPPLIER_CATEGORIES = ["Goods", "Services", "Both"] as const;
-const GST_TYPES = [
-  "Regular",
-  "Composition",
-  "Unregistered",
-  "SEZ",
-  "Deemed Export",
-] as const;
+const GST_TYPES = ["Registered", "Unregistered"] as const;
 const GST_STATES = [
   "Andaman and Nicobar Islands",
   "Andhra Pradesh",
@@ -93,7 +91,32 @@ interface Supplier {
   LGSTType: string | null;
   LGSTState: string | null;
   LHeadAddress: string | null;
+  LBelongsTo: number | null;
   LHeadStatus: boolean;
+  GroupName: string | null;
+}
+
+interface AccountGroup {
+  _id: string;
+  name: string;
+  code: string;
+  parentId: string | null;
+}
+
+interface TreeNode extends AccountGroup {
+  children: TreeNode[];
+}
+
+function buildTree(items: AccountGroup[]): TreeNode[] {
+  const map: Record<string, TreeNode> = {};
+  items.forEach((i) => (map[i._id] = { ...i, children: [] }));
+  const roots: TreeNode[] = [];
+  items.forEach((i) => {
+    if (i.parentId && map[i.parentId])
+      map[i.parentId].children.push(map[i._id]);
+    else roots.push(map[i._id]);
+  });
+  return roots;
 }
 
 interface SupplierForm {
@@ -108,6 +131,7 @@ interface SupplierForm {
   LGSTState: string;
   LHeadAddress: string;
   LHeadStatus: boolean;
+  LBelongsTo: string;
 }
 
 const EMPTY_FORM: SupplierForm = {
@@ -121,6 +145,7 @@ const EMPTY_FORM: SupplierForm = {
   LGSTType: "",
   LGSTState: "",
   LHeadAddress: "",
+  LBelongsTo: "",
   LHeadStatus: true,
 };
 
@@ -135,8 +160,18 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "GST Type", accessor: "LGSTType" },
   { header: "GST State", accessor: "LGSTState" },
   { header: "Category", accessor: "supplierCategory" },
+  {
+    header: "Group",
+    accessor: (r) => {
+      // resolved in display — raw value is AGId
+      return r.LBelongsTo != null ? String(r.LBelongsTo) : "—";
+    },
+  },
   { header: "Address", accessor: "LHeadAddress" },
-  { header: "Status", accessor: (r) => (r.LHeadStatus ? "Active" : "Inactive") },
+  {
+    header: "Status",
+    accessor: (r) => (r.LHeadStatus ? "Active" : "Inactive"),
+  },
 ];
 
 // ─── Column builder ────────────────────────────────────────────────────────────
@@ -302,6 +337,29 @@ const SupplierMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: groupsData } = useQuery({
+    queryKey: ["account-groups"],
+    queryFn: getAccountGroups,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const accountGroups: AccountGroup[] = useMemo(() => {
+    if (!Array.isArray(groupsData)) return [];
+    return (groupsData as any[])
+      .filter((item) => item.AGId != null && item.Name)
+      .map((item) => ({
+        _id: String(item.AGId),
+        name: item.Name as string,
+        code: item.Code || "",
+        parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
+      }));
+  }, [groupsData]);
+
+  const accountGroupTree = useMemo(
+    () => buildTree(accountGroups),
+    [accountGroups],
+  );
+
   const suppliers: Supplier[] = useMemo(() => {
     if (!Array.isArray(rawData)) return [];
     return rawData.map((item: any) => ({
@@ -312,11 +370,13 @@ const SupplierMaster: React.FC = () => {
       LHeadEmail: item.LHeadEmail || null,
       LGST: item.LGST || null,
       LHeadPan: item.LHeadPan || null,
-      supplierCategory: item.LHeadCatagory || null,
+      supplierCategory: item.LHeadCategory || null,
       LGSTType: item.LGSTType || null,
       LGSTState: item.LGSTState || null,
       LHeadAddress: item.LHeadAddress || null,
+      LBelongsTo: item.LBelongsTo != null ? Number(item.LBelongsTo) : null,
       LHeadStatus: Boolean(item.LHeadStatus),
+      GroupName: item.GroupName ?? null,
     }));
   }, [rawData]);
 
@@ -332,14 +392,14 @@ const SupplierMaster: React.FC = () => {
     LHeadEmail: f.LHeadEmail || null,
     LGST: f.LGST || null,
     LHeadPan: f.LHeadPan || null,
-    LHeadCatagory: f.supplierCategory || null,
+    LHeadCategory: f.supplierCategory || null,
     LGSTType: f.LGSTType || null,
     LHeadAddress: f.LHeadAddress || null,
     LHeadStatus: f.LHeadStatus,
     LBranchName: null,
     LGSTState: f.LGSTState || null,
     LCountry: "India",
-    LBelongsTo: null,
+    LBelongsTo: f.LBelongsTo ? Number(f.LBelongsTo) : null,
     LDescription: null,
   });
 
@@ -375,8 +435,19 @@ const SupplierMaster: React.FC = () => {
   });
 
   const saving = createMut.isPending || updateMut.isPending;
+  const canSave =
+    form.LHeadName.trim() !== "" &&
+    form.LHeadPan.trim() !== "" &&
+    (form.LGSTType !== "Registered" || form.LGST.trim() !== "");
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+  const normalizeGSTType = (t: string | null): string => {
+    if (!t) return "";
+    if (t === "Unregistered") return "Unregistered";
+    // Legacy values (Regular, Composition, SEZ, Deemed Export) all imply a registered GSTIN
+    return "Registered";
+  };
+
   const startEdit = (s: Supplier) => {
     setEditingId(s.LHeadId);
     setForm({
@@ -387,9 +458,10 @@ const SupplierMaster: React.FC = () => {
       LGST: s.LGST ?? "",
       LHeadPan: s.LHeadPan ?? "",
       supplierCategory: s.supplierCategory ?? "",
-      LGSTType: s.LGSTType ?? "",
+      LGSTType: normalizeGSTType(s.LGSTType),
       LGSTState: s.LGSTState ?? "",
       LHeadAddress: s.LHeadAddress ?? "",
+      LBelongsTo: s.LBelongsTo != null ? String(s.LBelongsTo) : "",
       LHeadStatus: s.LHeadStatus,
     });
     setErrors({});
@@ -405,6 +477,8 @@ const SupplierMaster: React.FC = () => {
   const handleSave = () => {
     const e: Partial<Record<keyof SupplierForm, boolean>> = {};
     if (!form.LHeadName.trim()) e.LHeadName = true;
+    if (!form.LHeadPan.trim()) e.LHeadPan = true;
+    if (form.LGSTType === "Registered" && !form.LGST.trim()) e.LGST = true;
     if (Object.keys(e).length) {
       setErrors(e);
       return;
@@ -434,6 +508,7 @@ const SupplierMaster: React.FC = () => {
         <tr><td>GST Type</td><td>${s.LGSTType || "—"}</td></tr>
         <tr><td>GST State</td><td>${s.LGSTState || "—"}</td></tr>
         <tr><td>Category</td><td>${s.supplierCategory || "—"}</td></tr>
+        <tr><td>Group</td><td>${s.LBelongsTo != null ? (accountGroups.find((g) => g._id === String(s.LBelongsTo))?.name ?? "—") : "—"}</td></tr>
         <tr><td>Address</td><td>${s.LHeadAddress || "—"}</td></tr>
         <tr><td>Status</td><td>${s.LHeadStatus ? "Active" : "Inactive"}</td></tr>
       </table>
@@ -469,8 +544,7 @@ const SupplierMaster: React.FC = () => {
         (s.LHeadPhone ?? "").toLowerCase().includes(q) ||
         (s.LGST ?? "").toLowerCase().includes(q) ||
         (s.LHeadContactPerson ?? "").toLowerCase().includes(q);
-      const matchCat =
-        !filterCategory || s.supplierCategory === filterCategory;
+      const matchCat = !filterCategory || s.supplierCategory === filterCategory;
       const matchStatus =
         !filterStatus ||
         (filterStatus === "active" ? s.LHeadStatus : !s.LHeadStatus);
@@ -497,8 +571,6 @@ const SupplierMaster: React.FC = () => {
   // ── Shared field class ─────────────────────────────────────────────────────
   const inputCls =
     "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
-  const selectCls =
-    "w-full appearance-none pl-3 pr-9 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
 
   const totalPages = Math.max(Math.ceil(filtered.length / limit), 1);
   const paginated = filtered.slice((page - 1) * limit, page * limit);
@@ -528,49 +600,16 @@ const SupplierMaster: React.FC = () => {
 
         {/* ── Form Card ── */}
         <div className="rounded-xl border border-border bg-card shadow-sm">
-          {/* Card header */}
-          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
-            <div className="flex items-center gap-3">
-              {editingId && (
-                <button
-                  onClick={resetForm}
-                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <RotateCcw size={15} />
-                  <span className="hidden sm:inline">Back</span>
-                </button>
-              )}
-              {editingId && <span className="text-border/60">|</span>}
-              <h2 className="text-base font-heading font-semibold text-foreground">
+          {/* Card header — title only */}
+          <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
+            <div>
+              <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? "Edit Supplier" : "Add Supplier"}
               </h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={resetForm}
-                className="px-4 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
-              >
-                <RotateCcw size={13} />
-                {editingId ? "Cancel" : "Reset"}
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60 flex items-center gap-2"
-              >
-                {saving ? (
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : editingId ? (
-                  <Check size={14} />
-                ) : (
-                  <Plus size={14} />
-                )}
-                {saving
-                  ? "Saving…"
-                  : editingId
-                    ? "Update Supplier"
-                    : "Save Supplier"}
-              </button>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Fields marked <span className="text-destructive">*</span> are
+                required
+              </p>
             </div>
           </div>
 
@@ -636,29 +675,32 @@ const SupplierMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Supplier Category
                   </label>
-                  <div className="relative">
-                    <select
-                      value={form.supplierCategory}
-                      onChange={(e) =>
-                        setForm((p) => ({
-                          ...p,
-                          supplierCategory: e.target.value,
-                        }))
-                      }
-                      className={selectCls}
-                    >
-                      <option value="">Select category…</option>
-                      {SUPPLIER_CATEGORIES.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
+                  <TreeDropdown
+                    variant="flat"
+                    value={form.supplierCategory}
+                    onChange={(v) =>
+                      setForm((p) => ({ ...p, supplierCategory: v }))
+                    }
+                    options={SUPPLIER_CATEGORIES.map((c) => ({
+                      value: c,
+                      label: c,
+                    }))}
+                    placeholder="Select category…"
+                  />
+                </div>
+
+                {/* Account Group */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Account Group
+                  </label>
+                  <TreeDropdown
+                    variant="tree"
+                    value={form.LBelongsTo}
+                    onChange={(v) => setForm((p) => ({ ...p, LBelongsTo: v }))}
+                    items={accountGroupTree}
+                    allGroups={accountGroups}
+                  />
                 </div>
               </div>
             </div>
@@ -760,42 +802,29 @@ const SupplierMaster: React.FC = () => {
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-x-6 gap-y-5">
-                {/* GST Number */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    GST Number
-                  </label>
-                  <input
-                    value={form.LGST}
-                    onChange={(e) =>
-                      setForm((p) => ({
-                        ...p,
-                        LGST: e.target.value.toUpperCase(),
-                      }))
-                    }
-                    placeholder="e.g. 27AAPFU0939F1ZV"
-                    maxLength={15}
-                    className={`${inputCls} font-mono`}
-                  />
-                </div>
-
                 {/* PAN */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    PAN Number
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    PAN Number <span className="text-destructive">*</span>
                   </label>
                   <input
                     value={form.LHeadPan}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setForm((p) => ({
                         ...p,
                         LHeadPan: e.target.value.toUpperCase(),
-                      }))
-                    }
+                      }));
+                      setErrors((p) => ({ ...p, LHeadPan: false }));
+                    }}
                     placeholder="e.g. AAPFU0939F"
                     maxLength={10}
-                    className={`${inputCls} font-mono`}
+                    className={`${inputCls} font-mono ${errors.LHeadPan ? "border-red-400" : ""}`}
                   />
+                  {errors.LHeadPan && (
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertCircle size={11} /> Required
+                    </p>
+                  )}
                 </div>
 
                 {/* GST Type */}
@@ -803,53 +832,61 @@ const SupplierMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     GST Type
                   </label>
-                  <div className="relative">
-                    <select
-                      value={form.LGSTType}
-                      onChange={(e) =>
-                        setForm((p) => ({ ...p, LGSTType: e.target.value }))
-                      }
-                      className={selectCls}
-                    >
-                      <option value="">Select type…</option>
-                      {GST_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
+                  <TreeDropdown
+                    variant="flat"
+                    value={form.LGSTType}
+                    onChange={(v) => {
+                      setForm((p) => ({
+                        ...p,
+                        LGSTType: v,
+                        LGST: v === "Registered" ? p.LGST : "",
+                      }));
+                      setErrors((p) => ({ ...p, LGST: false }));
+                    }}
+                    options={GST_TYPES.map((t) => ({ value: t, label: t }))}
+                    placeholder="Select type…"
+                  />
                 </div>
+
+                {/* GST Number — only when Registered */}
+                {form.LGSTType === "Registered" && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                      GST Number <span className="text-destructive">*</span>
+                    </label>
+                    <input
+                      value={form.LGST}
+                      onChange={(e) => {
+                        setForm((p) => ({
+                          ...p,
+                          LGST: e.target.value.toUpperCase(),
+                        }));
+                        setErrors((p) => ({ ...p, LGST: false }));
+                      }}
+                      placeholder="e.g. 27AAPFU0939F1ZV"
+                      maxLength={15}
+                      className={`${inputCls} font-mono ${errors.LGST ? "border-red-400" : ""}`}
+                    />
+                    {errors.LGST && (
+                      <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                        <AlertCircle size={11} /> Required
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* GST State */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     GST State
                   </label>
-                  <div className="relative">
-                    <select
-                      value={form.LGSTState}
-                      onChange={(e) =>
-                        setForm((p) => ({ ...p, LGSTState: e.target.value }))
-                      }
-                      className={selectCls}
-                    >
-                      <option value="">Select state…</option>
-                      {GST_STATES.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
+                  <TreeDropdown
+                    variant="flat"
+                    value={form.LGSTState}
+                    onChange={(v) => setForm((p) => ({ ...p, LGSTState: v }))}
+                    options={GST_STATES.map((s) => ({ value: s, label: s }))}
+                    placeholder="Select state…"
+                  />
                 </div>
               </div>
             </div>
@@ -879,6 +916,47 @@ const SupplierMaster: React.FC = () => {
               </span>
             </div>
           </div>
+
+          {/* Card footer — actions */}
+          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
+            <p className="text-[11px] text-muted-foreground">
+              {canSave ? (
+                <span className="text-emerald-500 font-medium">
+                  Ready to save
+                </span>
+              ) : (
+                "Fill in the required fields to save"
+              )}
+            </p>
+            <div className="flex items-center gap-2">
+              {editingId && (
+                <button
+                  onClick={resetForm}
+                  className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                onClick={handleSave}
+                disabled={saving || !canSave}
+                className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
+              >
+                {saving ? (
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : editingId ? (
+                  <Check size={14} />
+                ) : (
+                  <Plus size={14} />
+                )}
+                {saving
+                  ? "Saving…"
+                  : editingId
+                    ? "Update Supplier"
+                    : "Save Supplier"}
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* ── Table Section ── */}
@@ -898,40 +976,24 @@ const SupplierMaster: React.FC = () => {
               />
             </div>
 
-            <div className="relative">
-              <select
-                value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
-                className="appearance-none text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-              >
-                <option value="">All Categories</option>
-                {SUPPLIER_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={12}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
+            <TreeDropdown
+              variant="flat"
+              value={filterCategory}
+              onChange={(v) => setFilterCategory(v)}
+              options={SUPPLIER_CATEGORIES.map((c) => ({ value: c, label: c }))}
+              placeholder="All Categories"
+            />
 
-            <div className="relative">
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="appearance-none text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-              >
-                <option value="">All Status</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-              <ChevronDown
-                size={12}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
+            <TreeDropdown
+              variant="flat"
+              value={filterStatus}
+              onChange={(v) => setFilterStatus(v)}
+              options={[
+                { value: "active", label: "Active" },
+                { value: "inactive", label: "Inactive" },
+              ]}
+              placeholder="All Status"
+            />
 
             {(search || filterCategory || filterStatus) && (
               <button
@@ -1025,9 +1087,17 @@ const SupplierMaster: React.FC = () => {
                   label: "Contact Person",
                   value: viewRecord.LHeadContactPerson || "—",
                 },
-                { label: "Phone", value: viewRecord.LHeadPhone || "—", mono: true },
+                {
+                  label: "Phone",
+                  value: viewRecord.LHeadPhone || "—",
+                  mono: true,
+                },
                 { label: "Email", value: viewRecord.LHeadEmail || "—" },
-                { label: "GST Number", value: viewRecord.LGST || "—", mono: true },
+                {
+                  label: "GST Number",
+                  value: viewRecord.LGST || "—",
+                  mono: true,
+                },
                 {
                   label: "PAN Number",
                   value: viewRecord.LHeadPan || "—",
@@ -1038,6 +1108,15 @@ const SupplierMaster: React.FC = () => {
                 {
                   label: "Supplier Category",
                   value: viewRecord.supplierCategory || "—",
+                },
+                {
+                  label: "Group Name",
+                  value:
+                    viewRecord.LBelongsTo != null
+                      ? (accountGroups.find(
+                          (g) => g._id === String(viewRecord.LBelongsTo),
+                        )?.name ?? "—")
+                      : "—",
                 },
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
               ].map(({ label, value, mono }) => (

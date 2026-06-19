@@ -45,6 +45,10 @@ export interface ReceivedPaymentRecord {
   RPCustomerName: string | null;
   RPDepositBankId: number | null;
   RPDepositBankName: string | null;
+  // Sale Invoice cash-collection link (workflow: SO → SI → Cash Payment).
+  // When set, the backend force-enforces RPMode = "Cash" and overrides
+  // RPDepositBankId to the Dummy Bank account regardless of what's sent.
+  SourceSaleInvoiceId?: number | null;
 }
 
 export type ReceivedPaymentPayload = Omit<

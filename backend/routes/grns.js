@@ -77,6 +77,23 @@ function normaliseGRNRow(row) {
   return row;
 }
 
+// Resolve the godown linked to a project (enterprise with business_type='P')
+// Returns null if no project-specific godown exists (caller should fall back to Main)
+async function resolveProjectGodownId(pool, projectId) {
+  if (!projectId) return null;
+  try {
+    const res = await pool
+      .request()
+      .input("ProjectID", sql.Int, parseInt(projectId, 10))
+      .query(
+        "SELECT TOP 1 GodownID FROM dbo.Godowns WHERE ProjectID = @ProjectID AND IsDeleted = 0 ORDER BY GodownID",
+      );
+    return res.recordset[0]?.GodownID || null;
+  } catch {
+    return null;
+  }
+}
+
 async function resolveMainGodownId(pool) {
   try {
     const res = await pool
@@ -393,6 +410,8 @@ router.get("/filtered", async (req, res) => {
     const result = await request.query(`
       SELECT grn.GRNID, grn.GRNNo, grn.GRNDate, grn.SupplierID, grn.POID,
              grn.Status, grn.Remarks, grn.DocNo,
+             grn.SourceTransferID,
+             grn.SourceTransferDocNo,
              s.LHeadName AS SupplierName,
              p.PurchaseOrderNo AS PONumber,
              p.POType,
@@ -446,6 +465,7 @@ router.get("/", cache("grns", 300), async (req, res) => {
         grn.CreatedDate,
         grn.DocTypeId,
         grn.DocNo,
+        grn.GRNItems,
         grn.TotalAmount,
         grn.DocYear,
         -- Derive a FinYear string so the expense-booking picker can filter correctly.
@@ -468,14 +488,22 @@ router.get("/", cache("grns", 300), async (req, res) => {
         p.SourceWDDocNo,
         p.ProjectId,
         p.CompanyId,
+        co.name AS CompanyName,
+        pr.name AS ProjectName,
+        fyGrn.FName AS FinYearName,
         p.TotalAmount    AS POTotalAmount,
         p.SubtotalAmount AS POSubtotalAmount,
         td.Prefix AS DocTypePrefix,
         td.Description AS DocTypeDescription,
+        grn.SourceTransferID,
+        grn.SourceTransferDocNo,
         COUNT(*) OVER() AS _total
       FROM GoodsReceiptNotes grn
       LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
       LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
+      LEFT JOIN dbo.enterprise co ON co.id = p.CompanyId
+      LEFT JOIN dbo.enterprise pr ON pr.id = p.ProjectId
+      LEFT JOIN dbo.FinYear fyGrn ON grn.GRNDate >= fyGrn.FStartDate AND grn.GRNDate <= fyGrn.FEndDate
       LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = grn.DocTypeId
       WHERE (@finYear IS NULL OR (
         grn.DocYear IS NOT NULL AND (
@@ -508,6 +536,42 @@ router.get("/", cache("grns", 300), async (req, res) => {
       error: "Failed to fetch GRNs",
       message: err.message,
     });
+  }
+});
+
+// -- GET /by-po/:poId --
+// Returns all GRNs created against a given PO, ordered newest-first.
+// Used by the Expense Booking preview modal to fetch the GST breakdown for
+// PO-linked bookings (eSourceType = 'PO' | 'WO_PO') \u2014 the GRN holds the
+// actual received quantities and item-level GST rates, which are the
+// authoritative source for the incl-GST amount shown in the breakdown.
+// Must be declared before /:id to avoid route collision.
+router.get("/by-po/:poId", async (req, res) => {
+  const poId = parseInt(req.params.poId, 10);
+  if (isNaN(poId) || poId <= 0)
+    return res.status(400).json({ error: "Invalid PO ID" });
+
+  try {
+    const pool = await getPool();
+    const result = await pool.request().input("POID", sql.Int, poId).query(`
+      SELECT
+        grn.GRNID,
+        grn.GRNNo,
+        grn.DocNo,
+        grn.GRNDate,
+        grn.Status,
+        grn.TotalAmount,
+        s.LHeadName AS SupplierName
+      FROM dbo.GoodsReceiptNotes grn
+      LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId = grn.SupplierID
+      WHERE grn.POID = @POID
+        AND (grn.Status IS NULL OR grn.Status != 'Rejected')
+      ORDER BY grn.GRNID DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("GET /by-po/:poId ERROR:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -586,7 +650,8 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
     finYear,
     parentDocNo = null, // DocNo of the parent PO or WO
     rootExBDocNo = null, // Root ExB DocNo when raised under Expense Booking
-    godownId = null, // Target godown for stock credit (null → Main Godown)
+    godownId = null, // Target godown for stock credit (null → resolve from project or Main)
+    projectId = null, // Project linked to this GRN (used for godown resolution)
   } = req.body;
 
   if (!grnDate || !supplierId) {
@@ -596,6 +661,29 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
   }
 
   const pool = await getPool();
+
+  // ── Guard: a GRN can only be raised against an Approved PO ────────────────
+  // Mirrors the MR → PO approval guard in purchaseOrders.js (POST /).
+  if (poId) {
+    const poStatusCheck = await pool
+      .request()
+      .input("POID", sql.Int, parseInt(poId, 10))
+      .query(
+        "SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+      );
+
+    if (poStatusCheck.recordset.length === 0) {
+      return res.status(404).json({ error: "Purchase Order not found" });
+    }
+
+    const poStatus = poStatusCheck.recordset[0].Status;
+    if (poStatus !== "Approved" && poStatus !== "Received") {
+      return res.status(400).json({
+        error: `Cannot create a GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`,
+      });
+    }
+  }
+
   const transaction = pool.transaction();
 
   try {
@@ -634,6 +722,45 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
     const docSerial =
       parts.length >= 1 ? parseInt(parts[parts.length - 1], 10) || null : null;
 
+    // Godown resolution priority (resolved BEFORE the insert so the row is
+    // written correctly the first time):
+    // 1. Explicit godownId from client
+    // 2. Project's linked godown (when PO has a ProjectId)
+    // 3. Main Godown fallback
+    // NOTE: this used to run AFTER the insert, then patch GodownID via a
+    // separate `pool.request()` UPDATE on the same row. That UPDATE ran on a
+    // different pooled connection than the still-open `transaction`, which
+    // already held an exclusive lock on this row from the INSERT below.
+    // The UPDATE would block waiting on that lock, but the only thing that
+    // could release the lock (transaction.commit()) was sequenced AFTER the
+    // UPDATE — a self-deadlock that hung until the client request timeout
+    // fired (ETIMEOUT), every single time a GRN was created. Resolving the
+    // godown first and inserting it directly removes the second statement
+    // — and the deadlock — entirely.
+    let resolvedGodownId = godownId ? parseInt(godownId, 10) : null;
+    if (!resolvedGodownId) {
+      // Try to get ProjectId from the PO if not provided in body
+      let resolvedProjectId = projectId ? parseInt(projectId, 10) : null;
+      if (!resolvedProjectId && poId) {
+        const poRow = await pool
+          .request()
+          .input("POID", sql.Int, parseInt(poId, 10))
+          .query(
+            "SELECT TOP 1 ProjectId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+          );
+        resolvedProjectId = poRow.recordset[0]?.ProjectId || null;
+      }
+      if (resolvedProjectId) {
+        resolvedGodownId = await resolveProjectGodownId(
+          pool,
+          resolvedProjectId,
+        );
+      }
+      if (!resolvedGodownId) {
+        resolvedGodownId = await resolveMainGodownId(pool);
+      }
+    }
+
     const grnResult = await transaction
       .request()
       .input("GRNNo", sql.NVarChar(50), finalDocNo)
@@ -650,7 +777,7 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
       .input("ParentDocNo", sql.NVarChar(100), parentDocNo)
       .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo)
       .input("TotalAmount", sql.Decimal(18, 2), computeGRNTotal(grnItems))
-      .input("GodownID", sql.Int, godownId ? parseInt(godownId, 10) : null)
+      .input("GodownID", sql.Int, resolvedGodownId)
       .input("CreatedDate", sql.DateTime2, new Date()).query(`
         INSERT INTO GoodsReceiptNotes
           (GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks,
@@ -665,12 +792,8 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
 
     const grnId = grnResult.recordset[0].GRNID;
 
-    await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
-
-    // Use the godown sent by the client; fall back to Main Godown only if none given
-    const resolvedGodownId = godownId
-      ? parseInt(godownId, 10)
-      : await resolveMainGodownId(pool);
+    // IMPORTANT: use transaction.request() not pool.request() — the GRN row
+    // only exists inside this uncommitted transaction; pool sees nothing yet.
     await insertStockLedgerEntries(
       transaction,
       grnId,
@@ -680,6 +803,9 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
     );
 
     await transaction.commit();
+
+    // backPatchRecordId uses pool directly — must run after commit
+    await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
 
     // ── Update parent PO status ───────────────────────────────────────────────
     // Check if all ordered quantities are now received; set status accordingly.
@@ -765,6 +891,7 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
   } catch (err) {
     await transaction.rollback().catch(() => {});
     console.error("CREATE GRN FULL ERROR:", err);
+    if (res.headersSent) return; // timeout middleware already sent 503
     res.status(500).json({
       error: "Failed to create GRN",
       message: err.message,
@@ -795,6 +922,28 @@ router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
   const grnId = parseInt(req.params.id, 10);
 
   const pool = await getPool();
+
+  // ── Guard: a GRN can only be linked to an Approved PO ──────────────────────
+  if (poId) {
+    const poStatusCheck = await pool
+      .request()
+      .input("POID", sql.Int, parseInt(poId, 10))
+      .query(
+        "SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+      );
+
+    if (poStatusCheck.recordset.length === 0) {
+      return res.status(404).json({ error: "Purchase Order not found" });
+    }
+
+    const poStatus = poStatusCheck.recordset[0].Status;
+    if (poStatus !== "Approved" && poStatus !== "Received") {
+      return res.status(400).json({
+        error: `Cannot update GRN: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used to raise a GRN.`,
+      });
+    }
+  }
+
   const transaction = pool.transaction();
   try {
     await transaction.begin();
@@ -839,8 +988,14 @@ router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
         "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
       );
 
-    // Preserve the godown that was set when the GRN was created
-    const grnGodownRes = await pool
+    // Preserve the godown that was set when the GRN was created.
+    // Must read via `transaction`, not `pool` — the UPDATE above is still
+    // uncommitted and holds a lock on this row on the transaction's
+    // connection. A read from a different pooled connection would block
+    // waiting on that lock until transaction.commit() runs, but commit()
+    // is sequenced after this read — the same self-deadlock as the POST
+    // handler's old GodownID UPDATE, just with a SELECT instead.
+    const grnGodownRes = await transaction
       .request()
       .input("GID", sql.Int, grnId)
       .query(
@@ -864,6 +1019,7 @@ router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
   } catch (err) {
     await transaction.rollback().catch(() => {});
     console.error("UPDATE GRN ERROR:", err);
+    if (res.headersSent) return; // timeout middleware already sent 503
     res.status(500).json({
       error: "Failed to update GRN",
       message: err.message,
@@ -986,6 +1142,13 @@ router.delete("/:id", async (req, res) => {
   try {
     await transaction.begin();
 
+    // Capture the linked POID before deleting so we can revert PO status after
+    const grnMeta = await pool
+      .request()
+      .input("GRNID", sql.Int, grnId)
+      .query("SELECT POID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID");
+    const linkedPOId = grnMeta.recordset[0]?.POID ?? null;
+
     await transaction
       .request()
       .input("RefID", sql.Int, grnId)
@@ -1008,6 +1171,59 @@ router.delete("/:id", async (req, res) => {
     await bumpCacheVersion("grns");
     await bumpCacheVersion("expense-booking-options");
     await bumpCacheVersion("stock-ledger");
+
+    // If this GRN was linked to a PO, recalculate PO status now that the GRN
+    // is gone. If no active GRNs remain, revert PO to 'Approved' so a new GRN
+    // can be raised. If GRNs remain but total received < PO total, also revert
+    // (partial-receipt case where a GRN was deleted mid-way).
+    if (linkedPOId) {
+      try {
+        const poRecheck = await pool
+          .request()
+          .input("POID", sql.Int, linkedPOId).query(`
+            SELECT
+              po.Status         AS POStatus,
+              po.TotalAmount    AS POTotalAmount,
+              ISNULL(SUM(grn.TotalAmount), 0) AS TotalReceived,
+              COUNT(grn.GRNID)  AS GRNCount
+            FROM dbo.PurchaseOrders po
+            LEFT JOIN dbo.GoodsReceiptNotes grn
+              ON grn.POID = po.PurchaseOrderID
+              AND ISNULL(grn.Status, '') != 'Rejected'
+            WHERE po.PurchaseOrderID = @POID
+            GROUP BY po.Status, po.TotalAmount
+          `);
+
+        if (poRecheck.recordset.length > 0) {
+          const poRow = poRecheck.recordset[0];
+          const totalOrdered = Number(poRow.POTotalAmount || 0);
+          const totalReceived = Number(poRow.TotalReceived || 0);
+          const grnCount = Number(poRow.GRNCount || 0);
+
+          // Revert to 'Approved' if: no GRNs left, or remaining GRNs don't
+          // fully cover the PO total — meaning it's no longer fully received.
+          const shouldRevert =
+            poRow.POStatus === "Received" &&
+            (grnCount === 0 || totalReceived < totalOrdered);
+
+          if (shouldRevert) {
+            await pool
+              .request()
+              .input("POID", sql.Int, linkedPOId)
+              .query(
+                "UPDATE dbo.PurchaseOrders SET Status = 'Approved', UpdatedAt = GETDATE() WHERE PurchaseOrderID = @POID AND Status = 'Received'",
+              );
+            await bumpCacheVersion("purchase-orders");
+          }
+        }
+      } catch (poErr) {
+        console.error(
+          "PO status revert after GRN delete failed (non-fatal):",
+          poErr.message,
+        );
+      }
+    }
+
     res.json({ message: "GRN deleted successfully" });
   } catch (err) {
     await transaction.rollback().catch(() => {});
@@ -1327,6 +1543,251 @@ router.get("/:id/pending-items", async (req, res) => {
   } catch (err) {
     console.error("GET pending-items error:", err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /from-transfer/:transferId ──────────────────────────────────────────
+// Create a GRN from a Stock Transfer document.
+//
+// Flow:
+//   1. Fetch the StockTransfer by ID (validate it exists & is Completed).
+//   2. Map TransferItems → GRNItems (receivedQty = transferred qty).
+//   3. Target godown = ToGodownID of the transfer (stock already landed there).
+//   4. Lock a GRN doc-number using the standard "GRN" prefix (same series as all GRNs).
+//   5. Insert GoodsReceiptNotes row (no POID / SupplierID required).
+//   6. Insert StockLedger IN entries (credit the destination godown).
+//   7. Store SourceTransferID + SourceTransferDocNo for traceability.
+//
+// The caller may pass { remarks, supplierId } in the request body to optionally
+// attach a supplier and free-text note.  All other fields are derived from the
+// transfer.
+router.post("/from-transfer/:transferId", async (req, res) => {
+  const transferId = parseInt(req.params.transferId, 10);
+  if (isNaN(transferId)) {
+    return res.status(400).json({ error: "Invalid transferId" });
+  }
+
+  const pool = await getPool();
+
+  // ── 1. Fetch transfer ──────────────────────────────────────────────────────
+  let transfer;
+  try {
+    const trResult = await pool
+      .request()
+      .input("TransferID", sql.Int, transferId).query(`
+        SELECT
+          st.TransferID, st.DocNo, st.TransferDate,
+          st.FromGodownID, fg.GodownName AS FromGodownName,
+          st.ToGodownID,   tg.GodownName AS ToGodownName,
+          st.TransferItems, st.Status
+        FROM dbo.StockTransfers st
+        JOIN dbo.Godowns fg ON fg.GodownID = st.FromGodownID
+        JOIN dbo.Godowns tg ON tg.GodownID = st.ToGodownID
+        WHERE st.TransferID = @TransferID
+      `);
+
+    if (!trResult.recordset.length) {
+      return res.status(404).json({ error: "Stock Transfer not found" });
+    }
+
+    transfer = trResult.recordset[0];
+
+    // Parse TransferItems JSON
+    if (
+      typeof transfer.TransferItems === "string" &&
+      transfer.TransferItems.trim()
+    ) {
+      transfer.TransferItems = JSON.parse(transfer.TransferItems);
+    }
+    if (
+      !Array.isArray(transfer.TransferItems) ||
+      !transfer.TransferItems.length
+    ) {
+      return res.status(400).json({ error: "Transfer has no items" });
+    }
+  } catch (err) {
+    console.error("[grns] from-transfer fetch error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+
+  // ── 2. Check for duplicate GRN (idempotency guard) ──────────────────────
+  const dupCheck = await pool
+    .request()
+    .input("SourceTransferID", sql.Int, transferId)
+    .query(
+      "SELECT GRNID, GRNNo FROM dbo.GoodsReceiptNotes WHERE SourceTransferID = @SourceTransferID AND Status != 'Rejected'",
+    );
+  if (dupCheck.recordset.length > 0) {
+    const existing = dupCheck.recordset[0];
+    return res.status(409).json({
+      error: `A GRN (${existing.GRNNo}) already exists for this transfer`,
+      existingGrnId: existing.GRNID,
+      existingGrnNo: existing.GRNNo,
+    });
+  }
+
+  const { remarks = null, supplierId = null } = req.body || {};
+  const grnDate = transfer.TransferDate
+    ? transfer.TransferDate.toISOString
+      ? transfer.TransferDate.toISOString().slice(0, 10)
+      : String(transfer.TransferDate).slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
+
+  // ── 3. Map TransferItems → GRNItems ────────────────────────────────────────
+  const grnItems = transfer.TransferItems.map((item) => ({
+    itemId: String(item.itemId),
+    itemName: item.itemName || item.itemId,
+    orderedQty: Number(item.qty),
+    receivedQty: Number(item.qty),
+    remainingQty: 0,
+    uom: item.uom || "",
+    rate: Number(item.rate || 0),
+    quantity: Number(item.qty),
+    totalAmount: Number(item.rate || 0) * Number(item.qty),
+    gstPct: 0,
+    gstAmount: 0,
+  }));
+
+  const transaction = pool.transaction();
+  try {
+    await transaction.begin();
+
+    // ── 4. Lock doc number using the standard "GRN" prefix ───────────────────
+    // Transfer GRNs share the same GRN-YYYY-NNNNN number series as all other
+    // GRNs. The source transfer is tracked via SourceTransferDocNo (Ref Doc).
+    const resolvedDocTypeId = await resolveDocTypeId(pool, sql, "GRN");
+
+    const finalDocNo = await lockNextDocNumber(pool, sql, {
+      docTypeId: resolvedDocTypeId,
+      finYear: null,
+      tableName: "GoodsReceiptNotes",
+      docNoColumn: "DocNo",
+      issuedBy: req.user?.email || req.user?.name || null,
+      parentDocNo: transfer.DocNo,
+      rootExBDocNo: null,
+    });
+
+    const parts = (finalDocNo || "").split("-");
+    const docYear =
+      parts.length >= 2 ? parseInt(parts[parts.length - 2], 10) || null : null;
+    const docSerial =
+      parts.length >= 1 ? parseInt(parts[parts.length - 1], 10) || null : null;
+
+    // ── 5. Insert GoodsReceiptNotes ────────────────────────────────────────
+    const grnResult = await transaction
+      .request()
+      .input("GRNNo", sql.NVarChar(50), finalDocNo)
+      .input("GRNDate", sql.Date, grnDate)
+      .input(
+        "SupplierID",
+        sql.Int,
+        supplierId ? parseInt(supplierId, 10) : null,
+      )
+      .input("POID", sql.Int, null)
+      .input("GRNItems", sql.NVarChar(sql.MAX), JSON.stringify(grnItems))
+      .input("Status", sql.NVarChar(50), "Draft")
+      .input(
+        "Remarks",
+        sql.NVarChar(sql.MAX),
+        remarks || `Auto-generated from Stock Transfer ${transfer.DocNo}`,
+      )
+      .input("DocTypeId", sql.Int, resolvedDocTypeId || null)
+      .input("DocNo", sql.NVarChar(100), finalDocNo)
+      .input("DocYear", sql.SmallInt, docYear)
+      .input("DocSerial", sql.Int, docSerial)
+      .input("ParentDocNo", sql.NVarChar(100), transfer.DocNo)
+      .input("RootExBDocNo", sql.NVarChar(100), null)
+      .input("TotalAmount", sql.Decimal(18, 2), computeGRNTotal(grnItems))
+      .input("GodownID", sql.Int, parseInt(transfer.ToGodownID, 10))
+      .input("SourceTransferID", sql.Int, transferId)
+      .input("SourceTransferDocNo", sql.NVarChar(100), transfer.DocNo)
+      .input("CreatedDate", sql.DateTime2, new Date()).query(`
+        INSERT INTO dbo.GoodsReceiptNotes
+          (GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks,
+           DocTypeId, DocNo, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
+           TotalAmount, GodownID, SourceTransferID, SourceTransferDocNo, CreatedDate)
+        OUTPUT INSERTED.GRNID
+        VALUES
+          (@GRNNo, @GRNDate, @SupplierID, @POID, @GRNItems, @Status, @Remarks,
+           @DocTypeId, @DocNo, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
+           @TotalAmount, @GodownID, @SourceTransferID, @SourceTransferDocNo, @CreatedDate)
+      `);
+
+    const grnId = grnResult.recordset[0].GRNID;
+
+    // ── 6. Insert StockLedger IN entries for the destination godown ─────────
+    await insertStockLedgerEntries(
+      transaction,
+      grnId,
+      grnItems,
+      finalDocNo,
+      parseInt(transfer.ToGodownID, 10),
+    );
+
+    await transaction.commit();
+
+    // Back-patch the doc number reservation record with the real GRNID
+    await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
+
+    // Auto-submit: Draft → Pending
+    try {
+      const { transition } = require("../services/approvalService");
+      await transition(
+        "goods-receipt",
+        grnId,
+        "Pending",
+        req.user?.email,
+        req.user?.role,
+      );
+    } catch (submitErr) {
+      console.warn(
+        "[grns] from-transfer auto-submit failed (non-fatal):",
+        submitErr.message,
+      );
+    }
+
+    await bumpCacheVersion("grns");
+    await bumpCacheVersion("stock-ledger");
+
+    return res.status(201).json({
+      message: `GRN created from transfer ${transfer.DocNo}`,
+      grnId,
+      grnNo: finalDocNo,
+      docNo: finalDocNo,
+      sourceTransferDocNo: transfer.DocNo,
+      toGodownName: transfer.ToGodownName,
+    });
+  } catch (err) {
+    await transaction.rollback().catch(() => {});
+    console.error("[grns] from-transfer create error:", err.message);
+    return res.status(500).json({
+      error: "Failed to create GRN from transfer",
+      message: err.message,
+    });
+  }
+});
+
+// ─── GET /by-transfer/:transferId ─────────────────────────────────────────────
+// Returns all GRNs linked to a specific stock transfer (for UI badge/check).
+router.get("/by-transfer/:transferId", async (req, res) => {
+  const transferId = parseInt(req.params.transferId, 10);
+  if (isNaN(transferId)) {
+    return res.status(400).json({ error: "Invalid transferId" });
+  }
+  try {
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input("SourceTransferID", sql.Int, transferId).query(`
+        SELECT GRNID, GRNNo, DocNo, GRNDate, Status, TotalAmount, SourceTransferDocNo
+        FROM dbo.GoodsReceiptNotes
+        WHERE SourceTransferID = @SourceTransferID
+        ORDER BY CreatedDate DESC
+      `);
+    return res.json(result.recordset);
+  } catch (err) {
+    console.error("[grns] by-transfer error:", err.message);
+    return res.status(500).json({ error: err.message });
   }
 });
 

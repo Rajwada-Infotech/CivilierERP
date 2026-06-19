@@ -46,6 +46,14 @@ export const getStockTransfers = async (params?: {
   return res.json();
 };
 
+export const getStockTransferById = async (
+  id: number,
+): Promise<StockTransfer> => {
+  const res = await fetchWithAuth(`${BASE}/${id}`);
+  if (!res.ok) throw new Error(`Failed to fetch transfer: ${res.status}`);
+  return res.json();
+};
+
 export interface CreateTransferPayload {
   FromGodownID: number;
   ToGodownID: number;

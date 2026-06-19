@@ -96,45 +96,34 @@ async function fetchEmiReminders(): Promise<ReminderItem[]> {
 
 async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
   try {
-    let res: Response;
-    try {
-      // Fetch without a status filter so both Pending and Approved MRs are
-      // included — Draft/Ordered/Cancelled are excluded below client-side.
-      res = await fetchWithAuth(
-        "/api/material-requests?limit=200&page=1",
-      );
-    } catch {
-      // fetchWithAuth throws on 403, network errors, etc. — treat as empty, never propagate
-      return [];
-    }
+    const res = await fetchWithAuth("/api/material-requests?limit=500&page=1");
     if (!res.ok) return [];
     const raw = await res.json();
-    // API always returns { data: [], page, limit, total, totalPages }
     const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
 
-    // Statuses that need action / attention — Draft has no due pressure,
-    // Ordered/Cancelled are already resolved.
+    // Statuses that need action / attention
     const ACTIONABLE = new Set(["Pending", "Approved", "Partially Ordered"]);
 
     return list
-      .filter((r) => {
-        // Only actionable statuses
-        if (!ACTIONABLE.has(r.Status)) return false;
-        // Skip records with no usable date — can't determine urgency
-        const dateStr = r.RequiredByDate || r.RequestDate;
-        if (!dateStr) return false;
-        const urgency = classifyUrgency(dateStr);
-        return true; // show all items with a due date
-      })
+      .filter((r) => ACTIONABLE.has(r.Status))
       .map((r) => {
-        const dateStr = r.RequiredByDate || r.RequestDate;
+        // Use RequiredByDate for urgency if set; otherwise treat as "upcoming"
+        // so MRs without a deadline don't incorrectly show as overdue.
+        const dueDate: string = r.RequiredByDate
+          ? String(r.RequiredByDate).slice(0, 10)
+          : String(r.RequestDate ?? new Date().toISOString()).slice(0, 10);
+
+        const urgency: ReminderItem["urgency"] = r.RequiredByDate
+          ? classifyUrgency(String(r.RequiredByDate).slice(0, 10))
+          : "upcoming";
+
         return {
           id: `mr-${r.MRId}`,
           type: "material_request" as ReminderType,
-          title: `MR #${r.DocNo || r.MRId}`,
+          title: `MR ${r.DocNo || `#${r.MRId}`}`,
           subtitle: `${r.ProjectName || r.CompanyName || "Material Request"} · ${r.Status} · ${r.Priority || "Normal"} priority`,
-          dueDate: dateStr,
-          urgency: classifyUrgency(dateStr),
+          dueDate,
+          urgency,
           path: "/material/material-request",
         };
       });

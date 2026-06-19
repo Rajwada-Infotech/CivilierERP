@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -136,6 +142,7 @@ interface CompanyOption {
 interface ProjectOption {
   id: number;
   label: string;
+  company_id?: number | null;
 }
 interface GSTConfig {
   applicable: boolean;
@@ -159,6 +166,7 @@ interface POItem {
   SourceWDId?: number | null;
   SourceWDDocNo?: string | null;
   POType?: string | null;
+  POItems?: Record<string, unknown>[];
 }
 interface WOItem {
   Id: number;
@@ -231,6 +239,12 @@ interface SelectedDoc {
   companyId?: number;
   projectId?: number;
   amount?: number;
+  /** Pre-tax subtotal (sum of qty × rate across all line items) — populated for PO / WO_PO */
+  subtotal?: number;
+  /** CGST rate derived from PO line items (weighted avg) */
+  derivedCgstRate?: number;
+  /** SGST rate derived from PO line items (weighted avg) */
+  derivedSgstRate?: number;
   status?: string;
   date?: string;
   gst?: GSTConfig | null;
@@ -547,6 +561,10 @@ function DocSelectorPanel({
 
   const filteredPO = poList.filter((p) => {
     if (bookedPOIds?.has(p.PurchaseOrderID)) return false;
+    // Only Approved POs (or already-partially-received ones) can be used
+    // for expense booking. Draft / Pending / Rejected / Cancelled POs must
+    // not show up in the picker.
+    if (p.Status !== "Approved" && p.Status !== "Received") return false;
     if (
       filterCompanyId &&
       p.CompanyId &&
@@ -599,6 +617,9 @@ function DocSelectorPanel({
   });
   const filteredWOPO = woPOList.filter((p) => {
     if (bookedWOPOIds?.has(p.PurchaseOrderID)) return false;
+    // Only Approved WO-POs (or already-partially-received ones) can be used
+    // for expense booking.
+    if (p.Status !== "Approved" && p.Status !== "Received") return false;
     if (
       filterCompanyId &&
       p.CompanyId &&
@@ -630,6 +651,9 @@ function DocSelectorPanel({
   );
   const filteredGRN = grnList.filter((g) => {
     if (bookedGRNIds?.has(g.GRNID)) return false;
+    // Only Approved GRNs can be used for expense booking — matches the
+    // backend guard in expenseBooking.js (POST /).
+    if (g.Status !== "Approved") return false;
     if (
       filterCompanyId &&
       g.CompanyId &&
@@ -967,7 +991,12 @@ function DocSelectorPanel({
                     .join(" · ")}
                   badge={po.Status}
                   amount={po.TotalAmount}
-                  onClick={() =>
+                  onClick={() => {
+                    const {
+                      subtotal,
+                      cgstRate: dCgst,
+                      sgstRate: dSgst,
+                    } = derivePOGst(po.POItems ?? []);
                     onSelect({
                       kind: "PO",
                       docNo,
@@ -977,11 +1006,14 @@ function DocSelectorPanel({
                       companyId: po.CompanyId,
                       projectId: po.ProjectId,
                       amount: po.TotalAmount,
+                      subtotal: subtotal > 0 ? subtotal : undefined,
+                      derivedCgstRate: dCgst,
+                      derivedSgstRate: dSgst,
                       status: po.Status,
                       date: po.PODate,
                       gst: po.GST ?? null,
-                    })
-                  }
+                    });
+                  }}
                 />
               );
             })
@@ -1049,7 +1081,12 @@ function DocSelectorPanel({
                     .join(" · ")}
                   badge={po.Status}
                   amount={po.TotalAmount}
-                  onClick={() =>
+                  onClick={() => {
+                    const {
+                      subtotal,
+                      cgstRate: dCgst,
+                      sgstRate: dSgst,
+                    } = derivePOGst(po.POItems ?? []);
                     onSelect({
                       kind: "WO_PO",
                       docNo,
@@ -1059,11 +1096,14 @@ function DocSelectorPanel({
                       companyId: po.CompanyId,
                       projectId: po.ProjectId,
                       amount: po.TotalAmount,
+                      subtotal: subtotal > 0 ? subtotal : undefined,
+                      derivedCgstRate: dCgst,
+                      derivedSgstRate: dSgst,
                       status: po.Status,
                       date: po.PODate,
                       gst: po.GST ?? null,
-                    })
-                  }
+                    });
+                  }}
                 />
               );
             })
@@ -1226,6 +1266,17 @@ function resolveGstRates(
   if (doc.kind === "GRN") return { cgst: 0, sgst: 0 };
 
   if (doc.kind === "PO" || doc.kind === "WORK_DONE" || doc.kind === "WO_PO") {
+    // Prefer rates derived from PO line items
+    if (
+      doc.derivedCgstRate != null &&
+      (doc.derivedCgstRate > 0 || doc.derivedSgstRate != null)
+    ) {
+      return {
+        cgst: doc.derivedCgstRate ?? 0,
+        sgst: doc.derivedSgstRate ?? 0,
+      };
+    }
+    // Fall back to top-level GST blob
     if (doc.gst?.applicable) {
       const { type, rate } = doc.gst;
       if (type === "cgst_sgst") return { cgst: rate / 2, sgst: rate / 2 };
@@ -1235,6 +1286,47 @@ function resolveGstRates(
   }
 
   return { cgst: fallbackCgst, sgst: fallbackSgst };
+}
+
+/** Derives pre-tax subtotal and weighted-average CGST/SGST rates from PO line items */
+function derivePOGst(poItems: any[]): {
+  subtotal: number;
+  cgstRate: number;
+  sgstRate: number;
+} {
+  if (!Array.isArray(poItems) || poItems.length === 0)
+    return { subtotal: 0, cgstRate: 0, sgstRate: 0 };
+
+  let subtotal = 0;
+  let totalCgstAmt = 0;
+  let totalSgstAmt = 0;
+
+  for (const item of poItems) {
+    const qty = Number(item.quantity ?? item.Quantity ?? 0);
+    const rate = Number(item.rate ?? item.Rate ?? 0);
+    const base = Math.round(qty * rate * 100) / 100;
+
+    // per-item GST rate stored as total % (e.g. 28 means 14+14)
+    const totalGstRate = Number(
+      item.gstRate ?? item.GstRate ?? item.tax ?? item.Tax ?? 0,
+    );
+    // prefer stored split; fall back to half/half
+    const cgst = Number(item.cgstRate ?? item.CgstRate ?? totalGstRate / 2);
+    const sgst = Number(item.sgstRate ?? item.SgstRate ?? totalGstRate / 2);
+
+    subtotal += base;
+    totalCgstAmt += Math.round(((base * cgst) / 100) * 100) / 100;
+    totalSgstAmt += Math.round(((base * sgst) / 100) * 100) / 100;
+  }
+
+  subtotal = Math.round(subtotal * 100) / 100;
+  // Weighted average rates
+  const cgstRate =
+    subtotal > 0 ? Math.round((totalCgstAmt / subtotal) * 100 * 100) / 100 : 0;
+  const sgstRate =
+    subtotal > 0 ? Math.round((totalSgstAmt / subtotal) * 100 * 100) / 100 : 0;
+
+  return { subtotal, cgstRate, sgstRate };
 }
 
 function GRNChainBadge({
@@ -1342,6 +1434,13 @@ export default function MaterialExpenseBooking() {
   const [view, setView] = useState<PageView>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<ExpenseRecord, "id">>(blankForm());
+
+  const filteredProjectOptions = useMemo(() => {
+    if (!form.companyId) return projectOptions;
+    return projectOptions.filter(
+      (p) => Number(p.company_id) === Number(form.companyId),
+    );
+  }, [projectOptions, form.companyId]);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteBlockInfo, setDeleteBlockInfo] = useState<{
     reason: "brs_cleared" | "has_payments" | "debit_note";
@@ -1664,7 +1763,9 @@ export default function MaterialExpenseBooking() {
       basicAmount:
         doc.kind === "GRN"
           ? prev.basicAmount
-          : (doc.amount ?? prev.basicAmount),
+          : doc.kind === "PO" || doc.kind === "WO_PO"
+            ? (doc.subtotal ?? doc.amount ?? prev.basicAmount)
+            : (doc.amount ?? prev.basicAmount),
       companyId: doc.companyId ?? prev.companyId,
       projectSite: doc.projectId ? String(doc.projectId) : prev.projectSite,
       supplier: doc.vendorLabel ?? prev.supplier,
@@ -2160,6 +2261,7 @@ export default function MaterialExpenseBooking() {
               ? form.billingTerms
               : form.discount,
           );
+
     let emiForSave = { ...form.emi };
     if (
       !isEditing &&
@@ -2241,6 +2343,7 @@ export default function MaterialExpenseBooking() {
             ? form.billingTerms
             : form.discount,
         );
+
   const filteredRecords =
     statusFilter && statusFilter !== "All"
       ? records.filter((r) => r.status === statusFilter)
@@ -2304,8 +2407,8 @@ export default function MaterialExpenseBooking() {
       <Breadcrumbs items={["Dashboard", "Material", "Expense Booking"]} />
       <div className="space-y-6 mt-6">
         {/* Page Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="w-full sm:w-auto">
+        <div className="flex items-start justify-between gap-4">
+          <div>
             <h1 className="text-xl font-heading font-bold text-foreground">
               Expense Booking
             </h1>
@@ -2372,6 +2475,7 @@ export default function MaterialExpenseBooking() {
               {/* ── 0. Booking Information ─────────────────────────────── */}
               <div className="space-y-4">
                 <SectionHeader label="Booking Information" />
+                {/* Row 1: Company | Project / Site */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Company" required>
                     <Select
@@ -2403,6 +2507,56 @@ export default function MaterialExpenseBooking() {
                       </SelectContent>
                     </Select>
                   </Field>
+                  <Field
+                    label="Project / Site"
+                    hint={
+                      selectedDoc?.projectId
+                        ? "Pre-filled from linked order"
+                        : undefined
+                    }
+                  >
+                    <Select
+                      value={form.projectSite || ""}
+                      onValueChange={(v) => set("projectSite", v || "")}
+                    >
+                      <SelectTrigger>
+                        <div className="flex items-center gap-2">
+                          <FolderKanban
+                            size={13}
+                            className="text-muted-foreground shrink-0"
+                          />
+                          <SelectValue placeholder="Select project…" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {filteredProjectOptions.length === 0 &&
+                          !form.projectSite && (
+                            <SelectItem value="__none__" disabled>
+                              No projects found
+                            </SelectItem>
+                          )}
+                        {form.projectSite &&
+                          !filteredProjectOptions.some(
+                            (p) => String(p.id) === form.projectSite,
+                          ) && (
+                            <SelectItem
+                              key="__current__"
+                              value={form.projectSite}
+                            >
+                              {form.projectName || form.projectSite}
+                            </SelectItem>
+                          )}
+                        {filteredProjectOptions.map((p) => (
+                          <SelectItem key={p.id} value={String(p.id)}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+                {/* Row 2: Supplier / Vendor (full width) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field
                     label={vendorLabel}
                     hint={
@@ -2444,54 +2598,6 @@ export default function MaterialExpenseBooking() {
                         </SelectContent>
                       </Select>
                     )}
-                  </Field>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field
-                    label="Project / Site"
-                    hint={
-                      selectedDoc?.projectId
-                        ? "Pre-filled from linked order"
-                        : undefined
-                    }
-                  >
-                    <Select
-                      value={form.projectSite || ""}
-                      onValueChange={(v) => set("projectSite", v || "")}
-                    >
-                      <SelectTrigger>
-                        <div className="flex items-center gap-2">
-                          <FolderKanban
-                            size={13}
-                            className="text-muted-foreground shrink-0"
-                          />
-                          <SelectValue placeholder="Select project…" />
-                        </div>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {projectOptions.length === 0 && !form.projectSite && (
-                          <SelectItem value="__none__" disabled>
-                            No projects found
-                          </SelectItem>
-                        )}
-                        {form.projectSite &&
-                          !projectOptions.some(
-                            (p) => String(p.id) === form.projectSite,
-                          ) && (
-                            <SelectItem
-                              key="__current__"
-                              value={form.projectSite}
-                            >
-                              {form.projectName || form.projectSite}
-                            </SelectItem>
-                          )}
-                        {projectOptions.map((p) => (
-                          <SelectItem key={p.id} value={String(p.id)}>
-                            {p.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                   </Field>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -2692,10 +2798,29 @@ export default function MaterialExpenseBooking() {
               {/* ── 2. Amount & GST ────────────────────────────────────── */}
               <div className="space-y-4">
                 <SectionHeader label="Amount & GST" />
+                {/* Info banner — for PO/WO_PO show auto-filled GST summary */}
                 {hasParentGST && (
                   <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
                     <BadgePercent size={12} className="text-primary shrink-0" />
-                    {selectedDoc!.gst?.applicable ? (
+                    {(selectedDoc!.derivedCgstRate ?? 0) > 0 ||
+                    (selectedDoc!.derivedSgstRate ?? 0) > 0 ? (
+                      <span className="text-foreground">
+                        GST auto-filled from linked{" "}
+                        <span className="font-semibold">
+                          {selectedDoc!.kind === "PO"
+                            ? "Purchase Order"
+                            : "Work Done"}
+                        </span>
+                        {" — "}
+                        CGST {selectedDoc!.derivedCgstRate ?? 0}% + SGST{" "}
+                        {selectedDoc!.derivedSgstRate ?? 0}% (total{" "}
+                        {(
+                          (selectedDoc!.derivedCgstRate ?? 0) +
+                          (selectedDoc!.derivedSgstRate ?? 0)
+                        ).toFixed(2)}
+                        %). Basic amount is pre-tax (qty × rate).
+                      </span>
+                    ) : selectedDoc!.gst?.applicable ? (
                       <span className="text-foreground">
                         GST auto-filled from linked{" "}
                         <span className="font-semibold">
@@ -2709,7 +2834,7 @@ export default function MaterialExpenseBooking() {
                           : selectedDoc!.gst!.type === "igst"
                             ? `IGST ${selectedDoc!.gst!.rate}% (mapped to CGST)`
                             : "GST not applicable"}
-                        . Editable if needed.
+                        . Basic amount is pre-tax (qty × rate).
                       </span>
                     ) : (
                       <span className="text-muted-foreground">
@@ -2717,23 +2842,24 @@ export default function MaterialExpenseBooking() {
                         {selectedDoc!.kind === "PO"
                           ? "Purchase Order"
                           : "Work Done"}{" "}
-                        has no GST applied — rates set to 0. Editable if needed.
+                        has no GST on its items — rates set to 0. Basic amount
+                        is pre-tax (qty × rate).
                       </span>
                     )}
                   </div>
                 )}
-                <div
-                  className={`grid grid-cols-1 gap-4 ${isGRN ? "sm:grid-cols-1" : "sm:grid-cols-3"}`}
-                >
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-1">
                   <Field
                     label="Basic Amount (₹)"
                     required
                     hint={
                       isGRN
                         ? "Enter the invoice amount being booked against this GRN"
-                        : selectedDoc?.amount != null
-                          ? "Auto-filled from linked order value"
-                          : "Will be auto-filled when a PO or WO is selected"
+                        : isPOorWO
+                          ? "Auto-filled: pre-tax total (qty × rate) from linked order"
+                          : selectedDoc?.amount != null
+                            ? "Auto-filled from linked order value"
+                            : "Enter the basic (pre-tax) amount"
                     }
                   >
                     <div className="relative">
@@ -2744,59 +2870,41 @@ export default function MaterialExpenseBooking() {
                         type="number"
                         min={0}
                         value={form.basicAmount || ""}
-                        readOnly={!isGRN && !!selectedDoc?.amount}
+                        readOnly={isPOorWO || (!isGRN && !!selectedDoc?.amount)}
                         onChange={(e) => {
-                          if (!isGRN && selectedDoc?.amount) return;
+                          if (isPOorWO || (!isGRN && selectedDoc?.amount))
+                            return;
                           set("basicAmount", parseFloat(e.target.value) || 0);
                         }}
-                        className={`pl-7 font-mono ${!isGRN && selectedDoc?.amount != null ? "bg-muted/30 cursor-not-allowed" : ""}`}
+                        className={`pl-7 font-mono ${isPOorWO || (!isGRN && selectedDoc?.amount != null) ? "bg-muted/30 cursor-not-allowed" : ""}`}
                         placeholder="0.00"
                       />
                     </div>
                   </Field>
-                  {!isGRN && (
-                    <>
+                  {/* CGST/SGST rate inputs — only shown for Other Expenses (no linked doc) */}
+                  {!isGRN && !isPOorWO && (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <Field
                         label="CGST Rate (%)"
-                        hint={
-                          isPOorWO
-                            ? selectedDoc!.gst?.applicable
-                              ? selectedDoc!.gst!.type === "igst"
-                                ? "IGST mapped here — editable"
-                                : "Auto-filled from linked order — editable"
-                              : "No GST on this order — editable"
-                            : "Enter CGST rate manually"
-                        }
+                        hint="Enter CGST rate manually"
                       >
                         <RateInput
                           value={form.cgstRate}
                           onChange={(v) => set("cgstRate", v)}
-                          highlighted={gstHighlighted}
+                          highlighted={false}
                         />
                       </Field>
                       <Field
-                        label={
-                          selectedDoc?.gst?.type === "igst"
-                            ? "SGST Rate (%) — N/A for IGST"
-                            : "SGST Rate (%)"
-                        }
-                        hint={
-                          isPOorWO
-                            ? selectedDoc!.gst?.type === "igst"
-                              ? "IGST order — SGST is 0"
-                              : selectedDoc!.gst?.applicable
-                                ? "Auto-filled from linked order — editable"
-                                : "No GST on this order — editable"
-                            : "Enter SGST rate manually"
-                        }
+                        label="SGST Rate (%)"
+                        hint="Enter SGST rate manually"
                       >
                         <RateInput
                           value={form.sgstRate}
                           onChange={(v) => set("sgstRate", v)}
-                          highlighted={gstHighlighted}
+                          highlighted={false}
                         />
                       </Field>
-                    </>
+                    </div>
                   )}
                 </div>
                 {form.basicAmount > 0 && (
@@ -3136,8 +3244,8 @@ export default function MaterialExpenseBooking() {
                   onChange={(d) => set("discount", d)}
                   onChangeBillingTerms={(terms) => set("billingTerms", terms)}
                   grnNetAmount={
-                    isGRN && selectedDoc?.amount != null
-                      ? selectedDoc.amount
+                    isGRN
+                      ? (selectedDoc?.amount ?? form.grnTotalAmount ?? null)
                       : null
                   }
                   gstBreakdown={

@@ -81,6 +81,8 @@ router.get("/:id", async (req, res, next) => {
     ];
     if (hasColumn(columnMeta, "LGSTType")) selectColumns.push("lh.LGSTType");
     if (hasColumn(columnMeta, "LHeadPan")) selectColumns.push("lh.LHeadPan");
+    if (hasColumn(columnMeta, "LHeadCategory"))
+      selectColumns.push("lh.LHeadCategory");
 
     const query = `SELECT ${selectColumns.join(", ")}
       FROM dbo.AccountHeadMaster lh
@@ -126,8 +128,8 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
 
     if (hasColumn(columnMeta, "LGSTType")) selectColumns.push("lh.LGSTType");
     if (hasColumn(columnMeta, "LHeadPan")) selectColumns.push("lh.LHeadPan");
-    if (hasColumn(columnMeta, "LHeadCatagory"))
-      selectColumns.push("lh.LHeadCatagory");
+    if (hasColumn(columnMeta, "LHeadCategory"))
+      selectColumns.push("lh.LHeadCategory");
     if (hasColumn(columnMeta, "CreatedAt")) selectColumns.push("lh.CreatedAt");
     if (hasColumn(columnMeta, "UpdatedAt")) selectColumns.push("lh.UpdatedAt");
     if (hasColumn(columnMeta, "ApprovedBy"))
@@ -189,13 +191,35 @@ router.post("/", async (req, res) => {
     LDescription,
     LGSTType,
     LHeadPan,
-    LHeadCatagory,
+    LHeadCategory,
     LHeadType,
   } = req.body;
 
   try {
     const userName = requireUserName(req, res);
     if (!userName) return;
+
+    // ── Account Group is mandatory (not required for suppliers/customers/contractors) ──
+    if (
+      !LBelongsTo &&
+      LHeadType !== "S" &&
+      LHeadType !== "A" &&
+      LHeadType !== "C"
+    ) {
+      return res.status(400).json({
+        error:
+          "Please select an Account Group before creating a Ledger Account.",
+        code: "MISSING_ACCOUNT_GROUP",
+      });
+    }
+
+    // ── PAN is mandatory for suppliers ──
+    if (LHeadType === "S" && !(LHeadPan && LHeadPan.trim())) {
+      return res.status(400).json({
+        error: "PAN Number is mandatory for suppliers.",
+        code: "MISSING_PAN",
+      });
+    }
 
     const pool = getPool();
     const columnMeta = await getAccountHeadColumnMeta();
@@ -256,10 +280,10 @@ router.post("/", async (req, res) => {
       insertColumns.push("LHeadPan");
       insertValues.push("@LHeadPan");
     }
-    if (hasColumn(columnMeta, "LHeadCatagory")) {
-      request.input("LHeadCatagory", sql.NVarChar(100), LHeadCatagory || null);
-      insertColumns.push("LHeadCatagory");
-      insertValues.push("@LHeadCatagory");
+    if (hasColumn(columnMeta, "LHeadCategory")) {
+      request.input("LHeadCategory", sql.NVarChar(100), LHeadCategory || null);
+      insertColumns.push("LHeadCategory");
+      insertValues.push("@LHeadCategory");
     }
     if (hasColumn(columnMeta, "CreatedBy")) {
       request.input("CreatedBy", sql.NVarChar(100), userName);
@@ -467,7 +491,8 @@ router.put("/:id", async (req, res) => {
     LDescription,
     LGSTType,
     LHeadPan,
-    LHeadCatagory,
+    LHeadCategory,
+    LHeadType,
   } = req.body;
 
   try {
@@ -486,6 +511,27 @@ router.put("/:id", async (req, res) => {
     if (!row) return res.status(404).json({ error: "Record not found" });
     if (row.Status === "Approved") {
       return res.status(400).json({ error: "Cannot edit an approved record" });
+    }
+
+    // ── Account Group is mandatory (not required for suppliers/customers/contractors) ──
+    if (
+      !LBelongsTo &&
+      LHeadType !== "S" &&
+      LHeadType !== "A" &&
+      LHeadType !== "C"
+    ) {
+      return res.status(400).json({
+        error: "Please select an Account Group before saving a Ledger Account.",
+        code: "MISSING_ACCOUNT_GROUP",
+      });
+    }
+
+    // ── PAN is mandatory for suppliers ──
+    if (LHeadType === "S" && !(LHeadPan && LHeadPan.trim())) {
+      return res.status(400).json({
+        error: "PAN Number is mandatory for suppliers.",
+        code: "MISSING_PAN",
+      });
     }
 
     const columnMeta = await getAccountHeadColumnMeta();
@@ -534,9 +580,9 @@ router.put("/:id", async (req, res) => {
       request.input("LHeadPan", sql.NVarChar(50), LHeadPan || null);
       updates.push("LHeadPan=@LHeadPan");
     }
-    if (hasColumn(columnMeta, "LHeadCatagory")) {
-      request.input("LHeadCatagory", sql.NVarChar(100), LHeadCatagory || null);
-      updates.push("LHeadCatagory=@LHeadCatagory");
+    if (hasColumn(columnMeta, "LHeadCategory")) {
+      request.input("LHeadCategory", sql.NVarChar(100), LHeadCategory || null);
+      updates.push("LHeadCategory=@LHeadCategory");
     }
     if (hasColumn(columnMeta, "UpdatedBy")) {
       request.input("UpdatedBy", sql.NVarChar(100), userName);

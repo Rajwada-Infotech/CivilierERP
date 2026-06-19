@@ -81,6 +81,8 @@ import {
   ChevronDown,
   CalendarDays,
   FilePenLine,
+  Phone,
+  Mail,
 } from "lucide-react";
 
 // ─── PO Chain Status Hook ─────────────────────────────────────────────────────
@@ -147,6 +149,7 @@ interface POForm {
   remarks: string;
   docTypeId: number | null;
   docNo: string;
+  status: string;
 }
 
 interface DropdownOption {
@@ -235,6 +238,7 @@ const EMPTY_FORM = (): POForm => ({
   remarks: "",
   docTypeId: null,
   docNo: "",
+  status: "Draft",
 });
 
 // ─── Shared styles (matching WorkOrderMaster) ─────────────────────────────────
@@ -546,13 +550,16 @@ const PurchaseOrderMaster: React.FC = () => {
     [tcRaw],
   );
 
-  // ── Enterprise logo (stored as base64 data URL in DB) ─────────────────────
+  // ── Company logo — prefer the selected company's own logo; fall back to enterprise logo ──
   const enterpriseLogo = useMemo(() => {
     const list = ensureArray<any>(enterprisesRaw);
     const enterprise =
       list.find((e) => e.entity_type === "Enterprise") ?? list[0];
     return (enterprise?.logo as string | null) ?? null;
   }, [enterprisesRaw]);
+
+  // The logo shown in print/preview: company-specific first, then enterprise fallback
+  const activeLogo = companyDetails?.logo ?? enterpriseLogo;
 
   // ── Print handler — uses Blob URL so base64 logo renders correctly ─────────
   const handlePrint = () => {
@@ -566,6 +573,8 @@ const PurchaseOrderMaster: React.FC = () => {
     const supAddr = supplierDetails?.LHeadAddress ?? "";
     const supContact = supplierDetails?.LHeadContactPerson ?? "";
     const supGST = supplierDetails?.LGST ?? "";
+    const supPhone = supplierDetails?.LHeadPhone ?? "";
+    const supEmail = supplierDetails?.LHeadEmail ?? "";
     const compAddr = [
       companyDetails?.address,
       companyDetails?.address_line2,
@@ -576,12 +585,27 @@ const PurchaseOrderMaster: React.FC = () => {
       .filter(Boolean)
       .join(", ");
     const compGST = companyDetails?.gst_no ?? "";
+    const compEmail = companyDetails?.email ?? "";
+    const compPhone = companyDetails?.phone_number ?? "";
 
-    // Logo: if it's a base64 data URL embed it directly — Blob URL approach
-    // keeps it same-origin so the popup's img src resolves.
-    const logoHtml = enterpriseLogo
-      ? `<img src="${enterpriseLogo}" alt="Logo" style="height:64px;max-width:200px;object-fit:contain;" />`
+    // Logo: company-specific logo first, then enterprise fallback
+    const logoHtml = activeLogo
+      ? `<img src="${activeLogo}" alt="Logo" style="height:64px;max-width:200px;object-fit:contain;" />`
       : `<span style="font-size:20px;font-weight:800;color:#4f46e5;">${company}</span>`;
+
+    // PO status badge for print
+    const poStatus = form.status || "Draft";
+    const statusColors: Record<
+      string,
+      { bg: string; color: string; border: string }
+    > = {
+      approved: { bg: "#f0fdf4", color: "#166534", border: "#86efac" },
+      pending: { bg: "#fffbeb", color: "#92400e", border: "#fcd34d" },
+      draft: { bg: "#f3f4f6", color: "#374151", border: "#d1d5db" },
+      rejected: { bg: "#fef2f2", color: "#991b1b", border: "#fca5a5" },
+    };
+    const sc = statusColors[poStatus.toLowerCase()] ?? statusColors.draft;
+    const statusHtml = `<span style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};border:1px solid ${sc.border};letter-spacing:0.05em;">${poStatus.toUpperCase()}</span>`;
 
     const itemRows = lineItems
       .map(
@@ -643,6 +667,7 @@ const PurchaseOrderMaster: React.FC = () => {
       <div style="font-size:15px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${form.poNumber || "—"}</div>
       <div style="font-size:12px;color:#6b7280;margin-top:6px;">Date: <strong>${fmtDate(form.poDate)}</strong></div>
       ${form.expectedDate ? `<div style="font-size:12px;color:#6b7280;margin-top:2px;">Expected: <strong>${fmtDate(form.expectedDate)}</strong></div>` : ""}
+      ${statusHtml}
     </div>
   </div>
 
@@ -653,12 +678,16 @@ const PurchaseOrderMaster: React.FC = () => {
       <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${supplier}</div>
       ${supAddr ? `<div style="font-size:11px;color:#374151;margin-bottom:2px;">${supAddr}</div>` : ""}
       ${supContact ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">Contact: <strong style="color:#111827;">${supContact}</strong></div>` : ""}
+      ${supPhone ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#128222; ${supPhone}</div>` : ""}
+      ${supEmail ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#9993; ${supEmail}</div>` : ""}
       ${supGST ? `<div style="margin-top:5px;"><span style="font-family:monospace;font-size:10px;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:4px;display:inline-block;">GSTIN: ${supGST}</span></div>` : ""}
     </div>
     <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Company</div>
       <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${company}</div>
       ${compAddr ? `<div style="font-size:11px;color:#374151;margin-bottom:2px;">${compAddr}</div>` : ""}
+      ${compPhone ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#128222; ${compPhone}</div>` : ""}
+      ${compEmail ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#9993; ${compEmail}</div>` : ""}
       ${compGST ? `<div style="margin-top:5px;"><span style="font-family:monospace;font-size:10px;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:4px;display:inline-block;">GSTIN: ${compGST}</span></div>` : ""}
     </div>
     <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
@@ -1502,6 +1531,7 @@ const PurchaseOrderMaster: React.FC = () => {
       remarks: raw.Remarks ?? "",
       docTypeId,
       docNo,
+      status: raw.Status ?? "Draft",
     });
 
     // Restore line items from POItems (full record) or legacy fields
@@ -2113,13 +2143,16 @@ const PurchaseOrderMaster: React.FC = () => {
             <ArrowLeft size={16} />
           </button>
           <div>
-            <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
+            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
               <ShoppingCart size={18} className="text-primary" />
               {viewMode === "create"
                 ? "New Purchase Order"
                 : viewMode === "edit"
                   ? "Edit Purchase Order"
                   : `Purchase Order — ${form.poNumber || "—"}`}
+              {viewMode === "view" && form.status && (
+                <StatusChip status={form.status} />
+              )}
             </h1>
           </div>
         </div>
@@ -2614,6 +2647,28 @@ const PurchaseOrderMaster: React.FC = () => {
                       </dd>
                     </div>
                   )}
+                  {supplierDetails.LHeadPhone && (
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Phone
+                      </dt>
+                      <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
+                        <Phone size={12} className="text-muted-foreground" />
+                        {supplierDetails.LHeadPhone}
+                      </dd>
+                    </div>
+                  )}
+                  {supplierDetails.LHeadEmail && (
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Email
+                      </dt>
+                      <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
+                        <Mail size={12} className="text-muted-foreground" />
+                        {supplierDetails.LHeadEmail}
+                      </dd>
+                    </div>
+                  )}
                   {supplierDetails.LGST && (
                     <div>
                       <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -2661,6 +2716,28 @@ const PurchaseOrderMaster: React.FC = () => {
                       </dt>
                       <dd className="font-mono text-xs font-semibold text-primary mt-0.5 bg-primary/5 px-2 py-1 rounded-md inline-block">
                         {companyDetails.gst_no}
+                      </dd>
+                    </div>
+                  )}
+                  {companyDetails.phone_number && (
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Phone
+                      </dt>
+                      <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
+                        <Phone size={12} className="text-muted-foreground" />
+                        {companyDetails.phone_number}
+                      </dd>
+                    </div>
+                  )}
+                  {companyDetails.email && (
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Email
+                      </dt>
+                      <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
+                        <Mail size={12} className="text-muted-foreground" />
+                        {companyDetails.email}
                       </dd>
                     </div>
                   )}

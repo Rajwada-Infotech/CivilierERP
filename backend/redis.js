@@ -500,12 +500,12 @@ const getPredictedRPM = async () => {
 // DYNAMIC RATE LIMIT
 // ─────────────────────────────
 function getDynamicLimit(score, rpm, memoryUsage) {
-  const base = 20 + Math.sqrt(Number(score) || 0) * 10;
+  const base = 300 + Math.sqrt(Number(score) || 0) * 10;
   let loadFactor = 1;
   if (rpm > 10000) loadFactor = 0.5;
   else if (rpm > 5000) loadFactor = 0.7;
   const memoryFactor = memoryUsage > 0.8 ? 0.7 : 1;
-  return Math.floor(Math.min(base * loadFactor * memoryFactor, 500));
+  return Math.floor(Math.min(base * loadFactor * memoryFactor, 1000));
 }
 
 module.exports = {

@@ -30,9 +30,6 @@ import {
   ArrowDownToLine,
   User,
   Layers,
-  PackageX,
-  TrendingUp,
-  Activity,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -170,204 +167,6 @@ function GodownBadge({
   );
 }
 
-// ─── Godown stock stat card ───────────────────────────────────────────────────
-
-function GodownStockStats({
-  items,
-  loading,
-  godownName,
-}: {
-  items: any[];
-  loading: boolean;
-  godownName?: string;
-}) {
-  const stats = useMemo(() => {
-    if (!items.length) return null;
-    const inStock = items.filter((it) => Number(it.AvailableStock) > 0);
-    const outOfStock = items.filter((it) => Number(it.AvailableStock) <= 0);
-    const totalQty = items.reduce(
-      (s, it) => s + Number(it.AvailableStock ?? 0),
-      0,
-    );
-    const top5 = [...items]
-      .filter((it) => Number(it.AvailableStock) > 0)
-      .sort((a, b) => Number(b.AvailableStock) - Number(a.AvailableStock))
-      .slice(0, 5);
-    const maxQty = top5[0] ? Number(top5[0].AvailableStock) : 1;
-    return { inStock, outOfStock, totalQty, top5, maxQty, total: items.length };
-  }, [items]);
-
-  if (loading) {
-    return (
-      <div className="rounded-xl border border-border bg-muted/20 p-4 flex items-center justify-center gap-2 text-sm text-muted-foreground h-24">
-        <RefreshCw size={14} className="animate-spin" />
-        Loading stock levels…
-      </div>
-    );
-  }
-
-  if (!stats) return null;
-
-  const inStockPct =
-    stats.total > 0 ? (stats.inStock.length / stats.total) * 100 : 0;
-
-  return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      {/* Header strip */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/20">
-        <div className="flex items-center gap-2">
-          <BarChart3 size={14} className="text-primary" />
-          <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            Godown Stock Levels
-          </span>
-          {godownName && (
-            <span className="text-xs text-foreground font-medium">
-              — {godownName}
-            </span>
-          )}
-        </div>
-        <span className="text-xs text-muted-foreground">
-          {stats.total} SKUs
-        </span>
-      </div>
-
-      <div className="p-4 grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-4">
-        {/* ── Left: 3 stat tiles ── */}
-        <div className="grid grid-cols-3 sm:grid-cols-1 gap-2 sm:w-40">
-          {/* Total qty */}
-          <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 flex flex-col gap-0.5">
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Activity size={11} />
-              <span className="text-[10px] font-semibold uppercase tracking-wider">
-                Total Qty
-              </span>
-            </div>
-            <span className="font-mono font-bold text-lg leading-tight text-foreground">
-              {stats.totalQty.toLocaleString("en-IN", {
-                maximumFractionDigits: 2,
-              })}
-            </span>
-          </div>
-
-          {/* In stock */}
-          <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2.5 flex flex-col gap-0.5">
-            <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-              <TrendingUp size={11} />
-              <span className="text-[10px] font-semibold uppercase tracking-wider">
-                In Stock
-              </span>
-            </div>
-            <div className="flex items-end gap-1">
-              <span className="font-mono font-bold text-lg leading-tight text-emerald-700 dark:text-emerald-300">
-                {stats.inStock.length}
-              </span>
-              <span className="text-[10px] text-emerald-600/70 dark:text-emerald-400/70 pb-0.5">
-                items
-              </span>
-            </div>
-          </div>
-
-          {/* Out of stock */}
-          <div
-            className={`rounded-lg border px-3 py-2.5 flex flex-col gap-0.5 ${
-              stats.outOfStock.length > 0
-                ? "border-destructive/30 bg-destructive/5"
-                : "border-border bg-muted/20"
-            }`}
-          >
-            <div
-              className={`flex items-center gap-1.5 ${
-                stats.outOfStock.length > 0
-                  ? "text-destructive"
-                  : "text-muted-foreground"
-              }`}
-            >
-              <PackageX size={11} />
-              <span className="text-[10px] font-semibold uppercase tracking-wider">
-                Out of Stock
-              </span>
-            </div>
-            <div className="flex items-end gap-1">
-              <span
-                className={`font-mono font-bold text-lg leading-tight ${
-                  stats.outOfStock.length > 0
-                    ? "text-destructive"
-                    : "text-muted-foreground"
-                }`}
-              >
-                {stats.outOfStock.length}
-              </span>
-              <span className="text-[10px] text-muted-foreground pb-0.5">
-                items
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Right: top-5 horizontal bar chart ── */}
-        <div className="min-w-0">
-          <div className="flex items-center justify-between mb-2.5">
-            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-              Top items by available qty
-            </span>
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-emerald-500 transition-all"
-                  style={{ width: `${inStockPct}%` }}
-                />
-              </div>
-              <span>{Math.round(inStockPct)}% available</span>
-            </div>
-          </div>
-
-          {stats.top5.length === 0 ? (
-            <div className="flex items-center justify-center h-16 text-xs text-muted-foreground gap-1.5">
-              <PackageX size={13} />
-              No stock in this godown
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {stats.top5.map((item) => {
-                const qty = Number(item.AvailableStock);
-                const pct = stats.maxQty > 0 ? (qty / stats.maxQty) * 100 : 0;
-                const barColor =
-                  pct > 60
-                    ? "bg-emerald-500"
-                    : pct > 25
-                      ? "bg-amber-500"
-                      : "bg-orange-500";
-                return (
-                  <div key={item.M_Id} className="flex items-center gap-2.5">
-                    <span
-                      className="text-xs text-foreground font-medium truncate shrink-0"
-                      style={{ width: "38%" }}
-                      title={item.M_Name}
-                    >
-                      {item.M_Name}
-                    </span>
-                    <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${barColor}`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <span className="font-mono text-xs font-semibold text-foreground shrink-0 w-16 text-right">
-                      {qty.toLocaleString("en-IN", {
-                        maximumFractionDigits: 2,
-                      })}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function Issues() {
@@ -418,7 +217,7 @@ export default function Issues() {
     queryKey: ["issues-items", selectedGodownId],
     queryFn: () => issuesApi.getItemOptions(selectedGodownId),
     staleTime: 60_000,
-    enabled: viewMode === "form",
+    enabled: viewMode === "form" && !!selectedGodownId,
   });
 
   const { data: uoms = [], isLoading: loadingUoms } = useQuery({
@@ -1129,15 +928,6 @@ export default function Issues() {
               )}
             </div>
 
-            {/* ── Godown stock stat card — visible once a godown is chosen ── */}
-            {header.godownId && (
-              <GodownStockStats
-                items={itemOptions as any[]}
-                loading={loadingItems}
-                godownName={selectedGodown?.name}
-              />
-            )}
-
             {/* Row 1: Company | Project | Fin Year | Date */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
               <Field label="Company" required>
@@ -1522,10 +1312,17 @@ export default function Issues() {
                               {selectedGodown?.name}
                             </span>
                             :{" "}
-                            <span className="font-semibold text-foreground ml-0.5">
-                              {availStock.toFixed(2)}{" "}
-                              {uomObj?.Symbol || ci.UOMCode}
-                            </span>
+                            {loadingItems ? (
+                              <span className="flex items-center gap-1 text-muted-foreground/70 italic">
+                                <RefreshCw size={10} className="animate-spin" />
+                                Loading…
+                              </span>
+                            ) : (
+                              <span className="font-semibold text-foreground ml-0.5">
+                                {availStock.toFixed(2)}{" "}
+                                {uomObj?.Symbol || ci.UOMCode}
+                              </span>
+                            )}
                           </span>
                           {isOver ? (
                             <span className="flex items-center gap-1 font-semibold text-destructive">

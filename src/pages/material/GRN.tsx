@@ -31,6 +31,7 @@ import {
   Printer,
   CopyPlus,
   Warehouse,
+  ArrowLeftRight,
 } from "lucide-react";
 import {
   Dialog,
@@ -254,6 +255,19 @@ const fmt = (n: number) =>
     maximumFractionDigits: 2,
   });
 
+// Derive a "YYYY-YYYY" financial-year label (Apr–Mar) from a date string.
+// Used as a fallback for older POs that have no fy_id / FinYearName set.
+const deriveFYFromDate = (dateStr?: string | null): string | null => {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  const year = d.getFullYear();
+  const month = d.getMonth(); // 0-indexed; Jan = 0
+  // April (3) onward → FY starts this year; Jan-Mar → FY started last year
+  const startYear = month >= 3 ? year : year - 1;
+  return `${startYear}-${startYear + 1}`;
+};
+
 // Input classes — matches existing app design tokens
 const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
@@ -439,88 +453,128 @@ let handleDeleteGrn: (id: string) => void;
 let goToGRNAmend: (grn: any) => void;
 
 // ─── List Columns ─────────────────────────────────────────────────────────────
+// isTransferGRN: doc number starts with "TRF-GRN" — these rows came from a
+// Stock Transfer and have no PO / Supplier; their ref doc is the TRF-xxx number.
+const isTransferGRN = (grn: any): boolean => Boolean(grn.SourceTransferDocNo);
+
 const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
+  // ── Doc No + type badge ──────────────────────────────────────────────────
   {
     accessorKey: "DocNo",
     header: "Doc No",
     cell: ({ row, getValue }) => {
-      const docNo = (getValue() as string) || row.original.GRNNo;
-      const grnNo = row.original.GRNNo as string;
+      const grn = row.original;
+      const docNo = (getValue() as string) || grn.GRNNo;
+      const isTRF = isTransferGRN(grn);
       return (
-        <div className="flex flex-col gap-0.5">
-          <span className="font-mono text-xs font-semibold">
+        <div className="flex flex-col gap-1">
+          <span className="font-mono text-xs font-bold text-foreground">
             {docNo || "—"}
           </span>
-          {grnNo && grnNo !== docNo && (
-            <span className="font-mono text-[10px] text-muted-foreground/50">
-              {grnNo}
+          {isTRF ? (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-400/20 w-fit">
+              <ArrowLeftRight size={8} /> Transfer GRN
             </span>
-          )}
+          ) : grn.POType ? (
+            <span
+              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold border w-fit ${
+                grn.POType === "Normal"
+                  ? "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800"
+                  : grn.POType === "WO_PO"
+                    ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800"
+                    : "bg-muted text-muted-foreground border-border"
+              }`}
+            >
+              {grn.POType}
+            </span>
+          ) : null}
         </div>
       );
     },
   },
+  // ── Ref doc — smart column ───────────────────────────────────────────────
+  // Transfer GRN → show TRF-xxx (the source transfer)
+  // Normal GRN   → show PO No
   {
-    accessorKey: "PONumber",
-    header: "PO No",
+    id: "RefDoc",
+    header: "Ref Doc",
     cell: ({ row }) => {
       const grn = row.original;
-      const poType = grn.POType as string | undefined;
-      const typeColor =
-        poType === "Normal"
-          ? "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800"
-          : poType === "WO_PO"
-            ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800"
-            : "bg-muted text-muted-foreground border-border";
+      const isTRF = isTransferGRN(grn);
+      if (isTRF) {
+        return (
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">
+              Transfer
+            </span>
+            <span className="font-mono text-xs font-semibold text-violet-600 dark:text-violet-400">
+              {grn.SourceTransferDocNo || "—"}
+            </span>
+          </div>
+        );
+      }
       return (
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-xs">{(grn.PONumber as string) || "—"}</span>
-          {poType && (
-            <span
-              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${typeColor}`}
-            >
-              {poType}
+        <div className="flex flex-col gap-0.5">
+          {grn.PONumber ? (
+            <>
+              <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">
+                PO
+              </span>
+              <span className="font-mono text-xs">{grn.PONumber}</span>
+            </>
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          )}
+        </div>
+      );
+    },
+  },
+  // ── Supplier / Source ────────────────────────────────────────────────────
+  // Transfer GRN → show Source MR if any (from the original transfer context)
+  // Normal GRN   → show Supplier + Source MR
+  {
+    id: "SupplierOrSource",
+    header: "Supplier / Source MR",
+    cell: ({ row }) => {
+      const grn = row.original;
+      const isTRF = isTransferGRN(grn);
+      if (isTRF) {
+        return (
+          <span className="text-xs text-muted-foreground italic">
+            Via stock transfer
+          </span>
+        );
+      }
+      return (
+        <div className="flex flex-col gap-0.5">
+          {grn.SupplierName ? (
+            <span className="text-xs font-medium">{grn.SupplierName}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          )}
+          {grn.SourceMRDocNo && (
+            <span className="font-mono text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+              {grn.SourceMRDocNo}
             </span>
           )}
         </div>
       );
     },
   },
-  {
-    accessorKey: "SupplierName",
-    header: "Supplier",
-    cell: ({ getValue }) => (
-      <span className="text-xs hidden sm:inline">
-        {(getValue() as string) || "—"}
-      </span>
-    ),
-  },
+  // ── Date ─────────────────────────────────────────────────────────────────
   {
     accessorKey: "GRNDate",
     header: "Date",
     cell: ({ getValue }) => {
       const v = getValue() as string;
       return (
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-muted-foreground whitespace-nowrap">
           {v ? new Date(v).toLocaleDateString("en-IN") : "—"}
         </span>
       );
     },
   },
-  {
-    accessorKey: "SourceMRDocNo",
-    header: "Source MR",
-    cell: ({ getValue }) => {
-      const v = getValue() as string;
-      return v ? (
-        <span className="font-mono text-xs font-semibold text-blue-600 dark:text-blue-400">
-          {v}
-        </span>
-      ) : (
-        <span className="text-xs text-muted-foreground">—</span>
-      );
-    },
-  },
+  // ── Amount ───────────────────────────────────────────────────────────────
   {
     accessorKey: "TotalAmount",
     header: "Amount",
@@ -533,6 +587,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
       );
     },
   },
+  // ── Status ───────────────────────────────────────────────────────────────
   {
     id: "chain",
     header: "Status",
@@ -545,6 +600,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
       />
     ),
   },
+  // ── Actions ──────────────────────────────────────────────────────────────
   {
     id: "actions",
     header: "",
@@ -741,18 +797,6 @@ export default function GRN() {
 
   // Derive the financial year string from a date string using Indian FY rule (Apr–Mar).
   // e.g. 2026-01-15 → "2025-2026",  2026-05-10 → "2026-2027"
-  const deriveFYFromDate = (
-    dateStr: string | null | undefined,
-  ): string | null => {
-    if (!dateStr) return null;
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return null;
-    const yr = d.getFullYear();
-    const mo = d.getMonth() + 1; // 1-based
-    const startYr = mo >= 4 ? yr : yr - 1;
-    return `${startYr}-${startYr + 1}`;
-  };
-
   const { data: uomsData = [] } = useQuery({
     queryKey: ["uomMaster"],
     queryFn: grnApi.getUoms,
@@ -772,6 +816,29 @@ export default function GRN() {
   });
   const godowns = (godownsData as any)?.data ?? [];
 
+  // Find the godown linked to a project (by ProjectID FK on Godowns row)
+  const findProjectGodownId = (
+    projectId: string | number | null | undefined,
+  ): string => {
+    if (!projectId || !godowns.length) return "";
+    const match = godowns.find(
+      (g: any) => String(g.ProjectID) === String(projectId),
+    );
+    return match ? String(match.GodownID) : "";
+  };
+
+  // Auto-select the project-linked godown whenever projectId changes.
+  // Skip when editing an existing GRN (the saved GodownID is loaded via loadForEdit).
+  useEffect(() => {
+    if (editingId) return;
+    const auto = findProjectGodownId(formData.projectId);
+    setFormData((prev) => {
+      if (prev.godownId === auto) return prev; // no change → no re-render
+      return { ...prev, godownId: auto };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.projectId, godowns]);
+
   const { data: projectsData = [] } = useQuery({
     queryKey: ["grn-projects"],
     queryFn: getProjects,
@@ -787,9 +854,21 @@ export default function GRN() {
             String(po.PurchaseOrderID) === formData.poId
           )
             return true;
+          // Only Approved POs (or already-partially-received ones) can be
+          // used to raise a GRN. Draft / Pending / Rejected / Cancelled POs
+          // must not show up in the dropdown.
+          const status = (po as any).Status;
+          if (status !== "Approved" && status !== "Received") return false;
           if (selectedFinYear) {
-            const poFY = deriveFYFromDate((po as any).PODate);
-            if (poFY !== selectedFinYear) return false;
+            // Compare against FinYearName from the DB (same FName value the
+            // fin-year selector uses).  For older POs created before fy_id
+            // was wired up, FinYearName will be null — fall back to
+            // deriving the FY from PODate so they still appear under the
+            // correct financial year filter.
+            const poFY =
+              ((po as any).FinYearName as string | null | undefined) ||
+              deriveFYFromDate((po as any).PODate);
+            if (!poFY || poFY !== selectedFinYear) return false;
           }
           if (formData.projectId) {
             if (String((po as any).ProjectId ?? "") !== formData.projectId)
@@ -822,7 +901,9 @@ export default function GRN() {
       grn.DocNo?.toLowerCase().includes(q) ||
       grn.GRNNo?.toLowerCase().includes(q) ||
       grn.PONumber?.toLowerCase().includes(q) ||
-      grn.SupplierName?.toLowerCase().includes(q)
+      grn.SupplierName?.toLowerCase().includes(q) ||
+      grn.SourceTransferDocNo?.toLowerCase().includes(q) ||
+      grn.SourceMRDocNo?.toLowerCase().includes(q)
     );
   });
 
@@ -1198,6 +1279,7 @@ export default function GRN() {
       poNumber: fullGrn.PONumber || "",
       poTotalAmount: Number(fullGrn.POTotalAmount ?? 0),
       poSubtotalAmount: Number(fullGrn.POSubtotalAmount ?? 0),
+      poReceivedAmount: Number(fullGrn.POTotalReceived ?? 0),
       remarks: fullGrn.Remarks || "",
       status: (fullGrn.Status as any) || "Draft",
       items: parsedItems.length ? parsedItems : [createEmptyItem()],

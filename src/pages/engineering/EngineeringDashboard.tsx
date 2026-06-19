@@ -83,6 +83,7 @@ function StatCard({
   icon: Icon,
   iconColor = "text-orange-600",
   iconBg = "bg-orange-500/10",
+  borderL = "border-l-orange-500",
   trend,
   onClick,
 }: {
@@ -92,13 +93,14 @@ function StatCard({
   icon: React.ElementType;
   iconColor?: string;
   iconBg?: string;
+  borderL?: string;
   trend?: "up" | "down" | "neutral";
   onClick?: () => void;
 }) {
   return (
     <div
       onClick={onClick}
-      className={`rounded-xl border border-border bg-card p-5 flex flex-col gap-3 transition-all duration-200 ${
+      className={`rounded-xl border border-border bg-card p-5 flex flex-col gap-3 transition-all duration-200 border-l-2 ${borderL} ${
         onClick
           ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5 hover:border-primary/20"
           : ""
@@ -445,6 +447,7 @@ export default function EngineeringDashboard() {
             icon={HardHat}
             iconColor="text-orange-600"
             iconBg="bg-orange-500/10"
+            borderL="border-l-orange-500"
             trend="up"
             onClick={() => navigate("/engineering/work-order")}
           />
@@ -455,6 +458,7 @@ export default function EngineeringDashboard() {
             icon={ClipboardList}
             iconColor="text-blue-600"
             iconBg="bg-blue-500/10"
+            borderL="border-l-blue-500"
             onClick={() => navigate("/engineering/boq")}
           />
           <StatCard
@@ -464,6 +468,7 @@ export default function EngineeringDashboard() {
             icon={CheckCircle2}
             iconColor="text-emerald-600"
             iconBg="bg-emerald-500/10"
+            borderL="border-l-emerald-500"
             onClick={() => navigate("/engineering/work-done")}
           />
           <StatCard
@@ -473,6 +478,7 @@ export default function EngineeringDashboard() {
             icon={Building2}
             iconColor="text-purple-600"
             iconBg="bg-purple-500/10"
+            borderL="border-l-purple-500"
           />
         </div>
 
@@ -485,29 +491,33 @@ export default function EngineeringDashboard() {
                 value: fmt(workOrders.totalValue),
                 icon: HardHat,
                 color: "text-orange-600",
+                borderL: "border-l-orange-500",
               },
               {
                 label: "Open Work Orders",
                 value: fmtNum(workOrders.open),
                 icon: Clock,
                 color: "text-amber-600",
+                borderL: "border-l-amber-500",
               },
               {
                 label: "BOQ Approved",
                 value: fmtNum(boq.approved),
                 icon: CheckCircle2,
                 color: "text-emerald-600",
+                borderL: "border-l-emerald-500",
               },
               {
                 label: "Work Done (Pending)",
                 value: fmtNum(workDone.pending),
                 icon: AlertCircle,
                 color: "text-red-500",
+                borderL: "border-l-red-500",
               },
             ].map((s) => (
               <div
                 key={s.label}
-                className="rounded-xl border border-border bg-card px-4 py-3 flex items-center gap-3"
+                className={`rounded-xl border border-border bg-card px-4 py-3 flex items-center gap-3 border-l-2 ${s.borderL}`}
               >
                 <s.icon size={18} className={s.color} />
                 <div>

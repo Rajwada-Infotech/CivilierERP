@@ -92,7 +92,7 @@ router.get("/", async (req, res) => {
       LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
       LEFT JOIN dbo.TypeOfDoc  td ON td.TypeOfDocId = b.DocTypeId
       WHERE
-        CAST(b.CreatedAt AS DATE) = @Date
+        CAST(DATEADD(MINUTE, 330, b.CreatedAt) AS DATE) = @Date
         AND (@CompanyId IS NULL OR b.CompanyId = @CompanyId)
         AND (@ProjectId IS NULL OR b.ProjectId = @ProjectId)
       ORDER BY b.BoqID DESC
@@ -144,7 +144,7 @@ router.get("/", async (req, res) => {
       LEFT JOIN dbo.TypeOfDoc         td  ON td.TypeOfDocId = h.DocTypeId
       LEFT JOIN dbo.BOQ               b   ON b.BoqID = h.BoqID
       WHERE
-        CAST(h.CreatedAt AS DATE) = @Date
+        CAST(DATEADD(MINUTE, 330, h.CreatedAt) AS DATE) = @Date
         AND (@CompanyId IS NULL OR h.CompanyId = @CompanyId)
         AND (@ProjectId IS NULL OR h.ProjectId = @ProjectId)
       GROUP BY
@@ -267,7 +267,7 @@ router.get("/", async (req, res) => {
         GROUP BY woa.WorkOrderHeaderId
       ) wo_uom ON wo_uom.WorkOrderHeaderId = wd.WorkOrderID
       WHERE
-        CAST(wd.CreatedAt AS DATE) = @Date
+        CAST(DATEADD(MINUTE, 330, wd.CreatedAt) AS DATE) = @Date
         AND (@CompanyId IS NULL OR wd.CompanyId = @CompanyId)
         AND (@ProjectId IS NULL OR wd.ProjectId = @ProjectId)
       ORDER BY wd.ID DESC
