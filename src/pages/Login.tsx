@@ -11,40 +11,38 @@ import {
 } from "framer-motion";
 import { toast } from "sonner";
 
-const ROLE_HINTS = import.meta.env.DEV
-  ? [
-      {
-        role: "Super Admin",
-        email: "superadmin@civilier.com",
-        password: "super123",
-        color: "#7c3aed",
-      },
-      {
-        role: "Admin",
-        email: "admin@civilier.com",
-        password: "admin123",
-        color: "#2563eb",
-      },
-      {
-        role: "DB Admin",
-        email: "dba@civilier.com",
-        password: "dba123",
-        color: "#8b5cf6",
-      },
-      {
-        role: "Engineer",
-        email: "engineer@civilier.com",
-        password: "engineer123",
-        color: "#14b8a6",
-      },
-      {
-        role: "Customer",
-        email: "customer@civilier.com",
-        password: "customer123",
-        color: "#f59e0b",
-      },
-    ]
-  : [];
+const ROLE_HINTS = [
+  {
+    role: "Super Admin",
+    email: "superadmin@civilier.com",
+    password: "super123",
+    color: "#7c3aed",
+  },
+  {
+    role: "Admin",
+    email: "admin@civilier.com",
+    password: "admin123",
+    color: "#2563eb",
+  },
+  {
+    role: "DB Admin",
+    email: "dba@civilier.com",
+    password: "dba123",
+    color: "#8b5cf6",
+  },
+  {
+    role: "Engineer",
+    email: "engineer@civilier.com",
+    password: "engineer123",
+    color: "#14b8a6",
+  },
+  {
+    role: "Customer",
+    email: "customer@civilier.com",
+    password: "customer123",
+    color: "#f59e0b",
+  },
+];
 
 // ── Typewriter hook ────────────────────────────────────────────────────────────
 function useTypewriter(words: string[], speed = 80, pause = 2000) {
@@ -1332,7 +1330,7 @@ export default function Login() {
                   <motion.button
                     type="button"
                     onClick={() => setShowPass(!showPass)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-purple-700 transition-colors p-1"
+                    className="absolute right-3 bottom-2.5 text-slate-400 hover:text-purple-700 transition-colors p-1"
                     whileTap={{ scale: 0.85, rotate: 15 }}
                   >
                     <AnimatePresence mode="wait">
@@ -1416,80 +1414,76 @@ export default function Login() {
               </ShimmerButton>
             </motion.form>
 
-            {/* Dev hints */}
-            {import.meta.env.DEV && (
-              <div className="mt-5">
-                <motion.button
-                  type="button"
-                  onClick={() => setShowHints(!showHints)}
-                  className="w-full flex items-center justify-center gap-2 text-xs text-slate-500 hover:text-purple-700 transition-colors"
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
+            {/* Demo credentials */}
+            <div className="mt-5">
+              <motion.button
+                type="button"
+                onClick={() => setShowHints(!showHints)}
+                className="w-full flex items-center justify-center gap-2 text-xs text-slate-500 hover:text-purple-700 transition-colors"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <motion.div
+                  animate={{ rotate: showHints ? 180 : 0 }}
+                  transition={{ duration: 0.2 }}
                 >
-                  <motion.div
-                    animate={{ rotate: showHints ? 180 : 0 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    <ShieldCheck size={14} />
-                  </motion.div>
-                  {showHints
-                    ? "Hide demo credentials"
-                    : "Show demo credentials"}
-                </motion.button>
+                  <ShieldCheck size={14} />
+                </motion.div>
+                {showHints ? "Hide demo credentials" : "Show demo credentials"}
+              </motion.button>
 
-                <AnimatePresence>
-                  {showHints && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="mt-3 space-y-1.5 overflow-hidden"
-                    >
-                      {ROLE_HINTS.map((h, i) => (
-                        <motion.button
-                          key={h.email}
-                          type="button"
-                          onClick={() => {
-                            setEmail(h.email);
-                            setPassword(h.password);
-                            setShowHints(false);
-                            setError("");
+              <AnimatePresence>
+                {showHints && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="mt-3 space-y-1.5 overflow-hidden"
+                  >
+                    {ROLE_HINTS.map((h, i) => (
+                      <motion.button
+                        key={h.email}
+                        type="button"
+                        onClick={() => {
+                          setEmail(h.email);
+                          setPassword(h.password);
+                          setShowHints(false);
+                          setError("");
+                        }}
+                        initial={{ opacity: 0, x: -12 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: i * 0.06 }}
+                        whileHover={{
+                          x: 3,
+                          backgroundColor: "rgba(255,255,255,0.95)",
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl border border-slate-200 bg-white/60 transition-colors text-left"
+                      >
+                        <motion.span
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ background: h.color }}
+                          animate={{ scale: [1, 1.3, 1] }}
+                          transition={{
+                            duration: 2,
+                            delay: i * 0.3,
+                            repeat: Infinity,
                           }}
-                          initial={{ opacity: 0, x: -12 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: i * 0.06 }}
-                          whileHover={{
-                            x: 3,
-                            backgroundColor: "rgba(255,255,255,0.95)",
-                          }}
-                          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl border border-slate-200 bg-white/60 transition-colors text-left"
-                        >
-                          <motion.span
-                            className="w-2 h-2 rounded-full shrink-0"
-                            style={{ background: h.color }}
-                            animate={{ scale: [1, 1.3, 1] }}
-                            transition={{
-                              duration: 2,
-                              delay: i * 0.3,
-                              repeat: Infinity,
-                            }}
-                          />
-                          <span className="text-xs font-medium text-slate-700 w-24 sm:w-28 shrink-0">
-                            {h.role}
-                          </span>
-                          <span className="text-xs text-slate-500 truncate flex-1 min-w-0">
-                            {h.email}
-                          </span>
-                          <span className="text-xs font-medium text-slate-400 shrink-0 tracking-widest">
-                            {"•".repeat(h.password.length)}
-                          </span>
-                        </motion.button>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            )}
+                        />
+                        <span className="text-xs font-medium text-slate-700 w-24 sm:w-28 shrink-0">
+                          {h.role}
+                        </span>
+                        <span className="text-xs text-slate-500 truncate flex-1 min-w-0">
+                          {h.email}
+                        </span>
+                        <span className="text-xs font-medium text-slate-400 shrink-0 tracking-widest">
+                          {"•".repeat(h.password.length)}
+                        </span>
+                      </motion.button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         </TiltCard>
       </motion.div>
