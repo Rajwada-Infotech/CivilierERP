@@ -482,6 +482,7 @@ router.get("/options", async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = grn.SupplierID
         WHERE
           (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
+          AND eb.EStatus = 'Approved'
           AND NOT EXISTS (
             SELECT 1 FROM dbo.DebitNote dn
             WHERE dn.bill_id = eb.Eid AND dn.is_active = 1
@@ -532,6 +533,7 @@ router.get("/options", async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster ahm2 ON ahm2.LHeadId = grn2.SupplierID
         WHERE
           eb.EEmiPayment = 1
+          AND eb.EStatus = 'Approved'
           AND ei.Status = 'Pending'
           AND NOT EXISTS (
             SELECT 1 FROM dbo.DebitNote dn
@@ -899,7 +901,10 @@ router.get("/:id", async (req, res) => {
                  WHEN eb.ESourceType = 'GRN' AND grn_det.TotalAmount IS NOT NULL AND grn_det.TotalAmount > 0
                  THEN grn_det.TotalAmount
                  ELSE NULL
-               END AS EGrnTotalAmount
+               END AS EGrnTotalAmount,
+               -- Pass through source info needed for fallback computation
+               eb.ESourceType AS _ESourceType,
+               eb.ESourceId   AS _ESourceId
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
         LEFT JOIN dbo.enterprise ec ON ec.id = eb.ECompanyId
@@ -918,30 +923,47 @@ router.get("/:id", async (req, res) => {
     if (!result.recordset.length)
       return res.status(404).json({ error: "Not found" });
 
-    const raw = result.recordset[0];
+    // Destructure to separate the internal _ESourceType/_ESourceId aliases
+    // from the rest. mssql recordset rows can be non-configurable so we must
+    // not mutate them in-place (delete/assignment throws in strict contexts).
+    const { _ESourceType, _ESourceId, ...row } = result.recordset[0];
+
+    // If EGrnTotalAmount is NULL (grn.TotalAmount not populated for older records),
+    // compute the authoritative total from buildGrnGstData (item qty x PO rate + GST).
+    let EGrnTotalAmount = row.EGrnTotalAmount ?? null;
+    if (!EGrnTotalAmount && _ESourceType === "GRN" && _ESourceId) {
+      try {
+        const grnId = parseInt(String(_ESourceId), 10);
+        if (Number.isFinite(grnId) && grnId > 0) {
+          const grnData = await buildGrnGstData(pool, grnId);
+          if (grnData && grnData.totals.netAmount > 0) {
+            EGrnTotalAmount = grnData.totals.netAmount;
+          }
+        }
+      } catch {
+        /* non-fatal: frontend will fall back to standard breakdown */
+      }
+    }
 
     // For GRN-linked bookings, recompute ENetAmount live from the GRN total + billing terms.
     // The stored ENetAmount may be stale if the GRN was amended after the booking was created.
-    let liveENetAmount = raw.ENetAmount;
+    let liveENetAmount = row.ENetAmount;
     if (
-      raw.ESourceType === "GRN" &&
-      raw.EGrnTotalAmount != null &&
-      parseFloat(raw.EGrnTotalAmount) > 0
+      _ESourceType === "GRN" &&
+      EGrnTotalAmount != null &&
+      parseFloat(EGrnTotalAmount) > 0
     ) {
       liveENetAmount = applyBillingTermsToAmount(
-        parseFloat(raw.EGrnTotalAmount),
-        parseFloat(raw.EAmount ?? 0),
-        parseFloat(raw.ECgstRate ?? 0),
-        parseFloat(raw.ESgstRate ?? 0),
-        raw.EBillingTermsData,
-        raw.EDiscountData,
-      );
-      console.log(
-        `[/:id] Eid=${raw.Eid} ESourceType=${raw.ESourceType} EGrnTotalAmount=${raw.EGrnTotalAmount} stored=${raw.ENetAmount} live=${liveENetAmount} billingTerms=${JSON.stringify(raw.EBillingTermsData)}`,
+        parseFloat(EGrnTotalAmount),
+        parseFloat(row.EAmount ?? 0),
+        parseFloat(row.ECgstRate ?? 0),
+        parseFloat(row.ESgstRate ?? 0),
+        row.EBillingTermsData,
+        row.EDiscountData,
       );
     }
 
-    res.json({ ...raw, ENetAmount: liveENetAmount });
+    res.json({ ...row, EGrnTotalAmount, ENetAmount: liveENetAmount });
   } catch (err) {
     console.error("Get by id error:", err.message);
     res.status(500).json({ error: err.message });
@@ -1093,6 +1115,40 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
         await transaction.rollback();
         return res.status(404).json({ error: "Linked GRN not found." });
       }
+
+      // Enforce: an expense can only be booked against an Approved GRN.
+      const grnStatusResult = await transaction
+        .request()
+        .input("GRNID", sql.Int, grnId)
+        .query("SELECT Status FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID");
+      const grnStatus = grnStatusResult.recordset[0]?.Status;
+      if (grnStatus !== "Approved") {
+        await transaction.rollback();
+        return res.status(400).json({
+          error: `Cannot book expense: GRN is "${grnStatus}". Only Approved GRNs can be used for expense booking.`,
+        });
+      }
+
+      // Enforce: only one active expense booking per GRN at a time.
+      // If the previous booking was deleted (hard-deleted), no row remains, so
+      // this check passes and a fresh booking is allowed.
+      const dupCheck = await transaction
+        .request()
+        .input("DupGRNId", sql.Int, grnId).query(`
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ExpenseBooking
+          WHERE ESourceType = 'GRN'
+            AND ESourceId = @DupGRNId
+            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+        `);
+      if (Number(dupCheck.recordset[0]?.cnt) > 0) {
+        await transaction.rollback();
+        return res.status(409).json({
+          error:
+            "An expense booking already exists for this GRN. Delete the existing booking before creating a new one.",
+        });
+      }
+
       if (!grnGst.totals.receivedQty || grnGst.totals.receivedQty <= 0) {
         await transaction.rollback();
         return res.status(400).json({
@@ -1113,6 +1169,103 @@ router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
         EBillingTermsData,
         EDiscountData,
       );
+    }
+
+    if (ESourceType === "PO" || ESourceType === "WO_PO") {
+      const poId = parseInt(ESourceId, 10);
+      if (!Number.isFinite(poId) || poId <= 0) {
+        await transaction.rollback();
+        return res
+          .status(400)
+          .json({ error: "Purchase Order source is required." });
+      }
+
+      // Enforce: an expense can only be booked against an Approved
+      // (or already partially-fulfilled / Received) Purchase Order.
+      const poStatusResult = await transaction
+        .request()
+        .input("POID", sql.Int, poId)
+        .query(
+          "SELECT Status FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @POID",
+        );
+      const poStatus = poStatusResult.recordset[0]?.Status;
+      if (!poStatus) {
+        await transaction.rollback();
+        return res
+          .status(404)
+          .json({ error: "Linked Purchase Order not found." });
+      }
+      if (poStatus !== "Approved" && poStatus !== "Received") {
+        await transaction.rollback();
+        return res.status(400).json({
+          error: `Cannot book expense: Purchase Order is "${poStatus}". Only Approved Purchase Orders can be used for expense booking.`,
+        });
+      }
+
+      // Enforce: only one active expense booking per PO at a time.
+      const poDupCheck = await transaction
+        .request()
+        .input("DupPOId", sql.Int, poId)
+        .input("DupPOSourceType", sql.NVarChar(20), ESourceType).query(`
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ExpenseBooking
+          WHERE ESourceType = @DupPOSourceType
+            AND ESourceId = @DupPOId
+            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+        `);
+      if (Number(poDupCheck.recordset[0]?.cnt) > 0) {
+        await transaction.rollback();
+        return res.status(409).json({
+          error:
+            "An expense booking already exists for this Purchase Order. Delete the existing booking before creating a new one.",
+        });
+      }
+    }
+
+    if (ESourceType === "WORK_DONE") {
+      const workDoneId = parseInt(ESourceId, 10);
+      if (!Number.isFinite(workDoneId) || workDoneId <= 0) {
+        await transaction.rollback();
+        return res.status(400).json({ error: "Work Done source is required." });
+      }
+
+      // Enforce: an expense can only be booked against an Approved
+      // Work Done certificate.
+      const wdStatusResult = await transaction
+        .request()
+        .input("WDID", sql.BigInt, workDoneId)
+        .query("SELECT Status FROM dbo.WorkDone WHERE ID = @WDID");
+      const wdStatus = wdStatusResult.recordset[0]?.Status;
+      if (!wdStatus) {
+        await transaction.rollback();
+        return res
+          .status(404)
+          .json({ error: "Linked Work Done entry not found." });
+      }
+      if (wdStatus !== "Approved") {
+        await transaction.rollback();
+        return res.status(400).json({
+          error: `Cannot book expense: Work Done is "${wdStatus}". Only Approved Work Done entries can be used for expense booking.`,
+        });
+      }
+
+      // Enforce: only one active expense booking per Work Done entry at a time.
+      const wdDupCheck = await transaction
+        .request()
+        .input("DupWDId", sql.BigInt, workDoneId).query(`
+          SELECT COUNT(*) AS cnt
+          FROM dbo.ExpenseBooking
+          WHERE ESourceType = 'WORK_DONE'
+            AND ESourceId = @DupWDId
+            AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+        `);
+      if (Number(wdDupCheck.recordset[0]?.cnt) > 0) {
+        await transaction.rollback();
+        return res.status(409).json({
+          error:
+            "An expense booking already exists for this Work Done entry. Delete the existing booking before creating a new one.",
+        });
+      }
     }
 
     if (EDocTypeId) {

@@ -124,6 +124,53 @@ const purchaseOrderUpdateSchema = purchaseOrderBaseSchema
   })
   .passthrough();
 
+const customerSaleOrderLineItemSchema = z
+  .object({
+    itemId: optStr(100),
+    itemName: optStr(255),
+    itemDescription: optStr(255),
+    itemCode: optStr(50),
+    description: optStr(4000),
+    quantity: optNumber,
+    rate: optNumber,
+    amount: optNumber,
+    unit: optStr(50),
+  })
+  .passthrough();
+
+const customerSaleOrderBaseSchema = z
+  .object({
+    SaleOrderNo: optStr(100),
+    SODate: optDate,
+    CustomerID: reqInt("Customer is required"),
+    CompanyId: optInt,
+    ProjectId: optInt,
+    ItemDescription: optStr(4000),
+    Quantity: optNumber,
+    Unit: optStr(50),
+    Rate: optNumber,
+    TotalAmount: optNumber,
+    ReceivingGodownId: optInt,
+    ReferenceNumber: optStr(100),
+    PaymentTerms: optStr(4000),
+    Status: optStr(50),
+    Remarks: optStr(4000),
+    DocTypeId: optInt,
+    finYear: optStr(20),
+    SOItems: z.union([z.array(customerSaleOrderLineItemSchema), z.string()]).optional(),
+  })
+  .passthrough();
+
+const customerSaleOrderBodySchema = customerSaleOrderBaseSchema.refine(
+  (value) => value.DocTypeId || value.SaleOrderNo,
+  {
+    path: ["SaleOrderNo"],
+    message: "Select a document type or enter a sale order number",
+  },
+);
+
+const customerSaleOrderUpdateSchema = customerSaleOrderBaseSchema.passthrough();
+
 const grnItemSchema = z
   .object({
     itemId: optStr(100),
@@ -217,6 +264,8 @@ const paymentBodySchema = z
 module.exports = {
   purchaseOrderBodySchema,
   purchaseOrderUpdateSchema,
+  customerSaleOrderBodySchema,
+  customerSaleOrderUpdateSchema,
   grnBodySchema,
   paymentBodySchema,
 };

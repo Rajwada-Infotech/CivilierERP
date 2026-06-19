@@ -14,7 +14,6 @@ import {
   MapPin,
   Building2,
   Tag,
-  Star,
   MoreVertical,
   Archive,
   Search,
@@ -22,6 +21,7 @@ import {
   TrendingUp,
   TrendingDown,
   Boxes,
+  FolderKanban,
 } from "lucide-react";
 import {
   getGodowns,
@@ -35,6 +35,7 @@ import {
   getInventoryMaster,
   type InventoryMasterRow,
 } from "@/api/inventoryMasterApi";
+import { getEnterpriseOptions } from "@/api/enterpriseApi";
 
 // ─── Field ────────────────────────────────────────────────────────────────────
 function Field({
@@ -77,8 +78,33 @@ function GodownDrawer({
     ShortDesc: "",
     Description: "",
     Remarks: "",
+    EnterpriseID: null,
+    ProjectID: null,
   });
   const [err, setErr] = useState("");
+
+  const { data: companiesData } = useQuery({
+    queryKey: ["enterprise-options", "C"],
+    queryFn: () => getEnterpriseOptions(undefined, "C"),
+    staleTime: 300_000,
+  });
+  const companies = (companiesData ?? []) as { id: number; label: string }[];
+
+  const { data: projectsData } = useQuery({
+    queryKey: ["enterprise-options", "P"],
+    queryFn: () => getEnterpriseOptions(undefined, "P"),
+    staleTime: 300_000,
+  });
+  const allProjects = (projectsData ?? []) as {
+    id: number;
+    label: string;
+    belongs_to: string | null;
+  }[];
+  const filteredProjects = form.EnterpriseID
+    ? allProjects.filter(
+        (p) => String(p.belongs_to) === String(form.EnterpriseID),
+      )
+    : allProjects;
 
   React.useEffect(() => {
     if (editing) {
@@ -88,6 +114,8 @@ function GodownDrawer({
         ShortDesc: editing.ShortDesc || "",
         Description: editing.Description || "",
         Remarks: editing.Remarks || "",
+        EnterpriseID: editing.EnterpriseID ?? null,
+        ProjectID: editing.ProjectID ?? null,
       });
     } else {
       setForm({
@@ -96,6 +124,8 @@ function GodownDrawer({
         ShortDesc: "",
         Description: "",
         Remarks: "",
+        EnterpriseID: null,
+        ProjectID: null,
       });
     }
     setErr("");
@@ -214,6 +244,45 @@ function GodownDrawer({
                 placeholder="Shown in badges"
                 className={inputCls}
               />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Company">
+              <select
+                value={
+                  form.EnterpriseID != null ? String(form.EnterpriseID) : ""
+                }
+                onChange={(e) => {
+                  const v = e.target.value ? Number(e.target.value) : null;
+                  setForm((f) => ({ ...f, EnterpriseID: v, ProjectID: null }));
+                }}
+                className={inputCls}
+              >
+                <option value="">— None —</option>
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Project">
+              <select
+                value={form.ProjectID != null ? String(form.ProjectID) : ""}
+                onChange={(e) => {
+                  const v = e.target.value ? Number(e.target.value) : null;
+                  setForm((f) => ({ ...f, ProjectID: v }));
+                }}
+                className={inputCls}
+              >
+                <option value="">— None —</option>
+                {filteredProjects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
             </Field>
           </div>
 
@@ -532,34 +601,20 @@ function GodownCard({
       }}
     >
       {/* Top accent bar */}
-      <div
-        className={`h-1 w-full ${godown.IsMain ? "bg-gradient-to-r from-emerald-500 to-emerald-400" : "bg-gradient-to-r from-border to-border group-hover:from-emerald-500/40 group-hover:to-emerald-400/40 transition-all duration-300"}`}
-      />
+      <div className="h-1 w-full bg-gradient-to-r from-emerald-500/40 to-emerald-400/40 group-hover:from-emerald-500 group-hover:to-emerald-400 transition-all duration-300" />
 
       <div className="p-5">
         {/* Header row */}
         <div className="flex items-start justify-between gap-3 mb-4">
           <div className="flex items-center gap-3">
-            <div
-              className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${godown.IsMain ? "bg-emerald-500/15" : "bg-muted"}`}
-            >
-              <Warehouse
-                size={19}
-                className={
-                  godown.IsMain ? "text-emerald-600" : "text-muted-foreground"
-                }
-              />
+            <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 bg-muted">
+              <Warehouse size={19} className="text-muted-foreground" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <p className="text-sm font-heading font-bold text-foreground truncate">
                   {godown.GodownName}
                 </p>
-                {godown.IsMain && (
-                  <span className="inline-flex items-center gap-1 text-[9px] bg-emerald-500/15 text-emerald-600 px-2 py-0.5 rounded-full font-bold tracking-wide uppercase shrink-0">
-                    <Star size={8} fill="currentColor" /> Main
-                  </span>
-                )}
                 {!godown.IsActive && (
                   <span className="text-[9px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-medium uppercase tracking-wide">
                     Inactive
@@ -602,18 +657,16 @@ function GodownCard({
                   >
                     <Pencil size={11} /> Edit
                   </button>
-                  {!godown.IsMain && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setMenuOpen(false);
-                        onDelete(godown);
-                      }}
-                      className="w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-red-500/10 transition-colors text-red-500"
-                    >
-                      <Trash2 size={11} /> Delete
-                    </button>
-                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuOpen(false);
+                      onDelete(godown);
+                    }}
+                    className="w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-red-500/10 transition-colors text-red-500"
+                  >
+                    <Trash2 size={11} /> Delete
+                  </button>
                 </div>
               </>
             )}
@@ -698,7 +751,7 @@ export default function InventoryMaster() {
     staleTime: 60_000,
   });
 
-  const godowns: Godown[] = (data?.data ?? []).filter((g) => !g.IsMain);
+  const godowns: Godown[] = data?.data ?? [];
 
   const filtered = search.trim()
     ? godowns.filter(
@@ -709,7 +762,7 @@ export default function InventoryMaster() {
       )
     : godowns;
 
-  // Sort: project godowns first (exclude Main), then alphabetical
+  // Sort alphabetically
   const sorted = [...filtered].sort((a, b) => {
     return a.GodownName.localeCompare(b.GodownName);
   });

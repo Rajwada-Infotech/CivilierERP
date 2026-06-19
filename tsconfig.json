@@ -4,7 +4,6 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "baseUrl": ".",
 
     /* Paths */
     "paths": {
@@ -15,8 +14,8 @@
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
 
-    /* Backend support */
-    "types": ["node", "vitest/globals"],
+    /* Frontend */
+    "types": ["vitest/globals"],
     "resolveJsonModule": true,
 
     /* Emit — Vite handles bundling; tsc is type-check only */
@@ -38,9 +37,9 @@
     "allowJs": true
   },
 
-  "include": ["src", "backend/**/*.ts", "backend/utils/loadRoutes.js"],
+  "include": ["src"],
 
-  "exclude": ["node_modules", "backend/dist"],
+  "exclude": ["node_modules"],
 
   "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -326,18 +326,21 @@ function SummaryCard({
     red: {
       ring: "ring-red-400",
       bar: "bg-red-400",
+      borderL: "border-l-red-400",
       num: "text-red-600 dark:text-red-400",
       bg: "bg-red-100 dark:bg-red-900/30",
     },
     blue: {
       ring: "ring-blue-400",
       bar: "bg-blue-400",
+      borderL: "border-l-blue-400",
       num: "text-blue-600 dark:text-blue-400",
       bg: "bg-blue-100 dark:bg-blue-900/30",
     },
     emerald: {
       ring: "ring-emerald-400",
       bar: "bg-emerald-400",
+      borderL: "border-l-emerald-400",
       num: "text-emerald-600 dark:text-emerald-400",
       bg: "bg-emerald-100 dark:bg-emerald-900/30",
     },
@@ -346,11 +349,12 @@ function SummaryCard({
   return (
     <button
       onClick={onClick}
-      className={`relative text-left w-full rounded-xl border bg-card p-5 transition-all duration-150 hover:shadow-md hover:-translate-y-0.5 ${active ? `ring-2 ${styles.ring} shadow-md -translate-y-0.5` : ""}`}
+      className={`relative text-left w-full rounded-xl border bg-card p-5 overflow-hidden transition-all duration-150 hover:shadow-md hover:-translate-y-0.5 border-l-2 ${styles.borderL} ${active ? `ring-2 ${styles.ring} shadow-md -translate-y-0.5` : ""}`}
     >
       <div
         className={`absolute top-0 left-0 h-0.5 w-full rounded-t-xl ${active ? styles.bar : "bg-transparent"}`}
       />
+      <div className={`absolute top-0 right-0 w-24 h-24 rounded-full opacity-10 -translate-y-6 translate-x-6 ${styles.bar}`} />
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
@@ -501,39 +505,34 @@ export function FinancePaymentsPage() {
     : 0;
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-[1400px] mx-auto px-6 py-6 space-y-6">
+    <>
+      <Breadcrumbs
+        items={[
+          { label: "Follow-Up", path: "/followup" },
+          { label: "Finance" },
+          { label: "Payments" },
+        ]}
+      />
+      <div className="space-y-8 mt-6">
         {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div>
-          <Breadcrumbs
-            items={[
-              { label: "Follow-Up", path: "/followup" },
-              { label: "Finance" },
-              { label: "Payments" },
-            ]}
-          />
-          <div className="flex items-center justify-between mt-2">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-foreground">
-                Payment Collections
-              </h1>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                Record receipts and track collections against demanded
-                milestones
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Payment Collections
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Record receipts and track collections against demanded milestones
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="gap-2"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
-              <RefreshCw
-                className={`w-3.5 h-3.5 ${isFetching ? "animate-spin" : ""}`}
-              />
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
               Refresh
-            </Button>
+            </button>
           </div>
         </div>
 
@@ -574,105 +573,97 @@ export function FinancePaymentsPage() {
           />
         </div>
 
-        {/* ── Filters ─────────────────────────────────────────────────────── */}
-        <div className="flex flex-wrap gap-2 items-center">
-          <div className="flex gap-1.5 flex-1 min-w-[220px] max-w-sm">
-            <div className="relative flex-1">
+        {/* ── Filters + Table ─────────────────────────────────────────────── */}
+        <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
+          {/* Filter bar */}
+          <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-border bg-muted/30">
+            <Filter className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input
                 placeholder="Search applicant, booking, milestone…"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && applySearch()}
-                className="pl-8 h-9"
+                className="pl-8 h-8 text-sm"
               />
             </div>
-            <Button
-              onClick={applySearch}
-              size="sm"
-              variant="outline"
-              className="h-9 px-3"
-            >
+            <Button onClick={applySearch} size="sm" variant="outline" className="h-8 px-3 text-sm">
               Search
             </Button>
+
+            <Select
+              value={companyId || "all"}
+              onValueChange={(v) => {
+                setCompanyId(v === "all" ? "" : v);
+                setProjectId("");
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-8 w-40 text-sm">
+                <SelectValue placeholder="All Companies" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Companies</SelectItem>
+                {companiesRaw.map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>{c.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={projectId || "all"}
+              onValueChange={(v) => {
+                setProjectId(v === "all" ? "" : v);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-8 w-40 text-sm">
+                <SelectValue placeholder="All Projects" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Projects</SelectItem>
+                {filteredProjects.map((p: any) => (
+                  <SelectItem key={p.ProjectId} value={String(p.ProjectId)}>{p.ProjectName}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={status || "all"}
+              onValueChange={(v) => {
+                setStatus(v === "all" ? "" : v);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-8 w-32 text-sm">
+                <SelectValue placeholder="All Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="Demanded">Outstanding</SelectItem>
+                <SelectItem value="Paid">Paid</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {hasFilters && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearFilters}
+                className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-3.5 h-3.5" /> Clear filters
+              </Button>
+            )}
+
+            <span className="ml-auto text-sm text-muted-foreground tabular-nums">
+              {total.toLocaleString("en-IN")} milestone{total !== 1 ? "s" : ""}
+            </span>
           </div>
 
-          <Select
-            value={companyId || "all"}
-            onValueChange={(v) => {
-              setCompanyId(v === "all" ? "" : v);
-              setProjectId("");
-              setPage(1);
-            }}
-          >
-            <SelectTrigger className="h-9 w-44 text-sm">
-              <SelectValue placeholder="All Companies" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Companies</SelectItem>
-              {companiesRaw.map((c) => (
-                <SelectItem key={c.id} value={String(c.id)}>
-                  {c.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select
-            value={projectId || "all"}
-            onValueChange={(v) => {
-              setProjectId(v === "all" ? "" : v);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger className="h-9 w-44 text-sm">
-              <SelectValue placeholder="All Projects" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Projects</SelectItem>
-              {filteredProjects.map((p: any) => (
-                <SelectItem key={p.ProjectId} value={String(p.ProjectId)}>
-                  {p.ProjectName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select
-            value={status || "all"}
-            onValueChange={(v) => {
-              setStatus(v === "all" ? "" : v);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger className="h-9 w-36 text-sm">
-              <SelectValue placeholder="All Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="Demanded">Outstanding</SelectItem>
-              <SelectItem value="Paid">Paid</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {hasFilters && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={clearFilters}
-              className="h-9 gap-1.5 text-muted-foreground hover:text-foreground"
-            >
-              <X className="w-3.5 h-3.5" /> Clear filters
-            </Button>
-          )}
-
-          <span className="ml-auto text-sm text-muted-foreground tabular-nums">
-            {total.toLocaleString("en-IN")} milestone{total !== 1 ? "s" : ""}
-          </span>
-        </div>
-
-        {/* ── Table ───────────────────────────────────────────────────────── */}
-        <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
+        {/* ── Table ── */}
+        <div className="overflow-hidden">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -944,7 +935,8 @@ export function FinancePaymentsPage() {
             </div>
           )}
         </div>
-      </div>
+        </div> {/* end card: rounded-xl border bg-card */}
+      </div> {/* end space-y-8 */}
 
       {/* ── Record Payment Dialog ─────────────────────────────────────────── */}
       <Dialog open={!!recordRow} onOpenChange={(o) => !o && setRecordRow(null)}>
@@ -1246,7 +1238,7 @@ export function FinancePaymentsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }
 

@@ -64,6 +64,7 @@ function StatCard({
   icon: Icon,
   iconColor = "text-emerald-600",
   iconBg = "bg-emerald-500/10",
+  borderL = "border-l-emerald-500",
   trend,
   onClick,
 }: {
@@ -73,13 +74,14 @@ function StatCard({
   icon: React.ElementType;
   iconColor?: string;
   iconBg?: string;
+  borderL?: string;
   trend?: "up" | "down" | "neutral";
   onClick?: () => void;
 }) {
   return (
     <div
       onClick={onClick}
-      className={`rounded-2xl border border-border bg-card p-5 flex flex-col gap-4 transition-all duration-200 ${
+      className={`rounded-2xl border border-border bg-card p-5 flex flex-col gap-4 transition-all duration-200 border-l-2 ${borderL} ${
         onClick
           ? "cursor-pointer hover:shadow-lg hover:-translate-y-0.5 hover:border-primary/20"
           : ""
@@ -415,8 +417,9 @@ export default function TicketDashboard() {
                 value={stats.total}
                 sub={`${stats.resolvedPct}% resolved`}
                 icon={MessageSquare}
-                iconColor="text-primary"
-                iconBg="bg-primary/10"
+                iconColor="text-violet-600"
+                iconBg="bg-violet-500/10"
+                borderL="border-l-violet-500"
                 trend="neutral"
                 onClick={() => navigate("/ticket/my-tickets")}
               />
@@ -427,6 +430,7 @@ export default function TicketDashboard() {
                 icon={Clock}
                 iconColor="text-amber-600"
                 iconBg="bg-amber-500/10"
+                borderL="border-l-amber-500"
                 trend={
                   stats.pending + stats.inProgress > 0 ? "down" : "neutral"
                 }
@@ -439,6 +443,7 @@ export default function TicketDashboard() {
                 icon={CheckCircle2}
                 iconColor="text-emerald-600"
                 iconBg="bg-emerald-500/10"
+                borderL="border-l-emerald-500"
                 trend="up"
                 onClick={() => navigate("/ticket/resolved")}
               />
@@ -449,6 +454,7 @@ export default function TicketDashboard() {
                 icon={Flame}
                 iconColor="text-red-600"
                 iconBg="bg-red-500/10"
+                borderL="border-l-red-500"
                 trend={stats.urgent + stats.high > 0 ? "down" : "neutral"}
                 onClick={() => navigate("/ticket/pending")}
               />
@@ -460,7 +466,7 @@ export default function TicketDashboard() {
         {!isLoading && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {/* Resolution rate pill */}
-            <div className="rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4">
+            <div className="rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4 border-l-2 border-l-emerald-500">
               <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center shrink-0">
                 <CheckCircle2 size={18} className="text-emerald-600" />
               </div>
@@ -471,7 +477,7 @@ export default function TicketDashboard() {
                 </p>
               </div>
             </div>
-            <div className="rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4">
+            <div className="rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4 border-l-2 border-l-amber-500">
               <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
                 <Clock size={18} className="text-amber-600" />
               </div>
@@ -482,7 +488,7 @@ export default function TicketDashboard() {
                 </p>
               </div>
             </div>
-            <div className="rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4">
+            <div className="rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4 border-l-2 border-l-red-500">
               <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center shrink-0">
                 <ShieldAlert size={18} className="text-red-600" />
               </div>
@@ -732,8 +738,8 @@ export default function TicketDashboard() {
                   label: "Create Ticket",
                   icon: Plus,
                   path: "/ticket/create",
-                  color: "text-primary",
-                  bg: "bg-primary/10",
+                  color: "text-violet-600",
+                  bg: "bg-violet-500/10",
                 },
                 {
                   label: "My Tickets",

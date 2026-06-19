@@ -23,6 +23,7 @@ import {
   Search,
   X,
   Clock,
+  CalendarDays,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
@@ -65,6 +66,7 @@ interface OptionItem {
   SelectionNo?: string;
   UnitNo?: string;
   ApplicantId?: number;
+  CompanyId?: number;
 }
 
 interface MetaOptions {
@@ -99,6 +101,14 @@ interface WorkflowRecord {
   OverallStatus: string;
   Notes: string | null;
   [key: string]: unknown;
+}
+
+interface WorkflowStepPayload {
+  stepField: string;
+  status: string;
+  doneDate?: string;
+  notes?: string;
+  signatureId?: number;
 }
 
 interface ListResponse {
@@ -199,7 +209,7 @@ function filterProjectsByCompany(
 ): OptionItem[] {
   if (!companyId) return projects;
   return projects.filter(
-    (p) => String((p as Record<string, unknown>).CompanyId) === companyId,
+    (p) => String(p.CompanyId) === companyId,
   );
 }
 
@@ -230,7 +240,7 @@ function WorkflowStepper({
   onStepUpdate,
 }: {
   record: WorkflowRecord;
-  onStepUpdate: (id: number, step: unknown) => void;
+  onStepUpdate: (id: number, step: WorkflowStepPayload) => void;
 }) {
   const [editingStep, setEditingStep] = useState<string | null>(null);
   const [form, setForm] = useState({ status: "", doneDate: "", notes: "" });
@@ -363,14 +373,15 @@ function WorkflowStepper({
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Completion Date</Label>
-                        <Input
-                          type="date"
-                          className="rounded-[9px]"
-                          value={form.doneDate}
-                          onChange={(e) =>
-                            setForm((f) => ({ ...f, doneDate: e.target.value }))
-                          }
-                        />
+                        <div className="relative">
+                          <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                          <input
+                            type="date"
+                            value={form.doneDate}
+                            onChange={(e) => setForm((f) => ({ ...f, doneDate: e.target.value }))}
+                            className="w-full pl-8 pr-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                          />
+                        </div>
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Notes</Label>
@@ -452,7 +463,7 @@ function MobileCard({
   onToggle: () => void;
   onDelete: () => void;
   onAudit: () => void;
-  onStepUpdate: (id: number, step: unknown) => void;
+  onStepUpdate: (id: number, step: WorkflowStepPayload) => void;
 }) {
   return (
     <div className="border border-border rounded-xl overflow-hidden bg-card mb-2">
@@ -492,7 +503,7 @@ function MobileCard({
           <button
             title="History"
             onClick={onAudit}
-            className="p-1.5 rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           >
             <Clock size={14} />
           </button>
@@ -571,7 +582,7 @@ export default function AgreementWorkflowPage() {
   });
 
   const stepMutation = useMutation({
-    mutationFn: ({ id, step }: { id: number; step: unknown }) =>
+    mutationFn: ({ id, step }: { id: number; step: WorkflowStepPayload }) =>
       updateWorkflowStep(id, step),
     onSuccess: () => {
       toast.success("Step updated");
@@ -609,8 +620,35 @@ export default function AgreementWorkflowPage() {
         ]}
       />
 
+      <div className="space-y-8 mt-6">
+      {/* ── Header ── */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-heading font-bold text-foreground">Agreement Workflow</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">Track and manage agreement workflow steps per applicant</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+            Refresh
+          </button>
+          <Button
+            onClick={() => setDialogOpen(true)}
+            className="gradient-accent text-white rounded-[9px] gap-1.5 font-semibold text-sm px-5 py-2 h-auto shrink-0"
+          >
+            <Plus size={15} />
+            <span className="hidden sm:inline">New Workflow</span>
+            <span className="sm:hidden">New</span>
+          </Button>
+        </div>
+      </div>
+
       {/* ── Toolbar ── */}
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap">
         {/* Search */}
         <div className="relative flex-1 min-w-[180px] max-w-xs">
           <Search
@@ -660,25 +698,6 @@ export default function AgreementWorkflowPage() {
           ))}
         </select>
 
-        <button
-          onClick={() => refetch()}
-          title="Refresh"
-          className="h-[34px] px-2.5 rounded-[9px] border border-border bg-background flex items-center hover:bg-accent transition-colors"
-        >
-          <RefreshCw
-            size={14}
-            className={`text-muted-foreground${isFetching ? " animate-spin" : ""}`}
-          />
-        </button>
-
-        <Button
-          onClick={() => setDialogOpen(true)}
-          className="gradient-accent text-white rounded-[9px] gap-1.5 font-semibold text-sm px-4 h-[34px] ml-auto"
-        >
-          <Plus size={15} />{" "}
-          <span className="hidden sm:inline">New Workflow</span>
-          <span className="sm:hidden">New</span>
-        </Button>
       </div>
 
       {/* ── Mobile card list (hidden on md+) ── */}
@@ -830,7 +849,7 @@ export default function AgreementWorkflowPage() {
                                   no: row.WorkflowNo ?? `#${row.Id}`,
                                 })
                               }
-                              className="p-1 rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                              className="p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
                             >
                               <Clock size={14} />
                             </button>
@@ -882,14 +901,14 @@ export default function AgreementWorkflowPage() {
               <button
                 disabled={pagination.page <= 1}
                 onClick={() => setPage((p) => p - 1)}
-                className="px-3 py-1 rounded-lg border border-border bg-background text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent transition-colors"
+                className="px-3 py-1 rounded-lg border border-border bg-background text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted transition-colors"
               >
                 Prev
               </button>
               <button
                 disabled={pagination.page >= pagination.totalPages}
                 onClick={() => setPage((p) => p + 1)}
-                className="px-3 py-1 rounded-lg border border-border bg-background text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent transition-colors"
+                className="px-3 py-1 rounded-lg border border-border bg-background text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted transition-colors"
               >
                 Next
               </button>
@@ -910,14 +929,14 @@ export default function AgreementWorkflowPage() {
             <button
               disabled={pagination.page <= 1}
               onClick={() => setPage((p) => p - 1)}
-              className="px-3 py-1 rounded-lg border border-border bg-background text-foreground disabled:opacity-40 hover:bg-accent transition-colors"
+              className="px-3 py-1 rounded-lg border border-border bg-background text-foreground disabled:opacity-40 hover:bg-muted transition-colors"
             >
               Prev
             </button>
             <button
               disabled={pagination.page >= pagination.totalPages}
               onClick={() => setPage((p) => p + 1)}
-              className="px-3 py-1 rounded-lg border border-border bg-background text-foreground disabled:opacity-40 hover:bg-accent transition-colors"
+              className="px-3 py-1 rounded-lg border border-border bg-background text-foreground disabled:opacity-40 hover:bg-muted transition-colors"
             >
               Next
             </button>
@@ -1109,17 +1128,20 @@ export default function AgreementWorkflowPage() {
             {STEPS.map((s) => (
               <div key={s.field} className="space-y-1">
                 <Label className="text-xs">{s.label}</Label>
-                <Input
-                  type="date"
-                  className="rounded-[9px]"
-                  value={form[`${s.field}Due`] || ""}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      [`${s.field}Due`]: e.target.value,
-                    }))
-                  }
-                />
+                <div className="relative">
+                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
+                  <input
+                    type="date"
+                    value={form[`${s.field}Due`] || ""}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        [`${s.field}Due`]: e.target.value,
+                      }))
+                    }
+                    className="w-full pl-8 pr-3 py-2 rounded-[9px] text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  />
+                </div>
               </div>
             ))}
 
@@ -1227,6 +1249,8 @@ export default function AgreementWorkflowPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      </div> {/* end space-y-5 */}
 
       <AuditLogDrawer
         open={!!auditTarget}

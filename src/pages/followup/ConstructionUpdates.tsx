@@ -430,6 +430,7 @@ export function ConstructionUpdatesPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
 
   const { data: meta } = useQuery({
     queryKey: ["cu-meta"],
@@ -477,7 +478,7 @@ export function ConstructionUpdatesPage() {
 
   const projectItems: ComboItem[] = useMemo(
     () =>
-      filterProjectsByCompany(meta?.projects ?? [], form.CompanyId).map(
+      filterProjectsByCompany(meta?.projects ?? [] as any[], form.CompanyId).map(
         (p) => ({
           value: String(p.Id),
           label: p.Name,
@@ -1187,16 +1188,21 @@ export function ConstructionUpdatesPage() {
                             >
                               <button
                                 className="cu-menu-btn"
-                                onClick={() =>
-                                  setOpenMenuId(
-                                    openMenuId === cu.Id ? null : cu.Id,
-                                  )
-                                }
+                                onClick={(e) => {
+                                  if (openMenuId === cu.Id) { setOpenMenuId(null); return; }
+                                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                  const menuH = canDeleteRecords ? 82 : 42;
+                                  const top = window.innerHeight - rect.bottom < menuH + 8
+                                    ? rect.top - menuH - 4
+                                    : rect.bottom + 4;
+                                  setMenuPos({ top, right: window.innerWidth - rect.right });
+                                  setOpenMenuId(cu.Id);
+                                }}
                               >
                                 <MoreHorizontal size={16} />
                               </button>
                               {openMenuId === cu.Id && (
-                                <div className="cu-menu">
+                                <div className="cu-menu" style={{ position: "fixed", top: menuPos.top, right: menuPos.right, zIndex: 200 }}>
                                   <button
                                     className="cu-menu-item"
                                     onClick={() => {

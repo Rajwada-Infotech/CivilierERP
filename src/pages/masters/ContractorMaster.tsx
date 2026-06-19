@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -7,18 +7,21 @@ import {
   updateRecord,
   deleteRecord,
 } from "@/api/accountHeadApi";
+import { getAccountGroups } from "@/api/accountApi";
 import { getContractorCategoryOptions } from "@/api/contractorCategoryApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { DataTable, type ColumnDef, type ExportColumn } from "@/components/ui/DataTable";
+import {
+  DataTable,
+  type ColumnDef,
+  type ExportColumn,
+} from "@/components/ui/DataTable";
 import {
   Pencil,
   Trash2,
   X,
   Check,
-  RotateCcw,
   Plus,
   Search,
-  ChevronDown,
   AlertCircle,
   Eye,
   XCircle,
@@ -32,6 +35,7 @@ import {
   HardHat,
   CreditCard,
 } from "lucide-react";
+import TreeDropdown from "@/components/common/TreeDropdown";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CONTRACTOR_TYPE = "C";
@@ -56,7 +60,32 @@ interface Contractor {
   contractorType: string | null;
   LHeadPaymentTerms: string | null;
   LHeadAddress: string | null;
+  LBelongsTo: number | null;
   LHeadStatus: boolean;
+  GroupName: string | null;
+}
+
+interface AccountGroup {
+  _id: string;
+  name: string;
+  code: string;
+  parentId: string | null;
+}
+
+interface TreeNode extends AccountGroup {
+  children: TreeNode[];
+}
+
+function buildTree(items: AccountGroup[]): TreeNode[] {
+  const map: Record<string, TreeNode> = {};
+  items.forEach((i) => (map[i._id] = { ...i, children: [] }));
+  const roots: TreeNode[] = [];
+  items.forEach((i) => {
+    if (i.parentId && map[i.parentId])
+      map[i.parentId].children.push(map[i._id]);
+    else roots.push(map[i._id]);
+  });
+  return roots;
 }
 
 interface ContractorForm {
@@ -69,6 +98,7 @@ interface ContractorForm {
   contractorType: string;
   LHeadPaymentTerms: string;
   LHeadAddress: string;
+  LBelongsTo: number | "";
   LHeadStatus: boolean;
 }
 
@@ -82,6 +112,7 @@ const EMPTY_FORM: ContractorForm = {
   contractorType: "",
   LHeadPaymentTerms: "",
   LHeadAddress: "",
+  LBelongsTo: "",
   LHeadStatus: true,
 };
 
@@ -95,8 +126,15 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "PAN Number", accessor: "LHeadPan" },
   { header: "Contractor Type", accessor: "contractorType" },
   { header: "Payment Terms", accessor: "LHeadPaymentTerms" },
+  {
+    header: "Group",
+    accessor: (r) => (r.LBelongsTo != null ? String(r.LBelongsTo) : "—"),
+  },
   { header: "Address", accessor: "LHeadAddress" },
-  { header: "Status", accessor: (r) => (r.LHeadStatus ? "Active" : "Inactive") },
+  {
+    header: "Status",
+    accessor: (r) => (r.LHeadStatus ? "Active" : "Inactive"),
+  },
 ];
 
 // ─── Column builder ────────────────────────────────────────────────────────────
@@ -280,6 +318,29 @@ const ContractorMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: groupsData } = useQuery({
+    queryKey: ["account-groups"],
+    queryFn: getAccountGroups,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const accountGroups: AccountGroup[] = useMemo(() => {
+    if (!Array.isArray(groupsData)) return [];
+    return (groupsData as any[])
+      .filter((item) => item.AGId != null && item.Name)
+      .map((item) => ({
+        _id: String(item.AGId),
+        name: item.Name as string,
+        code: item.Code || "",
+        parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
+      }));
+  }, [groupsData]);
+
+  const accountGroupTree = useMemo(
+    () => buildTree(accountGroups),
+    [accountGroups],
+  );
+
   const contractorCategories: string[] = useMemo(
     () =>
       categoryOptions && categoryOptions.length > 0
@@ -298,10 +359,12 @@ const ContractorMaster: React.FC = () => {
       LHeadEmail: item.LHeadEmail || null,
       LGST: item.LGST || null,
       LHeadPan: item.LHeadPan || null,
-      contractorType: item.LHeadCatagory || null,
+      contractorType: item.LHeadCategory || null,
       LHeadPaymentTerms: item.LHeadPaymentTerms || null,
       LHeadAddress: item.LHeadAddress || null,
+      LBelongsTo: item.LBelongsTo != null ? Number(item.LBelongsTo) : null,
       LHeadStatus: Boolean(item.LHeadStatus),
+      GroupName: item.GroupName ?? null,
     }));
   }, [rawData]);
 
@@ -317,14 +380,14 @@ const ContractorMaster: React.FC = () => {
     LHeadEmail: f.LHeadEmail || null,
     LGST: f.LGST || null,
     LHeadPan: f.LHeadPan || null,
-    LHeadCatagory: f.contractorType || null,
+    LHeadCategory: f.contractorType || null,
     LHeadPaymentTerms: f.LHeadPaymentTerms || null,
     LHeadAddress: f.LHeadAddress || null,
     LHeadStatus: f.LHeadStatus,
     LBranchName: null,
     LGSTState: null,
     LCountry: "India",
-    LBelongsTo: null,
+    LBelongsTo: f.LBelongsTo ? Number(f.LBelongsTo) : null,
     LDescription: null,
   });
 
@@ -361,6 +424,7 @@ const ContractorMaster: React.FC = () => {
   });
 
   const saving = createMut.isPending || updateMut.isPending;
+  const canSave = form.LHeadName.trim() !== "";
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const startEdit = (c: Contractor) => {
@@ -375,6 +439,7 @@ const ContractorMaster: React.FC = () => {
       contractorType: c.contractorType ?? "",
       LHeadPaymentTerms: c.LHeadPaymentTerms ?? "",
       LHeadAddress: c.LHeadAddress ?? "",
+      LBelongsTo: c.LBelongsTo ?? "",
       LHeadStatus: c.LHeadStatus,
     });
     setErrors({});
@@ -418,6 +483,7 @@ const ContractorMaster: React.FC = () => {
         <tr><td>PAN Number</td><td>${c.LHeadPan || "—"}</td></tr>
         <tr><td>Contractor Type</td><td>${c.contractorType || "—"}</td></tr>
         <tr><td>Payment Terms</td><td>${c.LHeadPaymentTerms || "—"}</td></tr>
+        <tr><td>Group</td><td>${c.LBelongsTo != null ? (accountGroups.find((g) => g._id === String(c.LBelongsTo))?.name ?? "—") : "—"}</td></tr>
         <tr><td>Address</td><td>${c.LHeadAddress || "—"}</td></tr>
         <tr><td>Status</td><td>${c.LHeadStatus ? "Active" : "Inactive"}</td></tr>
       </table>
@@ -453,8 +519,7 @@ const ContractorMaster: React.FC = () => {
         (c.LHeadPhone ?? "").toLowerCase().includes(q) ||
         (c.LGST ?? "").toLowerCase().includes(q) ||
         (c.LHeadContactPerson ?? "").toLowerCase().includes(q);
-      const matchCat =
-        !filterCategory || c.contractorType === filterCategory;
+      const matchCat = !filterCategory || c.contractorType === filterCategory;
       const matchStatus =
         !filterStatus ||
         (filterStatus === "active" ? c.LHeadStatus : !c.LHeadStatus);
@@ -481,8 +546,6 @@ const ContractorMaster: React.FC = () => {
   // ── Shared field classes ───────────────────────────────────────────────────
   const inputCls =
     "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
-  const selectCls =
-    "w-full appearance-none pl-3 pr-9 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
 
   const totalPages = Math.max(Math.ceil(filtered.length / limit), 1);
   const paginated = filtered.slice((page - 1) * limit, page * limit);
@@ -514,49 +577,16 @@ const ContractorMaster: React.FC = () => {
 
         {/* ── Form Card ── */}
         <div className="rounded-xl border border-border bg-card shadow-sm">
-          {/* Card header */}
-          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
-            <div className="flex items-center gap-3">
-              {editingId && (
-                <button
-                  onClick={resetForm}
-                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <RotateCcw size={15} />
-                  <span className="hidden sm:inline">Back</span>
-                </button>
-              )}
-              {editingId && <span className="text-border/60">|</span>}
-              <h2 className="text-base font-heading font-semibold text-foreground">
+          {/* Card header — title only */}
+          <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
+            <div>
+              <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? "Edit Contractor" : "Add Contractor"}
               </h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={resetForm}
-                className="px-4 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
-              >
-                <RotateCcw size={13} />
-                {editingId ? "Cancel" : "Reset"}
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60 flex items-center gap-2"
-              >
-                {saving ? (
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : editingId ? (
-                  <Check size={14} />
-                ) : (
-                  <Plus size={14} />
-                )}
-                {saving
-                  ? "Saving…"
-                  : editingId
-                    ? "Update Contractor"
-                    : "Save Contractor"}
-              </button>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Fields marked <span className="text-destructive">*</span> are
+                required
+              </p>
             </div>
           </div>
 
@@ -622,29 +652,32 @@ const ContractorMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Contractor Type
                   </label>
-                  <div className="relative">
-                    <select
-                      value={form.contractorType}
-                      onChange={(e) =>
-                        setForm((p) => ({
-                          ...p,
-                          contractorType: e.target.value,
-                        }))
-                      }
-                      className={selectCls}
-                    >
-                      <option value="">Select type…</option>
-                      {contractorCategories.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
+                  <TreeDropdown
+                    variant="flat"
+                    value={form.contractorType}
+                    onChange={(v) =>
+                      setForm((p) => ({ ...p, contractorType: v }))
+                    }
+                    options={contractorCategories.map((c) => ({
+                      value: c,
+                      label: c,
+                    }))}
+                    placeholder="Select type…"
+                  />
+                </div>
+
+                {/* Account Group */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Account Group
+                  </label>
+                  <TreeDropdown
+                    variant="tree"
+                    value={String(form.LBelongsTo)}
+                    onChange={(v) => setForm((p) => ({ ...p, LBelongsTo: v === "" ? "" : Number(v) }))}
+                    items={accountGroupTree}
+                    allGroups={accountGroups}
+                  />
                 </div>
               </div>
             </div>
@@ -835,6 +868,47 @@ const ContractorMaster: React.FC = () => {
               </span>
             </div>
           </div>
+
+          {/* Card footer — actions */}
+          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
+            <p className="text-[11px] text-muted-foreground">
+              {canSave ? (
+                <span className="text-emerald-500 font-medium">
+                  Ready to save
+                </span>
+              ) : (
+                "Fill in the required fields to save"
+              )}
+            </p>
+            <div className="flex items-center gap-2">
+              {editingId && (
+                <button
+                  onClick={resetForm}
+                  className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                onClick={handleSave}
+                disabled={saving || !canSave}
+                className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
+              >
+                {saving ? (
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : editingId ? (
+                  <Check size={14} />
+                ) : (
+                  <Plus size={14} />
+                )}
+                {saving
+                  ? "Saving…"
+                  : editingId
+                    ? "Update Contractor"
+                    : "Save Contractor"}
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* ── Table Section ── */}
@@ -854,40 +928,27 @@ const ContractorMaster: React.FC = () => {
               />
             </div>
 
-            <div className="relative">
-              <select
-                value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
-                className="appearance-none text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-              >
-                <option value="">All Types</option>
-                {contractorCategories.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={12}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
+            <TreeDropdown
+              variant="flat"
+              value={filterCategory}
+              onChange={(v) => setFilterCategory(v)}
+              options={contractorCategories.map((c) => ({
+                value: c,
+                label: c,
+              }))}
+              placeholder="All Types"
+            />
 
-            <div className="relative">
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="appearance-none text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-              >
-                <option value="">All Status</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-              <ChevronDown
-                size={12}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-            </div>
+            <TreeDropdown
+              variant="flat"
+              value={filterStatus}
+              onChange={(v) => setFilterStatus(v)}
+              options={[
+                { value: "active", label: "Active" },
+                { value: "inactive", label: "Inactive" },
+              ]}
+              placeholder="All Status"
+            />
 
             {(search || filterCategory || filterStatus) && (
               <button
@@ -1004,6 +1065,15 @@ const ContractorMaster: React.FC = () => {
                 {
                   label: "Payment Terms",
                   value: viewRecord.LHeadPaymentTerms || "—",
+                },
+                {
+                  label: "Group Name",
+                  value:
+                    viewRecord.LBelongsTo != null
+                      ? (accountGroups.find(
+                          (g) => g._id === String(viewRecord.LBelongsTo),
+                        )?.name ?? "—")
+                      : "—",
                 },
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
               ].map(({ label, value, mono }) => (

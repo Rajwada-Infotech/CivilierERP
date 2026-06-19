@@ -36,7 +36,7 @@ const config = {
     acquireTimeoutMillis: 15000, // was 10000 — extra 5 s for new connection handshake
   },
   connectionTimeout: 30000,
-  requestTimeout: 30000,
+  requestTimeout: 60000,
 };
 
 let pool = null;

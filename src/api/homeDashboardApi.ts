@@ -173,6 +173,14 @@ export interface FollowupSummaryData {
 
 // ─── Aggregated home dashboard shape ─────────────────────────────────────────
 
+export interface SalesSummaryData {
+  total: number;
+  approved: number;
+  pendingApproval: number;
+  thisMonthAmount: number;
+  totalAmount: number;
+}
+
 export interface HomeDashboardData {
   finance: FinanceDashboardData | null;
   material: MaterialDashboardData | null;
@@ -182,6 +190,7 @@ export interface HomeDashboardData {
   tickets: TicketSummaryData | null;
   engineering: EngineeringSummaryData | null;
   followup: FollowupSummaryData | null;
+  sales: SalesSummaryData | null;
   errors: Record<string, string>;
 }
 
@@ -238,7 +247,13 @@ function normalizeFinanceDashboard(
 
 // ─── Main fetcher ─────────────────────────────────────────────────────────────
 
-const FINANCE_ROLES = ["admin", "super_admin", "dba", "finance_manager", "branch_manager"];
+const FINANCE_ROLES = [
+  "admin",
+  "super_admin",
+  "dba",
+  "finance_manager",
+  "branch_manager",
+];
 
 export async function fetchHomeDashboard(
   isAdmin: boolean,
@@ -261,6 +276,7 @@ export async function fetchHomeDashboard(
     safeFetch<unknown>("/api/followup-agreements?pageSize=500"),
     safeFetch<unknown>("/api/followup-noc?pageSize=500"),
     safeFetch<unknown>("/api/followup-handover?pageSize=500"),
+    safeFetch<{ data: any[]; total: number }>("/api/sale-orders?limit=500"),
     // Fetch active project count independently — engineering/dashboard is
     // permission-gated so non-engineering users would always see 0 otherwise.
     safeFetch<unknown>("/api/project-master"),
@@ -282,6 +298,7 @@ export async function fetchHomeDashboard(
     agreementsRes,
     nocRes,
     handoverRes,
+    saleOrdersRes,
     projectMasterRes,
     adminRes,
   ] = await Promise.all([...baseRequests, adminRequest]);
@@ -294,6 +311,7 @@ export async function fetchHomeDashboard(
   if (ticketsRes.error) errors.tickets = ticketsRes.error;
   if (engineeringRes.error) errors.engineering = engineeringRes.error;
   if (adminRes.error) errors.admin = adminRes.error;
+  if (saleOrdersRes.error) errors.sales = saleOrdersRes.error;
 
   let tickets: TicketSummaryData | null = null;
   if (!ticketsRes.error && ticketsRes.data) {
@@ -395,6 +413,40 @@ export async function fetchHomeDashboard(
       .length,
   };
 
+  // ── Sales summary
+  const soList: any[] = (() => {
+    const d = saleOrdersRes.data;
+    return Array.isArray(d)
+      ? d
+      : Array.isArray((d as any)?.data)
+        ? (d as any).data
+        : [];
+  })();
+  const soNow = new Date();
+  // Use YYYY-MM prefix for safe UTC-safe month comparison
+  const soMonthPrefix = `${soNow.getFullYear()}-${String(soNow.getMonth() + 1).padStart(2, "0")}`;
+  const sales: SalesSummaryData = {
+    total: soList.length,
+    approved: soList.filter((o) =>
+      (o.Status ?? "").toLowerCase().includes("approved"),
+    ).length,
+    pendingApproval: soList.filter((o) =>
+      ["pending", "draft"].some((s) =>
+        (o.Status ?? "").toLowerCase().includes(s),
+      ),
+    ).length,
+    thisMonthAmount: soList
+      .filter((o) => {
+        const d = o.OrderDate ?? o.CreatedAt ?? "";
+        return typeof d === "string" ? d.startsWith(soMonthPrefix) : false;
+      })
+      .reduce((sum, o) => sum + (Number(o.TotalAmount) || 0), 0),
+    totalAmount: soList.reduce(
+      (sum, o) => sum + (Number(o.TotalAmount) || 0),
+      0,
+    ),
+  };
+
   return {
     finance: normalizeFinanceDashboard(financeRes.data),
     material: materialRes.data,
@@ -408,6 +460,7 @@ export async function fetchHomeDashboard(
     tickets,
     engineering,
     followup,
+    sales,
     errors,
   };
 }

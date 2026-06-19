@@ -12,7 +12,6 @@ import {
   keepPreviousData,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Calendar as CalendarIcon } from "lucide-react";
 import {
   getFinYears,
   addFinYear,
@@ -129,12 +128,11 @@ const FinancialYearMaster: React.FC = () => {
       <Breadcrumbs
         items={["Dashboard", "Finance Module", "Financial Year Master"]}
       />
-      <div className="flex items-center gap-3 mb-4">
-        <CalendarIcon className="w-5 h-5 text-amber-500" />
-        <h1 className="text-xl font-heading font-bold text-foreground">
-          Financial Year Master
-        </h1>
-      </div>
+      <h1 className="text-xl font-heading font-bold text-foreground mt-6 mb-0">
+        Financial Year Master
+      </h1>
+      <p className="text-xs text-muted-foreground mt-0.5">Manage financial years with start / end dates, status and lock controls.</p>
+      <div className="mt-8">
       <MasterPage
         title="Financial Year"
         fields={[
@@ -155,15 +153,76 @@ const FinancialYearMaster: React.FC = () => {
           {
             name: "status",
             label: "Status",
-            type: "select",
-            options: ["Active", "Closed"],
+            type: "custom",
+            fullWidth: true,
             defaultValue: "Active",
+            render: ({ value, onChange }) => {
+              const isActive = value !== "Closed";
+              return (
+                <div className="flex items-center gap-3 mt-1">
+                  <button
+                    type="button"
+                    onClick={() => onChange(isActive ? "Closed" : "Active")}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${
+                      isActive ? "bg-emerald-500" : "bg-muted-foreground/30"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                        isActive ? "translate-x-4" : "translate-x-0.5"
+                      }`}
+                    />
+                  </button>
+                  <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                    Status —{" "}
+                    <span
+                      className={
+                        isActive ? "text-emerald-600" : "text-foreground"
+                      }
+                    >
+                      {isActive ? "Active" : "Closed"}
+                    </span>
+                  </span>
+                </div>
+              );
+            },
           },
           {
             name: "locked",
             label: "Locked",
-            type: "toggle",
+            type: "custom",
+            fullWidth: true,
             defaultValue: false,
+            render: ({ value, onChange }) => {
+              const isLocked = !!value;
+              return (
+                <div className="flex items-center gap-3 mt-1">
+                  <button
+                    type="button"
+                    onClick={() => onChange(!isLocked)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${
+                      isLocked ? "bg-orange-500" : "bg-muted-foreground/30"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                        isLocked ? "translate-x-4" : "translate-x-0.5"
+                      }`}
+                    />
+                  </button>
+                  <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                    Locked —{" "}
+                    <span
+                      className={
+                        isLocked ? "text-orange-500" : "text-foreground"
+                      }
+                    >
+                      {isLocked ? "Locked" : "Unlocked"}
+                    </span>
+                  </span>
+                </div>
+              );
+            },
           },
         ]}
         columns={[
@@ -188,6 +247,7 @@ const FinancialYearMaster: React.FC = () => {
           ],
         }}
       />
+      </div>
     </>
   );
 };

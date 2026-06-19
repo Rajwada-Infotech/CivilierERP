@@ -20,6 +20,7 @@ export interface InventoryMasterResponse {
   total: number;
   date: string;
   godownId: number | null;
+  godownName: string | null;
 }
 
 export const getInventoryMaster = async (

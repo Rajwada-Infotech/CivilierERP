@@ -484,7 +484,7 @@ export default function SuperAdminDashboard() {
           <Crown className="text-yellow-500" size={22} />
         </div>
         <div>
-          <h1 className="text-xl font-bold text-foreground">
+          <h1 className="text-xl font-heading font-bold text-foreground">
             Super Admin Control Panel
           </h1>
           <p className="text-sm text-muted-foreground">

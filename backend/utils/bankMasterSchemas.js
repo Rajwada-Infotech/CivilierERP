@@ -3,11 +3,10 @@ const { z } = require("zod");
 const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 
 const trimString = (max, message = `Must be ${max} characters or less`) =>
-  z
-    .preprocess(
-      (value) => (typeof value === "string" ? value.trim() : value),
-      z.string().max(max, message),
-    );
+  z.preprocess(
+    (value) => (typeof value === "string" ? value.trim() : value),
+    z.string().max(max, message),
+  );
 
 const nullableString = (max) =>
   z.preprocess((value) => {
@@ -19,10 +18,18 @@ const nullableString = (max) =>
 const requiredString = (max, message) =>
   trimString(max).pipe(z.string().min(1, message));
 
-const ifscSchema = z.preprocess((value) => {
-  if (value === undefined || value === null) return "";
-  return String(value).trim().toUpperCase();
-}, z.string().regex(IFSC_REGEX, "Invalid IFSC Code format. Expected format: 4 letters + 0 + 6 alphanumeric (e.g. SBIN0001234)"));
+const ifscSchema = z.preprocess(
+  (value) => {
+    if (value === undefined || value === null) return "";
+    return String(value).trim().toUpperCase();
+  },
+  z
+    .string()
+    .regex(
+      IFSC_REGEX,
+      "Invalid IFSC Code format. Expected format: 4 letters + 0 + 6 alphanumeric (e.g. SBIN0001234)",
+    ),
+);
 
 const openingBalanceSchema = z.preprocess((value) => {
   if (value === undefined || value === null || value === "") return 0;
@@ -41,6 +48,10 @@ const bankMasterCreateSchema = z.object({
   BAddress: nullableString(300),
   BStatus: z.coerce.boolean().default(true),
   BCompanyName: nullableString(500),
+  BLBelongsTo: z.preprocess(
+    (v) => (v === undefined || v === null || v === "" ? null : Number(v)),
+    z.number().int().positive().nullable(),
+  ),
 });
 
 const bankMasterUpdateSchema = bankMasterCreateSchema.partial().extend({

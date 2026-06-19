@@ -9,7 +9,10 @@ const { getPool, sql } = require("../db");
 // Only the expense-booking branch populates GrnTotalAmount and BillingTermsData.
 const NULL_EXTRA = `
   CAST(NULL AS DECIMAL(18,2)) AS GrnTotalAmount,
-  CAST(NULL AS NVARCHAR(MAX)) AS BillingTermsData,`;
+  CAST(NULL AS NVARCHAR(MAX)) AS BillingTermsData,
+  CAST(NULL AS NVARCHAR(100)) AS SourceTransferDocNo,
+  CAST(NULL AS NVARCHAR(255)) AS FromGodownName,
+  CAST(NULL AS NVARCHAR(255)) AS ToGodownName,`;
 
 router.get("/", async (req, res) => {
   try {
@@ -126,7 +129,11 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)                     AS ContractorName,
           s.LHeadName                               AS SupplierName,
           grn.TotalAmount                           AS Amount,
-          ${NULL_EXTRA}
+          CAST(NULL AS DECIMAL(18,2))               AS GrnTotalAmount,
+          CAST(NULL AS NVARCHAR(MAX))               AS BillingTermsData,
+          grn.SourceTransferDocNo                   AS SourceTransferDocNo,
+          fg.GodownName                             AS FromGodownName,
+          tg.GodownName                             AS ToGodownName,
           CAST(ISNULL(po.PurchaseOrderNo, '') AS NVARCHAR(255)) AS CreatedBy,
           ISNULL((
             SELECT TOP 1 ApproverEmail
@@ -164,6 +171,9 @@ router.get("/", async (req, res) => {
         FROM dbo.GoodsReceiptNotes grn
         LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId = grn.SupplierID
         LEFT JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
+        LEFT JOIN dbo.StockTransfers st ON st.TransferID = grn.SourceTransferID
+        LEFT JOIN dbo.Godowns fg ON fg.GodownID = st.FromGodownID
+        LEFT JOIN dbo.Godowns tg ON tg.GodownID = st.ToGodownID
         WHERE grn.Status = 'Pending'
       `);
     }
@@ -191,6 +201,9 @@ router.get("/", async (req, res) => {
           END                      AS GrnTotalAmount,
           -- Billing terms JSON so the frontend can apply them on top of GrnTotalAmount.
           eb.EBillingTermsData     AS BillingTermsData,
+          CAST(NULL AS NVARCHAR(100)) AS SourceTransferDocNo,
+          CAST(NULL AS NVARCHAR(255)) AS FromGodownName,
+          CAST(NULL AS NVARCHAR(255)) AS ToGodownName,
           CAST(ISNULL(u_created.name, CAST(eb.ECreatedBy AS NVARCHAR(255))) AS NVARCHAR(255))  AS CreatedBy,
           CAST(ISNULL(u_approved.name, '') AS NVARCHAR(255))                                    AS ApprovedBy,
           ''                       AS ApprovedAt,
@@ -271,22 +284,28 @@ router.get("/", async (req, res) => {
         SELECT
           'material-requests'                  AS Module,
           'Material Request'                   AS ModuleLabel,
-          CAST(MRId AS NVARCHAR)               AS RecordId,
-          ISNULL(DocNo, CONCAT('MR#', CAST(MRId AS NVARCHAR))) AS Reference,
-          RequestDate                          AS RecordDate,
-          Status,
-          CAST(NULL AS NVARCHAR)               AS ContractorName,
-          CAST(NULL AS NVARCHAR)               AS SupplierName,
+          CAST(mr.MRId AS NVARCHAR)             AS RecordId,
+          ISNULL(mr.DocNo, CONCAT('MR#', CAST(mr.MRId AS NVARCHAR))) AS Reference,
+          mr.RequestDate                       AS RecordDate,
+          mr.Status,
+          CAST(pr.name AS NVARCHAR(255))        AS ContractorName,
+          CAST(CONCAT(
+            COALESCE(pr.name, ''),
+            CASE WHEN pr.name IS NOT NULL AND co.name IS NOT NULL THEN ' / ' ELSE '' END,
+            COALESCE(co.name, '')
+          ) AS NVARCHAR(512))                   AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))          AS Amount,
           ${NULL_EXTRA}
-          CAST(CreatedBy AS NVARCHAR(255))     AS CreatedBy,
+          CAST(mr.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
           ''                                   AS ApprovedBy,
           ''                                   AS ApprovedAt,
           ''                                   AS RejectedBy,
           ''                                   AS RejectionNote,
-          UpdatedAt                            AS LastModified
-        FROM dbo.MaterialRequests
-        WHERE Status = 'Pending'
+          mr.UpdatedAt                          AS LastModified
+        FROM dbo.MaterialRequests mr
+        LEFT JOIN dbo.enterprise co ON co.id = mr.CompanyId
+        LEFT JOIN dbo.enterprise pr ON pr.id = mr.ProjectId
+        WHERE mr.Status = 'Pending'
       `);
     }
 
@@ -312,6 +331,66 @@ router.get("/", async (req, res) => {
         FROM dbo.MaterialIssues mi
         LEFT JOIN dbo.enterprise p ON p.id = mi.ProjectId
         WHERE ISNULL(mi.Status, 'Pending') = 'Pending'
+      `);
+    }
+
+    if (!module || module === "sale-orders") {
+      queries.push(`
+        SELECT
+          'sale-orders'                              AS Module,
+          'Sale Order'                                AS ModuleLabel,
+          CAST(so.SaleOrderID AS NVARCHAR)            AS RecordId,
+          so.DocNo                                    AS Reference,
+          so.OrderDate                                AS RecordDate,
+          ISNULL(so.Status, 'Draft')                  AS Status,
+          fc.name                                      AS ContractorName,
+          tc.name                                      AS SupplierName,
+          so.TotalAmount                               AS Amount,
+          CAST(NULL AS DECIMAL(18,2))                  AS GrnTotalAmount,
+          CAST(NULL AS NVARCHAR(MAX))                  AS BillingTermsData,
+          CAST(NULL AS NVARCHAR(100))                  AS SourceTransferDocNo,
+          fg.GodownName                                 AS FromGodownName,
+          tg.GodownName                                 AS ToGodownName,
+          CAST(so.CreatedBy AS NVARCHAR(255))          AS CreatedBy,
+          ISNULL((
+            SELECT TOP 1 ApproverEmail
+            FROM dbo.ApprovalAuditLog
+            WHERE TableName = 'SaleOrders'
+              AND RecordId = so.SaleOrderID
+              AND ActionStatus = 'Approved'
+            ORDER BY ActionAt DESC
+          ), '')                                       AS ApprovedBy,
+          ISNULL(CAST((
+            SELECT TOP 1 ActionAt
+            FROM dbo.ApprovalAuditLog
+            WHERE TableName = 'SaleOrders'
+              AND RecordId = so.SaleOrderID
+              AND ActionStatus = 'Approved'
+            ORDER BY ActionAt DESC
+          ) AS NVARCHAR), '')                          AS ApprovedAt,
+          ISNULL((
+            SELECT TOP 1 ApproverEmail
+            FROM dbo.ApprovalAuditLog
+            WHERE TableName = 'SaleOrders'
+              AND RecordId = so.SaleOrderID
+              AND ActionStatus = 'Rejected'
+            ORDER BY ActionAt DESC
+          ), '')                                       AS RejectedBy,
+          ISNULL((
+            SELECT TOP 1 Note
+            FROM dbo.ApprovalAuditLog
+            WHERE TableName = 'SaleOrders'
+              AND RecordId = so.SaleOrderID
+              AND ActionStatus = 'Rejected'
+            ORDER BY ActionAt DESC
+          ), '')                                       AS RejectionNote,
+          ISNULL(so.UpdatedAt, so.CreatedAt)           AS LastModified
+        FROM dbo.SaleOrders so
+        JOIN dbo.enterprise fc ON fc.id = so.FromCompanyID
+        JOIN dbo.enterprise tc ON tc.id = so.ToCompanyID
+        JOIN dbo.Godowns fg ON fg.GodownID = so.FromGodownID
+        JOIN dbo.Godowns tg ON tg.GodownID = so.ToGodownID
+        WHERE so.Status = 'Pending'
       `);
     }
 
@@ -349,7 +428,8 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.WorkDone           WHERE ISNULL(Status,'Draft') = 'Pending') +
         (SELECT COUNT(*) FROM dbo.BOQ                WHERE ISNULL(Status,'Draft') = 'Pending') +
         (SELECT COUNT(*) FROM dbo.MaterialRequests   WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.MaterialIssues     WHERE ISNULL(Status,'Pending') = 'Pending')
+        (SELECT COUNT(*) FROM dbo.MaterialIssues     WHERE ISNULL(Status,'Pending') = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.SaleOrders         WHERE Status = 'Pending')
       AS TotalPending
     `);
     res.json({ count: result.recordset[0].TotalPending ?? 0 });

@@ -243,7 +243,7 @@ export default function WidgetCatalogAdmin() {
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <Puzzle size={22} className="text-primary" />
-            <h1 className="text-xl font-bold">Widget catalog</h1>
+            <h1 className="text-xl font-heading font-bold text-foreground">Widget catalog</h1>
           </div>
           <p className="text-sm text-muted-foreground">
             Master list of all dashboard widgets. Changes here affect what appears in Widgets Rights.
