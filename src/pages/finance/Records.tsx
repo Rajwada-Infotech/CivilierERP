@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FinanceShell } from "@/components/finance/FinanceShell";
 import {
   useRecords,
   type RecordFileAttachment,
@@ -302,64 +303,72 @@ export default function Records() {
   return (
     <>
       <Breadcrumbs items={["Record Management", "Records"]} />
-
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-heading font-bold text-foreground">
-          Records
-        </h1>
-        <button
-          onClick={refreshRecords}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-          title="Refresh from Payment & Expense data"
-        >
-          <RefreshCw size={13} />
-          Refresh
-        </button>
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        {summaryStats.map((s) => (
-          <div
-            key={s.label}
-            className="rounded-xl bg-card border border-border p-4 flex items-center gap-4"
-            style={{ borderLeftWidth: 3, borderLeftColor: s.color }}
+      <FinanceShell
+        title="Records"
+        subtitle="Financial entry documents with file attachments"
+        action={
+          <button
+            onClick={refreshRecords}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors"
+            style={{ color: "#818cf8" }}
           >
+            <RefreshCw size={13} />
+            Refresh
+          </button>
+        }
+      >
+        {/* Summary Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {summaryStats.map((s) => (
             <div
-              className="p-2 rounded-lg"
-              style={{ background: `${s.color}20` }}
+              key={s.label}
+              className="rounded-xl p-4 flex items-center gap-4"
+              style={{
+                background: `${s.color}0A`,
+                border: `1px solid ${s.color}30`,
+                backdropFilter: "blur(12px)",
+                WebkitBackdropFilter: "blur(12px)",
+                borderLeftWidth: 3,
+                borderLeftColor: s.color,
+              }}
             >
-              <s.icon size={20} style={{ color: s.color }} />
+              <div className="p-2 rounded-lg" style={{ background: `${s.color}20` }}>
+                <s.icon size={18} style={{ color: s.color }} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground font-heading">{s.label}</p>
+                <p className="text-base font-heading font-bold text-foreground truncate">{s.value}</p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <p className="text-xs text-muted-foreground font-heading">
-                {s.label}
-              </p>
-              <p className="text-base sm:text-lg font-heading font-bold text-foreground truncate">
-                {s.value}
-              </p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {error && (
-        <div className="p-6 text-center text-destructive text-sm bg-destructive/5 border border-destructive/20 rounded-lg mb-4">
-          Failed to load records: {error}
+          ))}
         </div>
-      )}
 
-      {/* Records Table */}
-      <div className="rounded-xl bg-card border border-border overflow-hidden">
-        <DataTable
-          data={records}
-          columns={columns}
-          loading={loading}
-          paginated={false}
-          searchPlaceholder="Search records…"
-          emptyMessage="No records found. Add payments or expenses first, then click Refresh."
-        />
-      </div>
+        {error && (
+          <div className="p-4 text-center text-destructive text-sm bg-destructive/5 border border-destructive/20 rounded-xl">
+            Failed to load records: {error}
+          </div>
+        )}
+
+        {/* Records Table */}
+        <div
+          className="rounded-xl overflow-hidden"
+          style={{
+            background: "rgba(15,17,26,0.45)",
+            border: "1px solid rgba(99,102,241,0.15)",
+            backdropFilter: "blur(16px)",
+            WebkitBackdropFilter: "blur(16px)",
+          }}
+        >
+          <DataTable
+            data={records}
+            columns={columns}
+            loading={loading}
+            paginated={false}
+            searchPlaceholder="Search records…"
+            emptyMessage="No records found. Add payments or expenses first, then click Refresh."
+          />
+        </div>
+      </FinanceShell>
     </>
   );
 }

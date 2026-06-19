@@ -4,13 +4,6 @@ import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
   Table,
   TableBody,
   TableCell,
@@ -21,19 +14,22 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  TrendingUp,
   RefreshCw,
   CreditCard,
   Landmark,
   BookOpen,
-  ArrowUpRight,
-  ArrowDownRight,
   Receipt,
   BadgeDollarSign,
   CheckCircle2,
   Clock,
 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { useTheme } from "@/contexts/ThemeContext";
+import {
+  FinanceShell,
+  FinanceGlassCard,
+  GlassSection,
+} from "@/components/finance/FinanceShell";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FinanceDashboardData {
@@ -110,81 +106,15 @@ const fmtDate = (d: string | null) =>
       })
     : "—";
 
-// ─── Stat Card ────────────────────────────────────────────────────────────────
-const StatCard = ({
-  label,
-  value,
-  sub,
-  icon: Icon,
-  trend,
-  accent = "border-l-primary",
-  iconBg = "bg-primary/10",
-  iconColor = "text-primary",
-  onClick,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-  icon: React.ElementType;
-  trend?: "up" | "down" | "neutral";
-  accent?: string;
-  iconBg?: string;
-  iconColor?: string;
-  onClick?: () => void;
-}) => (
-  <Card
-    onClick={onClick}
-    className={`relative overflow-hidden transition-all duration-200 border-l-2 ${accent} ${
-      onClick
-        ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5 hover:border-primary/20 active:scale-[0.98]"
-        : ""
-    }`}
-  >
-    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-      <CardTitle className="text-xs font-heading uppercase tracking-widest text-muted-foreground">
-        {label}
-      </CardTitle>
-
-      <div
-        className={`w-8 h-8 rounded-lg ${iconBg} flex items-center justify-center transition-transform duration-200 ${
-          onClick ? "group-hover:scale-110" : ""
-        }`}
-      >
-        <Icon size={15} className={iconColor} />
-      </div>
-    </CardHeader>
-
-    <CardContent>
-      <div className="text-2xl font-bold font-heading text-foreground">
-        {value}
-      </div>
-
-      <div className="flex items-center gap-1 mt-1">
-        {trend === "up" && (
-          <ArrowUpRight size={13} className="text-emerald-500" />
-        )}
-
-        {trend === "down" && (
-          <ArrowDownRight size={13} className="text-destructive" />
-        )}
-
-        <p className="text-xs text-muted-foreground">{sub}</p>
-      </div>
-    </CardContent>
-  </Card>
-);
-
 const StatCardSkeleton = () => (
-  <Card>
-    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-      <Skeleton className="h-3 w-28" />
-      <Skeleton className="h-8 w-8 rounded-lg" />
-    </CardHeader>
-    <CardContent>
-      <Skeleton className="h-7 w-24 mb-2" />
-      <Skeleton className="h-3 w-32" />
-    </CardContent>
-  </Card>
+  <div className="rounded-xl overflow-hidden border border-border/40 bg-card/40 backdrop-blur-sm p-4">
+    <div className="flex items-start justify-between mb-3">
+      <Skeleton className="h-3 w-24" />
+      <Skeleton className="h-7 w-7 rounded-lg" />
+    </div>
+    <Skeleton className="h-7 w-20 mb-2" />
+    <Skeleton className="h-3 w-32" />
+  </div>
 );
 
 // ─── Mini info pill ───────────────────────────────────────────────────────────
@@ -255,6 +185,8 @@ function normalise(raw: any): FinanceDashboardData {
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 const FinanceDashboard = () => {
   const navigate = useNavigate();
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
 
   const {
     data: rawData,
@@ -330,31 +262,35 @@ const FinanceDashboard = () => {
       ]
     : [];
 
+  const tableGlass = {
+    background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
+    border: isDark ? "1px solid rgba(99,102,241,0.15)" : "1px solid rgba(99,102,241,0.18)",
+    backdropFilter: "blur(16px) saturate(150%)",
+    WebkitBackdropFilter: "blur(16px) saturate(150%)",
+    boxShadow: isDark
+      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
+      : "0 4px 24px rgba(99,102,241,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+  };
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance"]} />
-      <div className="relative p-6 space-y-8">
-        <DashboardBackground />
-
-        {/* Header */}
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Finance Overview
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Payments, cheques, cards and bank accounts at a glance
-            </p>
-          </div>
+      <DashboardBackground />
+      <FinanceShell
+        title="Finance Overview"
+        subtitle="Payments, cheques, cards and bank accounts at a glance"
+        action={
           <button
             onClick={() => refetch()}
             disabled={isFetching}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors disabled:opacity-50"
+            style={{ color: "#818cf8" }}
           >
-            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+            <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
             Refresh
           </button>
-        </div>
+        }
+      >
 
       {isError && (
         <div className="px-4 py-3 rounded-lg bg-destructive/10 text-destructive text-sm border border-destructive/20">
@@ -363,181 +299,183 @@ const FinanceDashboard = () => {
       )}
 
       {/* ── Primary stat cards ────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {isLoading
-          ? Array.from({ length: 4 }).map((_, i) => (
-              <StatCardSkeleton key={i} />
-            ))
-          : primaryStats.map((s) => <StatCard key={s.label} {...s} />)}
-      </div>
+      <GlassSection title="Today's Activity" icon={Receipt} accentColor="#6366f1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {isLoading
+            ? Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)
+            : [
+                {
+                  label: "Payments Made Today",
+                  value: data?.paymentsMade.todayCount.toString() ?? "0",
+                  sub: `${fmt(data?.paymentsMade.todayAmount ?? 0)} paid today · ${data?.paymentsMade.totalCount ?? 0} total`,
+                  icon: Receipt,
+                  accentColor: "#f43f5e",
+                  onClick: () => navigate("/payments"),
+                  trend: "up" as const,
+                },
+                {
+                  label: "Received Today",
+                  value: data?.receivedPayments.todayCount.toString() ?? "0",
+                  sub: `${fmt(data?.receivedPayments.todayAmount ?? 0)} received · ${data?.receivedPayments.totalCount ?? 0} total`,
+                  icon: BadgeDollarSign,
+                  accentColor: "#10b981",
+                  onClick: () => navigate("/received-payments"),
+                  trend: "up" as const,
+                },
+                {
+                  label: "Pending Cheques",
+                  value: data?.cheques.pendingCount.toString() ?? "0",
+                  sub: `${data?.cheques.clearedCount ?? 0} cleared · ${data?.cheques.totalCount ?? 0} total`,
+                  icon: BookOpen,
+                  accentColor: "#f59e0b",
+                  onClick: () => navigate("/masters/cheque"),
+                  trend: (data?.cheques.pendingCount ?? 0) > 0 ? "down" as const : "neutral" as const,
+                },
+                {
+                  label: "Active Cards",
+                  value: data?.cards.activeCount.toString() ?? "0",
+                  sub: `${data?.cards.inactiveCount ?? 0} inactive · ${data?.cards.totalCount ?? 0} total`,
+                  icon: CreditCard,
+                  accentColor: "#8b5cf6",
+                  onClick: () => navigate("/masters/card"),
+                  trend: "neutral" as const,
+                },
+              ].map((s) => <FinanceGlassCard key={s.label} {...s} />)}
+        </div>
+      </GlassSection>
 
-      {/* ── Banks row ─────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {isLoading ? (
-          Array.from({ length: 3 }).map((_, i) => <StatCardSkeleton key={i} />)
-        ) : (
-          <>
-            <StatCard
-              label="Bank Accounts"
-              value={(data?.banks.activeCount ?? 0).toString()}
-              sub={`${data?.banks.totalCount ?? 0} total bank heads`}
-              icon={Landmark}
-              accent="border-l-blue-500"
-              iconBg="bg-blue-500/10"
-              iconColor="text-blue-600"
-              onClick={() => navigate("/masters/banks")}
-            />
-            <StatCard
-              label="Total Payments Made"
-              value={fmt(data?.paymentsMade.totalAmount ?? 0)}
-              sub={`${data?.paymentsMade.totalCount ?? 0} entries all-time`}
-              icon={Receipt}
-              accent="border-l-rose-500"
-              iconBg="bg-rose-500/10"
-              iconColor="text-rose-600"
-              trend="neutral"
-            />
-            <StatCard
-              label="Total Payments Received"
-              value={fmt(data?.receivedPayments.totalAmount ?? 0)}
-              sub={`${data?.receivedPayments.approvedCount ?? 0} approved · ${data?.receivedPayments.draftCount ?? 0} draft`}
-              icon={BadgeDollarSign}
-              accent="border-l-emerald-500"
-              iconBg="bg-emerald-500/10"
-              iconColor="text-emerald-600"
-              trend="neutral"
-            />
-          </>
-        )}
-      </div>
+      {/* ── Banks / Totals row ────────────────────────────────────────────── */}
+      <GlassSection title="Totals" icon={Landmark} accentColor="#6366f1">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {isLoading ? (
+            Array.from({ length: 3 }).map((_, i) => <StatCardSkeleton key={i} />)
+          ) : (
+            <>
+              <FinanceGlassCard
+                label="Bank Accounts"
+                value={(data?.banks.activeCount ?? 0).toString()}
+                sub={`${data?.banks.totalCount ?? 0} total bank heads`}
+                icon={Landmark}
+                accentColor="#3b82f6"
+                onClick={() => navigate("/masters/banks")}
+              />
+              <FinanceGlassCard
+                label="Total Payments Made"
+                value={fmt(data?.paymentsMade.totalAmount ?? 0)}
+                sub={`${data?.paymentsMade.totalCount ?? 0} entries all-time`}
+                icon={Receipt}
+                accentColor="#f43f5e"
+                trend="neutral"
+              />
+              <FinanceGlassCard
+                label="Total Received"
+                value={fmt(data?.receivedPayments.totalAmount ?? 0)}
+                sub={`${data?.receivedPayments.approvedCount ?? 0} approved · ${data?.receivedPayments.draftCount ?? 0} draft`}
+                icon={BadgeDollarSign}
+                accentColor="#10b981"
+                trend="neutral"
+              />
+            </>
+          )}
+        </div>
+      </GlassSection>
 
       {/* ── Recent tables ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Payments Made */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="text-sm font-heading flex items-center gap-2">
-                <Receipt size={16} /> Recent Payments Made
-              </CardTitle>
-              <CardDescription>Last 8 entries</CardDescription>
-            </div>
-            <button
-              onClick={() => navigate("/payments")}
-              className="text-xs text-primary hover:underline"
+      <GlassSection title="Recent Activity" icon={Receipt} accentColor="#6366f1">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Recent Payments Made */}
+          <div className="rounded-xl overflow-hidden" style={tableGlass}>
+            <div
+              className="flex items-center justify-between px-4 py-3 border-b"
+              style={{ borderColor: isDark ? "rgba(99,102,241,0.15)" : "rgba(99,102,241,0.12)" }}
             >
-              View all →
-            </button>
-          </CardHeader>
-          <CardContent className="p-0">
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "rgba(244,63,94,0.15)" }}>
+                  <Receipt size={11} style={{ color: "#f43f5e" }} />
+                </div>
+                <span className="text-xs font-heading font-semibold" style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}>
+                  Recent Payments Made
+                </span>
+              </div>
+              <button onClick={() => navigate("/payments")} className="text-[10px] font-medium hover:opacity-70 transition-opacity" style={{ color: "#818cf8" }}>
+                View all →
+              </button>
+            </div>
             {isLoading ? (
-              <div className="p-4 space-y-3">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <Skeleton key={i} className="h-8 w-full" />
-                ))}
-              </div>
+              <div className="p-4 space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-7 w-full" />)}</div>
             ) : (data?.recentPaymentsMade.length ?? 0) === 0 ? (
-              <div className="text-center text-muted-foreground py-10 text-sm">
-                No payments recorded yet
-              </div>
+              <div className="text-center text-muted-foreground py-10 text-sm">No payments recorded yet</div>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Mode</TableHead>
-                      <TableHead className="text-right">Amount</TableHead>
-                      <TableHead>Date</TableHead>
+                    <TableRow className="border-b" style={{ borderColor: isDark ? "rgba(99,102,241,0.10)" : "rgba(99,102,241,0.08)" }}>
+                      <TableHead className="text-xs">Name</TableHead>
+                      <TableHead className="text-xs">Mode</TableHead>
+                      <TableHead className="text-xs text-right">Amount</TableHead>
+                      <TableHead className="text-xs">Date</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {(data?.recentPaymentsMade ?? []).map((p) => (
-                      <TableRow key={p.PPaymentID}>
-                        <TableCell className="font-medium truncate max-w-[140px]">
-                          {p.PPaymentName || "—"}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">{p.PMode || "—"}</Badge>
-                        </TableCell>
-                        <TableCell className="text-right font-medium text-rose-600">
-                          {p.PAmount != null ? fmt(p.PAmount) : "—"}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {fmtDate(p.PDate)}
-                        </TableCell>
+                      <TableRow key={p.PPaymentID} className="border-b border-indigo-500/5 hover:bg-indigo-500/5 transition-colors">
+                        <TableCell className="text-xs font-medium truncate max-w-[120px]">{p.PPaymentName || "—"}</TableCell>
+                        <TableCell><Badge variant="outline" className="text-[10px] border-rose-500/30 text-rose-500">{p.PMode || "—"}</Badge></TableCell>
+                        <TableCell className="text-xs text-right font-semibold" style={{ color: "#f43f5e" }}>{p.PAmount != null ? fmt(p.PAmount) : "—"}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{fmtDate(p.PDate)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
 
-        {/* Recent Received Payments */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="text-sm font-heading flex items-center gap-2">
-                <BadgeDollarSign size={16} /> Recent Received Payments
-              </CardTitle>
-              <CardDescription>Last 8 entries</CardDescription>
-            </div>
-            <button
-              onClick={() => navigate("/received-payments")}
-              className="text-xs text-primary hover:underline"
+          {/* Recent Received Payments */}
+          <div className="rounded-xl overflow-hidden" style={tableGlass}>
+            <div
+              className="flex items-center justify-between px-4 py-3 border-b"
+              style={{ borderColor: isDark ? "rgba(99,102,241,0.15)" : "rgba(99,102,241,0.12)" }}
             >
-              View all →
-            </button>
-          </CardHeader>
-          <CardContent className="p-0">
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "rgba(16,185,129,0.15)" }}>
+                  <BadgeDollarSign size={11} style={{ color: "#10b981" }} />
+                </div>
+                <span className="text-xs font-heading font-semibold" style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}>
+                  Recent Received Payments
+                </span>
+              </div>
+              <button onClick={() => navigate("/received-payments")} className="text-[10px] font-medium hover:opacity-70 transition-opacity" style={{ color: "#818cf8" }}>
+                View all →
+              </button>
+            </div>
             {isLoading ? (
-              <div className="p-4 space-y-3">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <Skeleton key={i} className="h-8 w-full" />
-                ))}
-              </div>
+              <div className="p-4 space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-7 w-full" />)}</div>
             ) : (data?.recentPaymentsReceived.length ?? 0) === 0 ? (
-              <div className="text-center text-muted-foreground py-10 text-sm">
-                No received payments recorded yet
-              </div>
+              <div className="text-center text-muted-foreground py-10 text-sm">No received payments recorded yet</div>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>From</TableHead>
-                      <TableHead>Mode</TableHead>
-                      <TableHead className="text-right">Amount</TableHead>
-                      <TableHead>Status</TableHead>
+                    <TableRow className="border-b" style={{ borderColor: isDark ? "rgba(99,102,241,0.10)" : "rgba(99,102,241,0.08)" }}>
+                      <TableHead className="text-xs">From</TableHead>
+                      <TableHead className="text-xs">Mode</TableHead>
+                      <TableHead className="text-xs text-right">Amount</TableHead>
+                      <TableHead className="text-xs">Status</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {(data?.recentPaymentsReceived ?? []).map((r) => (
-                      <TableRow key={r.RPPaymentID}>
-                        <TableCell className="font-medium truncate max-w-[140px]">
-                          {r.RPReceivedFrom || "—"}
-                        </TableCell>
+                      <TableRow key={r.RPPaymentID} className="border-b border-indigo-500/5 hover:bg-indigo-500/5 transition-colors">
+                        <TableCell className="text-xs font-medium truncate max-w-[120px]">{r.RPReceivedFrom || "—"}</TableCell>
+                        <TableCell><Badge variant="outline" className="text-[10px] border-emerald-500/30 text-emerald-500">{r.RPMode || "—"}</Badge></TableCell>
+                        <TableCell className="text-xs text-right font-semibold" style={{ color: "#10b981" }}>{r.RPAmount != null ? fmt(r.RPAmount) : "—"}</TableCell>
                         <TableCell>
-                          <Badge variant="outline">{r.RPMode || "—"}</Badge>
-                        </TableCell>
-                        <TableCell className="text-right font-medium text-emerald-600">
-                          {r.RPAmount != null ? fmt(r.RPAmount) : "—"}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={
-                              r.RPStatus === "Approved"
-                                ? "border-emerald-500 text-emerald-600"
-                                : r.RPStatus === "Draft" || !r.RPStatus
-                                  ? "border-amber-500 text-amber-600"
-                                  : "border-blue-500 text-blue-600"
-                            }
-                          >
-                            {r.RPStatus || "Draft"}
-                          </Badge>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                            r.RPStatus === "Approved" ? "bg-emerald-500/15 text-emerald-500" :
+                            r.RPStatus === "Draft" || !r.RPStatus ? "bg-amber-500/15 text-amber-500" :
+                            "bg-blue-500/15 text-blue-500"
+                          }`}>{r.RPStatus || "Draft"}</span>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -545,97 +483,65 @@ const FinanceDashboard = () => {
                 </Table>
               </div>
             )}
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </div>
+      </GlassSection>
 
-      {/* ── Cheque breakdown card ─────────────────────────────────────────── */}
-      {!isLoading && data && (
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-sm font-heading flex items-center gap-2">
-              <BookOpen size={16} /> Cheque Summary
-            </CardTitle>
-            <CardDescription>
-              Breakdown of all cheques in the system
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-6">
-              <Pill
-                icon={BookOpen}
-                label="Total"
-                value={data.cheques.totalCount}
-              />
-              <Pill
-                icon={Clock}
-                label="Pending"
-                value={data.cheques.pendingCount}
-                color={
-                  data.cheques.pendingCount > 0
-                    ? "text-amber-500"
-                    : "text-muted-foreground"
-                }
-              />
-              <Pill
-                icon={Clock}
-                label="Draft"
-                value={data.cheques.draftCount}
-                color="text-blue-500"
-              />
-              <Pill
-                icon={CheckCircle2}
-                label="Cleared"
-                value={data.cheques.clearedCount}
-                color="text-emerald-500"
-              />
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* ── Cheque summary + Quick Actions ───────────────────────────────── */}
+      <GlassSection title="Cheque Summary" icon={BookOpen} accentColor="#f59e0b">
+        {!isLoading && data && (
+          <div className="rounded-xl p-4 flex flex-wrap gap-4" style={tableGlass}>
+            {[
+              { icon: BookOpen, label: "Total", value: data.cheques.totalCount, color: "#6366f1" },
+              { icon: Clock, label: "Pending", value: data.cheques.pendingCount, color: data.cheques.pendingCount > 0 ? "#f59e0b" : "#64748b" },
+              { icon: Clock, label: "Draft", value: data.cheques.draftCount, color: "#3b82f6" },
+              { icon: CheckCircle2, label: "Cleared", value: data.cheques.clearedCount, color: "#10b981" },
+            ].map(({ icon: Icon, label, value, color }) => (
+              <div key={label} className="flex items-center gap-3 px-4 py-2 rounded-lg" style={{ background: `${color}10`, border: `1px solid ${color}20` }}>
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: `${color}20` }}>
+                  <Icon size={13} style={{ color }} />
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground font-heading uppercase tracking-wide">{label}</p>
+                  <p className="text-base font-bold font-heading" style={{ color }}>{value}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </GlassSection>
 
       {/* ── Quick Actions ─────────────────────────────────────────────────── */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Quick Actions</CardTitle>
-          <CardDescription>Common finance workflows</CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <GlassSection title="Quick Actions" icon={CreditCard} accentColor="#8b5cf6">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {[
-            { label: "New Payment", icon: Receipt, path: "/payments", iconBg: "bg-rose-500/10", iconColor: "text-rose-600" },
-            {
-              label: "New Received Payment",
-              icon: BadgeDollarSign,
-              path: "/received-payments",
-              iconBg: "bg-emerald-500/10",
-              iconColor: "text-emerald-600",
-            },
-            {
-              label: "Manage Cheques",
-              icon: BookOpen,
-              path: "/masters/cheque",
-              iconBg: "bg-amber-500/10",
-              iconColor: "text-amber-600",
-            },
-            { label: "Manage Cards", icon: CreditCard, path: "/masters/card", iconBg: "bg-violet-500/10", iconColor: "text-violet-600" },
-            { label: "Manage Banks", icon: Landmark, path: "/masters/banks", iconBg: "bg-blue-500/10", iconColor: "text-blue-600" },
-          ].map(({ label, icon: Icon, path, iconBg, iconColor }) => (
+            { label: "New Payment", icon: Receipt, path: "/payments", color: "#f43f5e" },
+            { label: "New Received", icon: BadgeDollarSign, path: "/received-payments", color: "#10b981" },
+            { label: "Cheques", icon: BookOpen, path: "/masters/cheque", color: "#f59e0b" },
+            { label: "Cards", icon: CreditCard, path: "/masters/card", color: "#8b5cf6" },
+            { label: "Banks", icon: Landmark, path: "/masters/banks", color: "#3b82f6" },
+          ].map(({ label, icon: Icon, path, color }) => (
             <button
               key={path}
               onClick={() => navigate(path)}
-              className="flex flex-col items-center gap-3 py-6 rounded-xl border border-border hover:bg-muted hover:border-primary/20 transition-all duration-150 active:scale-95 group"
+              className="group flex flex-col items-center gap-3 py-5 rounded-xl transition-all duration-200 active:scale-95"
+              style={{
+                background: isDark ? `${color}0A` : `${color}08`,
+                border: `1px solid ${color}25`,
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = `${color}18`; (e.currentTarget as HTMLElement).style.borderColor = `${color}40`; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = isDark ? `${color}0A` : `${color}08`; (e.currentTarget as HTMLElement).style.borderColor = `${color}25`; }}
             >
-              <div className={`w-11 h-11 rounded-xl ${iconBg} flex items-center justify-center group-hover:scale-110 transition-transform`}>
-                <Icon size={20} className={iconColor} />
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110" style={{ background: `${color}20`, border: `1px solid ${color}35` }}>
+                <Icon size={18} style={{ color }} />
               </div>
-              <span className="text-sm font-medium text-center leading-tight">
-                {label}
-              </span>
+              <span className="text-xs font-medium text-center leading-tight" style={{ color: isDark ? "#cbd5e1" : "#475569" }}>{label}</span>
             </button>
           ))}
-        </CardContent>
-      </Card>
-    </div>
+        </div>
+      </GlassSection>
+
+      </FinanceShell>
     </>
   );
 };

@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FinanceShell } from "@/components/finance/FinanceShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -706,43 +707,36 @@ export default function TrialBalance() {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Finance", "Transactions"]} />
-      <div className="space-y-6 mt-6">
-        {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Trial Balance
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {asOf
-                ? `${visible.length} entries · Refreshed ${fmtDate(asOf)}`
-                : "Account-wise opening, transaction and closing balances"}
-            </p>
-          </div>
+      <Breadcrumbs items={["Dashboard", "Finance", "Trial Balance"]} />
+      <FinanceShell
+        title="Trial Balance"
+        subtitle={asOf ? `${visible.length} entries · Refreshed ${fmtDate(asOf)}` : "Account-wise opening, transaction and closing balances"}
+        action={
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={expandAll}
-              className="px-3 py-1.5 text-xs rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className="px-3 py-1.5 text-xs rounded-lg border border-indigo-500/20 text-muted-foreground hover:text-foreground hover:bg-indigo-500/10 transition-colors"
             >
               Expand All
             </button>
             <button
               onClick={() => setExpanded(new Set(rows.map((r) => r.id)))}
-              className="px-3 py-1.5 text-xs rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className="px-3 py-1.5 text-xs rounded-lg border border-indigo-500/20 text-muted-foreground hover:text-foreground hover:bg-indigo-500/10 transition-colors"
             >
               Collapse
             </button>
             <button
               onClick={fetchData}
               disabled={loading}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors disabled:opacity-50"
+              style={{ color: "#818cf8" }}
             >
               <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
               Refresh
             </button>
           </div>
-        </div>
+        }
+      >
 
         {/* ── Main card ───────────────────────────────────────────────────── */}
         <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
@@ -1107,7 +1101,7 @@ export default function TrialBalance() {
             </table>
           </div>
         </div>
-      </div>
+      </FinanceShell>
     </>
   );
 }
