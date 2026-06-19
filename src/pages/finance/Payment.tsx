@@ -751,7 +751,7 @@ function PartyFilterCombobox({
     if (!value) return;
     if (suppliers.includes(value) && tab !== "suppliers") setTab("suppliers");
     if (others.includes(value) && tab !== "others") setTab("others");
-  }, [value]);
+  }, [value, suppliers, others, tab]);
 
   return (
     <div className="space-y-1.5">
@@ -1321,6 +1321,36 @@ const EXPORT_COLUMNS: ExportColumn[] = [
 // ─── Mode-specific info banner ─────────────────────────────────────────────────
 
 function ModeInfoBanner({ mode }: { mode: string }) {
+  const colorClasses: Record<string, { container: string; icon: string }> = {
+    emerald: {
+      container: "bg-emerald-500/5 border border-emerald-500/20",
+      icon: "text-emerald-500",
+    },
+    blue: {
+      container: "bg-blue-500/5 border border-blue-500/20",
+      icon: "text-blue-500",
+    },
+    indigo: {
+      container: "bg-indigo-500/5 border border-indigo-500/20",
+      icon: "text-indigo-500",
+    },
+    cyan: {
+      container: "bg-cyan-500/5 border border-cyan-500/20",
+      icon: "text-cyan-500",
+    },
+    violet: {
+      container: "bg-violet-500/5 border border-violet-500/20",
+      icon: "text-violet-500",
+    },
+    orange: {
+      container: "bg-orange-500/5 border border-orange-500/20",
+      icon: "text-orange-500",
+    },
+    pink: {
+      container: "bg-pink-500/5 border border-pink-500/20",
+      icon: "text-pink-500",
+    },
+  };
   const msgs: Record<
     string,
     { icon: React.ElementType; color: string; text: string }
@@ -1364,11 +1394,12 @@ function ModeInfoBanner({ mode }: { mode: string }) {
   const m = msgs[mode];
   if (!m) return null;
   const Icon = m.icon;
+  const classes = colorClasses[m.color] ?? colorClasses.emerald;
   return (
     <div
-      className={`flex items-start gap-2.5 rounded-lg bg-${m.color}-500/5 border border-${m.color}-500/20 px-4 py-3`}
+      className={`flex items-start gap-2.5 rounded-lg px-4 py-3 ${classes.container}`}
     >
-      <Icon size={14} className={`text-${m.color}-500 shrink-0 mt-0.5`} />
+      <Icon size={14} className={`${classes.icon} shrink-0 mt-0.5`} />
       <p className="text-xs text-muted-foreground">{m.text}</p>
     </div>
   );
@@ -2375,7 +2406,7 @@ const Payment: React.FC = () => {
         setLoadingExpense(false);
       }
     },
-    [expenseOptions],
+    [expenseOptions, companyOptions],
   );
 
   const clearExpenseLink = () => {
