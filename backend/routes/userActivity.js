@@ -143,8 +143,6 @@ router.get(
   checkPermission("UserActivity", "List", "CanView"),
   cache("user-activity", 60),
   async (req, res) => {
-    let whereClause = "1 = 1";
-
     try {
       const pool = getPool();
 
@@ -215,7 +213,7 @@ router.get(
         queryInputs.push(["dateTo", sql.DateTime2, computedDateTo]);
       }
 
-      whereClause = whereConditions.join(" AND ");
+      const whereClause = whereConditions.join(" AND ");
 
       const dataRequest = pool.request();
       for (const [name, type, value] of queryInputs) {
@@ -315,11 +313,9 @@ router.delete(
       );
 
       if (!isSuperAdmin && !userId) {
-        return res
-          .status(400)
-          .json({
-            error: "Cannot determine requesting user for scoped delete",
-          });
+        return res.status(400).json({
+          error: "Cannot determine requesting user for scoped delete",
+        });
       }
 
       let deleteResult;
@@ -542,7 +538,3 @@ router.post("/", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
