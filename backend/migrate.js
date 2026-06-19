@@ -19,6 +19,12 @@ const { Umzug, memoryStorage } = require("umzug");
 const sql   = require("mssql");
 const logger = require("./logger");
 
+function envBool(name, defaultValue) {
+  const value = process.env[name];
+  if (value === undefined || value === "") return defaultValue;
+  return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
+}
+
 // ─── DB pool (reuse config/db.js pattern) ────────────────────────────────────
 const dbConfig = {
   server:   process.env.DB_SERVER,
@@ -27,8 +33,11 @@ const dbConfig = {
   password: process.env.DB_PASSWORD,
   port:     parseInt(process.env.DB_PORT || "1433", 10),
   options: {
-    encrypt:              process.env.DB_ENCRYPT === "true",
-    trustServerCertificate: true,
+    encrypt: envBool("DB_ENCRYPT", process.env.NODE_ENV === "production"),
+    trustServerCertificate: envBool(
+      "DB_TRUST_SERVER_CERTIFICATE",
+      process.env.NODE_ENV !== "production",
+    ),
   },
   pool: { max: 3, min: 0, idleTimeoutMillis: 30000 },
 };

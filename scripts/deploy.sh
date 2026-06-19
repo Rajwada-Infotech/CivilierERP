@@ -23,9 +23,17 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
+placeholder_pattern='^(CHANGE_ME|CHANGEME|REPLACE_ME|TODO|YOUR_.*|<.*>)$'
+
 for key in "${required_vars[@]}"; do
   if ! grep -Eq "^${key}=.+" "$ENV_FILE"; then
     echo "Missing required value in $ENV_FILE: $key" >&2
+    exit 1
+  fi
+
+  value="$(grep -E "^${key}=" "$ENV_FILE" | head -n1 | cut -d= -f2-)"
+  if [[ "$value" =~ $placeholder_pattern ]]; then
+    echo "Refusing to deploy: $key in $ENV_FILE is still a placeholder ('$value')" >&2
     exit 1
   fi
 done
