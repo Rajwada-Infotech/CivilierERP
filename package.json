@@ -104,7 +104,7 @@
     "vitest": "^4.1.8"
   },
   "overrides": {
-    "ws": ">=8.20.1"
+    "ws": ">=8.21.0"
   },
   "trustedDependencies": [
     "unrs-resolver"
