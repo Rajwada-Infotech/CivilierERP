@@ -22,14 +22,27 @@ const requireUserEmail = (req, res) => {
 
 // GET all cards
 // created_by/updated_by now store email strings directly — no JOIN needed
+// Optional ?bankId= filter (and implicit active-only) is used by the Payment
+// form's card selector, mirroring the /cheque-lots?bankId= pattern.
 router.get("/", cache("card-master", 300), async (req, res) => {
   try {
     const pool = getPool()
-    const result = await pool.request().query(`
+    const bankId = req.query.bankId ? parseInt(req.query.bankId, 10) : null
+
+    const request = pool.request()
+    let whereClause = ""
+    if (bankId) {
+      request.input("bankId", sql.Int, bankId)
+      whereClause = "WHERE cm.bank_id = @bankId AND cm.status = 1"
+    }
+
+    const result = await request.query(`
       SELECT cm.*,
              cm.created_by AS CreatedByEmail,
              cm.updated_by AS UpdatedByEmail
       FROM dbo.card_master cm
+      ${whereClause}
+      ORDER BY cm.card_holder_name
     `)
     res.json(result.recordset)
   } catch (err) {
@@ -41,7 +54,7 @@ router.get("/", cache("card-master", 300), async (req, res) => {
 // POST - Create card
 router.post("/", validateBody(cardMasterCreateSchema), async (req, res) => {
   const {
-    company_name, bank_name, account_number, ifsc_code,
+    company_name, bank_id, bank_name, account_number, ifsc_code,
     card_network, card_type, card_holder_name, card_number,
     cvv, expiry_month, expiry_year, reminder_enabled,
     reminder_days, status
@@ -53,6 +66,7 @@ router.post("/", validateBody(cardMasterCreateSchema), async (req, res) => {
     const pool = getPool()
     await pool.request()
       .input("company_name",     sql.VarChar,   company_name || null)
+      .input("bank_id",          sql.Int,       bank_id || null)
       .input("bank_name",        sql.VarChar,   bank_name || null)
       .input("account_number",   sql.VarChar,   account_number || null)
       .input("ifsc_code",        sql.VarChar,   ifsc_code || null)
@@ -70,12 +84,12 @@ router.post("/", validateBody(cardMasterCreateSchema), async (req, res) => {
       .input("created_by",       sql.NVarChar(100), userEmail)  // ✅ real email
       .query(`
         INSERT INTO dbo.card_master (
-          company_name, bank_name, account_number, ifsc_code,
+          company_name, bank_id, bank_name, account_number, ifsc_code,
           card_network, card_type, card_holder_name, card_number,
           cvv, expiry_month, expiry_year, reminder_enabled,
           reminder_days, status, created_at, created_by
         ) VALUES (
-          @company_name, @bank_name, @account_number, @ifsc_code,
+          @company_name, @bank_id, @bank_name, @account_number, @ifsc_code,
           @card_network, @card_type, @card_holder_name, @card_number,
           @cvv, @expiry_month, @expiry_year, @reminder_enabled,
           @reminder_days, @status, @created_at, @created_by
@@ -92,7 +106,7 @@ router.post("/", validateBody(cardMasterCreateSchema), async (req, res) => {
 // PUT - Update card
 router.put("/:id", validateBody(cardMasterUpdateSchema), async (req, res) => {
   const {
-    company_name, bank_name, account_number, ifsc_code,
+    company_name, bank_id, bank_name, account_number, ifsc_code,
     card_network, card_type, card_holder_name, card_number,
     cvv, expiry_month, expiry_year, reminder_enabled,
     reminder_days, status
@@ -105,6 +119,7 @@ router.put("/:id", validateBody(cardMasterUpdateSchema), async (req, res) => {
     await pool.request()
       .input("id",               sql.Int,            req.params.id)
       .input("company_name",     sql.VarChar,        company_name || null)
+      .input("bank_id",          sql.Int,            bank_id || null)
       .input("bank_name",        sql.VarChar,        bank_name || null)
       .input("account_number",   sql.VarChar,        account_number || null)
       .input("ifsc_code",        sql.VarChar,        ifsc_code || null)
@@ -122,7 +137,7 @@ router.put("/:id", validateBody(cardMasterUpdateSchema), async (req, res) => {
       .input("updated_by",       sql.NVarChar(100),  userEmail)  // ✅ real email
       .query(`
         UPDATE dbo.card_master SET
-          company_name=@company_name, bank_name=@bank_name,
+          company_name=@company_name, bank_id=@bank_id, bank_name=@bank_name,
           account_number=@account_number, ifsc_code=@ifsc_code,
           card_network=@card_network, card_type=@card_type,
           card_holder_name=@card_holder_name, card_number=@card_number,

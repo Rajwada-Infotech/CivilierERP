@@ -200,9 +200,14 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         -- Ref Doc = the ExpenseBooking DocNo
         eb.EDocNo                                          AS RefDoc,
         -- EB DocDate for reference
-        eb.EDocDate                                        AS EBDocDate
+        eb.EDocDate                                        AS EBDocDate,
+        -- Card display info (last 4 digits + network) when PCardId is set
+        cmast.card_number                                  AS PCardNumber,
+        cmast.card_network                                 AS PCardNetwork,
+        cmast.card_holder_name                              AS PCardHolderName
       FROM dbo.NewPayment np
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      LEFT JOIN dbo.card_master cmast ON cmast.id = np.PCardId
       -- Resolve company
       LEFT JOIN dbo.enterprise ec
         ON ec.id = TRY_CAST(np.PCompany AS INT) AND ec.business_type = 'C'
@@ -428,6 +433,7 @@ router.post("/", validateBody(paymentBodySchema), async (req, res) => {
     PRtgsReference,
     PImpsReference,
     PCardReference,
+    PCardId,
   } = req.body;
 
   try {
@@ -504,6 +510,7 @@ router.post("/", validateBody(paymentBodySchema), async (req, res) => {
       .input("PRtgsReference", sql.NVarChar(100), PRtgsReference || null)
       .input("PImpsReference", sql.NVarChar(100), PImpsReference || null)
       .input("PCardReference", sql.NVarChar(100), PCardReference || null)
+      .input("PCardId", sql.Int, PCardId || null)
       // Document numbering
       .input("DocNo", sql.NVarChar(100), finalDocNo)
       .input("DocTypeId", sql.Int, docTypeId)
@@ -521,7 +528,7 @@ router.post("/", validateBody(paymentBodySchema), async (req, res) => {
           PBankID, PBankName, PProject, PCompany, PExpenseRef,
           PChequeNo, PChequeLotId, PChequeLotNumber, PChequeDate,
           PChequeAccountNumber, PChequeIfsc, PIsPostDated,
-          PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference,
+          PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PCardId,
           DocNo, DocTypeId, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
           PCreatedAt, PCreatedBy, PApprovedBy, Status
         )
@@ -531,7 +538,7 @@ router.post("/", validateBody(paymentBodySchema), async (req, res) => {
           @PBankID, @PBankName, @PProject, @PCompany, @PExpenseRef,
           @PChequeNo, @PChequeLotId, @PChequeLotNumber, @PChequeDate,
           @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
-          @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference, @PCardReference,
+          @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference, @PCardReference, @PCardId,
           @DocNo, @DocTypeId, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
           @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status
         )
@@ -585,6 +592,7 @@ router.put("/:id", validateBody(paymentBodySchema), async (req, res) => {
     PRtgsReference,
     PImpsReference,
     PCardReference,
+    PCardId,
   } = req.body;
 
   try {
@@ -647,6 +655,7 @@ router.put("/:id", validateBody(paymentBodySchema), async (req, res) => {
       .input("PRtgsReference", sql.NVarChar(100), PRtgsReference || null)
       .input("PImpsReference", sql.NVarChar(100), PImpsReference || null)
       .input("PCardReference", sql.NVarChar(100), PCardReference || null)
+      .input("PCardId", sql.Int, PCardId || null)
       .input("PUpdatedBy", sql.NVarChar(100), userEmail).query(`
         UPDATE dbo.NewPayment SET
           PPaymentName         = @PPaymentName,
@@ -672,7 +681,8 @@ router.put("/:id", validateBody(paymentBodySchema), async (req, res) => {
           PUpiTransactionId    = @PUpiTransactionId,
           PRtgsReference       = @PRtgsReference,
           PImpsReference       = @PImpsReference,
-          PCardReference       = @PCardReference
+          PCardReference       = @PCardReference,
+          PCardId              = @PCardId
         WHERE PPaymentID = @PPaymentID
       `);
 
