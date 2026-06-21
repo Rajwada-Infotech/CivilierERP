@@ -52,6 +52,7 @@ import {
   Eye,
   Printer,
   ArrowRight,
+  CreditCard,
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -89,6 +90,7 @@ interface DbPayment {
   PUpiTransactionId?: string | null;
   PRtgsReference?: string | null;
   PImpsReference?: string | null;
+  PCardReference?: string | null;
 }
 
 interface BankOption {
@@ -200,6 +202,7 @@ interface PaymentRecord {
   upiTransactionId: string;
   rtgsReference: string;
   impsReference: string;
+  cardReference: string;
   // GST breakdown from linked expense
   baseAmount: number | null;
   cgstRate: number | null;
@@ -218,6 +221,7 @@ const PAYMENT_MODES = [
   "UPI",
   "RTGS",
   "IMPS",
+  "Card",
 ] as const;
 
 type PaymentMode = (typeof PAYMENT_MODES)[number];
@@ -517,6 +521,7 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     upiTransactionId: "",
     rtgsReference: "",
     impsReference: "",
+    cardReference: "",
     baseAmount: null,
     cgstRate: null,
     sgstRate: null,
@@ -555,6 +560,7 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     upiTransactionId: item.PUpiTransactionId || "",
     rtgsReference: item.PRtgsReference || "",
     impsReference: item.PImpsReference || "",
+    cardReference: item.PCardReference || "",
     baseAmount: null,
     cgstRate: null,
     sgstRate: null,
@@ -1379,6 +1385,10 @@ function ModeInfoBanner({ mode }: { mode: string }) {
       container: "bg-pink-500/5 border border-pink-500/20",
       icon: "text-pink-500",
     },
+    amber: {
+      container: "bg-amber-500/5 border border-amber-500/20",
+      icon: "text-amber-500",
+    },
   };
   const msgs: Record<
     string,
@@ -1418,6 +1428,11 @@ function ModeInfoBanner({ mode }: { mode: string }) {
       icon: Hash,
       color: "pink",
       text: "Post-transaction: enter the IMPS reference number. Record will go for approval after save.",
+    },
+    Card: {
+      icon: CreditCard,
+      color: "amber",
+      text: "Post-transaction: enter the card transaction/approval ID for reconciliation. Record will go for approval after save.",
     },
   };
   const m = msgs[mode];
@@ -1788,6 +1803,12 @@ function DigitalRefPanel({
       placeholder: "e.g. 412210987654",
       hint: "12-digit reference from IMPS transfer confirmation.",
     },
+    Card: {
+      field: "cardReference",
+      label: "Card Transaction / Approval ID",
+      placeholder: "e.g. AUTH123456",
+      hint: "Transaction or approval ID from the card terminal/statement.",
+    },
   };
   const cfg = configs[mode];
   if (!cfg) return null;
@@ -1919,6 +1940,7 @@ const Payment: React.FC = () => {
       field("UPI Txn ID", rec.upiTransactionId || null),
       field("RTGS Ref.", rec.rtgsReference || null),
       field("IMPS Ref.", rec.impsReference || null),
+      field("Card Ref.", rec.cardReference || null),
     ].join("");
 
     const html = `<!DOCTYPE html>
@@ -2189,12 +2211,13 @@ const Payment: React.FC = () => {
           }
         : {}),
       // Clear digital fields when switching away from digital modes
-      ...(!["NEFT", "UPI", "RTGS", "IMPS"].includes(newMode)
+      ...(!["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(newMode)
         ? {
             neftNumber: "",
             upiTransactionId: "",
             rtgsReference: "",
             impsReference: "",
+            cardReference: "",
           }
         : {}),
     }));
@@ -2497,7 +2520,7 @@ const Payment: React.FC = () => {
 
     const isChequeMode =
       form.mode === "Cheque" || form.mode === "Post-Dated Cheque";
-    const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS"].includes(form.mode);
+    const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(form.mode);
 
     if (isChequeMode) {
       if (!form.bankId) {
@@ -2544,6 +2567,10 @@ const Payment: React.FC = () => {
         toast.error("IMPS reference is required.");
         return false;
       }
+      if (form.mode === "Card" && !form.cardReference.trim()) {
+        toast.error("Card transaction/approval ID is required.");
+        return false;
+      }
     }
 
     return true;
@@ -2583,6 +2610,7 @@ const Payment: React.FC = () => {
       upiTransactionId: form.upiTransactionId || null,
       rtgsReference: form.rtgsReference || null,
       impsReference: form.impsReference || null,
+      cardReference: form.cardReference || null,
     } as any;
 
     try {
@@ -2620,7 +2648,7 @@ const Payment: React.FC = () => {
 
   const isChequeMode =
     form.mode === "Cheque" || form.mode === "Post-Dated Cheque";
-  const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS"].includes(form.mode);
+  const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(form.mode);
   const isCashMode = form.mode === "Cash";
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -3754,7 +3782,7 @@ const Payment: React.FC = () => {
                 </div>
               )}
 
-              {/* NEFT / UPI / RTGS / IMPS */}
+              {/* NEFT / UPI / RTGS / IMPS / Card */}
               {isDigitalMode && (
                 <div className="space-y-3">
                   <SectionHeader icon={Hash} label={`${form.mode} Reference`} />
@@ -4391,6 +4419,10 @@ const Payment: React.FC = () => {
                               <span className="font-mono text-xs text-muted-foreground">
                                 {rec.impsReference}
                               </span>
+                            ) : rec.cardReference ? (
+                              <span className="font-mono text-xs text-muted-foreground">
+                                {rec.cardReference}
+                              </span>
                             ) : (
                               <span className="text-muted-foreground text-xs">
                                 —
@@ -4736,6 +4768,9 @@ const Payment: React.FC = () => {
                     : []),
                   ...(viewingRec.impsReference
                     ? [{ label: "IMPS Ref.", value: viewingRec.impsReference }]
+                    : []),
+                  ...(viewingRec.cardReference
+                    ? [{ label: "Card Ref.", value: viewingRec.cardReference }]
                     : []),
                   ...(viewingRec.parentDocNo
                     ? [{ label: "Parent Doc", value: viewingRec.parentDocNo }]

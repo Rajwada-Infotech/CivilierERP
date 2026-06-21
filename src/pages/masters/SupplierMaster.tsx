@@ -590,19 +590,26 @@ const SupplierMaster: React.FC = () => {
         action={
           <span
             className="text-xs font-heading px-3 py-1.5 rounded-lg"
-            style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
+            style={{
+              background: "rgba(99,102,241,0.12)",
+              border: "1px solid rgba(99,102,241,0.25)",
+              color: "#818cf8",
+            }}
           >
             {suppliers.length} Suppliers
           </span>
         }
       >
-
         {/* ── Form Card ── */}
         <div
           className="rounded-xl overflow-hidden"
           style={{
-            background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.82)",
-            border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.16)",
+            background: isDark
+              ? "rgba(12,14,22,0.55)"
+              : "rgba(255,255,255,0.82)",
+            border: isDark
+              ? "1px solid rgba(99,102,241,0.20)"
+              : "1px solid rgba(99,102,241,0.16)",
             backdropFilter: "blur(18px) saturate(150%)",
             WebkitBackdropFilter: "blur(18px) saturate(150%)",
             boxShadow: isDark
@@ -614,8 +621,12 @@ const SupplierMaster: React.FC = () => {
           <div
             className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
             style={{
-              background: isDark ? "rgba(99,102,241,0.09)" : "rgba(99,102,241,0.05)",
-              borderBottom: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.13)",
+              background: isDark
+                ? "rgba(99,102,241,0.09)"
+                : "rgba(99,102,241,0.05)",
+              borderBottom: isDark
+                ? "1px solid rgba(99,102,241,0.18)"
+                : "1px solid rgba(99,102,241,0.13)",
             }}
           >
             <div>
@@ -751,6 +762,7 @@ const SupplierMaster: React.FC = () => {
                         }))
                       }
                       placeholder="e.g. +91 98765 43210"
+                      maxLength={15}
                       className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                     />
                   </div>
