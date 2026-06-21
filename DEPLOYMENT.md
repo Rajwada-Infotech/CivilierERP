@@ -62,23 +62,52 @@ sudo chown root:root /etc/civilier/prod.env
 sudo chmod 600 /etc/civilier/prod.env
 ```
 
-Deploy:
+Deploy (first time, from this same SSH session, using a copy of the repo
+already on disk — for every deploy *after* this one, use the artifact-based
+flow below instead):
 
 ```bash
 cd /opt/civilier
 CIVILIER_ENV_FILE=/etc/civilier/prod.env bash scripts/deploy.sh main
 ```
 
+## Releasing updates (after the first deploy)
+
+Pushing to `main` does **not** deploy anything by itself — it only runs the
+CI checks (build + test) in GitHub Actions. Nothing in this repo can reach
+the EC2 box automatically. A release is a deliberate, two-step action:
+
+1. **Build it.** In GitHub: Actions tab → "CI" workflow → "Run workflow" →
+   pick the branch (usually `main`) → Run. Wait for it to finish, open the
+   run, and download the `.zip` under "Artifacts".
+2. **Deploy it.** Copy that `.zip` onto the EC2 box (`scp`, WinSCP,
+   FileZilla — whatever you already use to reach the instance), then run:
+
+   ```bash
+   bash /opt/civilier/scripts/deploy-from-artifact.sh /path/to/civilier-source-main-42.zip
+   ```
+
+That script extracts the zip, keeps the previous release at
+`/opt/civilier.previous` for a one-command rollback (it prints the exact
+command if the health check fails), then runs the same build/migrate/start
+sequence as before. See the comments at the top of
+`scripts/deploy-from-artifact.sh` for the full walkthrough.
+
+The old `scripts/deploy.sh` (live `git pull` on the box) still exists and
+still works if you ever want it, but nothing triggers it automatically
+anymore — GitHub Actions no longer has AWS credentials or talks to this box
+at all.
+
 ## GitHub Actions
 
-Add these repository secrets:
+No repository secrets are required anymore — the CI workflow only builds
+and tests; it never calls AWS. (If `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY` / `AWS_REGION` / `EC2_INSTANCE_ID` secrets are still
+set on the repo from before, they're unused now and safe to delete.)
 
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `AWS_REGION`
-- `EC2_INSTANCE_ID`
-
-Pushes to `dev` and pull requests run checks only. Pushes to `main` run checks and deploy through AWS SSM.
+Pushes and pull requests to `main`/`dev` run checks only — build, test,
+syntax check, Docker build check. Nothing deploys. Deploying is the manual
+two-step process described above.
 
 ## Smoke Test
 
