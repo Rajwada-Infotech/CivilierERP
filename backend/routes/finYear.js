@@ -32,7 +32,7 @@ router.post("/", validateBody(finYearCreateSchema), async (req, res) => {
       .input("FEndDate", sql.Date, end_date || null)
       .input("FStatus", sql.Bit, is_active !== false ? 1 : 0)
       .input("FisLocked", sql.Bit, is_locked ? 1 : 0)
-      .input("FCreatedBy", sql.Int, req.user.id)
+      .input("FCreatedBy", sql.Int, req.user.userId ?? req.user.id)
       .input("FCreatedAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.FinYear (FName, FStartDate, FEndDate, FStatus, FisLocked, FCreatedBy, FCreatedAt)
         VALUES (@FName, @FStartDate, @FEndDate, @FStatus, @FisLocked, @FCreatedBy, @FCreatedAt)
@@ -75,7 +75,7 @@ router.put("/:id", validateBody(finYearUpdateSchema), async (req, res) => {
     }
 
     setClauses.push("FUpdatedBy=@FUpdatedBy", "FUpdatedAt=@FUpdatedAt");
-    request.input("FUpdatedBy", sql.Int,  req.user.id);
+    request.input("FUpdatedBy", sql.Int, req.user.userId ?? req.user.id);
     request.input("FUpdatedAt", sql.DateTime2, new Date());
 
     if (setClauses.length === 2) {
@@ -110,7 +110,3 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
