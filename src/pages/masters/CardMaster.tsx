@@ -438,12 +438,19 @@ const CardMaster: React.FC = () => {
   const cards: CardRecord[] = dbItems.map((item) => {
     const mm = String(item.expiry_month ?? 0).padStart(2, "0");
     const yy = String(item.expiry_year ?? 0).slice(-2);
-    // Try to match back to a bank record by name so bankId is consistent
-    const matchedBank = dbBanks.find((b) => b.label === item.bank_name);
+    // Prefer the real bank_id FK; fall back to matching by name for
+    // legacy rows saved before bank_id existed.
+    const matchedBank = item.bank_id
+      ? dbBanks.find((b) => b.id === item.bank_id)
+      : dbBanks.find((b) => b.label === item.bank_name);
     return {
       _id: String(item.id),
       companyName: item.company_name || "",
-      bankId: matchedBank ? String(matchedBank.id) : "",
+      bankId: item.bank_id
+        ? String(item.bank_id)
+        : matchedBank
+          ? String(matchedBank.id)
+          : "",
       bankName: item.bank_name || "",
       accountNumber: item.account_number || "",
       ifscCode: item.ifsc_code || "",
@@ -542,6 +549,7 @@ const CardMaster: React.FC = () => {
 
   const toPayload = (f: FormState) => ({
     company_name: f.companyName || null,
+    bank_id: f.bankId ? Number(f.bankId) : null,
     bank_name: f.bankName || null,
     account_number: f.accountNumber || null,
     ifsc_code: f.ifscCode || null,
