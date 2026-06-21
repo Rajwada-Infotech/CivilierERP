@@ -1,6 +1,8 @@
 import React from "react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FinanceShell } from "@/components/finance/FinanceShell";
+import { useTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -330,6 +332,8 @@ function EmptyState() {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function ReceivedPaymentPage() {
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
   const { finYears } = useFinYear();
 
   const [payments, setPayments] = useState<ReceivedPayment[]>([]);
@@ -818,25 +822,19 @@ export default function ReceivedPaymentPage() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Received Payments"]} />
-      <div className="relative space-y-8 mt-6">
-        {/* ── Page header ── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Received Payments
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              All inbound payments received from clients &amp; customers
-            </p>
-          </div>
+      <FinanceShell
+        title="Received Payments"
+        subtitle="All inbound payments received from clients & customers"
+        action={
           <Button
             onClick={openAdd}
-            className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-5 py-2 text-sm h-auto"
+            className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-4 py-1.5 text-xs h-auto"
           >
-            <Plus size={15} className="mr-1" />
+            <Plus size={13} className="mr-1" />
             Add Payment
           </Button>
-        </div>
+        }
+      >
 
         {/* ── Stats ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1161,7 +1159,7 @@ export default function ReceivedPaymentPage() {
             </div>
           </div>
         )}
-      </div>
+      </FinanceShell>
       {/* end p-6 space-y-8 */}
 
       {/* ── Add / Edit Dialog ────────────────────────────────────────────────── */}
@@ -1177,25 +1175,49 @@ export default function ReceivedPaymentPage() {
         <DialogContent
           className="max-w-5xl max-h-[92vh] overflow-y-auto p-0"
           hideCloseButton
+          style={{
+            background: isDark ? "rgba(12,14,22,0.88)" : "rgba(255,255,255,0.94)",
+            border: isDark ? "1px solid rgba(16,185,129,0.22)" : "1px solid rgba(16,185,129,0.18)",
+            backdropFilter: "blur(24px) saturate(160%)",
+            WebkitBackdropFilter: "blur(24px) saturate(160%)",
+            boxShadow: isDark
+              ? "0 20px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06)"
+              : "0 20px 60px rgba(16,185,129,0.08), inset 0 1px 0 rgba(255,255,255,0.95)",
+          }}
         >
           {/* Header */}
-          <DialogHeader className="px-7 pt-6 pb-4 border-b border-border bg-muted/20">
+          <DialogHeader
+            className="px-7 pt-5 pb-4 relative overflow-hidden"
+            style={{
+              background: isDark ? "rgba(16,185,129,0.08)" : "rgba(16,185,129,0.05)",
+              borderBottom: isDark ? "1px solid rgba(16,185,129,0.16)" : "1px solid rgba(16,185,129,0.12)",
+            }}
+          >
+            {/* Left accent stripe */}
+            <div
+              className="absolute left-0 top-0 bottom-0 w-0.5"
+              style={{ background: "linear-gradient(to bottom, transparent 10%, #10b981 30%, #10b981 70%, transparent 90%)" }}
+            />
             <div className="flex items-start justify-between gap-4">
-              <div className="space-y-1.5">
-                <DialogTitle className="font-heading text-lg flex items-center gap-2.5">
-                  <div className="p-1.5 rounded-lg bg-emerald-500/10">
-                    <ArrowDownCircle size={18} className="text-emerald-500" />
+              <div className="space-y-1">
+                <DialogTitle className="font-heading text-base flex items-center gap-2.5" style={{ color: isDark ? "#e0e7ff" : "#1e1b4b" }}>
+                  <div
+                    className="p-1.5 rounded-lg"
+                    style={{ background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.28)" }}
+                  >
+                    <ArrowDownCircle size={16} style={{ color: "#10b981" }} />
                   </div>
-                  {editingId
-                    ? "Edit Received Payment"
-                    : "Record Received Payment"}
+                  {editingId ? "Edit Received Payment" : "Record Received Payment"}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground">
                   Fill in all required fields. Document number is auto-generated
                   (REC/XXXXXX/YYYY-YYYY).
                 </DialogDescription>
               </div>
-              <DialogClose className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 mt-0.5">
+              <DialogClose
+                className="p-1.5 rounded-lg transition-colors shrink-0 mt-0.5 hover:opacity-70"
+                style={{ color: isDark ? "#64748b" : "#6366f1" }}
+              >
                 <X size={16} />
                 <span className="sr-only">Close</span>
               </DialogClose>
@@ -1510,12 +1532,22 @@ export default function ReceivedPaymentPage() {
             </div>
           </div>
 
-          <DialogFooter className="px-7 py-4 border-t border-border bg-muted/10 gap-2">
+          <DialogFooter
+            className="px-7 py-4 gap-2"
+            style={{
+              borderTop: isDark ? "1px solid rgba(16,185,129,0.14)" : "1px solid rgba(16,185,129,0.12)",
+              background: isDark ? "rgba(16,185,129,0.06)" : "rgba(16,185,129,0.04)",
+            }}
+          >
             <Button
               variant="outline"
               onClick={() => setIsOpen(false)}
               disabled={actionLoading}
               className="px-5 py-2 text-sm h-auto font-heading"
+              style={{
+                borderColor: isDark ? "rgba(99,102,241,0.25)" : "rgba(99,102,241,0.20)",
+                color: isDark ? "#94a3b8" : "#6366f1",
+              }}
             >
               Cancel
             </Button>

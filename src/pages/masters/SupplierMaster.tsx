@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
+import { FinanceShell } from "@/components/finance/FinanceShell";
+import { useTheme } from "@/contexts/ThemeContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -303,6 +305,8 @@ function buildSupplierColumns(
 // ─── Component ────────────────────────────────────────────────────────────────
 const SupplierMaster: React.FC = () => {
   const qc = useQueryClient();
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<SupplierForm>(EMPTY_FORM);
@@ -580,28 +584,51 @@ const SupplierMaster: React.FC = () => {
     <>
       <Breadcrumbs items={["Masters", "Supplier Master"]} />
 
-      <div className="relative space-y-8 mt-6">
-        {/* ── Page header ── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Supplier Master
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Manage supplier accounts with contact, GST and category details
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-xs text-muted-foreground bg-muted/60 rounded-lg px-3 py-1.5">
-              {suppliers.length} Suppliers
-            </span>
-          </div>
-        </div>
-
+      <FinanceShell
+        title="Supplier Master"
+        subtitle="Manage supplier accounts with contact, GST and category details"
+        action={
+          <span
+            className="text-xs font-heading px-3 py-1.5 rounded-lg"
+            style={{
+              background: "rgba(99,102,241,0.12)",
+              border: "1px solid rgba(99,102,241,0.25)",
+              color: "#818cf8",
+            }}
+          >
+            {suppliers.length} Suppliers
+          </span>
+        }
+      >
         {/* ── Form Card ── */}
-        <div className="rounded-xl border border-border bg-card shadow-sm">
+        <div
+          className="rounded-xl overflow-hidden"
+          style={{
+            background: isDark
+              ? "rgba(12,14,22,0.55)"
+              : "rgba(255,255,255,0.82)",
+            border: isDark
+              ? "1px solid rgba(99,102,241,0.20)"
+              : "1px solid rgba(99,102,241,0.16)",
+            backdropFilter: "blur(18px) saturate(150%)",
+            WebkitBackdropFilter: "blur(18px) saturate(150%)",
+            boxShadow: isDark
+              ? "0 8px 32px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.06)"
+              : "0 8px 32px rgba(99,102,241,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
+          }}
+        >
           {/* Card header — title only */}
-          <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
+          <div
+            className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
+            style={{
+              background: isDark
+                ? "rgba(99,102,241,0.09)"
+                : "rgba(99,102,241,0.05)",
+              borderBottom: isDark
+                ? "1px solid rgba(99,102,241,0.18)"
+                : "1px solid rgba(99,102,241,0.13)",
+            }}
+          >
             <div>
               <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? "Edit Supplier" : "Add Supplier"}
@@ -735,6 +762,7 @@ const SupplierMaster: React.FC = () => {
                         }))
                       }
                       placeholder="e.g. +91 98765 43210"
+                      maxLength={15}
                       className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                     />
                   </div>
@@ -1056,7 +1084,7 @@ const SupplierMaster: React.FC = () => {
             </div>
           </div>
         </div>
-      </div>
+      </FinanceShell>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (

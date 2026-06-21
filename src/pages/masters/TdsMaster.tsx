@@ -1,5 +1,7 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import React from "react";
+import { FinanceShell } from "@/components/finance/FinanceShell";
+import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
@@ -52,6 +54,8 @@ const toPayload = (r: Record<string, unknown>) => ({
 // ─── Component ────────────────────────────────────────────────────────────────
 const TdsMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
 
   const {
     data: dbData,
@@ -134,57 +138,53 @@ const TdsMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Masters", "TDS Master"]} />
-      <h1 className="text-xl font-heading font-bold text-foreground mt-6 mb-0">
-        TDS Master
-      </h1>
-      <p className="text-xs text-muted-foreground mt-0.5">Configure TDS natures, names and rates for tax deduction at source.</p>
-      <div className="mt-8">
-      <MasterPage
-        title="TDS"
-        fields={[
-          {
-            name: "nature",
-            label: "Nature",
-            type: "text",
-            required: true,
-            uppercase: true,
-          },
-          { name: "name", label: "Name", type: "text", required: true },
-          {
-            name: "percentage",
-            label: "Percentage (%)",
-            type: "number",
-            required: true,
-          },
-          {
-            name: "status",
-            label: "Status",
-            type: "toggle",
-            defaultValue: true,
-            fullWidth: true,
-          },
-        ]}
-        columns={[
-          { key: "nature", label: "Nature" },
-          { key: "name", label: "Name" },
-          { key: "percentage", label: "Rate (%)" },
-          { key: "status", label: "Status" },
-        ]}
-        columnRenderers={columnRenderers}
-        initialData={mappedData}
-        onDataEvent={handleDataEvent}
-        exportConfig={{
-          title: "TDS Master",
-          filename: "tds-master",
-          columns: [
-            { header: "Nature",   accessor: "nature" },
-            { header: "Name",     accessor: "name" },
-            { header: "Rate (%)", accessor: "percentage" },
-            { header: "Status",   accessor: "status" },
-          ],
-        }}
-      />
-      </div>
+      <FinanceShell title="TDS Master" subtitle="Configure TDS natures, names and rates for tax deduction at source">
+        <MasterPage
+          title="TDS"
+          fields={[
+            {
+              name: "nature",
+              label: "Nature",
+              type: "text",
+              required: true,
+              uppercase: true,
+            },
+            { name: "name", label: "Name", type: "text", required: true },
+            {
+              name: "percentage",
+              label: "Percentage (%)",
+              type: "number",
+              required: true,
+            },
+            {
+              name: "status",
+              label: "Status",
+              type: "toggle",
+              defaultValue: true,
+              fullWidth: true,
+            },
+          ]}
+          columns={[
+            { key: "nature", label: "Nature" },
+            { key: "name", label: "Name" },
+            { key: "percentage", label: "Rate (%)" },
+            { key: "status", label: "Status" },
+          ]}
+          columnRenderers={columnRenderers}
+          initialData={mappedData}
+          onDataEvent={handleDataEvent}
+          exportConfig={{
+            title: "TDS Master",
+            filename: "tds-master",
+            columns: [
+              { header: "Nature",   accessor: "nature" },
+              { header: "Name",     accessor: "name" },
+              { header: "Rate (%)", accessor: "percentage" },
+              { header: "Status",   accessor: "status" },
+            ],
+          }}
+        />
+      </FinanceShell>
     </>
   );
 };
