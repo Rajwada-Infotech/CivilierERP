@@ -42,7 +42,7 @@ export const FinanceShell: React.FC<FinanceShellProps> = ({
       };
 
   return (
-    <div className="relative min-h-full p-4 space-y-5 overflow-hidden">
+    <div className="relative min-h-full p-4 space-y-5">
       {/* ── Ambient background orbs ─────────────────────────────────────── */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden z-0">
         {/* Top-left indigo bloom */}
@@ -79,7 +79,7 @@ export const FinanceShell: React.FC<FinanceShellProps> = ({
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: "easeOut" }}
-        className="relative z-10 rounded-2xl px-5 py-4 overflow-hidden"
+        className="relative z-30 rounded-2xl px-5 py-4"
         style={glassCard}
       >
         {/* Inner top gradient */}

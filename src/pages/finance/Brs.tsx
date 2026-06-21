@@ -421,7 +421,7 @@ export default function Brs() {
                   .filter(Boolean)
                   .join(" · ") || undefined
               }
-              disabled={filtered.length === 0}
+              disabled={false}
             />
           </div>
         }
