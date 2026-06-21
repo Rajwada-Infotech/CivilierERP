@@ -38,5 +38,10 @@ fi
 cd "$APP_DIR"
 docker compose version
 
-echo "Create /etc/civilier/prod.env from backend/.env.example, then run:"
+echo "Create /etc/civilier/prod.env from backend/.env.example, then run this once to bring the app up:"
 echo "  cd $APP_DIR && CIVILIER_ENV_FILE=/etc/civilier/prod.env bash scripts/deploy.sh $BRANCH"
+echo ""
+echo "For every release AFTER this first one, don't pull from git again —"
+echo "build a release zip in GitHub Actions (Actions tab -> CI -> Run workflow),"
+echo "download it, upload it here, then run:"
+echo "  bash $APP_DIR/scripts/deploy-from-artifact.sh /path/to/civilier-source-*.zip"
