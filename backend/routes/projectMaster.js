@@ -32,7 +32,7 @@ router.get("/", async (req, res) => {
         p.start_date            AS StartDate,
         p.end_date              AS EndDate,
         p.team_size             AS TeamSize,
-        p.pan                   AS Remarks,
+        p.remarks               AS Remarks,
         CASE WHEN p.discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
         p.logo                  AS ProjectImage,
         -- enterprise FK
@@ -121,7 +121,7 @@ router.post("/", adminOnly, async (req, res) => {
       .input("start_date", sql.Date, f.startDate || null)
       .input("end_date", sql.Date, f.endDate || null)
       .input("team_size", sql.Int, f.teamSize ? parseInt(f.teamSize) : null)
-      .input("pan", sql.NVarChar(20), f.remarks || null)
+      .input("remarks", sql.NVarChar(500), f.remarks || null)
       .input("logo", sql.NVarChar(sql.MAX), f.projectImage || null)
       // ── proper FK ids (replaces the old string-based belongs_to / b_sub_identity_type) ──
       .input(
@@ -141,13 +141,13 @@ router.post("/", adminOnly, async (req, res) => {
         INSERT INTO dbo.enterprise (
           name, short_name, business_identity, business_type, entity_type, description,
           address, address_line2, address_line3, pincode, latitude, longitude,
-          currency, status, rera_no, start_date, end_date, team_size, pan,
+          currency, status, rera_no, start_date, end_date, team_size, remarks,
           logo, enterprise_id, company_id,
           jv_enabled, jv_company_name, discontinue, date_of_entry
         ) VALUES (
           @name, @short_name, @business_identity, @business_type, @entity_type, @description,
           @address, @address_line2, @address_line3, @pincode, @latitude, @longitude,
-          @currency, @status, @rera_no, @start_date, @end_date, @team_size, @pan,
+          @currency, @status, @rera_no, @start_date, @end_date, @team_size, @remarks,
           @logo, @enterprise_id, @company_id,
           @jv_enabled, @jv_company_name, @discontinue, @date_of_entry
         )
@@ -247,7 +247,7 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("start_date", sql.Date, f.startDate || null)
       .input("end_date", sql.Date, f.endDate || null)
       .input("team_size", sql.Int, f.teamSize ? parseInt(f.teamSize) : null)
-      .input("pan", sql.NVarChar(20), f.remarks || null)
+      .input("remarks", sql.NVarChar(500), f.remarks || null)
       .input("logo", sql.NVarChar(sql.MAX), f.projectImage || null)
       // ── proper FK ids ──
       .input(
@@ -269,7 +269,7 @@ router.put("/:id", adminOnly, async (req, res) => {
           address=@address, address_line2=@address_line2, address_line3=@address_line3,
           pincode=@pincode, latitude=@latitude, longitude=@longitude,
           currency=@currency, status=@status, rera_no=@rera_no,
-          start_date=@start_date, end_date=@end_date, team_size=@team_size, pan=@pan,
+          start_date=@start_date, end_date=@end_date, team_size=@team_size, remarks=@remarks,
           logo=@logo, enterprise_id=@enterprise_id, company_id=@company_id,
           jv_enabled=@jv_enabled, jv_company_name=@jv_company_name,
           discontinue=@discontinue

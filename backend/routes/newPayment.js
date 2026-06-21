@@ -427,6 +427,7 @@ router.post("/", validateBody(paymentBodySchema), async (req, res) => {
     PUpiTransactionId,
     PRtgsReference,
     PImpsReference,
+    PCardReference,
   } = req.body;
 
   try {
@@ -502,6 +503,7 @@ router.post("/", validateBody(paymentBodySchema), async (req, res) => {
       .input("PUpiTransactionId", sql.NVarChar(100), PUpiTransactionId || null)
       .input("PRtgsReference", sql.NVarChar(100), PRtgsReference || null)
       .input("PImpsReference", sql.NVarChar(100), PImpsReference || null)
+      .input("PCardReference", sql.NVarChar(100), PCardReference || null)
       // Document numbering
       .input("DocNo", sql.NVarChar(100), finalDocNo)
       .input("DocTypeId", sql.Int, docTypeId)
@@ -519,7 +521,7 @@ router.post("/", validateBody(paymentBodySchema), async (req, res) => {
           PBankID, PBankName, PProject, PCompany, PExpenseRef,
           PChequeNo, PChequeLotId, PChequeLotNumber, PChequeDate,
           PChequeAccountNumber, PChequeIfsc, PIsPostDated,
-          PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference,
+          PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference,
           DocNo, DocTypeId, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
           PCreatedAt, PCreatedBy, PApprovedBy, Status
         )
@@ -529,7 +531,7 @@ router.post("/", validateBody(paymentBodySchema), async (req, res) => {
           @PBankID, @PBankName, @PProject, @PCompany, @PExpenseRef,
           @PChequeNo, @PChequeLotId, @PChequeLotNumber, @PChequeDate,
           @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
-          @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference,
+          @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference, @PCardReference,
           @DocNo, @DocTypeId, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
           @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status
         )
@@ -582,6 +584,7 @@ router.put("/:id", validateBody(paymentBodySchema), async (req, res) => {
     PUpiTransactionId,
     PRtgsReference,
     PImpsReference,
+    PCardReference,
   } = req.body;
 
   try {
@@ -643,6 +646,7 @@ router.put("/:id", validateBody(paymentBodySchema), async (req, res) => {
       .input("PUpiTransactionId", sql.NVarChar(100), PUpiTransactionId || null)
       .input("PRtgsReference", sql.NVarChar(100), PRtgsReference || null)
       .input("PImpsReference", sql.NVarChar(100), PImpsReference || null)
+      .input("PCardReference", sql.NVarChar(100), PCardReference || null)
       .input("PUpdatedBy", sql.NVarChar(100), userEmail).query(`
         UPDATE dbo.NewPayment SET
           PPaymentName         = @PPaymentName,
@@ -667,7 +671,8 @@ router.put("/:id", validateBody(paymentBodySchema), async (req, res) => {
           PNeftNumber          = @PNeftNumber,
           PUpiTransactionId    = @PUpiTransactionId,
           PRtgsReference       = @PRtgsReference,
-          PImpsReference       = @PImpsReference
+          PImpsReference       = @PImpsReference,
+          PCardReference       = @PCardReference
         WHERE PPaymentID = @PPaymentID
       `);
 
