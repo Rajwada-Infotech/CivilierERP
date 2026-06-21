@@ -1,4 +1,6 @@
 import React, { useState, useMemo } from "react";
+import { FinanceShell } from "@/components/finance/FinanceShell";
+import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -412,6 +414,8 @@ function buildCardColumns(
 // ─── Component ────────────────────────────────────────────────────────────────
 const CardMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
   const { data: dbData, isLoading: loadingCards } = useQuery({
     queryKey: ["cards"],
     queryFn: getCards,
@@ -686,34 +690,31 @@ const CardMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Card Master"]} />
-      <div className="relative mt-6 space-y-8">
-      <div>
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-heading font-bold text-foreground">
-          Card Master
-        </h1>
-        {hasAlerts && (
-          <button
-            onClick={() => setShowReminderPanel((p) => !p)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-heading font-semibold transition-all ${overdueCount > 0 ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-amber-500/40 bg-amber-500/10 text-amber-600"}`}
-          >
-            <BellRing
-              size={13}
-              className={overdueCount > 0 ? "animate-pulse" : ""}
-            />
-            {overdueCount > 0
-              ? `${overdueCount} overdue`
-              : `${upcomingCount} upcoming`}
-            {showReminderPanel ? (
-              <ChevronUp size={12} />
-            ) : (
-              <ChevronDown size={12} />
-            )}
-          </button>
-        )}
-      </div>
-      <p className="text-xs text-muted-foreground mt-0.5">Register and manage bank cards with network, type and security details.</p>
-      </div>
+      <FinanceShell
+        title="Card Master"
+        subtitle="Register and manage bank cards with network, type and security details"
+        action={
+          hasAlerts ? (
+            <button
+              onClick={() => setShowReminderPanel((p) => !p)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-heading font-semibold transition-all ${overdueCount > 0 ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-amber-500/40 bg-amber-500/10 text-amber-600"}`}
+            >
+              <BellRing
+                size={13}
+                className={overdueCount > 0 ? "animate-pulse" : ""}
+              />
+              {overdueCount > 0
+                ? `${overdueCount} overdue`
+                : `${upcomingCount} upcoming`}
+              {showReminderPanel ? (
+                <ChevronUp size={12} />
+              ) : (
+                <ChevronDown size={12} />
+              )}
+            </button>
+          ) : undefined
+        }
+      >
 
       <div className="space-y-4">
         {showReminderPanel && (
@@ -725,8 +726,25 @@ const CardMaster: React.FC = () => {
         )}
 
         {/* Form */}
-        <div className="rounded-xl border border-border bg-card shadow-sm">
-          <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
+        <div
+          className="rounded-xl overflow-hidden"
+          style={{
+            background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.82)",
+            border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.16)",
+            backdropFilter: "blur(18px) saturate(150%)",
+            WebkitBackdropFilter: "blur(18px) saturate(150%)",
+            boxShadow: isDark
+              ? "0 8px 32px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.06)"
+              : "0 8px 32px rgba(99,102,241,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
+          }}
+        >
+          <div
+            className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
+            style={{
+              background: isDark ? "rgba(99,102,241,0.09)" : "rgba(99,102,241,0.05)",
+              borderBottom: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.13)",
+            }}
+          >
             <div>
               <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? "Edit Card" : "Add Card"}
@@ -1280,7 +1298,7 @@ const CardMaster: React.FC = () => {
           </div>
         )}
       </div>
-      </div>
+      </FinanceShell>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (

@@ -1,4 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
+import { FinanceShell } from "@/components/finance/FinanceShell";
+import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -219,6 +221,8 @@ function buildChequeColumns(
 // ─── Component ────────────────────────────────────────────────────────────────
 const ChequeMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
 
   const { data: chequeData, isLoading: loadingCheques } = useQuery({
     queryKey: ["cheques"],
@@ -440,16 +444,30 @@ const ChequeMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Cheque Master"]} />
-      <div className="relative mt-6 space-y-8">
-      <div>
-        <h1 className="text-xl font-heading font-bold text-foreground">
-          Cheque Master
-        </h1>
-        <p className="text-xs text-muted-foreground mt-0.5">Register and manage cheque books / lots with bank and lot details.</p>
-      </div>
+      <FinanceShell
+        title="Cheque Master"
+        subtitle="Register and manage cheque books / lots with bank and lot details"
+      >
         {/* Form */}
-        <div className="rounded-xl border border-border bg-card shadow-sm">
-          <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
+        <div
+          className="rounded-xl overflow-hidden"
+          style={{
+            background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.82)",
+            border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.16)",
+            backdropFilter: "blur(18px) saturate(150%)",
+            WebkitBackdropFilter: "blur(18px) saturate(150%)",
+            boxShadow: isDark
+              ? "0 8px 32px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.06)"
+              : "0 8px 32px rgba(99,102,241,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
+          }}
+        >
+          <div
+            className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
+            style={{
+              background: isDark ? "rgba(99,102,241,0.09)" : "rgba(99,102,241,0.05)",
+              borderBottom: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.13)",
+            }}
+          >
             <div>
               <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? "Edit Cheque Lot" : "Add Cheque Lot"}
@@ -788,7 +806,7 @@ const ChequeMaster: React.FC = () => {
             />
           </div>
         </div>
-      </div>
+      </FinanceShell>
 
       {/* View Detail Modal */}
       <Dialog

@@ -221,6 +221,14 @@ router.post("/", async (req, res) => {
       });
     }
 
+    // ── Phone must fit the LHeadPhone column (VarChar(15)) ──
+    if (LHeadPhone && LHeadPhone.length > 15) {
+      return res.status(400).json({
+        error: "Phone number must be 15 characters or fewer.",
+        code: "PHONE_TOO_LONG",
+      });
+    }
+
     const pool = getPool();
     const columnMeta = await getAccountHeadColumnMeta();
     const request = pool
@@ -531,6 +539,14 @@ router.put("/:id", async (req, res) => {
       return res.status(400).json({
         error: "PAN Number is mandatory for suppliers.",
         code: "MISSING_PAN",
+      });
+    }
+
+    // ── Phone must fit the LHeadPhone column (VarChar(15)) ──
+    if (LHeadPhone && LHeadPhone.length > 15) {
+      return res.status(400).json({
+        error: "Phone number must be 15 characters or fewer.",
+        code: "PHONE_TOO_LONG",
       });
     }
 

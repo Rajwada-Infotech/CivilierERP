@@ -1,6 +1,8 @@
 import React from "react";
 import { useState, useCallback, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FinanceShell } from "@/components/finance/FinanceShell";
+import { useTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -50,6 +52,7 @@ import {
   Eye,
   Printer,
   ArrowRight,
+  CreditCard,
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -87,6 +90,7 @@ interface DbPayment {
   PUpiTransactionId?: string | null;
   PRtgsReference?: string | null;
   PImpsReference?: string | null;
+  PCardReference?: string | null;
 }
 
 interface BankOption {
@@ -198,6 +202,7 @@ interface PaymentRecord {
   upiTransactionId: string;
   rtgsReference: string;
   impsReference: string;
+  cardReference: string;
   // GST breakdown from linked expense
   baseAmount: number | null;
   cgstRate: number | null;
@@ -216,6 +221,7 @@ const PAYMENT_MODES = [
   "UPI",
   "RTGS",
   "IMPS",
+  "Card",
 ] as const;
 
 type PaymentMode = (typeof PAYMENT_MODES)[number];
@@ -515,6 +521,7 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     upiTransactionId: "",
     rtgsReference: "",
     impsReference: "",
+    cardReference: "",
     baseAmount: null,
     cgstRate: null,
     sgstRate: null,
@@ -553,6 +560,7 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     upiTransactionId: item.PUpiTransactionId || "",
     rtgsReference: item.PRtgsReference || "",
     impsReference: item.PImpsReference || "",
+    cardReference: item.PCardReference || "",
     baseAmount: null,
     cgstRate: null,
     sgstRate: null,
@@ -595,12 +603,26 @@ function SectionHeader({
   label: string;
   badge?: React.ReactNode;
 }) {
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
   return (
-    <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-      <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-        <Icon size={12} className="text-primary" />
+    <div
+      className="flex items-center gap-2.5 px-3 py-2 rounded-lg"
+      style={{
+        background: isDark ? "rgba(99,102,241,0.08)" : "rgba(99,102,241,0.06)",
+        border: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.15)",
+      }}
+    >
+      <div
+        className="flex items-center justify-center w-5 h-5 rounded-md shrink-0"
+        style={{ background: "rgba(99,102,241,0.18)", border: "1px solid rgba(99,102,241,0.28)" }}
+      >
+        <Icon size={11} style={{ color: "#818cf8" }} />
       </div>
-      <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+      <p
+        className="text-[10px] font-heading uppercase tracking-widest flex-1"
+        style={{ color: isDark ? "#94a3b8" : "#6366f1" }}
+      >
         {label}
       </p>
       {badge}
@@ -972,14 +994,27 @@ function FilterBar({
     },
   ];
 
+  const { theme: _fbTheme } = useTheme();
+  const _fbDark = _fbTheme !== "light";
   return (
-    <div className="rounded-xl border border-border bg-card/60 p-3 space-y-3">
+    <div
+      className="rounded-xl p-3 space-y-3"
+      style={{
+        background: _fbDark ? "rgba(15,17,26,0.4)" : "rgba(248,250,252,0.72)",
+        border: _fbDark ? "1px solid rgba(99,102,241,0.14)" : "1px solid rgba(99,102,241,0.12)",
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
+      }}
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <div className="flex items-center justify-center w-5 h-5 rounded bg-muted">
-            <Search size={11} className="text-muted-foreground" />
+          <div
+            className="flex items-center justify-center w-5 h-5 rounded"
+            style={{ background: "rgba(99,102,241,0.15)" }}
+          >
+            <Search size={11} style={{ color: "#818cf8" }} />
           </div>
-          <span className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+          <span className="text-[11px] font-heading uppercase tracking-wider" style={{ color: _fbDark ? "#64748b" : "#6366f1" }}>
             Filter expense bookings
           </span>
           {activeCount > 0 && (
@@ -1350,6 +1385,10 @@ function ModeInfoBanner({ mode }: { mode: string }) {
       container: "bg-pink-500/5 border border-pink-500/20",
       icon: "text-pink-500",
     },
+    amber: {
+      container: "bg-amber-500/5 border border-amber-500/20",
+      icon: "text-amber-500",
+    },
   };
   const msgs: Record<
     string,
@@ -1389,6 +1428,11 @@ function ModeInfoBanner({ mode }: { mode: string }) {
       icon: Hash,
       color: "pink",
       text: "Post-transaction: enter the IMPS reference number. Record will go for approval after save.",
+    },
+    Card: {
+      icon: CreditCard,
+      color: "amber",
+      text: "Post-transaction: enter the card transaction/approval ID for reconciliation. Record will go for approval after save.",
     },
   };
   const m = msgs[mode];
@@ -1759,6 +1803,12 @@ function DigitalRefPanel({
       placeholder: "e.g. 412210987654",
       hint: "12-digit reference from IMPS transfer confirmation.",
     },
+    Card: {
+      field: "cardReference",
+      label: "Card Transaction / Approval ID",
+      placeholder: "e.g. AUTH123456",
+      hint: "Transaction or approval ID from the card terminal/statement.",
+    },
   };
   const cfg = configs[mode];
   if (!cfg) return null;
@@ -1780,6 +1830,8 @@ function DigitalRefPanel({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 const Payment: React.FC = () => {
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [supplierFilter, setSupplierFilter] = useState("");
@@ -1888,6 +1940,7 @@ const Payment: React.FC = () => {
       field("UPI Txn ID", rec.upiTransactionId || null),
       field("RTGS Ref.", rec.rtgsReference || null),
       field("IMPS Ref.", rec.impsReference || null),
+      field("Card Ref.", rec.cardReference || null),
     ].join("");
 
     const html = `<!DOCTYPE html>
@@ -2158,12 +2211,13 @@ const Payment: React.FC = () => {
           }
         : {}),
       // Clear digital fields when switching away from digital modes
-      ...(!["NEFT", "UPI", "RTGS", "IMPS"].includes(newMode)
+      ...(!["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(newMode)
         ? {
             neftNumber: "",
             upiTransactionId: "",
             rtgsReference: "",
             impsReference: "",
+            cardReference: "",
           }
         : {}),
     }));
@@ -2466,7 +2520,7 @@ const Payment: React.FC = () => {
 
     const isChequeMode =
       form.mode === "Cheque" || form.mode === "Post-Dated Cheque";
-    const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS"].includes(form.mode);
+    const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(form.mode);
 
     if (isChequeMode) {
       if (!form.bankId) {
@@ -2513,6 +2567,10 @@ const Payment: React.FC = () => {
         toast.error("IMPS reference is required.");
         return false;
       }
+      if (form.mode === "Card" && !form.cardReference.trim()) {
+        toast.error("Card transaction/approval ID is required.");
+        return false;
+      }
     }
 
     return true;
@@ -2552,6 +2610,7 @@ const Payment: React.FC = () => {
       upiTransactionId: form.upiTransactionId || null,
       rtgsReference: form.rtgsReference || null,
       impsReference: form.impsReference || null,
+      cardReference: form.cardReference || null,
     } as any;
 
     try {
@@ -2589,7 +2648,7 @@ const Payment: React.FC = () => {
 
   const isChequeMode =
     form.mode === "Cheque" || form.mode === "Post-Dated Cheque";
-  const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS"].includes(form.mode);
+  const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(form.mode);
   const isCashMode = form.mode === "Cash";
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -2597,19 +2656,12 @@ const Payment: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Payments"]} />
-      <div className="relative space-y-8 mt-6">
-        {/* ── Page header ── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Payment Management
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Record and track payments linked to expense bookings
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {view === "list" && (
+      <FinanceShell
+        title="Payment Management"
+        subtitle="Record and track payments linked to expense bookings"
+        action={
+          view === "list" ? (
+            <div className="flex items-center gap-2 shrink-0">
               <ExportMenu
                 data={records as unknown as Record<string, unknown>[]}
                 columns={EXPORT_COLUMNS}
@@ -2627,17 +2679,16 @@ const Payment: React.FC = () => {
                 }
                 logoBase64={selectedCompanyDetail?.logo || undefined}
               />
-            )}
-            {view === "list" && (
               <Button
                 onClick={openNew}
-                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-5 py-2 text-sm h-auto"
+                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-4 py-1.5 text-xs h-auto"
               >
-                <Plus size={15} className="mr-1" /> New Payment
+                <Plus size={13} className="mr-1" /> New Payment
               </Button>
-            )}
-          </div>
-        </div>
+            </div>
+          ) : undefined
+        }
+      >
 
         {/* ── Summary stats ── */}
         {view === "list" && (
@@ -2712,33 +2763,72 @@ const Payment: React.FC = () => {
         {/* FORM VIEW                                                          */}
         {/* ══════════════════════════════════════════════════════════════════ */}
         {view === "form" && (
-          <div className="rounded-xl border border-border bg-card shadow-sm">
-            {/* Card header */}
-            <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
+          <div
+            className="rounded-2xl overflow-hidden"
+            style={{
+              background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.80)",
+              border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.18)",
+              backdropFilter: "blur(20px) saturate(160%)",
+              WebkitBackdropFilter: "blur(20px) saturate(160%)",
+              boxShadow: isDark
+                ? "0 8px 40px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)"
+                : "0 8px 40px rgba(99,102,241,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
+            }}
+          >
+            {/* Form header */}
+            <div
+              className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
+              style={{
+                background: isDark ? "rgba(99,102,241,0.10)" : "rgba(99,102,241,0.06)",
+                borderBottom: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.14)",
+              }}
+            >
+              {/* Left accent stripe */}
+              <div
+                className="absolute left-0 top-0 bottom-0 w-0.5"
+                style={{ background: "linear-gradient(to bottom, transparent 10%, #6366f1 30%, #6366f1 70%, transparent 90%)" }}
+              />
               <div className="flex items-center gap-3">
                 <button
                   onClick={cancelForm}
-                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  className="flex items-center gap-1.5 text-sm transition-colors hover:opacity-70"
+                  style={{ color: isDark ? "#94a3b8" : "#6366f1" }}
                 >
                   <ArrowLeft size={15} />
                   <span className="hidden sm:inline">Back</span>
                 </button>
-                <span className="text-border/60">|</span>
-                <h2 className="text-base font-heading font-semibold text-foreground">
-                  {editingId ? "Edit Payment" : "New Payment"}
-                </h2>
+                <span style={{ color: isDark ? "rgba(99,102,241,0.4)" : "rgba(99,102,241,0.3)" }}>|</span>
+                <div className="flex items-center gap-2">
+                  <div
+                    className="w-6 h-6 rounded-lg flex items-center justify-center"
+                    style={{ background: "rgba(99,102,241,0.18)", border: "1px solid rgba(99,102,241,0.30)" }}
+                  >
+                    <Receipt size={12} style={{ color: "#818cf8" }} />
+                  </div>
+                  <h2
+                    className="text-sm font-heading font-bold"
+                    style={{ color: isDark ? "#e0e7ff" : "#3730a3" }}
+                  >
+                    {editingId ? "Edit Payment" : "New Payment"}
+                  </h2>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={cancelForm}
-                  className="px-5 py-2 rounded-lg text-sm h-auto font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  className="px-4 py-1.5 rounded-lg text-xs h-auto font-heading transition-colors"
+                  style={{
+                    border: isDark ? "1px solid rgba(99,102,241,0.25)" : "1px solid rgba(99,102,241,0.20)",
+                    color: isDark ? "#94a3b8" : "#6366f1",
+                    background: isDark ? "rgba(99,102,241,0.06)" : "rgba(99,102,241,0.04)",
+                  }}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleSave}
                   disabled={saving}
-                  className="px-5 py-2 rounded-lg text-sm h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60"
+                  className="px-4 py-1.5 rounded-lg text-xs h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60"
                 >
                   {saving ? "Saving…" : editingId ? "Update" : "Save Payment"}
                 </button>
@@ -3692,7 +3782,7 @@ const Payment: React.FC = () => {
                 </div>
               )}
 
-              {/* NEFT / UPI / RTGS / IMPS */}
+              {/* NEFT / UPI / RTGS / IMPS / Card */}
               {isDigitalMode && (
                 <div className="space-y-3">
                   <SectionHeader icon={Hash} label={`${form.mode} Reference`} />
@@ -4329,6 +4419,10 @@ const Payment: React.FC = () => {
                               <span className="font-mono text-xs text-muted-foreground">
                                 {rec.impsReference}
                               </span>
+                            ) : rec.cardReference ? (
+                              <span className="font-mono text-xs text-muted-foreground">
+                                {rec.cardReference}
+                              </span>
                             ) : (
                               <span className="text-muted-foreground text-xs">
                                 —
@@ -4431,7 +4525,7 @@ const Payment: React.FC = () => {
             )}
           </>
         )}
-      </div>
+      </FinanceShell>
 
       {/* Payment detail view modal */}
       {viewingRec && (
@@ -4674,6 +4768,9 @@ const Payment: React.FC = () => {
                     : []),
                   ...(viewingRec.impsReference
                     ? [{ label: "IMPS Ref.", value: viewingRec.impsReference }]
+                    : []),
+                  ...(viewingRec.cardReference
+                    ? [{ label: "Card Ref.", value: viewingRec.cardReference }]
                     : []),
                   ...(viewingRec.parentDocNo
                     ? [{ label: "Parent Doc", value: viewingRec.parentDocNo }]

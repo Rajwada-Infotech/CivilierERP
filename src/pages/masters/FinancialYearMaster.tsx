@@ -1,4 +1,6 @@
 import React from "react";
+import { FinanceShell } from "@/components/finance/FinanceShell";
+import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
@@ -41,6 +43,8 @@ const toPayload = (r: Record<string, unknown>) => ({
 // ─── Component ────────────────────────────────────────────────────────────────
 const FinancialYearMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
 
   const {
     data: dbData,
@@ -128,126 +132,122 @@ const FinancialYearMaster: React.FC = () => {
       <Breadcrumbs
         items={["Dashboard", "Finance Module", "Financial Year Master"]}
       />
-      <h1 className="text-xl font-heading font-bold text-foreground mt-6 mb-0">
-        Financial Year Master
-      </h1>
-      <p className="text-xs text-muted-foreground mt-0.5">Manage financial years with start / end dates, status and lock controls.</p>
-      <div className="mt-8">
-      <MasterPage
-        title="Financial Year"
-        fields={[
-          {
-            name: "year",
-            label: "Financial Year",
-            type: "text",
-            required: true,
-            placeholder: "e.g. 2024-25",
-          },
-          {
-            name: "startDate",
-            label: "Start Date",
-            type: "date",
-            required: true,
-          },
-          { name: "endDate", label: "End Date", type: "date", required: true },
-          {
-            name: "status",
-            label: "Status",
-            type: "custom",
-            fullWidth: true,
-            defaultValue: "Active",
-            render: ({ value, onChange }) => {
-              const isActive = value !== "Closed";
-              return (
-                <div className="flex items-center gap-3 mt-1">
-                  <button
-                    type="button"
-                    onClick={() => onChange(isActive ? "Closed" : "Active")}
-                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${
-                      isActive ? "bg-emerald-500" : "bg-muted-foreground/30"
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-                        isActive ? "translate-x-4" : "translate-x-0.5"
-                      }`}
-                    />
-                  </button>
-                  <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
-                    Status —{" "}
-                    <span
-                      className={
-                        isActive ? "text-emerald-600" : "text-foreground"
-                      }
-                    >
-                      {isActive ? "Active" : "Closed"}
-                    </span>
-                  </span>
-                </div>
-              );
+      <FinanceShell title="Financial Year Master" subtitle="Manage financial years with start / end dates, status and lock controls">
+        <MasterPage
+          title="Financial Year"
+          fields={[
+            {
+              name: "year",
+              label: "Financial Year",
+              type: "text",
+              required: true,
+              placeholder: "e.g. 2024-25",
             },
-          },
-          {
-            name: "locked",
-            label: "Locked",
-            type: "custom",
-            fullWidth: true,
-            defaultValue: false,
-            render: ({ value, onChange }) => {
-              const isLocked = !!value;
-              return (
-                <div className="flex items-center gap-3 mt-1">
-                  <button
-                    type="button"
-                    onClick={() => onChange(!isLocked)}
-                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${
-                      isLocked ? "bg-orange-500" : "bg-muted-foreground/30"
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-                        isLocked ? "translate-x-4" : "translate-x-0.5"
-                      }`}
-                    />
-                  </button>
-                  <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
-                    Locked —{" "}
-                    <span
-                      className={
-                        isLocked ? "text-orange-500" : "text-foreground"
-                      }
-                    >
-                      {isLocked ? "Locked" : "Unlocked"}
-                    </span>
-                  </span>
-                </div>
-              );
+            {
+              name: "startDate",
+              label: "Start Date",
+              type: "date",
+              required: true,
             },
-          },
-        ]}
-        columns={[
-          { key: "year", label: "Financial Year" },
-          { key: "startDate", label: "Start Date", hideOnMobile: true },
-          { key: "endDate", label: "End Date", hideOnMobile: true },
-          { key: "status", label: "Status" },
-          { key: "locked", label: "Locked" },
-        ]}
-        columnRenderers={columnRenderers}
-        initialData={mappedData}
-        onDataEvent={handleDataEvent}
-        exportConfig={{
-          title: "Financial Year Master",
-          filename: "financial-year-master",
-          columns: [
-            { header: "Financial Year", accessor: "year" },
-            { header: "Start Date", accessor: "startDate" },
-            { header: "End Date", accessor: "endDate" },
-            { header: "Status", accessor: "status" },
-            { header: "Locked", accessor: (r) => (r.locked ? "Yes" : "No") },
-          ],
-        }}
-      />
-      </div>
+            { name: "endDate", label: "End Date", type: "date", required: true },
+            {
+              name: "status",
+              label: "Status",
+              type: "custom",
+              fullWidth: true,
+              defaultValue: "Active",
+              render: ({ value, onChange }) => {
+                const isActive = value !== "Closed";
+                return (
+                  <div className="flex items-center gap-3 mt-1">
+                    <button
+                      type="button"
+                      onClick={() => onChange(isActive ? "Closed" : "Active")}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${
+                        isActive ? "bg-emerald-500" : "bg-muted-foreground/30"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                          isActive ? "translate-x-4" : "translate-x-0.5"
+                        }`}
+                      />
+                    </button>
+                    <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                      Status —{" "}
+                      <span
+                        className={
+                          isActive ? "text-emerald-600" : "text-foreground"
+                        }
+                      >
+                        {isActive ? "Active" : "Closed"}
+                      </span>
+                    </span>
+                  </div>
+                );
+              },
+            },
+            {
+              name: "locked",
+              label: "Locked",
+              type: "custom",
+              fullWidth: true,
+              defaultValue: false,
+              render: ({ value, onChange }) => {
+                const isLocked = !!value;
+                return (
+                  <div className="flex items-center gap-3 mt-1">
+                    <button
+                      type="button"
+                      onClick={() => onChange(!isLocked)}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${
+                        isLocked ? "bg-orange-500" : "bg-muted-foreground/30"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                          isLocked ? "translate-x-4" : "translate-x-0.5"
+                        }`}
+                      />
+                    </button>
+                    <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                      Locked —{" "}
+                      <span
+                        className={
+                          isLocked ? "text-orange-500" : "text-foreground"
+                        }
+                      >
+                        {isLocked ? "Locked" : "Unlocked"}
+                      </span>
+                    </span>
+                  </div>
+                );
+              },
+            },
+          ]}
+          columns={[
+            { key: "year", label: "Financial Year" },
+            { key: "startDate", label: "Start Date", hideOnMobile: true },
+            { key: "endDate", label: "End Date", hideOnMobile: true },
+            { key: "status", label: "Status" },
+            { key: "locked", label: "Locked" },
+          ]}
+          columnRenderers={columnRenderers}
+          initialData={mappedData}
+          onDataEvent={handleDataEvent}
+          exportConfig={{
+            title: "Financial Year Master",
+            filename: "financial-year-master",
+            columns: [
+              { header: "Financial Year", accessor: "year" },
+              { header: "Start Date", accessor: "startDate" },
+              { header: "End Date", accessor: "endDate" },
+              { header: "Status", accessor: "status" },
+              { header: "Locked", accessor: (r) => (r.locked ? "Yes" : "No") },
+            ],
+          }}
+        />
+      </FinanceShell>
     </>
   );
 };

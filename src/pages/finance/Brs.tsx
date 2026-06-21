@@ -19,6 +19,7 @@ import React, {
   useRef,
 } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FinanceShell } from "@/components/finance/FinanceShell";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { toast } from "sonner";
@@ -391,25 +392,16 @@ export default function Brs() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "BRS"]} />
-      <div className="relative space-y-8 mt-6">
-        {/* ── Page header ────────────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Bank Reconciliation Statement
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Verify payments against your bank passbook — tick each entry once
-              confirmed
-            </p>
-          </div>
-
+      <FinanceShell
+        title="Bank Reconciliation Statement"
+        subtitle="Verify payments against your bank passbook — tick each entry once confirmed"
+        action={
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={fetchData}
               disabled={loading}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
-              title="Refresh"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors disabled:opacity-50"
+              style={{ color: "#818cf8" }}
             >
               <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
               Refresh
@@ -429,10 +421,11 @@ export default function Brs() {
                   .filter(Boolean)
                   .join(" · ") || undefined
               }
-              disabled={filtered.length === 0}
+              disabled={false}
             />
           </div>
-        </div>
+        }
+      >
 
         {/* ── Stats ──────────────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -862,8 +855,7 @@ export default function Brs() {
             Showing payments and received payments with a linked bank account
           </p>
         </div>
-      </div>
-      {/* end p-6 space-y-8 */}
+      </FinanceShell>
     </>
   );
 }

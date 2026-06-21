@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
+import { FinanceShell } from "@/components/finance/FinanceShell";
+import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -342,6 +344,8 @@ function buildColumns(
 // ─── Main Component ─────────────────────────────────────────────────────────
 const BankMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
 
   const {
     data: dbData,
@@ -561,28 +565,40 @@ const BankMaster: React.FC = () => {
     <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Bank Master"]} />
 
-      <div className="relative space-y-8 mt-6">
-        {/* ── Page Header ── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Bank Master
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Manage bank accounts with branch, IFSC and balance details
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-xs text-muted-foreground bg-muted/60 rounded-lg px-3 py-1.5">
-              {dbBanks.length} Banks
-            </span>
-          </div>
-        </div>
+      <FinanceShell
+        title="Bank Master"
+        subtitle="Manage bank accounts with branch, IFSC and balance details"
+        action={
+          <span
+            className="text-xs font-heading px-3 py-1.5 rounded-lg"
+            style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
+          >
+            {dbBanks.length} Banks
+          </span>
+        }
+      >
 
         {/* ── Form Card ── */}
-        <div className="rounded-xl border border-border bg-card shadow-sm">
+        <div
+          className="rounded-xl overflow-hidden"
+          style={{
+            background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.82)",
+            border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.16)",
+            backdropFilter: "blur(18px) saturate(150%)",
+            WebkitBackdropFilter: "blur(18px) saturate(150%)",
+            boxShadow: isDark
+              ? "0 8px 32px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.06)"
+              : "0 8px 32px rgba(99,102,241,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
+          }}
+        >
           {/* Card header — title only */}
-          <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
+          <div
+            className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
+            style={{
+              background: isDark ? "rgba(99,102,241,0.09)" : "rgba(99,102,241,0.05)",
+              borderBottom: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.13)",
+            }}
+          >
             <div>
               <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? "Edit Bank" : "Add Bank"}
@@ -1009,7 +1025,7 @@ const BankMaster: React.FC = () => {
             </div>
           </div>
         </div>
-      </div>
+      </FinanceShell>
 
       {/* ── View Detail Drawer ── */}
       {viewRow && (
