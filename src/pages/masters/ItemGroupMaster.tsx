@@ -1,5 +1,6 @@
 import React from "react"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
+import { MaterialShell } from "@/components/material/MaterialShell"
 import { MasterPage, type DataChangeEvent } from "@/components/MasterPage"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -9,6 +10,7 @@ import {
   deleteItemGroup,
 } from "@/api/itemGroupApi"
 import { toast } from "sonner"
+import { Layers } from "lucide-react"
 
 interface DbItemGroup {
   M_Id: string
@@ -105,34 +107,37 @@ const ItemGroupMaster: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Finance Module", "Item Group Master"]} />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Item Group Master
-      </h1>
-      <MasterPage
-        title="Item Group"
-        fields={[
-          { name: "Name",        label: "Name",        type: "text", required: true },
-          { name: "Code",        label: "Code",        type: "text", required: true, uppercase: true },
-          { name: "Description", label: "Description", type: "text", required: true },
-        ]}
-        columns={[
-          { key: "Name",        label: "Name" },
-          { key: "Code",        label: "Code" },
-          { key: "Description", label: "Description" },
-        ]}
-        initialData={mappedData}
-        onDataEvent={handleDataEvent}
-        exportConfig={{
-          title: "Item Group Master",
-          filename: "item-group-master",
-          columns: [
-            { header: "Name",        accessor: "Name" },
-            { header: "Code",        accessor: "Code" },
-            { header: "Description", accessor: "Description" },
-          ],
-        }}
-      />
+      <Breadcrumbs items={["Dashboard", "Material Module", "Item Group Master"]} />
+      <MaterialShell
+        title="Item Group Master"
+        subtitle="Group and categorize items"
+        icon={Layers}
+      >
+        <MasterPage
+          title="Item Group"
+          fields={[
+            { name: "Name",        label: "Name",        type: "text", required: true },
+            { name: "Code",        label: "Code",        type: "text", required: true, uppercase: true },
+            { name: "Description", label: "Description", type: "text", required: true },
+          ]}
+          columns={[
+            { key: "Name",        label: "Name" },
+            { key: "Code",        label: "Code" },
+            { key: "Description", label: "Description" },
+          ]}
+          initialData={mappedData}
+          onDataEvent={handleDataEvent}
+          exportConfig={{
+            title: "Item Group Master",
+            filename: "item-group-master",
+            columns: [
+              { header: "Name",        accessor: "Name" },
+              { header: "Code",        accessor: "Code" },
+              { header: "Description", accessor: "Description" },
+            ],
+          }}
+        />
+      </MaterialShell>
     </>
   )
 }

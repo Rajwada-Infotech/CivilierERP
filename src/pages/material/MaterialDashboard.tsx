@@ -4,7 +4,13 @@ import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { useTheme } from "@/contexts/ThemeContext";
 import { DashboardBackground } from "@/components/DashboardBackground";
+import {
+  MaterialShell,
+  MaterialGlassCard,
+  MaterialSection,
+} from "@/components/material/MaterialShell";
 import {
   Dialog,
   DialogContent,
@@ -139,15 +145,13 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-// ─── Stat Card ────────────────────────────────────────────────────────────────
+// ─── Stat Card (glass) ───────────────────────────────────────────────────────
 function StatCard({
   label,
   value,
   sub,
   icon: Icon,
-  iconColor = "text-emerald-600",
-  iconBg = "bg-emerald-500/10",
-  borderL = "border-l-emerald-500",
+  accentColor = "#10b981",
   trend,
   onClick,
 }: {
@@ -158,42 +162,56 @@ function StatCard({
   iconColor?: string;
   iconBg?: string;
   borderL?: string;
+  accentColor?: string;
   trend?: "up" | "down" | "neutral";
   onClick?: () => void;
 }) {
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
   return (
     <div
       onClick={onClick}
-      className={`rounded-2xl border border-border bg-card p-5 flex flex-col gap-4 transition-all duration-200 border-l-2 ${borderL} ${
-        onClick
-          ? "cursor-pointer hover:shadow-lg hover:-translate-y-0.5 hover:border-primary/20"
-          : ""
-      }`}
+      className={`relative rounded-xl overflow-hidden ${onClick ? "cursor-pointer" : ""}`}
+      style={{
+        background: isDark ? "rgba(10,18,15,0.50)" : "rgba(255,255,255,0.75)",
+        border: `1px solid ${accentColor}28`,
+        backdropFilter: "blur(16px) saturate(150%)",
+        WebkitBackdropFilter: "blur(16px) saturate(150%)",
+        boxShadow: isDark
+          ? "0 4px 20px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
+          : "0 4px 20px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+        transition: "transform 0.15s, box-shadow 0.15s",
+      }}
+      onMouseEnter={onClick ? (e) => { (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; } : undefined}
+      onMouseLeave={onClick ? (e) => { (e.currentTarget as HTMLElement).style.transform = ""; } : undefined}
     >
-      <div className="flex items-start justify-between gap-2">
-        <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground leading-tight">
-          {label}
-        </span>
-        <div
-          className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center`}
-        >
-          <Icon size={15} className={iconColor} />
-        </div>
-      </div>
-      <div>
-        <div className="text-3xl font-bold font-heading text-foreground leading-none">
-          {value}
-        </div>
-        <div className="flex items-center gap-1 mt-1">
-          {trend === "up" && (
-            <ArrowUpRight size={12} className="text-emerald-500" />
-          )}
-          {trend === "down" && (
-            <ArrowDownRight size={12} className="text-red-500" />
-          )}
-          <span className="text-[11px] text-muted-foreground leading-tight">
-            {sub}
+      <div className="absolute inset-0 pointer-events-none" style={{ background: `linear-gradient(135deg, ${accentColor}10 0%, transparent 60%)` }} />
+      <div className="absolute left-0 top-3 bottom-3 w-0.5 rounded-full" style={{ background: accentColor }} />
+      <div className="absolute top-0 left-0 right-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${accentColor}50, transparent)` }} />
+      <div className="relative z-10 p-4 flex flex-col gap-3">
+        <div className="flex items-start justify-between gap-2">
+          <span className="text-[10px] font-heading font-semibold uppercase tracking-widest leading-tight" style={{ color: accentColor, opacity: 0.85 }}>
+            {label}
           </span>
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${accentColor}18`, border: `1px solid ${accentColor}30` }}>
+            <Icon size={14} style={{ color: accentColor }} />
+          </div>
+        </div>
+        <div>
+          <div className="text-2xl font-bold font-heading" style={{ color: isDark ? "#f1f5f9" : "#1e1b4b" }}>
+            {value}
+          </div>
+          <div className="flex items-center gap-1 mt-1">
+            {trend === "up" && (
+              <ArrowUpRight size={12} className="text-emerald-500" />
+            )}
+            {trend === "down" && (
+              <ArrowDownRight size={12} className="text-red-500" />
+            )}
+            <span className="text-[11px] text-muted-foreground leading-tight">
+              {sub}
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -220,22 +238,31 @@ function SectionHeader({
   sub,
   action,
   onAction,
+  accentColor = "#10b981",
+  compact = false,
 }: {
   icon: React.ElementType;
   title: string;
   sub?: string;
   action?: string;
   onAction?: () => void;
+  accentColor?: string;
+  compact?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between mb-4">
-      <div className="flex items-center gap-2.5">
-        <Icon size={16} className="text-muted-foreground" />
-        <span className="text-sm font-heading font-semibold text-foreground">
+    <div className={`flex items-center justify-between${compact ? "" : " mb-3"}`}>
+      <div className="flex items-center gap-2">
+        <div
+          className="w-5 h-5 rounded-md flex items-center justify-center shrink-0"
+          style={{ background: `${accentColor}18`, border: `1px solid ${accentColor}30` }}
+        >
+          <Icon size={11} style={{ color: accentColor }} />
+        </div>
+        <span className="text-xs font-heading font-semibold text-foreground">
           {title}
         </span>
         {sub && (
-          <span className="text-xs text-muted-foreground hidden sm:inline">
+          <span className="text-[10px] text-muted-foreground hidden sm:inline">
             {sub}
           </span>
         )}
@@ -243,7 +270,8 @@ function SectionHeader({
       {action && onAction && (
         <button
           onClick={onAction}
-          className="text-xs text-primary hover:underline font-heading"
+          className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+          style={{ color: accentColor }}
         >
           {action} →
         </button>
@@ -255,9 +283,8 @@ function SectionHeader({
 // ─── Empty state ──────────────────────────────────────────────────────────────
 function EmptyState({ label }: { label: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
-      <ClipboardList size={28} className="mb-2 opacity-30" />
-      <span className="text-xs">{label}</span>
+    <div className="text-center text-muted-foreground py-10 text-sm">
+      {label}
     </div>
   );
 }
@@ -586,7 +613,20 @@ type ModalKey =
 
 export default function MaterialDashboard() {
   const navigate = useNavigate();
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
   const [openModal, setOpenModal] = useState<ModalKey>(null);
+
+  // Reusable theme-aware glass panel style
+  const gp = {
+    background: isDark ? "rgba(10,18,15,0.45)" : "rgba(255,255,255,0.72)",
+    border: isDark ? "1px solid rgba(16,185,129,0.15)" : "1px solid rgba(16,185,129,0.18)",
+    backdropFilter: "blur(16px) saturate(150%)",
+    WebkitBackdropFilter: "blur(16px) saturate(150%)",
+    boxShadow: isDark
+      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
+      : "0 4px 24px rgba(16,185,129,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+  } as React.CSSProperties;
 
   const open = (key: ModalKey) => setOpenModal(key);
   const close = () => setOpenModal(null);
@@ -762,9 +802,7 @@ export default function MaterialDashboard() {
           value: fmtNum(data.items.count),
           sub: `${data.items.groupCount} item groups`,
           icon: Package,
-          iconColor: "text-emerald-600",
-          iconBg: "bg-emerald-500/10",
-          borderL: "border-l-emerald-500",
+          accentColor: "#10b981",
           trend: "neutral" as const,
           onClick: () => open("items"),
         },
@@ -773,9 +811,7 @@ export default function MaterialDashboard() {
           value: fmtNum(data.grns.thisMonth),
           sub: `${data.grns.today} today · ${fmt(data.grns.thisMonthValue)}`,
           icon: Truck,
-          iconColor: "text-blue-600",
-          iconBg: "bg-blue-500/10",
-          borderL: "border-l-blue-500",
+          accentColor: "#3b82f6",
           trend: "up" as const,
           onClick: () => open("grns"),
         },
@@ -784,9 +820,7 @@ export default function MaterialDashboard() {
           value: fmtNum(data.purchaseOrders.open),
           sub: `${fmt(data.purchaseOrders.openValue)} outstanding`,
           icon: ShoppingCart,
-          iconColor: "text-amber-600",
-          iconBg: "bg-amber-500/10",
-          borderL: "border-l-amber-500",
+          accentColor: "#f59e0b",
           trend:
             data.purchaseOrders.open > 0
               ? ("down" as const)
@@ -794,13 +828,11 @@ export default function MaterialDashboard() {
           onClick: () => open("pos"),
         },
         {
-          label: "Expenses",
+          label: "Pending Expenses",
           value: fmtNum(data.expenses.pending),
           sub: `${fmt(data.expenses.pendingAmount)} pending approval`,
           icon: Receipt,
-          iconColor: "text-red-600",
-          iconBg: "bg-red-500/10",
-          borderL: "border-l-red-500",
+          accentColor: "#ef4444",
           trend:
             data.expenses.pending > 0
               ? ("down" as const)
@@ -812,9 +844,7 @@ export default function MaterialDashboard() {
           value: fmtNum(data.stock.totalIn - data.stock.totalOut),
           sub: `${fmtNum(data.stock.uniqueItems)} items tracked`,
           icon: Layers,
-          iconColor: "text-teal-600",
-          iconBg: "bg-teal-500/10",
-          borderL: "border-l-teal-500",
+          accentColor: "#14b8a6",
           trend:
             data.stock.totalIn > data.stock.totalOut
               ? ("up" as const)
@@ -826,9 +856,7 @@ export default function MaterialDashboard() {
           value: fmtNum(data.materialIssues.thisMonth),
           sub: `${data.materialIssues.today} today · ${fmtNum(data.materialIssues.total)} total`,
           icon: PackageCheck,
-          iconColor: "text-orange-600",
-          iconBg: "bg-orange-500/10",
-          borderL: "border-l-orange-500",
+          accentColor: "#f97316",
           trend: "neutral" as const,
           onClick: () => open("issues"),
         },
@@ -837,9 +865,7 @@ export default function MaterialDashboard() {
           value: fmtNum(data.materialRequests.total),
           sub: `${data.materialRequests.thisMonth} this month · ${data.materialRequests.pending} pending`,
           icon: Send,
-          iconColor: "text-indigo-600",
-          iconBg: "bg-indigo-500/10",
-          borderL: "border-l-indigo-500",
+          accentColor: "#6366f1",
           trend:
             data.materialRequests.total > 0
               ? ("down" as const)
@@ -852,31 +878,26 @@ export default function MaterialDashboard() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material"]} />
-      <div className="relative p-6 space-y-8">
-        <DashboardBackground />
-        {/* Header */}
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Material Overview
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Real-time data from GRNs, Purchase Orders, Issues, Requests,
-              Expenses &amp; Stock
-            </p>
-          </div>
+      <DashboardBackground />
+      <MaterialShell
+        title="Material Overview"
+        subtitle="Real-time data from GRNs, Purchase Orders, Issues, Requests, Expenses & Stock"
+        icon={Package}
+        action={
           <button
             onClick={() => refetch()}
             disabled={isFetching}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-emerald-500/30 hover:bg-emerald-500/10 transition-colors disabled:opacity-50"
+            style={{ color: "#34d399" }}
           >
             <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
             Refresh
           </button>
-        </div>
+        }
+      >
 
         {isError && !data && (
-          <div className="px-4 py-3 rounded-lg bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
+          <div className="px-4 py-3 rounded-xl bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
             <AlertCircle size={15} />
             Failed to load dashboard data
             {(error as Error)?.message ? `: ${(error as Error).message}` : ""}.
@@ -893,64 +914,49 @@ export default function MaterialDashboard() {
 
         {/* Value Summary Strip */}
         {data && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {[
-              {
-                label: "Total GRN Value",
-                value: fmt(data.grns.totalValue),
-                icon: TrendingUp,
-                color: "text-emerald-600",
-                bg: "bg-emerald-500/10",
-                borderL: "border-l-emerald-500",
-              },
-              {
-                label: "Total PO Value",
-                value: fmt(data.purchaseOrders.totalValue),
-                icon: FileText,
-                color: "text-blue-600",
-                bg: "bg-blue-500/10",
-                borderL: "border-l-blue-500",
-              },
-              {
-                label: "Total Expense Amount",
-                value: fmt(data.expenses.totalAmount),
-                icon: Receipt,
-                color: "text-amber-600",
-                bg: "bg-amber-500/10",
-                borderL: "border-l-amber-500",
-              },
-            ].map((s) => (
-              <div
-                key={s.label}
-                className={`rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4 border-l-2 ${s.borderL}`}
-              >
-                <div
-                  className={`w-10 h-10 rounded-xl ${s.bg} flex items-center justify-center shrink-0`}
-                >
-                  <s.icon size={18} className={s.color} />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">{s.label}</p>
-                  <p className="text-lg font-heading font-bold text-foreground leading-tight mt-0.5">
-                    {s.value}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
+          <MaterialSection title="Totals" icon={TrendingUp} accentColor="#10b981">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <MaterialGlassCard
+                label="Total GRN Value"
+                value={fmt(data.grns.totalValue)}
+                sub={`${data.grns.total} total receipts`}
+                icon={TrendingUp}
+                accentColor="#10b981"
+                trend="neutral"
+              />
+              <MaterialGlassCard
+                label="Total PO Value"
+                value={fmt(data.purchaseOrders.totalValue)}
+                sub={`${data.purchaseOrders.total} total orders`}
+                icon={FileText}
+                accentColor="#3b82f6"
+                trend="neutral"
+              />
+              <MaterialGlassCard
+                label="Total Expense Amount"
+                value={fmt(data.expenses.totalAmount)}
+                sub={`${data.expenses.approved} approved`}
+                icon={Receipt}
+                accentColor="#f59e0b"
+                trend="neutral"
+              />
+            </div>
+          </MaterialSection>
         )}
 
         {/* Recent GRNs + Recent POs */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Recent GRNs */}
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="px-5 py-4 border-b border-border">
+          <div className="rounded-xl overflow-hidden" style={gp}>
+            <div className="px-4 py-3 border-b" style={{borderColor:"rgba(16,185,129,0.12)"}}>
               <SectionHeader
                 icon={Truck}
                 title="Recent GRNs"
                 sub="Last 6 goods receipts"
                 action="View all"
                 onAction={() => navigate("/material/grn")}
+                accentColor="#2563eb"
+                compact
               />
             </div>
             {isLoading ? (
@@ -969,14 +975,16 @@ export default function MaterialDashboard() {
           </div>
 
           {/* Recent Purchase Orders */}
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="px-5 py-4 border-b border-border">
+          <div className="rounded-xl overflow-hidden" style={gp}>
+            <div className="px-4 py-3 border-b" style={{borderColor:"rgba(16,185,129,0.12)"}}>
               <SectionHeader
                 icon={ShoppingCart}
                 title="Recent Purchase Orders"
                 sub="Last 6 POs"
                 action="View all"
                 onAction={() => navigate("/material/purchase-order")}
+                accentColor="#d97706"
+                compact
               />
             </div>
             {isLoading ? (
@@ -996,14 +1004,16 @@ export default function MaterialDashboard() {
         </div>
 
         {/* Recent Expense Bookings */}
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <div className="px-5 py-4 border-b border-border">
+        <div className="rounded-xl overflow-hidden" style={gp}>
+          <div className="px-4 py-3 border-b" style={{borderColor:"rgba(16,185,129,0.12)"}}>
             <SectionHeader
               icon={Receipt}
               title="Recent Expense Bookings"
               sub="Last 6 entries"
               action="View all"
               onAction={() => navigate("/material/expense-booking")}
+              accentColor="#dc2626"
+              compact
             />
           </div>
           {isLoading ? (
@@ -1024,14 +1034,16 @@ export default function MaterialDashboard() {
         {/* Recent Issues + Recent Requests */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Recent Material Issues */}
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="px-5 py-4 border-b border-border">
+          <div className="rounded-xl overflow-hidden" style={gp}>
+            <div className="px-4 py-3 border-b" style={{borderColor:"rgba(16,185,129,0.12)"}}>
               <SectionHeader
                 icon={PackageCheck}
                 title="Recent Material Issues"
                 sub="Last 6 issues"
                 action="View all"
                 onAction={() => navigate("/material/issues")}
+                accentColor="#ea580c"
+                compact
               />
             </div>
             {isLoading ? (
@@ -1050,14 +1062,16 @@ export default function MaterialDashboard() {
           </div>
 
           {/* Recent Material Requests */}
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="px-5 py-4 border-b border-border">
+          <div className="rounded-xl overflow-hidden" style={gp}>
+            <div className="px-4 py-3 border-b" style={{borderColor:"rgba(16,185,129,0.12)"}}>
               <SectionHeader
                 icon={Send}
                 title="Recent Material Requests"
                 sub="Last 6 requests"
                 action="View all"
                 onAction={() => navigate("/material/material-request")}
+                accentColor="#4f46e5"
+                compact
               />
             </div>
             {isLoading ? (
@@ -1079,11 +1093,12 @@ export default function MaterialDashboard() {
         {/* PO Status Breakdown + Material Requests Breakdown + Top Items */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* PO Status Breakdown */}
-          <div className="rounded-xl border border-border bg-card p-5">
+          <div className="rounded-xl p-5" style={gp}>
             <SectionHeader
               icon={ShoppingCart}
               title="PO Status Breakdown"
               onAction={() => navigate("/material/purchase-order")}
+              accentColor="#d97706"
             />
             {isLoading ? (
               <div className="space-y-2 animate-pulse">
@@ -1100,13 +1115,14 @@ export default function MaterialDashboard() {
           </div>
 
           {/* Material Requests Breakdown */}
-          <div className="rounded-xl border border-border bg-card p-5">
+          <div className="rounded-xl p-5" style={gp}>
             <SectionHeader
               icon={Send}
               title="Material Requests"
               sub="by status"
               action="View all"
               onAction={() => navigate("/material/material-request")}
+              accentColor="#4f46e5"
             />
             {isLoading ? (
               <div className="space-y-2 animate-pulse">
@@ -1179,8 +1195,8 @@ export default function MaterialDashboard() {
           </div>
 
           {/* Top Items */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <SectionHeader icon={Package} title="Top Items by Receipts" />
+          <div className="rounded-xl p-5" style={gp}>
+            <SectionHeader icon={Package} title="Top Items by Receipts" accentColor="#059669" />
             {isLoading ? (
               <div className="space-y-2 animate-pulse">
                 {Array.from({ length: 5 }).map((_, i) => (
@@ -1224,86 +1240,44 @@ export default function MaterialDashboard() {
         </div>
 
         {/* Quick Actions */}
-        <div className="rounded-xl border border-border bg-card p-5">
-          {" "}
-          <SectionHeader icon={BarChart3} title="Quick Actions" />
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
+        <div className="rounded-xl p-5" style={gp}>
+          <SectionHeader icon={BarChart3} title="Quick Actions" accentColor="#10b981" />
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
             {[
-              {
-                label: "New GRN",
-                icon: Truck,
-                path: "/material/grn",
-                color: "text-blue-600",
-                bg: "bg-blue-500/10",
-              },
-              {
-                label: "Purchase Order",
-                icon: ShoppingCart,
-                path: "/material/purchase-order",
-                color: "text-amber-600",
-                bg: "bg-amber-500/10",
-              },
-              {
-                label: "Issues",
-                icon: PackageCheck,
-                path: "/material/issues",
-                color: "text-orange-600",
-                bg: "bg-orange-500/10",
-              },
-              {
-                label: "Material Request",
-                icon: Send,
-                path: "/material/material-request",
-                color: "text-indigo-600",
-                bg: "bg-indigo-500/10",
-              },
-              {
-                label: "Expense Booking",
-                icon: Receipt,
-                path: "/material/expense-booking",
-                color: "text-red-600",
-                bg: "bg-red-500/10",
-              },
-              {
-                label: "UOM Master",
-                icon: Ruler,
-                path: "/material/uom",
-                color: "text-emerald-600",
-                bg: "bg-emerald-500/10",
-              },
-              {
-                label: "Inventory",
-                icon: ClipboardList,
-                path: "/material/inventory-master",
-                color: "text-teal-600",
-                bg: "bg-teal-500/10",
-              },
-              {
-                label: "T&C Master",
-                icon: FileText,
-                path: "/material/t-c-master",
-                color: "text-slate-600",
-                bg: "bg-slate-500/10",
-              },
-            ].map(({ label, icon: Icon, path, color, bg }) => (
+              { label: "New GRN",          icon: Truck,         path: "/material/grn",               color: "#2563eb" },
+              { label: "Purchase Order",   icon: ShoppingCart,  path: "/material/purchase-order",    color: "#d97706" },
+              { label: "Issues",           icon: PackageCheck,  path: "/material/issues",            color: "#ea580c" },
+              { label: "Material Request", icon: Send,          path: "/material/material-request",  color: "#4f46e5" },
+              { label: "Expense Booking",  icon: Receipt,       path: "/material/expense-booking",   color: "#dc2626" },
+              { label: "UOM Master",       icon: Ruler,         path: "/material/uom",               color: "#059669" },
+              { label: "Inventory",        icon: ClipboardList, path: "/material/inventory-master",  color: "#0d9488" },
+              { label: "T&C Master",       icon: FileText,      path: "/material/t-c-master",        color: "#7c3aed" },
+            ].map(({ label, icon: Icon, path, color }) => (
               <button
                 key={path}
                 onClick={() => navigate(path)}
-                className="flex flex-col items-center gap-3 py-5 px-3 rounded-2xl border border-border hover:bg-muted hover:border-primary/20 transition-all duration-150 active:scale-95 group"
+                className="group flex flex-col items-center gap-3 py-5 rounded-xl transition-all duration-200 active:scale-95"
+                style={{
+                  background: isDark ? `${color}0A` : `${color}08`,
+                  border: `1px solid ${color}25`,
+                }}
+                onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = `${color}18`; el.style.borderColor = `${color}40`; }}
+                onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = isDark ? `${color}0A` : `${color}08`; el.style.borderColor = `${color}25`; }}
               >
                 <div
-                  className={`w-11 h-11 rounded-xl ${bg} flex items-center justify-center group-hover:scale-110 transition-transform`}
+                  className="w-10 h-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110"
+                  style={{ background: `${color}20`, border: `1px solid ${color}35` }}
                 >
-                  <Icon size={16} className={color} />
+                  <Icon size={18} style={{ color }} />
                 </div>
-                <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
+                <span className="text-xs font-medium text-center leading-tight" style={{ color: isDark ? "#cbd5e1" : "#475569" }}>
                   {label}
                 </span>
               </button>
             ))}
           </div>
         </div>
-      </div>
+      </MaterialShell>
 
       {/* ── Unified Modal ── */}
       <Dialog open={openModal !== null} onOpenChange={(v) => !v && close()}>

@@ -11,6 +11,7 @@ import {
   Printer,
   ChevronDown,
   CalendarDays,
+  RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -393,6 +394,11 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     setErrors({});
   };
 
+  const defaults = { ...getDefaults(fields), ...(externalFormPatch ?? {}) };
+  const isDirty = Object.keys(form).some(
+    (k) => String(form[k] ?? "") !== String(defaults[k] ?? "")
+  );
+
   const canSave = fields.every(
     (f) =>
       !f.required ||
@@ -598,27 +604,27 @@ export const MasterPage: React.FC<MasterPageProps> = ({
         </div>
 
         {/* Footer — actions */}
-        <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
-          <p className="text-[11px] text-muted-foreground">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
+          <p className="text-[11px] text-muted-foreground hidden sm:block">
             {canSave
               ? <span className="text-emerald-500 font-medium">Ready to save</span>
               : fields.some((f) => f.required)
                 ? "Fill in the required fields to save"
                 : ""}
           </p>
-          <div className="flex items-center gap-2">
-            {editingId !== null && (
-              <button
-                onClick={handleReset}
-                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
-                Cancel
-              </button>
-            )}
+          <div className="flex items-center gap-2 sm:ml-auto">
+            <button
+              onClick={handleReset}
+              disabled={!isDirty && editingId === null}
+              className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            >
+              <RotateCcw size={12} />
+              {editingId !== null ? "Cancel" : "Reset"}
+            </button>
             <button
               onClick={handleSave}
               disabled={!canSave}
-              className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
+              className="flex-1 sm:flex-none px-4 sm:px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-opacity whitespace-nowrap"
             >
               {editingId !== null ? <Check size={14} /> : <Plus size={14} />}
               {editingId !== null ? `Update ${title}` : `Save ${title}`}
@@ -630,7 +636,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
       {/* ── TABLE CARD ── */}
       {!hideTable && (
         <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-visible">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60 rounded-t-xl overflow-visible">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60 rounded-t-xl overflow-visible">
             <div>
               <h3 className="font-heading font-semibold text-foreground text-sm">
                 {title} Records
@@ -639,7 +645,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                 {filtered.length} record{filtered.length !== 1 ? "s" : ""}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               {exportConfig && (
                 <ExportMenu
                   data={filtered as Record<string, unknown>[]}
@@ -650,7 +656,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   disabled={filtered.length === 0}
                 />
               )}
-              <div className="relative">
+              <div className="relative flex-1 sm:flex-none">
                 <Search
                   size={13}
                   className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -660,7 +666,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   placeholder="Search..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-40"
+                  className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-full sm:w-44"
                 />
               </div>
             </div>

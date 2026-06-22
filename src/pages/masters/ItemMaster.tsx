@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { MaterialShell } from "@/components/material/MaterialShell";
 import {
   Search,
   Edit2,
@@ -10,6 +11,7 @@ import {
   ChevronDown,
   Eye,
   Printer,
+  Package,
 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -684,8 +686,12 @@ const ItemMaster: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Finance Module", "Item Master"]} />
-      <h1 className="text-xl font-heading font-bold text-foreground">Item Master</h1>
+      <Breadcrumbs items={["Dashboard", "Material Module", "Item Master"]} />
+      <MaterialShell
+        title="Item Master"
+        subtitle="Manage your item catalog"
+        icon={Package}
+      >
 
       {/* ── Form ── */}
       <div className="rounded-xl border border-border bg-card p-6 mb-6">
@@ -857,21 +863,24 @@ const ItemMaster: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex gap-3 mt-5">
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-5 py-2 rounded-lg font-heading text-sm font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-primary/20 hover:-translate-y-0.5 transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            {saving && <Loader2 size={14} className="animate-spin" />}
-            {editingId ? "Update" : "Save"}
-          </button>
-          <button
-            onClick={handleReset}
-            className="px-5 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
-          >
-            Reset
-          </button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mt-5">
+          <p className="hidden sm:block text-xs text-muted-foreground">Ready to save</p>
+          <div className="flex gap-3 sm:ml-auto">
+            <button
+              onClick={handleReset}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
+            >
+              Reset
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex-1 sm:flex-none whitespace-nowrap px-5 py-2 rounded-lg font-heading text-sm font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-primary/20 hover:-translate-y-0.5 transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {saving && <Loader2 size={14} className="animate-spin" />}
+              {editingId ? "Update" : "Save"}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -982,6 +991,7 @@ const ItemMaster: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
+      </MaterialShell>
     </>
   );
 };
