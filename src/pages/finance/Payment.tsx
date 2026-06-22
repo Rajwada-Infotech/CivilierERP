@@ -26,6 +26,8 @@ import {
   Clock,
   ArrowLeft,
   Plus,
+  RotateCcw,
+  Check,
   Edit,
   Trash2,
   AlertCircle,
@@ -53,6 +55,7 @@ import {
   Printer,
   ArrowRight,
   CreditCard,
+  RefreshCw,
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -658,12 +661,17 @@ function SectionHeader({
       className="flex items-center gap-2.5 px-3 py-2 rounded-lg"
       style={{
         background: isDark ? "rgba(99,102,241,0.08)" : "rgba(99,102,241,0.06)",
-        border: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.15)",
+        border: isDark
+          ? "1px solid rgba(99,102,241,0.18)"
+          : "1px solid rgba(99,102,241,0.15)",
       }}
     >
       <div
         className="flex items-center justify-center w-5 h-5 rounded-md shrink-0"
-        style={{ background: "rgba(99,102,241,0.18)", border: "1px solid rgba(99,102,241,0.28)" }}
+        style={{
+          background: "rgba(99,102,241,0.18)",
+          border: "1px solid rgba(99,102,241,0.28)",
+        }}
       >
         <Icon size={11} style={{ color: "#818cf8" }} />
       </div>
@@ -1049,7 +1057,9 @@ function FilterBar({
       className="rounded-xl p-3 space-y-3"
       style={{
         background: _fbDark ? "rgba(15,17,26,0.4)" : "rgba(248,250,252,0.72)",
-        border: _fbDark ? "1px solid rgba(99,102,241,0.14)" : "1px solid rgba(99,102,241,0.12)",
+        border: _fbDark
+          ? "1px solid rgba(99,102,241,0.14)"
+          : "1px solid rgba(99,102,241,0.12)",
         backdropFilter: "blur(12px)",
         WebkitBackdropFilter: "blur(12px)",
       }}
@@ -1062,7 +1072,10 @@ function FilterBar({
           >
             <Search size={11} style={{ color: "#818cf8" }} />
           </div>
-          <span className="text-[11px] font-heading uppercase tracking-wider" style={{ color: _fbDark ? "#64748b" : "#6366f1" }}>
+          <span
+            className="text-[11px] font-heading uppercase tracking-wider"
+            style={{ color: _fbDark ? "#64748b" : "#6366f1" }}
+          >
             Filter expense bookings
           </span>
           {activeCount > 0 && (
@@ -1943,7 +1956,10 @@ function CardPanel({ bankId, form, set }: CardPanelProps) {
   const selected = cards.find((c) => c.id === form.cardId) ?? null;
 
   return (
-    <Field label="Card Used" hint="Select which card on file was used for this transaction.">
+    <Field
+      label="Card Used"
+      hint="Select which card on file was used for this transaction."
+    >
       <div className="relative">
         <CreditCard
           size={13}
@@ -1951,7 +1967,9 @@ function CardPanel({ bankId, form, set }: CardPanelProps) {
         />
         <select
           value={form.cardId ? String(form.cardId) : ""}
-          onChange={(e) => set("cardId", e.target.value ? Number(e.target.value) : null)}
+          onChange={(e) =>
+            set("cardId", e.target.value ? Number(e.target.value) : null)
+          }
           className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
         >
           <option value="">— Select card —</option>
@@ -1984,7 +2002,6 @@ function CardPanel({ bankId, form, set }: CardPanelProps) {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-
 
 const Payment: React.FC = () => {
   const { theme } = useTheme();
@@ -2350,6 +2367,25 @@ const Payment: React.FC = () => {
     setBookingFilters({ company: "", project: "", year: "", supplier: "" });
   };
 
+  const blank = blankForm();
+  const isDirty = (Object.keys(blank) as (keyof typeof blank)[]).some(
+    (k) => String(form[k] ?? "") !== String(blank[k] ?? ""),
+  );
+
+  const canSave = !!(
+    form.paymentName.trim() &&
+    form.mode &&
+    form.date &&
+    (Number(form.amount) > 0 || form.expenseRef)
+  );
+
+  const handleReset = () => {
+    setForm(blankForm());
+    setLinkedGRNs([]);
+    setSupplierBookingFilter("");
+    setBookingFilters({ company: "", project: "", year: "", supplier: "" });
+  };
+
   // ── Mode change — clear irrelevant fields ──────────────────────────────────
 
   const handleModeChange = (newMode: string) => {
@@ -2681,7 +2717,9 @@ const Payment: React.FC = () => {
 
     const isChequeMode =
       form.mode === "Cheque" || form.mode === "Post-Dated Cheque";
-    const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(form.mode);
+    const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(
+      form.mode,
+    );
 
     if (isChequeMode) {
       if (!form.bankId) {
@@ -2810,7 +2848,9 @@ const Payment: React.FC = () => {
 
   const isChequeMode =
     form.mode === "Cheque" || form.mode === "Post-Dated Cheque";
-  const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(form.mode);
+  const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(
+    form.mode,
+  );
   const isCashMode = form.mode === "Cash";
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -2821,9 +2861,17 @@ const Payment: React.FC = () => {
       <FinanceShell
         title="Payment Management"
         subtitle="Record and track payments linked to expense bookings"
+        icon={Wallet}
         action={
           view === "list" ? (
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <Button
+                onClick={openNew}
+                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-3 sm:px-4 py-1.5 text-xs h-auto"
+              >
+                <Plus size={13} className="sm:mr-1" />
+                <span className="hidden sm:inline">New Payment</span>
+              </Button>
               <ExportMenu
                 data={records as unknown as Record<string, unknown>[]}
                 columns={EXPORT_COLUMNS}
@@ -2840,18 +2888,20 @@ const Payment: React.FC = () => {
                   undefined
                 }
                 logoBase64={selectedCompanyDetail?.logo || undefined}
+                disabled={isLoading || records.length === 0}
               />
-              <Button
-                onClick={openNew}
-                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-4 py-1.5 text-xs h-auto"
+              <button
+                onClick={() => refetchPayments()}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors"
+                style={{ color: "#818cf8" }}
               >
-                <Plus size={13} className="mr-1" /> New Payment
-              </Button>
+                <RefreshCw size={13} />
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
             </div>
           ) : undefined
         }
       >
-
         {/* ── Summary stats ── */}
         {view === "list" && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -2928,8 +2978,12 @@ const Payment: React.FC = () => {
           <div
             className="rounded-2xl overflow-hidden"
             style={{
-              background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.80)",
-              border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.18)",
+              background: isDark
+                ? "rgba(12,14,22,0.55)"
+                : "rgba(255,255,255,0.80)",
+              border: isDark
+                ? "1px solid rgba(99,102,241,0.20)"
+                : "1px solid rgba(99,102,241,0.18)",
               backdropFilter: "blur(20px) saturate(160%)",
               WebkitBackdropFilter: "blur(20px) saturate(160%)",
               boxShadow: isDark
@@ -2941,14 +2995,21 @@ const Payment: React.FC = () => {
             <div
               className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
               style={{
-                background: isDark ? "rgba(99,102,241,0.10)" : "rgba(99,102,241,0.06)",
-                borderBottom: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.14)",
+                background: isDark
+                  ? "rgba(99,102,241,0.10)"
+                  : "rgba(99,102,241,0.06)",
+                borderBottom: isDark
+                  ? "1px solid rgba(99,102,241,0.18)"
+                  : "1px solid rgba(99,102,241,0.14)",
               }}
             >
               {/* Left accent stripe */}
               <div
                 className="absolute left-0 top-0 bottom-0 w-0.5"
-                style={{ background: "linear-gradient(to bottom, transparent 10%, #6366f1 30%, #6366f1 70%, transparent 90%)" }}
+                style={{
+                  background:
+                    "linear-gradient(to bottom, transparent 10%, #6366f1 30%, #6366f1 70%, transparent 90%)",
+                }}
               />
               <div className="flex items-center gap-3">
                 <button
@@ -2959,11 +3020,22 @@ const Payment: React.FC = () => {
                   <ArrowLeft size={15} />
                   <span className="hidden sm:inline">Back</span>
                 </button>
-                <span style={{ color: isDark ? "rgba(99,102,241,0.4)" : "rgba(99,102,241,0.3)" }}>|</span>
+                <span
+                  style={{
+                    color: isDark
+                      ? "rgba(99,102,241,0.4)"
+                      : "rgba(99,102,241,0.3)",
+                  }}
+                >
+                  |
+                </span>
                 <div className="flex items-center gap-2">
                   <div
                     className="w-6 h-6 rounded-lg flex items-center justify-center"
-                    style={{ background: "rgba(99,102,241,0.18)", border: "1px solid rgba(99,102,241,0.30)" }}
+                    style={{
+                      background: "rgba(99,102,241,0.18)",
+                      border: "1px solid rgba(99,102,241,0.30)",
+                    }}
                   >
                     <Receipt size={12} style={{ color: "#818cf8" }} />
                   </div>
@@ -2974,26 +3046,6 @@ const Payment: React.FC = () => {
                     {editingId ? "Edit Payment" : "New Payment"}
                   </h2>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={cancelForm}
-                  className="px-4 py-1.5 rounded-lg text-xs h-auto font-heading transition-colors"
-                  style={{
-                    border: isDark ? "1px solid rgba(99,102,241,0.25)" : "1px solid rgba(99,102,241,0.20)",
-                    color: isDark ? "#94a3b8" : "#6366f1",
-                    background: isDark ? "rgba(99,102,241,0.06)" : "rgba(99,102,241,0.04)",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="px-4 py-1.5 rounded-lg text-xs h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60"
-                >
-                  {saving ? "Saving…" : editingId ? "Update" : "Save Payment"}
-                </button>
               </div>
             </div>
 
@@ -3956,24 +4008,44 @@ const Payment: React.FC = () => {
               )}
 
               {/* ── Save footer ── */}
-              <div className="flex justify-end gap-2 pt-2 border-t border-border">
-                <button
-                  onClick={cancelForm}
-                  className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-60"
-                >
-                  {saving
-                    ? "Saving…"
-                    : editingId
-                      ? "Update Payment"
-                      : "Save Payment"}
-                </button>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
+                <p className="text-[11px] text-muted-foreground hidden sm:block">
+                  {canSave ? (
+                    <span className="text-emerald-500 font-medium">
+                      Ready to save
+                    </span>
+                  ) : (
+                    "Fill in the required fields to save"
+                  )}
+                </p>
+                <div className="flex items-center gap-2 sm:ml-auto">
+                  <button
+                    onClick={handleReset}
+                    disabled={!isDirty && !editingId}
+                    className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                  >
+                    <RotateCcw size={12} />
+                    {editingId ? "Cancel" : "Reset"}
+                  </button>
+                  <button
+                    onClick={handleSave}
+                    disabled={saving || !canSave}
+                    className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                  >
+                    {saving ? (
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : editingId ? (
+                      <Check size={14} />
+                    ) : (
+                      <Plus size={14} />
+                    )}
+                    {saving
+                      ? "Saving…"
+                      : editingId
+                        ? "Update Payment"
+                        : "Save Payment"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

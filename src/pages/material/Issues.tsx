@@ -2,6 +2,7 @@ import React, { useMemo, useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { MaterialShell } from "@/components/material/MaterialShell";
 import * as issuesApi from "@/api/issuesApi";
 import {
   CalendarDays,
@@ -1397,36 +1398,38 @@ export default function Issues() {
         </Card>
 
         {/* ── Save bar ── */}
-        <div className="flex items-center gap-3 pt-1">
-          <Button
-            variant="outline"
-            onClick={goToList}
-            disabled={isSaving}
-            className="px-6"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={onSave}
-            disabled={!canSave || isSaving}
-            className="gradient-accent px-6 gap-2"
-          >
-            {isSaving ? (
-              <RefreshCw size={14} className="animate-spin" />
-            ) : (
-              <Save size={14} />
-            )}
-            {isSaving ? "Saving…" : editingId ? "Update Issue" : "Save Issue"}
-          </Button>
-          {!canSave && (
-            <span className="text-xs text-muted-foreground">
-              {!headerIsValid
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-1">
+          <p className="hidden sm:block text-xs text-muted-foreground">
+            {!canSave
+              ? !headerIsValid
                 ? !header.godownId
                   ? "Select a source godown"
                   : "Fill all required header fields"
-                : "Fix cart errors above"}
-            </span>
-          )}
+                : "Fix cart errors above"
+              : "Ready to save"}
+          </p>
+          <div className="flex gap-3 sm:ml-auto">
+            <Button
+              variant="outline"
+              onClick={goToList}
+              disabled={isSaving}
+              className="flex-1 sm:flex-none justify-center px-6"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={onSave}
+              disabled={!canSave || isSaving}
+              className="flex-1 sm:flex-none whitespace-nowrap bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 px-6 gap-2"
+            >
+              {isSaving ? (
+                <RefreshCw size={14} className="animate-spin" />
+              ) : (
+                <Save size={14} />
+              )}
+              {isSaving ? "Saving…" : editingId ? "Update Issue" : "Save Issue"}
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -1636,18 +1639,12 @@ export default function Issues() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "Issues"]} />
-      <div className="relative space-y-8 mt-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Material Issues
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Issue stock items from a godown with real-time availability
-              tracking.
-            </p>
-          </div>
-          {viewMode === "list" && (
+      <MaterialShell
+        title="Material Issues"
+        subtitle="Issue materials from godown to projects"
+        icon={ArrowDownToLine}
+        action={
+          viewMode === "list" ? (
             <Button
               onClick={() => {
                 setHeader(defaultHeader);
@@ -1655,17 +1652,17 @@ export default function Issues() {
                 setEditingId(null);
                 setViewMode("form");
               }}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+              className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition-all"
             >
               <Plus size={15} /> New Issue
             </Button>
-          )}
-        </div>
-
+          ) : undefined
+        }
+      >
         {viewMode === "list" && IssueList()}
         {viewMode === "form" && IssueForm()}
         {viewMode === "view" && IssueView()}
-      </div>
+      </MaterialShell>
     </>
   );
 }

@@ -98,13 +98,15 @@ const Dropdown = ({
 
 // ─── Module color helpers ──────────────────────────────────────────────────────
 
+// HSL values derived from MODULE_HEADER hex colors in AppSidebar for consistency
 const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
-  finance: { h: 217, s: 91, l: 60 },
-  material: { h: 160, s: 60, l: 45 },
-  followup: { h: 263, s: 70, l: 58 },
-  engineering: { h: 38, s: 92, l: 50 },
-  ticket: { h: 330, s: 80, l: 60 },
-  admin: { h: 217, s: 91, l: 60 },
+  finance: { h: 239, s: 84, l: 67 },     // #6366f1 indigo
+  material: { h: 160, s: 84, l: 39 },    // #10b981 emerald
+  followup: { h: 235, s: 90, l: 74 },    // #818cf8 light indigo-violet
+  engineering: { h: 25, s: 95, l: 53 },  // #f97316 orange
+  ticket: { h: 330, s: 81, l: 60 },      // #ec4899 pink
+  sales: { h: 271, s: 91, l: 65 },       // #a855f7 purple
+  admin: { h: 217, s: 91, l: 60 },       // #3b82f6 blue
 };
 
 function moduleColorVars(id: string): React.CSSProperties {
@@ -144,7 +146,7 @@ const financeSetupItems = [
     icon: Layers,
     label: "AC Group",
     path: "/masters/account-group",
-    color: "text-indigo-500",
+    color: "text-indigo-400",
   },
   {
     icon: Receipt,
@@ -162,19 +164,19 @@ const financeSetupItems = [
     icon: HardHat,
     label: "Contractors",
     path: "/masters/contractors",
-    color: "text-yellow-500",
+    color: "text-amber-500",
   },
   {
     icon: Landmark,
     label: "Banks",
     path: "/masters/banks",
-    color: "text-green-500",
+    color: "text-emerald-500",
   },
   {
     icon: Calendar,
     label: "Fin Year",
     path: "/masters/financial-year",
-    color: "text-amber-500",
+    color: "text-purple-400",
   },
   {
     icon: BookOpen,
@@ -192,7 +194,7 @@ const financeSetupItems = [
     icon: FileText,
     label: "TDS",
     path: "/masters/tds",
-    color: "text-emerald-500",
+    color: "text-green-500",
   },
 ];
 
@@ -237,7 +239,7 @@ const materialSetupItems = [
     icon: ClipboardList,
     label: "Inventory",
     path: "/material/inventory-master",
-    color: "text-teal-400",
+    color: "text-sky-400",
   },
 ];
 
@@ -285,7 +287,7 @@ const engineeringSetupItems = [
     icon: Activity,
     label: "Activity",
     path: "/masters/activity",
-    color: "text-green-400",
+    color: "text-orange-400",
   },
 ];
 
@@ -355,7 +357,7 @@ const SetupDropdown = ({
       open={open}
       onClose={onClose}
       className="origin-top-left left-0"
-      style={{ minWidth: "22rem", ...modVars }}
+      style={{ minWidth: "min(22rem, calc(100vw - 2rem))", ...modVars }}
       trigger={
         <button
           onClick={onToggle}
@@ -435,7 +437,7 @@ const SetupDropdown = ({
 
       {/* ── Items grid ── */}
       <div className="p-3">
-        <div className={`grid grid-cols-4 gap-2 ${open ? "setup-grid-open" : ""}`}>
+        <div className={`grid grid-cols-3 sm:grid-cols-4 gap-2 ${open ? "setup-grid-open" : ""}`}>
           {items.map(({ icon: Icon, label, path, color }, i) => {
             const isActivePath = location.pathname === path;
             return (

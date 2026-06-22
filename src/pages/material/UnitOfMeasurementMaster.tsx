@@ -1,5 +1,6 @@
 import React from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { MaterialShell } from "@/components/material/MaterialShell";
 import {
   MasterPage,
   type ColumnDef,
@@ -174,12 +175,12 @@ export default function UnitOfMeasurementMaster() {
 
   return (
     <>
-      <Breadcrumbs
-        items={["Dashboard", "Material Module", "Unit of Measurement"]}
-      />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Unit of Measurement Master
-      </h1>
+      <Breadcrumbs items={["Dashboard", "Material", "Unit of Measurement"]} />
+      <MaterialShell
+        title="Unit of Measurement"
+        subtitle="Configure units used for items and stock"
+        icon={Ruler}
+      >
       <MasterPage
         title="Unit of Measurement"
         fields={FIELDS}
@@ -198,6 +199,7 @@ export default function UnitOfMeasurementMaster() {
           ],
         }}
       />
+      </MaterialShell>
     </>
   );
 }

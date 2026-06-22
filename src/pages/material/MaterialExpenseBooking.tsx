@@ -8,6 +8,7 @@ import React, {
 import { useNavigate } from "react-router-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { MaterialShell } from "@/components/material/MaterialShell";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -2405,27 +2406,21 @@ export default function MaterialExpenseBooking() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material", "Expense Booking"]} />
-      <div className="space-y-6 mt-6">
-        {/* Page Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Expense Booking
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Book expenses against purchase orders, confirmed work done, or
-              invoice documents
-            </p>
-          </div>
-          {view === "list" && (
+      <MaterialShell
+        title="Expense Booking"
+        subtitle="Book expenses against purchase orders, confirmed work done, or invoice documents"
+        icon={Receipt}
+        action={
+          view === "list" ? (
             <Button
               onClick={openNew}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+              className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition-all"
             >
-              <Plus size={15} /> New Booking
+              <Plus size={13} /> New Booking
             </Button>
-          )}
-        </div>
+          ) : undefined
+        }
+      >
 
         {/* Form View */}
         {view === "form" && (
@@ -2461,7 +2456,7 @@ export default function MaterialExpenseBooking() {
                     Cancel
                   </Button>
                   <Button
-                    className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex-1 sm:flex-none"
+                    className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex-1 sm:flex-none"
                     onClick={handleSave}
                     disabled={saving}
                   >
@@ -3366,7 +3361,7 @@ export default function MaterialExpenseBooking() {
                   Cancel
                 </Button>
                 <Button
-                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                  className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
                   onClick={handleSave}
                   disabled={saving}
                 >
@@ -3747,8 +3742,6 @@ export default function MaterialExpenseBooking() {
             )}
           </>
         )}
-      </div>
-
       {/* BRS / Payment block dialog */}
       <Dialog
         open={!!deleteBlockInfo}
@@ -3897,6 +3890,7 @@ export default function MaterialExpenseBooking() {
       />
 
       {/* Remaining GRN Items — auto-created silently on save */}
+      </MaterialShell>
     </>
   );
 }

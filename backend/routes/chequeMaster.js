@@ -74,11 +74,11 @@ router.get("/", cache("cheque-master", 300), async (req, res) => {
         cm.CreatedAt,
         cm.UpdatedAt,
         cm.ApprovedAt,
-        bm.BName        AS BankName,
-        bm.BBranch      AS BankBranch,
-        bm.BAccountType AS BankAccountType
+        ahm.LHeadName    AS BankName,
+        ahm.LHeadAddress AS BankBranch,
+        ahm.LAccountType AS BankAccountType
       FROM dbo.ChequeMaster cm
-      LEFT JOIN dbo.BankMaster bm ON cm.BankId = bm.BId
+      LEFT JOIN dbo.AccountHeadMaster ahm ON cm.BankId = ahm.LHeadId
     `);
 
     res.json(result.recordset);

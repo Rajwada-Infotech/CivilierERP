@@ -255,6 +255,9 @@ const ChequeMaster: React.FC = () => {
     resolver: zodResolver(chequeMasterSchema),
     defaultValues: EMPTY as ChequeMasterForm,
   });
+  const isDirty = (Object.keys(EMPTY) as (keyof FormState)[]).some(
+    (k) => form[k] !== EMPTY[k],
+  );
   const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [viewRow, setViewRow] = useState<DbCheque | null>(null);
@@ -447,6 +450,15 @@ const ChequeMaster: React.FC = () => {
       <FinanceShell
         title="Cheque Master"
         subtitle="Register and manage cheque books / lots with bank and lot details"
+        icon={BookOpen}
+        action={
+          <span
+            className="text-xs font-heading px-3 py-1.5 rounded-lg"
+            style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
+          >
+            {dbCheques.length} Lots
+          </span>
+        }
       >
         {/* Form */}
         <div
@@ -722,27 +734,28 @@ const ChequeMaster: React.FC = () => {
 
           </div>
 
-          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
-            <p className="text-[11px] text-muted-foreground">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
+            <p className="text-[11px] text-muted-foreground hidden sm:block">
               {canSave ? (
                 <span className="text-emerald-500 font-medium">Ready to save</span>
               ) : (
                 "Fill in the required fields to save"
               )}
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 sm:ml-auto">
               <button
                 type="button"
                 onClick={handleReset}
-                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+                disabled={!isDirty && !editingId}
+                className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
               >
-                <RotateCcw size={13} />
+                <RotateCcw size={12} />
                 {editingId ? "Cancel" : "Reset"}
               </button>
               <button
                 onClick={handleSave}
                 disabled={!canSave}
-                className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
+                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
               >
                 {editingId ? <Check size={14} /> : <Plus size={14} />}
                 {editingId ? "Update Lot" : "Save Lot"}
@@ -754,17 +767,17 @@ const ChequeMaster: React.FC = () => {
         {/* Table */}
         <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
-            <div>
+            <div className="min-w-0 flex-1 mr-3">
               <h3 className="font-heading font-semibold text-foreground text-sm">
                 Cheque Lot Records
               </h3>
               <p className="text-[11px] text-muted-foreground mt-0.5">
                 {filtered.length} lot{filtered.length !== 1 ? "s" : ""}
                 {filtered.length > 0 && (
-                  <span className="ml-2 text-primary font-semibold">
+                  <span className="ml-1 text-primary font-semibold">
                     ·{" "}
                     {filtered
-                      .reduce((s, r) => s + (r.TotalCheques || 0), 0)
+                      .reduce((s, r) => s + Number(r.TotalCheques || 0), 0)
                       .toLocaleString()}{" "}
                     total cheques
                   </span>

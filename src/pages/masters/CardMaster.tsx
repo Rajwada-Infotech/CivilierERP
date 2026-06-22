@@ -200,7 +200,7 @@ const ReminderBanner: React.FC<{
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 sm:ml-auto">
               <button
                 onClick={onAddNew}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-all"
@@ -481,6 +481,9 @@ const CardMaster: React.FC = () => {
     resolver: zodResolver(cardMasterSchema),
     defaultValues: EMPTY,
   });
+  const isDirty = (Object.keys(EMPTY) as (keyof FormState)[]).some(
+    (k) => form[k] !== EMPTY[k],
+  );
   const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
@@ -701,26 +704,35 @@ const CardMaster: React.FC = () => {
       <FinanceShell
         title="Card Master"
         subtitle="Register and manage bank cards with network, type and security details"
+        icon={CreditCard}
         action={
-          hasAlerts ? (
-            <button
-              onClick={() => setShowReminderPanel((p) => !p)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-heading font-semibold transition-all ${overdueCount > 0 ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-amber-500/40 bg-amber-500/10 text-amber-600"}`}
+          <div className="flex items-center gap-2">
+            {hasAlerts && (
+              <button
+                onClick={() => setShowReminderPanel((p) => !p)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-heading font-semibold transition-all ${overdueCount > 0 ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-amber-500/40 bg-amber-500/10 text-amber-600"}`}
+              >
+                <BellRing
+                  size={13}
+                  className={overdueCount > 0 ? "animate-pulse" : ""}
+                />
+                {overdueCount > 0
+                  ? `${overdueCount} overdue`
+                  : `${upcomingCount} upcoming`}
+                {showReminderPanel ? (
+                  <ChevronUp size={12} />
+                ) : (
+                  <ChevronDown size={12} />
+                )}
+              </button>
+            )}
+            <span
+              className="text-xs font-heading px-3 py-1.5 rounded-lg"
+              style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
             >
-              <BellRing
-                size={13}
-                className={overdueCount > 0 ? "animate-pulse" : ""}
-              />
-              {overdueCount > 0
-                ? `${overdueCount} overdue`
-                : `${upcomingCount} upcoming`}
-              {showReminderPanel ? (
-                <ChevronUp size={12} />
-              ) : (
-                <ChevronDown size={12} />
-              )}
-            </button>
-          ) : undefined
+              {dbItems.length} Cards
+            </span>
+          </div>
         }
       >
 
@@ -1094,7 +1106,7 @@ const CardMaster: React.FC = () => {
                         <p className="text-sm font-heading font-semibold text-foreground">
                           Card Renewal Reminder
                         </p>
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="text-[11px] text-muted-foreground hidden sm:block">
                           {form.reminderEnabled && previewReminderDate
                             ? `Will remind on ${formatDisplayDate(previewReminderDate)}`
                             : "No reminder set"}
@@ -1202,7 +1214,7 @@ const CardMaster: React.FC = () => {
 
           </div>
 
-          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
             <p className="text-[11px] text-muted-foreground">
               {canSave ? (
                 <span className="text-emerald-500 font-medium">Ready to save</span>
@@ -1214,15 +1226,16 @@ const CardMaster: React.FC = () => {
               <button
                 type="button"
                 onClick={handleReset}
-                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+                disabled={!isDirty && !editingId}
+                className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
               >
-                <RotateCcw size={13} />
+                <RotateCcw size={12} />
                 {editingId ? "Cancel" : "Reset"}
               </button>
               <button
                 onClick={handleSave}
                 disabled={!canSave}
-                className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
+                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
               >
                 {editingId ? <Check size={14} /> : <Plus size={14} />}
                 {editingId ? "Update Card" : "Save Card"}
