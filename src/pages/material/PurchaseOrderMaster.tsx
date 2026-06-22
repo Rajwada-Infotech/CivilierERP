@@ -1,3 +1,4 @@
+import { generateUUID } from '../../utils/cryptoPolyfill';  
 import { useEffect, useState, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -974,7 +975,7 @@ const PurchaseOrderMaster: React.FC = () => {
       }
 
       return {
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         itemId: it.itemId || "",
         itemName: it.itemDescription,
         itemDescription: it.itemDescription,
