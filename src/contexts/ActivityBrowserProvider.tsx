@@ -6,6 +6,7 @@ import React, {
   useMemo,
   useRef,
 } from "react";
+import { generateId } from "@/lib/generateId";
 
 import {
   type ActivityActionType,
@@ -186,7 +187,7 @@ export const ActivityBrowserProvider: React.FC<{
     async (user: { id: string; name: string; email: string; role: string }) => {
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
-      const sessionId = crypto.randomUUID();
+      const sessionId = generateId();
       const loginTime = Date.now();
 
       localStorage.setItem("currentSessionId", sessionId);

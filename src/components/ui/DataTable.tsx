@@ -167,7 +167,7 @@ export function DataTable<TData extends RowData>({
                 value={globalFilter}
                 onChange={(e) => setGlobalFilter(e.target.value)}
                 placeholder={searchPlaceholder}
-                className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-full sm:w-44"
+                className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 w-full sm:w-44"
               />
             </div>
           </div>
@@ -208,9 +208,9 @@ export function DataTable<TData extends RowData>({
                         {canSort && (
                           <span className="text-muted-foreground/50">
                             {sorted === "asc" ? (
-                              <ChevronUp size={11} className="text-primary" />
+                              <ChevronUp size={11} className="text-emerald-500" />
                             ) : sorted === "desc" ? (
-                              <ChevronDown size={11} className="text-primary" />
+                              <ChevronDown size={11} className="text-emerald-500" />
                             ) : (
                               <ChevronsUpDown size={11} />
                             )}
@@ -287,7 +287,7 @@ export function DataTable<TData extends RowData>({
                   pageIndex: 0,
                 }))
               }
-              className="text-xs rounded-md bg-muted border border-border px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              className="text-xs rounded-md bg-muted border border-border px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
             >
               {pageSizeOptions.map((s) => (
                 <option key={s} value={s}>
