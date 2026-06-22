@@ -39,103 +39,129 @@ export default defineConfig(({ mode }) => ({
       },
     },
   },
-  plugins: [
-    react(),
-  ],
+  plugins: [react()],
   build: {
+    // Raise the warning threshold slightly — jspdf/html2canvas are
+    // intentionally large and can't be split further without async imports.
+    chunkSizeWarningLimit: 600,
+
+    rolldownOptions: {
+      // Silence the lottie-web eval() warning — it's a third-party player
+      // that uses indirect eval internally; we cannot change its source.
+      onwarn(warning, defaultHandler) {
+        if (warning.code === "EVAL" && warning.id?.includes("lottie-web")) {
+          return;
+        }
+        defaultHandler(warning);
+      },
+    },
+
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
-          const normalizedId = id.replace(/\\/g, "/");
+          const n = id.replace(/\\/g, "/");
 
+          // ── Core React runtime ──────────────────────────────────────────
           if (
-            normalizedId.includes("/node_modules/react/") ||
-            normalizedId.includes("/node_modules/react-dom/") ||
-            normalizedId.includes("/node_modules/scheduler/") ||
-            normalizedId.includes("/node_modules/react-router") ||
-            normalizedId.includes("/node_modules/@remix-run/") ||
-            normalizedId.includes("/node_modules/@tanstack/")
-          ) {
+            n.includes("/node_modules/react/") ||
+            n.includes("/node_modules/react-dom/") ||
+            n.includes("/node_modules/scheduler/") ||
+            n.includes("/node_modules/react-router") ||
+            n.includes("/node_modules/@remix-run/") ||
+            n.includes("/node_modules/@tanstack/")
+          )
             return "vendor-framework";
-          }
-          if (normalizedId.includes("/node_modules/@radix-ui/")) {
-            return "vendor-ui";
-          }
-          if (
-            normalizedId.includes("/node_modules/recharts") ||
-            normalizedId.includes("/node_modules/d3-") ||
-            normalizedId.includes("/node_modules/victory-vendor/")
-          ) {
-            return "vendor-charts";
-          }
-          if (
-            normalizedId.includes("/node_modules/framer-motion/") ||
-            normalizedId.includes("/node_modules/motion-dom/")
-          ) {
-            return "vendor-ui";
-          }
-          if (normalizedId.includes("/node_modules/@react-pdf/")) {
-            return "vendor-react-pdf";
-          }
-          if (
-            normalizedId.includes("/node_modules/fontkit/") ||
-            normalizedId.includes("/node_modules/hyphen/") ||
-            normalizedId.includes("/node_modules/linebreak/") ||
-            normalizedId.includes("/node_modules/png-js/") ||
-            normalizedId.includes("/node_modules/unicode-properties/") ||
-            normalizedId.includes("/node_modules/yoga-layout/")
-          ) {
-            return "vendor-pdf-support";
-          }
-          if (normalizedId.includes("/node_modules/jspdf/")) {
-            return "vendor-jspdf";
-          }
-          if (normalizedId.includes("/node_modules/html2canvas/")) {
+
+          // ── PDF / export ────────────────────────────────────────────────
+          if (n.includes("/node_modules/jspdf/")) return "vendor-jspdf";
+          if (n.includes("/node_modules/html2canvas/"))
             return "vendor-html2canvas";
-          }
+          if (n.includes("/node_modules/@react-pdf/"))
+            return "vendor-react-pdf";
           if (
-            normalizedId.includes("/node_modules/dompurify/") ||
-            normalizedId.includes("/node_modules/fflate/")
-          ) {
+            n.includes("/node_modules/fontkit/") ||
+            n.includes("/node_modules/hyphen/") ||
+            n.includes("/node_modules/linebreak/") ||
+            n.includes("/node_modules/png-js/") ||
+            n.includes("/node_modules/unicode-properties/") ||
+            n.includes("/node_modules/yoga-layout/")
+          )
+            return "vendor-pdf-support";
+          if (
+            n.includes("/node_modules/dompurify/") ||
+            n.includes("/node_modules/fflate/")
+          )
             return "vendor-export-utils";
-          }
-          if (normalizedId.includes("/node_modules/lucide-react/")) {
-            return "vendor-ui";
-          }
-          if (normalizedId.includes("/node_modules/date-fns/")) {
-            return "vendor-ui";
-          }
+
+          // ── Charts / data-vis ───────────────────────────────────────────
           if (
-            normalizedId.includes("/node_modules/react-day-picker/") ||
-            normalizedId.includes("/node_modules/date-fns-jalali/")
-          ) {
-            return "vendor-ui";
-          }
+            n.includes("/node_modules/recharts") ||
+            n.includes("/node_modules/d3-") ||
+            n.includes("/node_modules/victory-vendor/")
+          )
+            return "vendor-charts";
+
+          // ── Spreadsheet / xlsx ──────────────────────────────────────────
+          if (n.includes("/node_modules/xlsx/")) return "vendor-xlsx";
+
+          // ── Animation ───────────────────────────────────────────────────
           if (
-            normalizedId.includes("/node_modules/react-hook-form/") ||
-            normalizedId.includes("/node_modules/@hookform/") ||
-            normalizedId.includes("/node_modules/zod/")
-          ) {
-            return "vendor-ui";
-          }
+            n.includes("/node_modules/lottie-web/") ||
+            n.includes("/node_modules/@lottiefiles/")
+          )
+            return "vendor-lottie";
           if (
-            normalizedId.includes("/node_modules/sonner/") ||
-            normalizedId.includes("/node_modules/cmdk/") ||
-            normalizedId.includes("/node_modules/vaul/") ||
-            normalizedId.includes("/node_modules/embla-carousel")
-          ) {
-            return "vendor-ui";
-          }
+            n.includes("/node_modules/framer-motion/") ||
+            n.includes("/node_modules/motion-dom/")
+          )
+            return "vendor-motion";
+
+          // ── Real-time / networking ──────────────────────────────────────
           if (
-            normalizedId.includes("/node_modules/axios/") ||
-            normalizedId.includes("/node_modules/tailwind-merge/") ||
-            normalizedId.includes("/node_modules/class-variance-authority/") ||
-            normalizedId.includes("/node_modules/clsx/")
-          ) {
-            return "vendor-ui";
-          }
-          return "vendor";
+            n.includes("/node_modules/socket.io-client/") ||
+            n.includes("/node_modules/engine.io-client/") ||
+            n.includes("/node_modules/@socket.io/")
+          )
+            return "vendor-socketio";
+
+          // ── Radix UI primitives ─────────────────────────────────────────
+          if (n.includes("/node_modules/@radix-ui/")) return "vendor-radix";
+
+          // ── Date utilities ──────────────────────────────────────────────
+          if (
+            n.includes("/node_modules/date-fns/") ||
+            n.includes("/node_modules/date-fns-jalali/") ||
+            n.includes("/node_modules/react-day-picker/")
+          )
+            return "vendor-dates";
+
+          // ── Forms / validation ──────────────────────────────────────────
+          if (
+            n.includes("/node_modules/react-hook-form/") ||
+            n.includes("/node_modules/@hookform/") ||
+            n.includes("/node_modules/zod/")
+          )
+            return "vendor-forms";
+
+          // ── Small UI utilities ──────────────────────────────────────────
+          if (
+            n.includes("/node_modules/lucide-react/") ||
+            n.includes("/node_modules/sonner/") ||
+            n.includes("/node_modules/cmdk/") ||
+            n.includes("/node_modules/vaul/") ||
+            n.includes("/node_modules/embla-carousel") ||
+            n.includes("/node_modules/tailwind-merge/") ||
+            n.includes("/node_modules/class-variance-authority/") ||
+            n.includes("/node_modules/clsx/")
+          )
+            return "vendor-ui-utils";
+
+          // ── HTTP / misc ─────────────────────────────────────────────────
+          if (n.includes("/node_modules/axios/")) return "vendor-http";
+
+          // ── Everything else in node_modules ────────────────────────────
+          return "vendor-misc";
         },
       },
     },

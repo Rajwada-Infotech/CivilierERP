@@ -476,7 +476,7 @@ const AccountGroupMaster: React.FC = () => {
 
         {/* ── Form card ── */}
         <div
-          className="rounded-xl overflow-hidden"
+          className="rounded-xl overflow-visible relative"
           style={{
             background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.82)",
             border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.16)",
@@ -485,11 +485,12 @@ const AccountGroupMaster: React.FC = () => {
             boxShadow: isDark
               ? "0 8px 32px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.06)"
               : "0 8px 32px rgba(99,102,241,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
+            zIndex: 10,
           }}
         >
           {/* Card header — title only */}
           <div
-            className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
+            className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden rounded-t-xl"
             style={{
               background: isDark ? "rgba(99,102,241,0.09)" : "rgba(99,102,241,0.05)",
               borderBottom: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.13)",
@@ -597,7 +598,7 @@ const AccountGroupMaster: React.FC = () => {
           </div>
 
           {/* Card footer — actions */}
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
             <p className="text-[11px] text-muted-foreground hidden sm:block">
               {canSave
                 ? <span className="text-emerald-500 font-medium">Ready to save</span>
