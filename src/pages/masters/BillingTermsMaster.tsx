@@ -1,13 +1,21 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { MaterialShell } from "@/components/material/MaterialShell";
 import {
   MasterPage,
   type FieldDef,
   type ColumnDef,
   type DataChangeEvent,
 } from "@/components/MasterPage";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
-import { Book, Loader2 } from "lucide-react";
+import { Book, Loader2, Download, Upload, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   useBillingTerms,
@@ -20,6 +28,32 @@ import {
   deleteBillingTerm,
   type BillingTermRow,
 } from "@/api/billingTermsMasterApi";
+
+// ─── CSV template / import column mapping ─────────────────────────────────────
+// Single source of truth for both the downloadable template and the importer,
+// so the headers a user downloads are exactly the headers the importer reads.
+const CSV_HEADERS = {
+  name: "Term Name",
+  calculationType: "Calculation Type (Before GST/After GST)",
+  deductionType: "Type (Addition/Deduction)",
+  description: "Remarks",
+  isActive: "Status (Active/Inactive)",
+} as const;
+
+const BILLING_TERM_CSV_TEMPLATE_COLUMNS: ExportColumn[] = [
+  { header: CSV_HEADERS.name, accessor: "Name" },
+  { header: CSV_HEADERS.calculationType, accessor: "CalculationType" },
+  { header: CSV_HEADERS.deductionType, accessor: "DeductionType" },
+  { header: CSV_HEADERS.description, accessor: "Description" },
+  { header: CSV_HEADERS.isActive, accessor: "IsActive" },
+];
+
+interface ImportRowResult {
+  row: number;
+  name: string;
+  status: "success" | "error";
+  message?: string;
+}
 
 // ─── Map DB row → context shape ───────────────────────────────────────────────
 // NOTE: We also spread the raw DB column names (Name, CalculationType,
@@ -97,6 +131,159 @@ const BillingTermsMaster: React.FC = () => {
   const refetch = async () => {
     const fresh = await getBillingTerms();
     setBillingTerms(fresh.map(mapRow));
+  };
+
+  // ── CSV import/export state ─────────────────────────────────────────────────
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState<ImportRowResult[] | null>(
+    null,
+  );
+
+  const handleDownloadTemplate = () => {
+    exportToCsv(
+      [],
+      BILLING_TERM_CSV_TEMPLATE_COLUMNS,
+      "billing-terms-template",
+    );
+    toast.success("Template downloaded — fill it in and use Import.");
+  };
+
+  const handleImportClick = () => {
+    importFileInputRef.current?.click();
+  };
+
+  const handleImportFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    // Allow picking the same filename again later.
+    e.target.value = "";
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast.error("Please select a .csv file.");
+      return;
+    }
+
+    setImporting(true);
+    setImportResults(null);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+
+      if (rows.length === 0) {
+        toast.error("The CSV file has no data rows.");
+        setImporting(false);
+        return;
+      }
+
+      const results: ImportRowResult[] = [];
+
+      // Sequential, not Promise.all — keeps row order in the result list
+      // predictable and avoids hammering the API with N parallel inserts.
+      for (let i = 0; i < rows.length; i++) {
+        const raw = rows[i];
+        const rowNum = i + 2; // +1 for header row, +1 for 1-based numbering
+        const nameForLog = raw[CSV_HEADERS.name] || "(blank)";
+
+        try {
+          const name = (raw[CSV_HEADERS.name] || "").trim();
+          const description = (raw[CSV_HEADERS.description] || "").trim();
+          const calcRaw = (raw[CSV_HEADERS.calculationType] || "")
+            .trim()
+            .toLowerCase();
+          const deductionRaw = (raw[CSV_HEADERS.deductionType] || "")
+            .trim()
+            .toLowerCase();
+          const statusRaw = (raw[CSV_HEADERS.isActive] || "")
+            .trim()
+            .toLowerCase();
+
+          if (!name) throw new Error("Term Name is required");
+
+          // Calculation Type defaults to "Before GST" when left blank,
+          // matching the form's default.
+          const calculationType =
+            calcRaw === "" || calcRaw === "before gst"
+              ? "Before GST"
+              : calcRaw === "after gst"
+                ? "After GST"
+                : null;
+          if (calculationType === null)
+            throw new Error(
+              `Calculation Type must be "Before GST" or "After GST" (got "${raw[CSV_HEADERS.calculationType]}")`,
+            );
+
+          // Type defaults to "Addition" when left blank, matching the form's default.
+          const deductionType =
+            deductionRaw === "" || deductionRaw === "addition"
+              ? "Addition"
+              : deductionRaw === "deduction"
+                ? "Deduction"
+                : null;
+          if (deductionType === null)
+            throw new Error(
+              `Type must be "Addition" or "Deduction" (got "${raw[CSV_HEADERS.deductionType]}")`,
+            );
+
+          // Status defaults to Active when left blank, matching the form's default.
+          const isActive =
+            statusRaw === "" || statusRaw === "active"
+              ? true
+              : statusRaw === "inactive"
+                ? false
+                : null;
+          if (isActive === null)
+            throw new Error(
+              `Status must be "Active" or "Inactive" (got "${raw[CSV_HEADERS.isActive]}")`,
+            );
+
+          await addBillingTerm({
+            Name: name,
+            Description: description,
+            CalculationType: calculationType,
+            DeductionType: deductionType,
+            IsActive: isActive,
+          });
+          results.push({ row: rowNum, name, status: "success" });
+        } catch (err: any) {
+          results.push({
+            row: rowNum,
+            name: nameForLog,
+            status: "error",
+            message: err?.message || "Unknown error",
+          });
+        }
+      }
+
+      setImportResults(results);
+      const successCount = results.filter((r) => r.status === "success").length;
+      const errorCount = results.length - successCount;
+
+      if (successCount > 0) {
+        await refetch();
+      }
+      if (errorCount === 0) {
+        toast.success(
+          `Imported ${successCount} billing term${successCount === 1 ? "" : "s"} ✓`,
+        );
+      } else if (successCount === 0) {
+        toast.error(
+          `Import failed for all ${errorCount} row${errorCount === 1 ? "" : "s"}.`,
+        );
+      } else {
+        toast.warning(
+          `Imported ${successCount} of ${results.length} rows — ${errorCount} failed. See details.`,
+        );
+      }
+    } catch (err: any) {
+      toast.error(
+        "Could not read CSV file: " + (err?.message || "Unknown error"),
+      );
+    } finally {
+      setImporting(false);
+    }
   };
 
   const fields: FieldDef[] = [
@@ -228,48 +415,151 @@ const BillingTermsMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Masters", "Billing Terms"]} />
+      <MaterialShell
+        title="Billing Terms"
+        subtitle="Configure billing terms and deduction types"
+        icon={Book}
+        action={
+          <div className="flex items-center gap-2">
+            <input
+              ref={importFileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleImportFileChange}
+              className="hidden"
+            />
+            <button
+              onClick={handleDownloadTemplate}
+              title="Download a blank CSV with all billing term fields"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+            >
+              <Download size={13} />
+              <span className="hidden sm:inline">Download Template</span>
+            </button>
+            <button
+              onClick={handleImportClick}
+              disabled={importing}
+              title="Import billing terms from a filled-in CSV"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {importing ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Upload size={13} />
+              )}
+              <span className="hidden sm:inline">
+                {importing ? "Importing..." : "Import CSV"}
+              </span>
+            </button>
+          </div>
+        }
+      >
+        {loading ? (
+          <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground">
+            <Loader2 size={18} className="animate-spin" />
+            <span className="text-sm font-heading">Loading billing terms…</span>
+          </div>
+        ) : (
+          <MasterPage
+            title="Billing Term"
+            fields={fields}
+            columns={columns}
+            columnRenderers={columnRenderers}
+            initialData={billingTerms as unknown as Record<string, unknown>[]}
+            onDataEvent={handleDataEvent}
+            exportConfig={{
+              title: "Billing Terms Master",
+              filename: "billing-terms-master",
+              columns: [
+                { header: "Term Name", accessor: "Name" },
+                { header: "Calculation Type", accessor: "CalculationType" },
+                { header: "Type", accessor: "DeductionType" },
+                { header: "Remarks", accessor: "Description" },
+                {
+                  header: "Status",
+                  accessor: (r) => (r.IsActive ? "Active" : "Inactive"),
+                },
+              ],
+            }}
+          />
+        )}
 
-      <div className="mb-6">
-        <div className="flex items-center gap-3 mb-2">
-          <Book className="w-6 h-6 text-primary" />
-          <h1 className="text-xl font-heading font-bold text-foreground">
-            Billing Terms Master
-          </h1>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Configure standard billing terms for automated invoicing
-        </p>
-      </div>
-
-      {loading ? (
-        <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground">
-          <Loader2 size={18} className="animate-spin" />
-          <span className="text-sm font-heading">Loading billing terms…</span>
-        </div>
-      ) : (
-        <MasterPage
-          title="Billing Term"
-          fields={fields}
-          columns={columns}
-          columnRenderers={columnRenderers}
-          initialData={billingTerms as unknown as Record<string, unknown>[]}
-          onDataEvent={handleDataEvent}
-          exportConfig={{
-            title: "Billing Terms Master",
-            filename: "billing-terms-master",
-            columns: [
-              { header: "Term Name", accessor: "Name" },
-              { header: "Calculation Type", accessor: "CalculationType" },
-              { header: "Type", accessor: "DeductionType" },
-              { header: "Remarks", accessor: "Description" },
-              {
-                header: "Status",
-                accessor: (r) => (r.IsActive ? "Active" : "Inactive"),
-              },
-            ],
-          }}
-        />
-      )}
+        {/* Import Results Modal */}
+        <Dialog
+          open={!!importResults}
+          onOpenChange={(open) => !open && setImportResults(null)}
+        >
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="font-heading text-base">
+                Import Results
+              </DialogTitle>
+            </DialogHeader>
+            {importResults && (
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="flex items-center gap-1.5 text-green-600">
+                    <Check size={14} />
+                    {
+                      importResults.filter((r) => r.status === "success").length
+                    }{" "}
+                    succeeded
+                  </span>
+                  {importResults.some((r) => r.status === "error") && (
+                    <span className="flex items-center gap-1.5 text-destructive">
+                      <X size={14} />
+                      {
+                        importResults.filter((r) => r.status === "error").length
+                      }{" "}
+                      failed
+                    </span>
+                  )}
+                </div>
+                <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+                  {importResults.map((r, i) => (
+                    <div
+                      key={i}
+                      className={`flex items-start gap-2 px-3 py-2 text-sm ${
+                        r.status === "error" ? "bg-destructive/5" : ""
+                      }`}
+                    >
+                      {r.status === "success" ? (
+                        <Check
+                          size={14}
+                          className="text-green-600 shrink-0 mt-0.5"
+                        />
+                      ) : (
+                        <X
+                          size={14}
+                          className="text-destructive shrink-0 mt-0.5"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">
+                          Row {r.row} — {r.name}
+                        </p>
+                        {r.message && (
+                          <p className="text-xs text-destructive">
+                            {r.message}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+              <button
+                onClick={() => setImportResults(null)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+              >
+                Close
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </MaterialShell>
     </>
   );
 };

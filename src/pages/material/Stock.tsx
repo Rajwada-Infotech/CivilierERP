@@ -2,6 +2,7 @@ import React from "react";
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { MaterialShell } from "@/components/material/MaterialShell";
 import {
   Warehouse,
   Building2,
@@ -500,19 +501,11 @@ export default function Stock() {
     <>
       <Breadcrumbs items={["Dashboard", "Material Module", "Stock"]} />
 
-      <div className="p-6 space-y-5">
-        {/* Header */}
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-            <Package size={20} className="text-emerald-600" />
-            Stock
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            View stock details for a specific godown. Filter by company or
-            project.
-          </p>
-        </div>
-
+      <MaterialShell
+        title="Stock Overview"
+        subtitle="Current stock levels by godown"
+        icon={Package}
+      >
         {/* Filter panel */}
         <div className="rounded-xl border border-border bg-card p-4">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
@@ -579,7 +572,7 @@ export default function Stock() {
             </p>
           </div>
         )}
-      </div>
+      </MaterialShell>
     </>
   );
 }

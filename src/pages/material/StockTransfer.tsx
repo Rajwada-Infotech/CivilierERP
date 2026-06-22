@@ -34,6 +34,7 @@ import {
   type TransferGRNSummary,
 } from "@/api/grnApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
+import { MaterialShell } from "@/components/material/MaterialShell";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { toast } from "sonner";
 
@@ -989,40 +990,33 @@ export default function StockTransfer() {
     <>
       <Breadcrumbs items={["Dashboard", "Material Module", "Stock Transfer"]} />
 
-      <div className="p-6 space-y-5">
-        {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-              <ArrowLeftRight size={20} className="text-emerald-600" />
-              Stock Transfer
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Move stock between project godowns
-            </p>
-          </div>
-          <div className="flex items-center gap-1 p-1 rounded-xl bg-muted border border-border">
-            <button
-              onClick={() => setActiveTab("transfer")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                activeTab === "transfer"
-                  ? "bg-emerald-600 text-white shadow-sm"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              <Send size={14} /> New Transfer
-            </button>
-            <button
-              onClick={() => setActiveTab("history")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                activeTab === "history"
-                  ? "bg-emerald-600 text-white shadow-sm"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              <ClipboardList size={14} /> History
-            </button>
-          </div>
+      <MaterialShell
+        title="Stock Transfer"
+        subtitle="Transfer stock between godowns"
+        icon={ArrowLeftRight}
+      >
+        {/* Tab toggle */}
+        <div className="flex items-center gap-1 p-1 rounded-xl bg-muted border border-border w-fit">
+          <button
+            onClick={() => setActiveTab("transfer")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === "transfer"
+                ? "bg-emerald-600 text-white shadow-sm"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            <Send size={14} /> New Transfer
+          </button>
+          <button
+            onClick={() => setActiveTab("history")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === "history"
+                ? "bg-emerald-600 text-white shadow-sm"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            <ClipboardList size={14} /> History
+          </button>
         </div>
 
         {activeTab === "history" && <TransferHistory />}
@@ -1280,29 +1274,34 @@ export default function StockTransfer() {
                       className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none focus:ring-2 focus:ring-emerald-500/30"
                     />
                   </div>
-                  <div className="flex items-center justify-end gap-3">
-                    <button
-                      onClick={handleReset}
-                      className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
-                    >
-                      Reset
-                    </button>
-                    <button
-                      onClick={handleTransfer}
-                      disabled={!canTransfer}
-                      className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-sm"
-                    >
-                      {transferMut.isPending ? (
-                        <>
-                          <RefreshCw size={14} className="animate-spin" />{" "}
-                          Processing…
-                        </>
-                      ) : (
-                        <>
-                          <Send size={14} /> Execute Transfer
-                        </>
-                      )}
-                    </button>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="hidden sm:block text-xs text-muted-foreground">
+                      Review items and godowns before executing.
+                    </p>
+                    <div className="flex gap-2 sm:ml-auto">
+                      <button
+                        onClick={handleReset}
+                        className="flex-1 sm:flex-none flex items-center justify-center px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+                      >
+                        Reset
+                      </button>
+                      <button
+                        onClick={handleTransfer}
+                        disabled={!canTransfer}
+                        className="flex-1 sm:flex-none whitespace-nowrap flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-sm"
+                      >
+                        {transferMut.isPending ? (
+                          <>
+                            <RefreshCw size={14} className="animate-spin" />{" "}
+                            Processing…
+                          </>
+                        ) : (
+                          <>
+                            <Send size={14} /> Execute Transfer
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1324,7 +1323,7 @@ export default function StockTransfer() {
             )}
           </div>
         )}
-      </div>
+      </MaterialShell>
     </>
   );
 }

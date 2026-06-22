@@ -1,9 +1,9 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { Landmark } from "lucide-react";
+import { Package } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
 
-interface FinanceShellProps {
+interface MaterialShellProps {
   title: string;
   subtitle?: string;
   icon?: React.ElementType;
@@ -12,10 +12,10 @@ interface FinanceShellProps {
 }
 
 /**
- * Shared glass-themed wrapper for all Finance module pages.
- * Provides ambient indigo glow, frosted header band, and consistent layout.
+ * Shared glass-themed wrapper for all Material module pages.
+ * Provides ambient emerald glow, frosted header band, and consistent layout.
  */
-export const FinanceShell: React.FC<FinanceShellProps> = ({
+export const MaterialShell: React.FC<MaterialShellProps> = ({
   title,
   subtitle,
   icon: PageIcon,
@@ -27,8 +27,8 @@ export const FinanceShell: React.FC<FinanceShellProps> = ({
 
   const glassCard = isDark
     ? {
-        background: "rgba(15, 17, 26, 0.45)",
-        border: "1px solid rgba(99,102,241,0.18)",
+        background: "rgba(10, 18, 15, 0.45)",
+        border: "1px solid rgba(16,185,129,0.18)",
         backdropFilter: "blur(20px) saturate(160%)",
         WebkitBackdropFilter: "blur(20px) saturate(160%)",
         boxShadow:
@@ -36,33 +36,33 @@ export const FinanceShell: React.FC<FinanceShellProps> = ({
       }
     : {
         background: "rgba(255,255,255,0.72)",
-        border: "1px solid rgba(99,102,241,0.20)",
+        border: "1px solid rgba(16,185,129,0.20)",
         backdropFilter: "blur(20px) saturate(180%)",
         WebkitBackdropFilter: "blur(20px) saturate(180%)",
         boxShadow:
-          "0 8px 32px rgba(99,102,241,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
+          "0 8px 32px rgba(16,185,129,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
       };
 
   return (
     <div className="relative min-h-full p-4 space-y-5">
       {/* ── Ambient background orbs ─────────────────────────────────────── */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden z-0">
-        {/* Top-left indigo bloom */}
+        {/* Top-left emerald bloom */}
         <div
           className="absolute -top-24 -left-24 w-96 h-96 rounded-full"
           style={{
             background: isDark
-              ? "radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%)"
-              : "radial-gradient(circle, rgba(99,102,241,0.08) 0%, transparent 70%)",
+              ? "radial-gradient(circle, rgba(16,185,129,0.10) 0%, transparent 70%)"
+              : "radial-gradient(circle, rgba(16,185,129,0.07) 0%, transparent 70%)",
           }}
         />
-        {/* Bottom-right violet bloom */}
+        {/* Bottom-right teal bloom */}
         <div
           className="absolute -bottom-32 -right-32 w-80 h-80 rounded-full"
           style={{
             background: isDark
-              ? "radial-gradient(circle, rgba(139,92,246,0.09) 0%, transparent 70%)"
-              : "radial-gradient(circle, rgba(139,92,246,0.06) 0%, transparent 70%)",
+              ? "radial-gradient(circle, rgba(20,184,166,0.08) 0%, transparent 70%)"
+              : "radial-gradient(circle, rgba(20,184,166,0.05) 0%, transparent 70%)",
           }}
         />
         {/* Center faint glow */}
@@ -70,8 +70,8 @@ export const FinanceShell: React.FC<FinanceShellProps> = ({
           className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[600px] h-48 rounded-full"
           style={{
             background: isDark
-              ? "radial-gradient(ellipse, rgba(99,102,241,0.05) 0%, transparent 70%)"
-              : "radial-gradient(ellipse, rgba(99,102,241,0.04) 0%, transparent 70%)",
+              ? "radial-gradient(ellipse, rgba(16,185,129,0.04) 0%, transparent 70%)"
+              : "radial-gradient(ellipse, rgba(16,185,129,0.03) 0%, transparent 70%)",
           }}
         />
       </div>
@@ -89,7 +89,7 @@ export const FinanceShell: React.FC<FinanceShellProps> = ({
           className="absolute inset-0 pointer-events-none rounded-2xl"
           style={{
             background:
-              "linear-gradient(135deg, rgba(99,102,241,0.12) 0%, transparent 60%)",
+              "linear-gradient(135deg, rgba(16,185,129,0.10) 0%, transparent 60%)",
           }}
         />
         {/* Left accent stripe */}
@@ -97,7 +97,7 @@ export const FinanceShell: React.FC<FinanceShellProps> = ({
           className="absolute left-0 top-0 bottom-0 w-0.5 rounded-l-2xl"
           style={{
             background:
-              "linear-gradient(to bottom, transparent 10%, #6366f1 30%, #6366f1 70%, transparent 90%)",
+              "linear-gradient(to bottom, transparent 10%, #10b981 30%, #10b981 70%, transparent 90%)",
           }}
         />
 
@@ -107,20 +107,20 @@ export const FinanceShell: React.FC<FinanceShellProps> = ({
             <div
               className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
               style={{
-                background: "rgba(99,102,241,0.18)",
-                border: "1px solid rgba(99,102,241,0.35)",
-                boxShadow: "0 0 12px rgba(99,102,241,0.2)",
+                background: "rgba(16,185,129,0.18)",
+                border: "1px solid rgba(16,185,129,0.35)",
+                boxShadow: "0 0 12px rgba(16,185,129,0.2)",
               }}
             >
               {PageIcon
-                ? <PageIcon size={16} style={{ color: "#818cf8" }} />
-                : <Landmark size={16} style={{ color: "#818cf8" }} />
+                ? <PageIcon size={16} style={{ color: "#34d399" }} />
+                : <Package size={16} style={{ color: "#34d399" }} />
               }
             </div>
             <div>
               <h1
                 className="text-base font-heading font-bold"
-                style={{ color: isDark ? "#e0e7ff" : "#3730a3" }}
+                style={{ color: isDark ? "#d1fae5" : "#064e3b" }}
               >
                 {title}
               </h1>
@@ -141,8 +141,8 @@ export const FinanceShell: React.FC<FinanceShellProps> = ({
   );
 };
 
-/** Glass-styled stat card for Finance pages */
-export const FinanceGlassCard: React.FC<{
+/** Glass-styled stat card for Material pages */
+export const MaterialGlassCard: React.FC<{
   label: string;
   value: React.ReactNode;
   sub?: string;
@@ -156,7 +156,7 @@ export const FinanceGlassCard: React.FC<{
   value,
   sub,
   icon: Icon,
-  accentColor = "#6366f1",
+  accentColor = "#10b981",
   onClick,
   trend,
   children,
@@ -172,7 +172,7 @@ export const FinanceGlassCard: React.FC<{
       className={`relative rounded-xl overflow-hidden ${onClick ? "cursor-pointer" : ""}`}
       style={{
         background: isDark
-          ? `rgba(15,17,26,0.5)`
+          ? `rgba(10,18,15,0.5)`
           : `rgba(255,255,255,0.75)`,
         border: `1px solid ${accentColor}28`,
         backdropFilter: "blur(16px) saturate(150%)",
@@ -246,13 +246,13 @@ export const FinanceGlassCard: React.FC<{
 };
 
 /** Glass section divider with label */
-export const GlassSection: React.FC<{
+export const MaterialSection: React.FC<{
   title: string;
   icon?: React.ElementType;
   action?: React.ReactNode;
   children: React.ReactNode;
   accentColor?: string;
-}> = ({ title, icon: Icon, action, children, accentColor = "#6366f1" }) => {
+}> = ({ title, icon: Icon, action, children, accentColor = "#10b981" }) => {
   const { theme } = useTheme();
   const isDark = theme !== "light";
 

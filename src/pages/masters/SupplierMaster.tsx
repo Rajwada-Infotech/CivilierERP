@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -33,8 +33,23 @@ import {
   MapPin,
   FileText,
   Printer,
+  RotateCcw,
+  Download,
+  Upload,
+  Loader2,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
+import {
+  exportToCsv,
+  parseCsv,
+  type ExportColumn as CsvExportColumn,
+} from "@/lib/export";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SUPPLIER_TYPE = "S";
@@ -175,6 +190,46 @@ const EXPORT_COLUMNS: ExportColumn[] = [
     accessor: (r) => (r.LHeadStatus ? "Active" : "Inactive"),
   },
 ];
+
+// ─── CSV template / import column mapping ─────────────────────────────────────
+// Single source of truth for both the downloadable template and the importer,
+// so the headers a user downloads are exactly the headers the importer reads.
+const CSV_HEADERS = {
+  name: "Supplier Name",
+  contactPerson: "Contact Person",
+  phone: "Phone",
+  email: "Email",
+  gst: "GST Number",
+  pan: "PAN Number",
+  category: "Category (Goods/Services/Both)",
+  gstType: "GST Type (Registered/Unregistered)",
+  gstState: "GST State",
+  group: "Group Name",
+  address: "Address",
+  status: "Status (Active/Inactive)",
+} as const;
+
+const SUPPLIER_CSV_TEMPLATE_COLUMNS: CsvExportColumn[] = [
+  { header: CSV_HEADERS.name, accessor: "LHeadName" },
+  { header: CSV_HEADERS.contactPerson, accessor: "LHeadContactPerson" },
+  { header: CSV_HEADERS.phone, accessor: "LHeadPhone" },
+  { header: CSV_HEADERS.email, accessor: "LHeadEmail" },
+  { header: CSV_HEADERS.gst, accessor: "LGST" },
+  { header: CSV_HEADERS.pan, accessor: "LHeadPan" },
+  { header: CSV_HEADERS.category, accessor: "supplierCategory" },
+  { header: CSV_HEADERS.gstType, accessor: "LGSTType" },
+  { header: CSV_HEADERS.gstState, accessor: "LGSTState" },
+  { header: CSV_HEADERS.group, accessor: "GroupName" },
+  { header: CSV_HEADERS.address, accessor: "LHeadAddress" },
+  { header: CSV_HEADERS.status, accessor: "LHeadStatus" },
+];
+
+interface ImportRowResult {
+  row: number;
+  name: string;
+  status: "success" | "error";
+  message?: string;
+}
 
 // ─── Column builder ────────────────────────────────────────────────────────────
 function buildSupplierColumns(
@@ -319,16 +374,10 @@ const SupplierMaster: React.FC = () => {
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [page, setPage] = useState(1);
-  const limit = 10;
   const [sortField, setSortField] = useState<
     "LHeadName" | "LHeadContactPerson" | "LHeadPhone"
   >("LHeadName");
   const [sortAsc, setSortAsc] = useState(true);
-
-  useEffect(() => {
-    setPage(1);
-  }, [search, filterCategory, filterStatus]);
 
   // ── Remote data ────────────────────────────────────────────────────────────
   const {
@@ -439,6 +488,194 @@ const SupplierMaster: React.FC = () => {
   });
 
   const saving = createMut.isPending || updateMut.isPending;
+
+  // ── CSV import/export state ─────────────────────────────────────────────────
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState<ImportRowResult[] | null>(
+    null,
+  );
+
+  const handleDownloadTemplate = () => {
+    exportToCsv([], SUPPLIER_CSV_TEMPLATE_COLUMNS, "supplier-master-template");
+    toast.success("Template downloaded — fill it in and use Import.");
+  };
+
+  const handleImportClick = () => {
+    importFileInputRef.current?.click();
+  };
+
+  const handleImportFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    // Allow picking the same filename again later.
+    e.target.value = "";
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast.error("Please select a .csv file.");
+      return;
+    }
+
+    setImporting(true);
+    setImportResults(null);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+
+      if (rows.length === 0) {
+        toast.error("The CSV file has no data rows.");
+        setImporting(false);
+        return;
+      }
+
+      const results: ImportRowResult[] = [];
+
+      // Sequential, not Promise.all — keeps row order in the result list
+      // predictable and avoids hammering the API with N parallel inserts.
+      for (let i = 0; i < rows.length; i++) {
+        const raw = rows[i];
+        const rowNum = i + 2; // +1 for header row, +1 for 1-based numbering
+        const nameForLog = raw[CSV_HEADERS.name] || "(blank)";
+
+        try {
+          const name = (raw[CSV_HEADERS.name] || "").trim();
+          const pan = (raw[CSV_HEADERS.pan] || "").trim();
+          const contactPerson = (raw[CSV_HEADERS.contactPerson] || "").trim();
+          const phone = (raw[CSV_HEADERS.phone] || "").trim();
+          const email = (raw[CSV_HEADERS.email] || "").trim();
+          const gst = (raw[CSV_HEADERS.gst] || "").trim();
+          const address = (raw[CSV_HEADERS.address] || "").trim();
+          const categoryRaw = (raw[CSV_HEADERS.category] || "").trim();
+          const gstTypeRaw = (raw[CSV_HEADERS.gstType] || "").trim();
+          const gstStateRaw = (raw[CSV_HEADERS.gstState] || "").trim();
+          const groupRaw = (raw[CSV_HEADERS.group] || "").trim();
+          const statusRaw = (raw[CSV_HEADERS.status] || "")
+            .trim()
+            .toLowerCase();
+
+          if (!name) throw new Error("Supplier Name is required");
+          if (!pan) throw new Error("PAN Number is required");
+
+          // Category is optional — validate against the known list when given.
+          const category = categoryRaw
+            ? SUPPLIER_CATEGORIES.find(
+                (c) => c.toLowerCase() === categoryRaw.toLowerCase(),
+              )
+            : "";
+          if (categoryRaw && !category)
+            throw new Error(
+              `Category must be one of Goods, Services, Both (got "${categoryRaw}")`,
+            );
+
+          // GST Type is optional — when given must be Registered/Unregistered.
+          const gstType = gstTypeRaw
+            ? GST_TYPES.find(
+                (t) => t.toLowerCase() === gstTypeRaw.toLowerCase(),
+              )
+            : "";
+          if (gstTypeRaw && !gstType)
+            throw new Error(
+              `GST Type must be "Registered" or "Unregistered" (got "${gstTypeRaw}")`,
+            );
+          if (gstType === "Registered" && !gst)
+            throw new Error(
+              "GST Number is required when GST Type is Registered",
+            );
+
+          // GST State is optional — validate against the known state list when given.
+          const gstState = gstStateRaw
+            ? GST_STATES.find(
+                (s) => s.toLowerCase() === gstStateRaw.toLowerCase(),
+              )
+            : "";
+          if (gstStateRaw && !gstState)
+            throw new Error(`Unrecognized GST State "${gstStateRaw}"`);
+
+          // Group Name is optional — resolved to the account group's ID by name.
+          let groupId: string = "";
+          if (groupRaw) {
+            const match = accountGroups.find(
+              (g) => g.name.toLowerCase() === groupRaw.toLowerCase(),
+            );
+            if (!match) throw new Error(`Group not found: "${groupRaw}"`);
+            groupId = match._id;
+          }
+
+          // Status defaults to Active when left blank, matching the form's default.
+          const isActive =
+            statusRaw === "" || statusRaw === "active"
+              ? true
+              : statusRaw === "inactive"
+                ? false
+                : null;
+          if (isActive === null)
+            throw new Error(
+              `Status must be "Active" or "Inactive" (got "${raw[CSV_HEADERS.status]}")`,
+            );
+
+          const rowForm: SupplierForm = {
+            LHeadName: name,
+            LHeadContactPerson: contactPerson,
+            LHeadPhone: phone,
+            LHeadEmail: email,
+            LGST: gst,
+            LHeadPan: pan,
+            supplierCategory: category || "",
+            LGSTType: gstType || "",
+            LGSTState: gstState || "",
+            LHeadAddress: address,
+            LBelongsTo: groupId,
+            LHeadStatus: isActive,
+          };
+
+          await addRecord(buildPayload(rowForm), SUPPLIER_TYPE);
+          results.push({ row: rowNum, name, status: "success" });
+        } catch (err: any) {
+          results.push({
+            row: rowNum,
+            name: nameForLog,
+            status: "error",
+            message: err?.message || "Unknown error",
+          });
+        }
+      }
+
+      setImportResults(results);
+      const successCount = results.filter((r) => r.status === "success").length;
+      const errorCount = results.length - successCount;
+
+      if (successCount > 0) {
+        invalidate();
+      }
+      if (errorCount === 0) {
+        toast.success(
+          `Imported ${successCount} supplier${successCount === 1 ? "" : "s"} ✓`,
+        );
+      } else if (successCount === 0) {
+        toast.error(
+          `Import failed for all ${errorCount} row${errorCount === 1 ? "" : "s"}.`,
+        );
+      } else {
+        toast.warning(
+          `Imported ${successCount} of ${results.length} rows — ${errorCount} failed. See details.`,
+        );
+      }
+    } catch (err: any) {
+      toast.error(
+        "Could not read CSV file: " + (err?.message || "Unknown error"),
+      );
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const isDirty = Object.keys(form).some(
+    (k) =>
+      String((form as Record<string, unknown>)[k] ?? "") !==
+      String((EMPTY_FORM as Record<string, unknown>)[k] ?? ""),
+  );
   const canSave =
     form.LHeadName.trim() !== "" &&
     form.LHeadPan.trim() !== "" &&
@@ -576,9 +813,6 @@ const SupplierMaster: React.FC = () => {
   const inputCls =
     "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
 
-  const totalPages = Math.max(Math.ceil(filtered.length / limit), 1);
-  const paginated = filtered.slice((page - 1) * limit, page * limit);
-
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
@@ -588,16 +822,48 @@ const SupplierMaster: React.FC = () => {
         title="Supplier Master"
         subtitle="Manage supplier accounts with contact, GST and category details"
         action={
-          <span
-            className="text-xs font-heading px-3 py-1.5 rounded-lg"
-            style={{
-              background: "rgba(99,102,241,0.12)",
-              border: "1px solid rgba(99,102,241,0.25)",
-              color: "#818cf8",
-            }}
-          >
-            {suppliers.length} Suppliers
-          </span>
+          <div className="flex items-center gap-2">
+            <span
+              className="text-xs font-heading px-3 py-1.5 rounded-lg"
+              style={{
+                background: "rgba(99,102,241,0.12)",
+                border: "1px solid rgba(99,102,241,0.25)",
+                color: "#818cf8",
+              }}
+            >
+              {suppliers.length} Suppliers
+            </span>
+            <input
+              ref={importFileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleImportFileChange}
+              className="hidden"
+            />
+            <button
+              onClick={handleDownloadTemplate}
+              title="Download a blank CSV with all supplier fields"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+            >
+              <Download size={13} />
+              <span className="hidden sm:inline">Download Template</span>
+            </button>
+            <button
+              onClick={handleImportClick}
+              disabled={importing}
+              title="Import suppliers from a filled-in CSV"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {importing ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Upload size={13} />
+              )}
+              <span className="hidden sm:inline">
+                {importing ? "Importing..." : "Import CSV"}
+              </span>
+            </button>
+          </div>
         }
       >
         {/* ── Form Card ── */}
@@ -946,8 +1212,8 @@ const SupplierMaster: React.FC = () => {
           </div>
 
           {/* Card footer — actions */}
-          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
-            <p className="text-[11px] text-muted-foreground">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
+            <p className="text-[11px] text-muted-foreground hidden sm:block">
               {canSave ? (
                 <span className="text-emerald-500 font-medium">
                   Ready to save
@@ -956,19 +1222,19 @@ const SupplierMaster: React.FC = () => {
                 "Fill in the required fields to save"
               )}
             </p>
-            <div className="flex items-center gap-2">
-              {editingId && (
-                <button
-                  onClick={resetForm}
-                  className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                >
-                  Cancel
-                </button>
-              )}
+            <div className="flex items-center gap-2 sm:ml-auto">
+              <button
+                onClick={resetForm}
+                disabled={!isDirty && !editingId}
+                className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+              >
+                <RotateCcw size={12} />
+                {editingId ? "Cancel" : "Reset"}
+              </button>
               <button
                 onClick={handleSave}
                 disabled={saving || !canSave}
-                className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
+                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
               >
                 {saving ? (
                   <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -991,7 +1257,7 @@ const SupplierMaster: React.FC = () => {
         <div>
           {/* Toolbar */}
           <div className="mb-3 flex items-center gap-3 flex-wrap">
-            <div className="relative">
+            <div className="relative flex-1 sm:flex-none">
               <Search
                 size={13}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -1000,7 +1266,7 @@ const SupplierMaster: React.FC = () => {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search name, phone, GST…"
-                className="w-56 text-sm rounded-lg border border-border pl-9 pr-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                className="w-full sm:w-56 text-sm rounded-lg border border-border pl-9 pr-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
               />
             </div>
 
@@ -1040,10 +1306,11 @@ const SupplierMaster: React.FC = () => {
           {/* Table */}
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden [&_th:last-child]:text-left [&_td:last-child]:text-left">
             <DataTable
-              data={paginated}
+              key={`${search}|${filterCategory}|${filterStatus}`}
+              data={filtered}
               columns={columns}
               loading={isLoading}
-              searchPlaceholder="Search suppliers..."
+              searchable={false}
               getRowId={(row) => String(row.LHeadId)}
               emptyMessage={
                 isError
@@ -1062,29 +1329,82 @@ const SupplierMaster: React.FC = () => {
               }
             />
           </div>
-          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
-            <span className="text-xs text-muted-foreground">
-              Page {page} of {totalPages}
-            </span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                disabled={page <= 1}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-                disabled={page >= totalPages}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          </div>
         </div>
       </FinanceShell>
+
+      {/* Import Results Modal */}
+      <Dialog
+        open={!!importResults}
+        onOpenChange={(open) => !open && setImportResults(null)}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-base">
+              Import Results
+            </DialogTitle>
+          </DialogHeader>
+          {importResults && (
+            <div className="space-y-3 pt-1">
+              <div className="flex items-center gap-3 text-sm">
+                <span className="flex items-center gap-1.5 text-green-600">
+                  <Check size={14} />
+                  {
+                    importResults.filter((r) => r.status === "success").length
+                  }{" "}
+                  succeeded
+                </span>
+                {importResults.some((r) => r.status === "error") && (
+                  <span className="flex items-center gap-1.5 text-destructive">
+                    <X size={14} />
+                    {
+                      importResults.filter((r) => r.status === "error").length
+                    }{" "}
+                    failed
+                  </span>
+                )}
+              </div>
+              <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+                {importResults.map((r, i) => (
+                  <div
+                    key={i}
+                    className={`flex items-start gap-2 px-3 py-2 text-sm ${
+                      r.status === "error" ? "bg-destructive/5" : ""
+                    }`}
+                  >
+                    {r.status === "success" ? (
+                      <Check
+                        size={14}
+                        className="text-green-600 shrink-0 mt-0.5"
+                      />
+                    ) : (
+                      <X
+                        size={14}
+                        className="text-destructive shrink-0 mt-0.5"
+                      />
+                    )}
+                    <div className="min-w-0">
+                      <p className="font-medium truncate">
+                        Row {r.row} — {r.name}
+                      </p>
+                      {r.message && (
+                        <p className="text-xs text-destructive">{r.message}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+            <button
+              onClick={() => setImportResults(null)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+            >
+              Close
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (

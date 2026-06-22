@@ -316,7 +316,7 @@ function FilterSelect({
   loading?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-0.5 min-w-[140px]">
+    <div className="flex flex-col gap-0.5 w-full sm:min-w-[140px] sm:w-auto">
       <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
         <Icon size={9} /> {label}
       </span>
@@ -472,7 +472,6 @@ export default function TrialBalance() {
           const t = toDateStr(active.FEndDate);
           setFrom(f);
           setTo(t);
-          fetchDataInner(f, t, "");
         }
       })
       .catch(() => {})
@@ -559,8 +558,8 @@ export default function TrialBalance() {
     return { f: from, t: to, ao: "" };
   }
 
-  // ── generate button disabled? ─────────────────────────────────────────────
-  const generateDisabled =
+  // ── export/refresh disabled? ──────────────────────────────────────────────
+  const notReady =
     loading ||
     (filterMode === "fy" && !selectedFYId) ||
     (filterMode === "range" && (!from || !to)) ||
@@ -600,6 +599,11 @@ export default function TrialBalance() {
     fetchDataInner(f, t, ao);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterMode, from, to, asOn, selCompany, selProject]);
+
+  // Auto-fetch whenever filter params change
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   // ── expand / collapse ─────────────────────────────────────────────────────
   const toggle = (id: number) =>
@@ -711,28 +715,31 @@ export default function TrialBalance() {
       <FinanceShell
         title="Trial Balance"
         subtitle={asOf ? `${visible.length} entries · Refreshed ${fmtDate(asOf)}` : "Account-wise opening, transaction and closing balances"}
+        icon={Scale}
         action={
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               onClick={expandAll}
-              className="px-3 py-1.5 text-xs rounded-lg border border-indigo-500/20 text-muted-foreground hover:text-foreground hover:bg-indigo-500/10 transition-colors"
+              className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg border border-indigo-500/20 text-muted-foreground hover:text-foreground hover:bg-indigo-500/10 transition-colors"
             >
-              Expand All
+              <ChevronDown size={13} />
+              <span className="hidden sm:inline">Expand All</span>
             </button>
             <button
-              onClick={() => setExpanded(new Set(rows.map((r) => r.id)))}
-              className="px-3 py-1.5 text-xs rounded-lg border border-indigo-500/20 text-muted-foreground hover:text-foreground hover:bg-indigo-500/10 transition-colors"
+              onClick={() => setExpanded(new Set())}
+              className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg border border-indigo-500/20 text-muted-foreground hover:text-foreground hover:bg-indigo-500/10 transition-colors"
             >
-              Collapse
+              <ChevronRight size={13} />
+              <span className="hidden sm:inline">Collapse</span>
             </button>
             <button
               onClick={fetchData}
               disabled={loading}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors disabled:opacity-50"
               style={{ color: "#818cf8" }}
             >
               <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
-              Refresh
+              <span className="hidden sm:inline">Refresh</span>
             </button>
           </div>
         }
@@ -769,8 +776,8 @@ export default function TrialBalance() {
                 placeholder="All projects"
               />
 
-              {/* Push Search + Generate + Export to the far right */}
-              <div className="ml-auto flex items-end gap-2">
+              {/* Search + Export — full-width on mobile, auto-right on sm+ */}
+              <div className="w-full sm:w-auto sm:ml-auto flex items-end gap-2">
                 {/* Search */}
                 <div className="flex flex-col gap-0.5">
                   <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60">
@@ -786,41 +793,27 @@ export default function TrialBalance() {
                       placeholder="Search accounts…"
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
-                      className="h-8 pl-8 pr-3 w-44 rounded-lg text-xs bg-background border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      className="h-8 pl-8 pr-3 w-full sm:w-44 rounded-lg text-xs bg-background border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
                     />
                   </div>
                 </div>
 
-                {/* Generate */}
-                <button
-                  onClick={fetchData}
-                  disabled={generateDisabled}
-                  className="h-8 px-5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white disabled:opacity-50 shrink-0"
-                >
-                  {loading ? "Loading…" : "Generate"}
-                </button>
-
                 {/* Export */}
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 invisible select-none">
-                    Export
-                  </span>
-                  <ExportMenu
-                    data={exportData}
-                    columns={TB_EXPORT_COLUMNS}
-                    title="Trial Balance"
-                    filename={`trial-balance-${periodLabel()?.replace(/\s/g, "-").toLowerCase() ?? "report"}`}
-                    subtitle={exportSubtitle || undefined}
-                    disabled={loading || rows.length === 0}
-                    stats={pdfStats}
-                  />
-                </div>
+                <ExportMenu
+                  data={exportData}
+                  columns={TB_EXPORT_COLUMNS}
+                  title="Trial Balance"
+                  filename={`trial-balance-${periodLabel()?.replace(/\s/g, "-").toLowerCase() ?? "report"}`}
+                  subtitle={exportSubtitle || undefined}
+                  disabled={notReady || rows.length === 0}
+                  stats={pdfStats}
+                />
               </div>
             </div>
 
             {/* Row 2 — Mode selector */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/50 mr-1">
+            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+              <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/50 mr-1 shrink-0">
                 Filter by:
               </span>
               <ModeTab
@@ -1045,7 +1038,7 @@ export default function TrialBalance() {
                       className="px-4 py-20 text-center text-muted-foreground text-sm"
                     >
                       {rows.length === 0
-                        ? "Click Generate to view the Trial Balance."
+                        ? (loading ? "Loading Trial Balance…" : "No entries found for the selected period.")
                         : "No accounts match your search."}
                     </td>
                   </tr>
