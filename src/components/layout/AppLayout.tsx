@@ -8,7 +8,9 @@ import { MobileNav } from "./MobileNav";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useModule } from "@/contexts/ModuleContext";
 import { useActivityBrowser } from "@/contexts/ActivityBrowserContext";
-import SlowConnectionBanner from "@/components/SlowConnectionBanner";
+const SlowConnectionBanner = React.lazy(
+  () => import("@/components/SlowConnectionBanner"),
+);
 // import AskCivilierAI from "@/components/AskCivilierAI";
 import {
   SidebarContext,
@@ -188,7 +190,9 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
               </div>
             </main>
 
-            <SlowConnectionBanner />
+            <React.Suspense fallback={null}>
+              <SlowConnectionBanner />
+            </React.Suspense>
 
             {/* Universal assistant — fixed-position, mounted once for every
                 page rendered through AppLayout. Suggested queries adapt to
