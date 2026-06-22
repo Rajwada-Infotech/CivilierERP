@@ -13,13 +13,12 @@ BEGIN
     paid_on DATE NULL,
     status NVARCHAR(20) NOT NULL DEFAULT 'pending',
     purpose NVARCHAR(255) NULL,
-    plan NVARCHAR(100) NULL,
+    [plan] NVARCHAR(100) NULL,
     renewal_period NVARCHAR(100) NULL,
     remarks NVARCHAR(MAX) NULL,
     created_at DATETIME2 NOT NULL DEFAULT SYSDATETIME(),
     updated_at DATETIME2 NULL
   );
-
   CREATE INDEX IX_DbaPaymentLogs_Status_CreatedAt
     ON dbo.DbaPaymentLogs(status, created_at DESC);
 END
