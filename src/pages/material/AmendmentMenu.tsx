@@ -1565,7 +1565,7 @@ export default function AmendmentMenu() {
             onClick={() => switchTab(id)}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all border ${
               activeTab === id
-                ? "gradient-accent text-white shadow-sm border-transparent"
+                ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white shadow-sm border-transparent"
                 : "border-border bg-card text-muted-foreground hover:bg-muted"
             }`}
           >

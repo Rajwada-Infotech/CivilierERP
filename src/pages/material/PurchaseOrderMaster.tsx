@@ -18,6 +18,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DocNumberPreview,
   fetchNextDocNumber,
@@ -976,21 +978,21 @@ const PurchaseOrderMaster: React.FC = () => {
       }
 
       return {
-        id: generateUUID(),
-        itemId: it.itemId || "",
-        itemName: it.itemDescription,
-        itemDescription: it.itemDescription,
-        quantity: qty,
-        uomId: uomMatch?.id ?? null,
-        unit: uomMatch?.name ?? it.unit ?? "",
-        rate,
-        cgstRate: halfGst,
-        sgstRate: halfGst,
-        igstRate: 0,
-        gstRate: totalGst,
-        taxAmount: taxAmt,
-        amount: base + taxAmt,
-      };
+  id: generateUUID(),
+  itemId: it.itemId || "",
+  itemName: it.itemDescription,
+  itemDescription: it.itemDescription,
+  quantity: qty,
+  uomId: uomMatch?.id ?? null,
+  unit: uomMatch?.name ?? it.unit ?? "",
+  rate,
+  cgstRate: halfGst,
+  sgstRate: halfGst,
+  igstRate: 0,
+  gstRate: totalGst,
+  taxAmount: taxAmt,
+  amount: base + taxAmt,
+};
     });
     if (prefillLines.length > 0) setLineItems(prefillLines);
     setSourceWO({
@@ -1693,7 +1695,7 @@ const PurchaseOrderMaster: React.FC = () => {
           action={
             <button
               onClick={goToCreate}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition-all"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
             >
               <Plus size={13} />
               New Purchase Order
@@ -1701,47 +1703,53 @@ const PurchaseOrderMaster: React.FC = () => {
           }
         >
 
-        {/* PO Type Filter Tabs */}
-        <div className="flex items-center gap-1 mb-3 bg-muted/30 rounded-xl p-1 w-fit">
-          {[
-            { value: "", label: "All POs" },
-            { value: "WO_PO", label: "WO-POs" },
-            { value: "Direct", label: "Direct" },
-            { value: "Normal", label: "From MR" },
-          ].map((tab) => (
-            <button
-              key={tab.value}
-              onClick={() => {
-                setPoTypeFilter(tab.value);
-                setPage(1);
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                poTypeFilter === tab.value
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Search */}
-        <div className="relative mb-4">
-          <Search
-            size={15}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-          />
-          <input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by PO number, supplier, company…"
-            className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-          />
-        </div>
-
-        {/* Table */}
-        <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+        <Card className="border-border shadow-sm">
+          <CardHeader className="pb-3 border-b border-border">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base font-semibold">Purchase Order Register</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-0.5">{totalRecords} record{totalRecords !== 1 ? "s" : ""}</p>
+                </div>
+                <div className="relative w-full sm:w-64">
+                  <Search
+                    size={13}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  />
+                  <Input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search PO number, supplier…"
+                    className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { value: "", label: "All POs" },
+                  { value: "WO_PO", label: "WO-POs" },
+                  { value: "Direct", label: "Direct" },
+                  { value: "Normal", label: "From MR" },
+                ].map((tab) => (
+                  <button
+                    key={tab.value}
+                    onClick={() => {
+                      setPoTypeFilter(tab.value);
+                      setPage(1);
+                    }}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                      poTypeFilter === tab.value
+                        ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm"
+                        : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -1789,11 +1797,7 @@ const PurchaseOrderMaster: React.FC = () => {
                       colSpan={8}
                       className="px-4 py-12 text-center text-muted-foreground"
                     >
-                      <ShoppingCart
-                        size={32}
-                        className="mx-auto mb-2 opacity-30"
-                      />
-                      <p>No purchase orders found</p>
+                      <p>No purchase orders found. Click 'New PO' to create one.</p>
                     </td>
                   </tr>
                 ) : (
@@ -1900,7 +1904,8 @@ const PurchaseOrderMaster: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+          </CardContent>
+        </Card>
 
         {/* ── PO Delete Block Dialog ─────────────────────────────────────────── */}
         <Dialog
@@ -2136,82 +2141,57 @@ const PurchaseOrderMaster: React.FC = () => {
         icon={ShoppingCart}
       >
 
-      {/* Form Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={goToList}
-            className="p-2 rounded-xl border border-border hover:bg-muted transition text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft size={16} />
-          </button>
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-              <ShoppingCart size={18} className="text-primary" />
-              {viewMode === "create"
-                ? "New Purchase Order"
-                : viewMode === "edit"
-                  ? "Edit Purchase Order"
-                  : `Purchase Order — ${form.poNumber || "—"}`}
-              {viewMode === "view" && form.status && (
-                <StatusChip status={form.status} />
-              )}
-            </h1>
+      {/* Form Header — Card matching Material Request style */}
+      <Card className="border-border shadow-sm">
+        <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
+          <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={goToList}
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            >
+              <ArrowLeft size={15} />
+              <span className="hidden sm:inline">Back</span>
+            </button>
+            <span className="text-emerald-500/40">|</span>
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-emerald-500/[0.18] border border-emerald-500/30 shrink-0">
+                <ShoppingCart size={12} className="text-emerald-400" />
+              </div>
+              <h2 className="text-sm font-heading font-bold text-foreground truncate flex items-center gap-2">
+                {viewMode === "create"
+                  ? "New Purchase Order"
+                  : viewMode === "edit"
+                    ? "Edit Purchase Order"
+                    : `Purchase Order — ${form.poNumber || "—"}`}
+                {viewMode === "view" && form.status && (
+                  <StatusChip status={form.status} />
+                )}
+              </h2>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {isReadOnly && (
+              <>
+                <StatusChip status={listData.find((r) => r._id === editingId)?.status ?? "Draft"} />
+                <button
+                  onClick={handlePrint}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-sm font-semibold text-foreground hover:bg-muted transition"
+                >
+                  <Printer size={14} /> Print
+                </button>
+                <button
+                  onClick={() => { const item = listData.find((r) => r._id === editingId); if (item) goToAmend(item); }}
+                  className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-sm font-semibold transition shadow-sm"
+                >
+                  <FilePenLine size={14} /> Amend
+                </button>
+              </>
+            )}
           </div>
         </div>
-
-        {!isReadOnly && (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={goToList}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition"
-            >
-              <RotateCcw size={14} />
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving || saved}
-              className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 inline-flex items-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
-            >
-              {saved ? (
-                <Check size={14} />
-              ) : saving ? (
-                <RefreshCw size={14} className="animate-spin" />
-              ) : (
-                <Save size={14} />
-              )}
-              {saved ? "Saved!" : saving ? "Saving…" : "Save Order"}
-            </button>
-          </div>
-        )}
-        {isReadOnly && (
-          <div className="flex items-center gap-2">
-            <StatusChip
-              status={
-                listData.find((r) => r._id === editingId)?.status ?? "Draft"
-              }
-            />
-            <button
-              onClick={handlePrint}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm font-semibold text-foreground hover:bg-muted transition"
-            >
-              <Printer size={14} />
-              Print
-            </button>
-            <button
-              onClick={() => {
-                const item = listData.find((r) => r._id === editingId);
-                if (item) goToAmend(item);
-              }}
-              className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold transition shadow-sm"
-            >
-              <FilePenLine size={14} />
-              Amend
-            </button>
-          </div>
-        )}
-      </div>
+      </Card>
 
       <div className="space-y-5">
         {/* ── Document Type & Fin Year Card ─────────────────────────────────── */}
@@ -3368,16 +3348,17 @@ const PurchaseOrderMaster: React.FC = () => {
             <p className="hidden sm:block text-xs text-muted-foreground">Ready to save</p>
             <div className="flex gap-3 sm:ml-auto">
               <button
-                onClick={goToList}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition"
+                onClick={goToCreate}
+                disabled={saving || saved}
+                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition disabled:opacity-50"
               >
                 <RotateCcw size={14} />
-                Cancel
+                Reset
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving || saved}
-                className="flex-1 sm:flex-none whitespace-nowrap bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 inline-flex items-center justify-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
+                className="flex-1 sm:flex-none whitespace-nowrap bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center justify-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
               >
                 {saved ? (
                   <Check size={14} />
