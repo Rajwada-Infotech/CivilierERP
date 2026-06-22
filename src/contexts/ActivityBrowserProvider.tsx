@@ -1,3 +1,4 @@
+import { generateUUID } from '../utils/cryptoPolyfill';
 // ActivityBrowserProvider.tsx — only exports a component (React Fast Refresh safe)
 import React, {
   useState,

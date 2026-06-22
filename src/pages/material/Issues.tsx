@@ -1,5 +1,5 @@
+import { generateUUID } from '../../utils/cryptoPolyfill';
 import React, { useMemo, useState, useCallback, useEffect } from "react";
-import { generateId } from "@/lib/generateId";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -99,7 +99,7 @@ const defaultHeader: IssueHeader = {
 };
 
 const blankCartItem = (): CartItem => ({
-  _key: generateId(),
+  _key: generateUUID(),
   ItemId: "",
   UOMCode: "",
   Quantity: "",
@@ -504,7 +504,7 @@ export default function Issues() {
       costCenter: record.CostCenter ?? "",
     });
     const items: CartItem[] = (record.items || []).map((it: any) => ({
-      _key: generateId(),
+      _key: generateUUID(),
       ItemId: String(it.ItemId ?? ""),
       UOMCode: String(it.UOMCode ?? ""),
       Quantity: String(it.Quantity ?? ""),
