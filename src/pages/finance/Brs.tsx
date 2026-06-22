@@ -40,6 +40,7 @@ import {
   Clock,
   Search,
   X,
+  RotateCw,
   RefreshCw,
   ChevronLeft,
   ChevronRight,
@@ -194,7 +195,7 @@ function PassbookCheck({
       `}
     >
       {loading ? (
-        <RefreshCw size={10} className="animate-spin text-white" />
+        <RotateCw size={10} className="animate-spin text-white" />
       ) : checked ? (
         <svg
           viewBox="0 0 10 8"
@@ -395,17 +396,9 @@ export default function Brs() {
       <FinanceShell
         title="Bank Reconciliation Statement"
         subtitle="Verify payments against your bank passbook — tick each entry once confirmed"
+        icon={ShieldCheck}
         action={
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={fetchData}
-              disabled={loading}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors disabled:opacity-50"
-              style={{ color: "#818cf8" }}
-            >
-              <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
-              Refresh
-            </button>
             <ExportMenu
               data={exportData}
               columns={EXPORT_COLUMNS}
@@ -421,8 +414,17 @@ export default function Brs() {
                   .filter(Boolean)
                   .join(" · ") || undefined
               }
-              disabled={false}
+              disabled={loading || entries.length === 0}
             />
+            <button
+              onClick={fetchData}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors disabled:opacity-50"
+              style={{ color: "#818cf8" }}
+            >
+              <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
           </div>
         }
       >
@@ -481,10 +483,10 @@ export default function Brs() {
 
         {/* ── Filters ────────────────────────────────────────────────────────── */}
         <div className="glass rounded-xl px-5 py-4 space-y-3">
-          {/* Row 1: search + company + bank */}
-          <div className="flex flex-wrap gap-2 items-center">
+          {/* Row 1: search + bank */}
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:items-center">
             {/* Search */}
-            <div className="relative flex-1 min-w-[180px] max-w-xs">
+            <div className="relative flex-1 sm:min-w-[180px] sm:max-w-xs">
               <Search
                 size={13}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
@@ -506,7 +508,7 @@ export default function Brs() {
             </div>
 
             {/* Bank */}
-            <div className="relative">
+            <div className="relative w-full sm:w-auto">
               <Landmark
                 size={12}
                 className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
@@ -514,7 +516,7 @@ export default function Brs() {
               <select
                 value={bankId ?? ""}
                 onChange={(e) => setBankId(e.target.value || undefined)}
-                className={`h-8 pl-7 pr-8 bg-input/70 border rounded-lg text-xs appearance-none focus:ring-1 focus:ring-primary outline-none cursor-pointer ${bankId ? "border-primary/60 text-primary font-medium" : "border-border"}`}
+                className={`h-8 w-full sm:w-auto pl-7 pr-8 bg-input/70 border rounded-lg text-xs appearance-none focus:ring-1 focus:ring-primary outline-none cursor-pointer ${bankId ? "border-primary/60 text-primary font-medium" : "border-border"}`}
               >
                 <option value="">All Banks</option>
                 {allBanks.map((b) => (
@@ -527,7 +529,7 @@ export default function Brs() {
           </div>
 
           {/* Row 2: date range + status pills */}
-          <div className="flex flex-wrap gap-2 items-center">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:items-center">
             {/* Date from */}
             <div className="relative">
               <CalendarDays
@@ -538,11 +540,11 @@ export default function Brs() {
                 type="date"
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="h-8 pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                className="h-8 w-full sm:w-auto pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
               />
             </div>
 
-            <span className="text-muted-foreground text-xs">to</span>
+            <span className="text-muted-foreground text-xs hidden sm:inline">to</span>
 
             {/* Date to */}
             <div className="relative">
@@ -554,7 +556,7 @@ export default function Brs() {
                 type="date"
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
-                className="h-8 pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                className="h-8 w-full sm:w-auto pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
               />
             </div>
 
@@ -573,7 +575,7 @@ export default function Brs() {
             )}
 
             {/* Status filter pills */}
-            <div className="flex gap-1.5 ml-auto">
+            <div className="flex gap-1.5 sm:ml-auto">
               {(["", "clear", "unclear"] as const).map((s) => {
                 const label =
                   s === "" ? "All" : s === "clear" ? "✓ Clear" : "○ Unclear";
@@ -612,7 +614,7 @@ export default function Brs() {
               {total !== filtered.length && ` (${total} server-side)`}
             </p>
             {loading && (
-              <RefreshCw
+              <RotateCw
                 size={13}
                 className="animate-spin text-muted-foreground"
               />
@@ -677,7 +679,7 @@ export default function Brs() {
                       colSpan={10}
                       className="px-5 py-14 text-center text-muted-foreground text-sm"
                     >
-                      <RefreshCw
+                      <RotateCw
                         size={18}
                         className="animate-spin mx-auto mb-2 opacity-40"
                       />
@@ -826,7 +828,7 @@ export default function Brs() {
 
         {/* ── Legend ─────────────────────────────────────────────────────────── */}
         <div className="flex flex-wrap items-center gap-4 mt-4 px-1">
-          <p className="text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
             <span className="inline-flex items-center gap-1 font-medium text-foreground">
               <span className="w-3.5 h-3.5 rounded border-2 border-emerald-500 bg-emerald-500 inline-flex items-center justify-center">
                 <svg
@@ -843,14 +845,14 @@ export default function Brs() {
               Tick
             </span>{" "}
             — confirmed in your bank passbook (Clear)
-          </p>
-          <p className="text-[11px] text-muted-foreground">
+          </span>
+          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
             <span className="inline-flex items-center gap-1 font-medium text-foreground">
-              <span className="w-3.5 h-3.5 rounded border-2 border-border inline-block" />
+              <span className="w-3.5 h-3.5 rounded border-2 border-border inline-flex" />
               Empty
             </span>{" "}
             — not yet verified (Unclear)
-          </p>
+          </span>
           <p className="text-[11px] text-muted-foreground ml-auto">
             Showing payments and received payments with a linked bank account
           </p>

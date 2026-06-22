@@ -346,6 +346,7 @@ const AccountGroupMaster: React.FC = () => {
     setErrors({});
   };
 
+  const isDirty = Object.keys(form).some((k) => String((form as Record<string,unknown>)[k] ?? "") !== String((EMPTY_FORM as Record<string,unknown>)[k] ?? ""));
   const canSave = form.name.trim() !== "" && form.code.trim() !== "";
 
   const handleSave = async () => {
@@ -596,24 +597,25 @@ const AccountGroupMaster: React.FC = () => {
           </div>
 
           {/* Card footer — actions */}
-          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
-            <p className="text-[11px] text-muted-foreground">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
+            <p className="text-[11px] text-muted-foreground hidden sm:block">
               {canSave
                 ? <span className="text-emerald-500 font-medium">Ready to save</span>
                 : "Fill in the required fields to save"}
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 sm:ml-auto">
               <button
                 onClick={resetForm}
-                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+                disabled={!isDirty && !editingId}
+                className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
               >
-                <RotateCcw size={13} />
+                <RotateCcw size={12} />
                 {editingId ? "Cancel" : "Reset"}
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving || !canSave}
-                className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
+                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
               >
                 {saving ? (
                   <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />

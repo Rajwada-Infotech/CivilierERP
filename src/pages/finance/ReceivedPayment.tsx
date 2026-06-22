@@ -10,7 +10,6 @@ import { format } from "date-fns";
 import {
   Dialog,
   DialogContent,
-  DialogClose,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -26,6 +25,9 @@ import {
 import { cn } from "@/lib/utils";
 import {
   Plus,
+  AlertCircle,
+  ArrowLeft,
+  RotateCcw,
   ArrowDownCircle,
   CheckCircle2,
   Clock,
@@ -64,6 +66,24 @@ import {
   fetchNextDocNumber,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { formatINR } from "@/utils/formatCurrency";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
+
+// ─── Export ───────────────────────────────────────────────────────────────────
+
+const EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "docNo" },
+  { header: "Received From", accessor: "receivedFrom" },
+  { header: "Customer", accessor: "customerName" },
+  { header: "Project", accessor: "projectName" },
+  { header: "Company", accessor: "companyName" },
+  { header: "Mode", accessor: "mode" },
+  { header: "Date", accessor: "docDate" },
+  { header: "Amount", accessor: (r) => formatINR(Number(r.amount || 0)) },
+  { header: "Bank", accessor: "depositBankName" },
+  { header: "Transaction / Cheque Ref", accessor: (r) => String(r.transactionId || r.checkNumber || "") },
+  { header: "Status", accessor: "status" },
+];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -313,18 +333,9 @@ function StatusBadge({ status }: { status: string }) {
 
 function EmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center py-20 px-4 text-center">
-      <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
-        <ArrowDownCircle size={30} className="text-primary" />
-      </div>
-      <h3 className="font-heading font-semibold text-foreground text-base mb-1">
-        No received payments yet
-      </h3>
-      <p className="text-sm text-muted-foreground max-w-xs">
-        Use the{" "}
-        <span className="font-semibold text-foreground">Add Payment</span>{" "}
-        button above to record your first payment.
-      </p>
+    <div className="text-center py-14 text-muted-foreground text-sm">
+      <AlertCircle size={18} className="mx-auto mb-2 opacity-30" />
+      No received payments yet. Click "Add Payment" to get started.
     </div>
   );
 }
@@ -337,7 +348,7 @@ export default function ReceivedPaymentPage() {
   const { finYears } = useFinYear();
 
   const [payments, setPayments] = useState<ReceivedPayment[]>([]);
-  const [isOpen, setIsOpen] = useState(false);
+  const [view, setView] = useState<"list" | "form">("list");
   const [search, setSearch] = useState("");
   const [filterMode, setFilterMode] = useState("All");
   const [filterStatus, setFilterStatus] = useState("All");
@@ -517,13 +528,41 @@ export default function ReceivedPaymentPage() {
   const setField = (key: keyof typeof EMPTY_FORM, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
 
-  // ── Open add dialog ───────────────────────────────────────────────────────────
+  const formDefaults: Record<string, string> = { ...EMPTY_FORM as Record<string, string>, finYear: activeFinYear ?? "" };
+  const isDirty = Object.keys(EMPTY_FORM).some(
+    (k) => String((form as Record<string, string>)[k] ?? "") !== String(formDefaults[k] ?? ""),
+  );
+
+  const canSave = !!(
+    form.companyId &&
+    form.projectId &&
+    date &&
+    form.finYear &&
+    form.mode &&
+    form.customerName &&
+    form.depositBankId &&
+    Number(form.amount) > 0
+  );
+
+  const handleReset = () => {
+    setForm({ ...EMPTY_FORM, finYear: activeFinYear });
+    setDate(new Date());
+    setDocNoPreview("");
+  };
+
+  const cancelForm = () => {
+    setView("list");
+    setEditingId(null);
+    setForm({ ...EMPTY_FORM, finYear: activeFinYear });
+  };
+
+  // ── Open add form ─────────────────────────────────────────────────────────────
   const openAdd = () => {
     setEditingId(null);
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
     setDate(new Date());
     setDocNoPreview("");
-    setIsOpen(true);
+    setView("form");
   };
 
   // ── Open edit dialog ──────────────────────────────────────────────────────────
@@ -548,7 +587,7 @@ export default function ReceivedPaymentPage() {
     });
     setDate(p.docDate ? new Date(p.docDate) : new Date());
     setDocNoPreview(p.docNo);
-    setIsOpen(true);
+    setView("form");
   };
 
   // ── Submit ────────────────────────────────────────────────────────────────────
@@ -611,7 +650,7 @@ export default function ReceivedPaymentPage() {
         await addReceivedPayment(payload as any);
         toast.success("Payment recorded successfully");
       }
-      setIsOpen(false);
+      setView("list");
       setEditingId(null);
       await loadPayments(currentPage);
     } catch {
@@ -825,17 +864,38 @@ export default function ReceivedPaymentPage() {
       <FinanceShell
         title="Received Payments"
         subtitle="All inbound payments received from clients & customers"
+        icon={Banknote}
         action={
-          <Button
-            onClick={openAdd}
-            className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-4 py-1.5 text-xs h-auto"
-          >
-            <Plus size={13} className="mr-1" />
-            Add Payment
-          </Button>
+          view === "list" ? (
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <Button
+                onClick={openAdd}
+                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-3 sm:px-4 py-1.5 text-xs h-auto"
+              >
+                <Plus size={13} className="sm:mr-1" />
+                <span className="hidden sm:inline">Add Payment</span>
+              </Button>
+              <ExportMenu
+                data={payments as unknown as Record<string, unknown>[]}
+                columns={EXPORT_COLUMNS}
+                title="Received Payments"
+                filename="received-payments"
+                disabled={apiLoading || payments.length === 0}
+              />
+              <button
+                onClick={() => loadPayments(1)}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors"
+                style={{ color: "#818cf8" }}
+              >
+                <RefreshCw size={13} />
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
+            </div>
+          ) : undefined
         }
       >
 
+        {view === "list" && <>
         {/* ── Stats ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {stats.map((s) => (
@@ -863,38 +923,40 @@ export default function ReceivedPaymentPage() {
         </div>
 
         {/* Filters */}
-        <div className="flex flex-wrap gap-2 mb-4">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 mb-4">
           <Input
             placeholder="Search by customer, company, project, doc no…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 text-xs max-w-72 flex-1 min-w-0 sm:flex-none"
+            className="h-8 text-xs w-full sm:max-w-72 sm:flex-1 sm:min-w-0"
           />
-          <Select value={filterMode} onValueChange={setFilterMode}>
-            <SelectTrigger className="h-8 text-xs w-32">
-              <SelectValue placeholder="Mode" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="All">All Modes</SelectItem>
-              {PAYMENT_MODES.map((m) => (
-                <SelectItem key={m} value={m}>
-                  {m}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="h-8 text-xs w-32">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="All">All Statuses</SelectItem>
-              <SelectItem value="Draft">Draft</SelectItem>
-              <SelectItem value="Pending">Pending Approval</SelectItem>
-              <SelectItem value="Approved">Approved</SelectItem>
-              <SelectItem value="Rejected">Rejected</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex gap-2">
+            <Select value={filterMode} onValueChange={setFilterMode}>
+              <SelectTrigger className="h-8 text-xs flex-1 sm:w-32">
+                <SelectValue placeholder="Mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All Modes</SelectItem>
+                {PAYMENT_MODES.map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {m}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger className="h-8 text-xs flex-1 sm:w-32">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All Statuses</SelectItem>
+                <SelectItem value="Draft">Draft</SelectItem>
+                <SelectItem value="Pending">Pending Approval</SelectItem>
+                <SelectItem value="Approved">Approved</SelectItem>
+                <SelectItem value="Rejected">Rejected</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         {/* Table */}
@@ -1159,72 +1221,62 @@ export default function ReceivedPaymentPage() {
             </div>
           </div>
         )}
-      </FinanceShell>
-      {/* end p-6 space-y-8 */}
+        </>}
 
-      {/* ── Add / Edit Dialog ────────────────────────────────────────────────── */}
-      <Dialog
-        open={isOpen}
-        onOpenChange={(o) => {
-          if (!o) {
-            setIsOpen(false);
-            setEditingId(null);
-          }
-        }}
-      >
-        <DialogContent
-          className="max-w-5xl max-h-[92vh] overflow-y-auto p-0"
-          hideCloseButton
-          style={{
-            background: isDark ? "rgba(12,14,22,0.88)" : "rgba(255,255,255,0.94)",
-            border: isDark ? "1px solid rgba(16,185,129,0.22)" : "1px solid rgba(16,185,129,0.18)",
-            backdropFilter: "blur(24px) saturate(160%)",
-            WebkitBackdropFilter: "blur(24px) saturate(160%)",
-            boxShadow: isDark
-              ? "0 20px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06)"
-              : "0 20px 60px rgba(16,185,129,0.08), inset 0 1px 0 rgba(255,255,255,0.95)",
-          }}
-        >
-          {/* Header */}
-          <DialogHeader
-            className="px-7 pt-5 pb-4 relative overflow-hidden"
+        {/* ── Inline Add / Edit Form ──────────────────────────────────────────── */}
+        {view === "form" && (
+          <div
+            className="rounded-2xl overflow-hidden"
             style={{
-              background: isDark ? "rgba(16,185,129,0.08)" : "rgba(16,185,129,0.05)",
-              borderBottom: isDark ? "1px solid rgba(16,185,129,0.16)" : "1px solid rgba(16,185,129,0.12)",
+              background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.80)",
+              border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.18)",
+              backdropFilter: "blur(20px) saturate(160%)",
+              WebkitBackdropFilter: "blur(20px) saturate(160%)",
+              boxShadow: isDark
+                ? "0 8px 40px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)"
+                : "0 8px 40px rgba(99,102,241,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
             }}
           >
-            {/* Left accent stripe */}
+            {/* Form header */}
             <div
-              className="absolute left-0 top-0 bottom-0 w-0.5"
-              style={{ background: "linear-gradient(to bottom, transparent 10%, #10b981 30%, #10b981 70%, transparent 90%)" }}
-            />
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-1">
-                <DialogTitle className="font-heading text-base flex items-center gap-2.5" style={{ color: isDark ? "#e0e7ff" : "#1e1b4b" }}>
+              className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
+              style={{
+                background: isDark ? "rgba(99,102,241,0.10)" : "rgba(99,102,241,0.06)",
+                borderBottom: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.14)",
+              }}
+            >
+              <div
+                className="absolute left-0 top-0 bottom-0 w-0.5"
+                style={{ background: "linear-gradient(to bottom, transparent 10%, #6366f1 30%, #6366f1 70%, transparent 90%)" }}
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={cancelForm}
+                  className="flex items-center gap-1.5 text-sm transition-colors hover:opacity-70"
+                  style={{ color: isDark ? "#94a3b8" : "#6366f1" }}
+                >
+                  <ArrowLeft size={15} />
+                  <span className="hidden sm:inline">Back</span>
+                </button>
+                <span style={{ color: isDark ? "rgba(99,102,241,0.4)" : "rgba(99,102,241,0.3)" }}>|</span>
+                <div className="flex items-center gap-2">
                   <div
-                    className="p-1.5 rounded-lg"
-                    style={{ background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.28)" }}
+                    className="w-6 h-6 rounded-lg flex items-center justify-center"
+                    style={{ background: "rgba(99,102,241,0.18)", border: "1px solid rgba(99,102,241,0.30)" }}
                   >
-                    <ArrowDownCircle size={16} style={{ color: "#10b981" }} />
+                    <ArrowDownCircle size={12} style={{ color: "#818cf8" }} />
                   </div>
-                  {editingId ? "Edit Received Payment" : "Record Received Payment"}
-                </DialogTitle>
-                <DialogDescription className="text-xs text-muted-foreground">
-                  Fill in all required fields. Document number is auto-generated
-                  (REC/XXXXXX/YYYY-YYYY).
-                </DialogDescription>
+                  <h2
+                    className="text-sm font-heading font-bold"
+                    style={{ color: isDark ? "#e0e7ff" : "#3730a3" }}
+                  >
+                    {editingId ? "Edit Received Payment" : "Record Received Payment"}
+                  </h2>
+                </div>
               </div>
-              <DialogClose
-                className="p-1.5 rounded-lg transition-colors shrink-0 mt-0.5 hover:opacity-70"
-                style={{ color: isDark ? "#64748b" : "#6366f1" }}
-              >
-                <X size={16} />
-                <span className="sr-only">Close</span>
-              </DialogClose>
             </div>
-          </DialogHeader>
 
-          <div className="px-7 py-6">
+          <div className="px-5 sm:px-6 py-6">
             {/* ── Two-column layout: form left, calendar right ── */}
             <div className="grid grid-cols-1 gap-8">
               {/* LEFT — form fields */}
@@ -1532,38 +1584,40 @@ export default function ReceivedPaymentPage() {
             </div>
           </div>
 
-          <DialogFooter
-            className="px-7 py-4 gap-2"
-            style={{
-              borderTop: isDark ? "1px solid rgba(16,185,129,0.14)" : "1px solid rgba(16,185,129,0.12)",
-              background: isDark ? "rgba(16,185,129,0.06)" : "rgba(16,185,129,0.04)",
-            }}
-          >
-            <Button
-              variant="outline"
-              onClick={() => setIsOpen(false)}
-              disabled={actionLoading}
-              className="px-5 py-2 text-sm h-auto font-heading"
-              style={{
-                borderColor: isDark ? "rgba(99,102,241,0.25)" : "rgba(99,102,241,0.20)",
-                color: isDark ? "#94a3b8" : "#6366f1",
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={actionLoading}
-              className="px-5 py-2 text-sm h-auto font-heading font-semibold gradient-accent text-white"
-            >
-              {actionLoading ? (
-                <Loader2 size={14} className="animate-spin mr-1.5" />
-              ) : null}
-              {editingId ? "Update Payment" : "Save Payment"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
+            <p className="text-[11px] text-muted-foreground hidden sm:block">
+              {canSave
+                ? <span className="text-emerald-500 font-medium">Ready to save</span>
+                : "Fill in the required fields to save"}
+            </p>
+            <div className="flex items-center gap-2 sm:ml-auto">
+              <button
+                onClick={handleReset}
+                disabled={!isDirty && !editingId}
+                className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+              >
+                <RotateCcw size={12} />
+                {editingId ? "Cancel" : "Reset"}
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={!canSave || actionLoading}
+                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+              >
+                {actionLoading ? (
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : editingId ? (
+                  <Check size={14} />
+                ) : (
+                  <Plus size={14} />
+                )}
+                {actionLoading ? "Saving…" : editingId ? "Update Payment" : "Save Payment"}
+              </button>
+            </div>
+          </div>
+          </div>
+        )}
+      </FinanceShell>
 
       {/* ── Submit for Approval Confirm ─────────────────────────────────────── */}
       <Dialog

@@ -1,6 +1,7 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import React from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { MaterialShell } from "@/components/material/MaterialShell";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -9,6 +10,7 @@ import {
 import type { ExportColumn } from "@/lib/export";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Hash } from "lucide-react";
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 const BASE = "/api/hsn";
@@ -114,10 +116,10 @@ const HsnMaster: React.FC = () => {
   const columnRenderers: Record<string, (value: unknown) => React.ReactNode> = {
     status: (value) => (
       <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${value ? "bg-green-500/10 border-green-500/20 text-green-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${value ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}
       >
         <span
-          className={`w-1.5 h-1.5 rounded-full mr-1.5 ${value ? "bg-green-500" : "bg-red-500"}`}
+          className={`w-1.5 h-1.5 rounded-full mr-1.5 ${value ? "bg-emerald-500" : "bg-red-500"}`}
         />
         {value ? "Active" : "Inactive"}
       </span>
@@ -149,66 +151,69 @@ const HsnMaster: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Masters", "HSN Master"]} />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        HSN Master
-      </h1>
-      <MasterPage
-        title="HSN"
-        fields={[
-          {
-            name: "code",
-            label: "HSN Code",
-            type: "text",
-            required: true,
-            uppercase: true,
-          },
-          {
-            name: "shortDesc",
-            label: "Short Description",
-            type: "text",
-            required: true,
-          },
-          {
-            name: "description",
-            label: "Full Description",
-            type: "textarea",
-            fullWidth: true,
-          },
-          { name: "igstRate", label: "IGST Rate (%)", type: "number" },
-          { name: "cgstRate", label: "CGST Rate (%)", type: "number" },
-          { name: "sgstRate", label: "SGST Rate (%)", type: "number" },
-          {
-            name: "status",
-            label: "Status",
-            type: "toggle",
-            defaultValue: true,
-          },
-        ]}
-        columns={[
-          { key: "code", label: "HSN Code" },
-          { key: "shortDesc", label: "Short Desc" },
-          { key: "igstRate", label: "IGST %", hideOnMobile: true },
-          { key: "cgstRate", label: "CGST %", hideOnMobile: true },
-          { key: "sgstRate", label: "SGST %", hideOnMobile: true },
-          { key: "status", label: "Status" },
-        ]}
-        columnRenderers={columnRenderers}
-        initialData={mappedData}
-        onDataEvent={handleDataEvent}
-        exportConfig={{
-          title: "HSN Master",
-          filename: "hsn-master",
-          columns: [
-            { header: "HSN Code",   accessor: "code" },
-            { header: "Short Desc", accessor: "shortDesc" },
-            { header: "IGST %",     accessor: "igstRate" },
-            { header: "CGST %",     accessor: "cgstRate" },
-            { header: "SGST %",     accessor: "sgstRate" },
-            { header: "Status",     accessor: "status" },
-          ],
-        }}
-      />
+      <Breadcrumbs items={["Dashboard", "Material Module", "HSN Master"]} />
+      <MaterialShell
+        title="HSN Master"
+        subtitle="HSN codes and GST rate configuration"
+        icon={Hash}
+      >
+        <MasterPage
+          title="HSN"
+          fields={[
+            {
+              name: "code",
+              label: "HSN Code",
+              type: "text",
+              required: true,
+              uppercase: true,
+            },
+            {
+              name: "shortDesc",
+              label: "Short Description",
+              type: "text",
+              required: true,
+            },
+            {
+              name: "description",
+              label: "Full Description",
+              type: "textarea",
+              fullWidth: true,
+            },
+            { name: "igstRate", label: "IGST Rate (%)", type: "number" },
+            { name: "cgstRate", label: "CGST Rate (%)", type: "number" },
+            { name: "sgstRate", label: "SGST Rate (%)", type: "number" },
+            {
+              name: "status",
+              label: "Status",
+              type: "toggle",
+              defaultValue: true,
+            },
+          ]}
+          columns={[
+            { key: "code", label: "HSN Code" },
+            { key: "shortDesc", label: "Short Desc" },
+            { key: "igstRate", label: "IGST %", hideOnMobile: true },
+            { key: "cgstRate", label: "CGST %", hideOnMobile: true },
+            { key: "sgstRate", label: "SGST %", hideOnMobile: true },
+            { key: "status", label: "Status" },
+          ]}
+          columnRenderers={columnRenderers}
+          initialData={mappedData}
+          onDataEvent={handleDataEvent}
+          exportConfig={{
+            title: "HSN Master",
+            filename: "hsn-master",
+            columns: [
+              { header: "HSN Code",   accessor: "code" },
+              { header: "Short Desc", accessor: "shortDesc" },
+              { header: "IGST %",     accessor: "igstRate" },
+              { header: "CGST %",     accessor: "cgstRate" },
+              { header: "SGST %",     accessor: "sgstRate" },
+              { header: "Status",     accessor: "status" },
+            ],
+          }}
+        />
+      </MaterialShell>
     </>
   );
 };

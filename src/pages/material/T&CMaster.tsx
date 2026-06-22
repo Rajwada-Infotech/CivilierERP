@@ -8,6 +8,7 @@ import {
   type RecordWithId,
 } from "@/components/MasterPage";
 import { FileText } from "lucide-react";
+import { MaterialShell } from "@/components/material/MaterialShell";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -198,6 +199,11 @@ export default function TCMaster() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material", "T&C"]} />
+      <MaterialShell
+        title="T&C Master"
+        subtitle="Manage terms and conditions for contracts and orders"
+        icon={FileText}
+      >
       <MasterPage
         title="T&C Master"
         fields={FIELDS}
@@ -215,6 +221,7 @@ export default function TCMaster() {
           ],
         }}
       />
+      </MaterialShell>
     </>
   );
 }
