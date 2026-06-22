@@ -1,23 +1,25 @@
 # ── Stage 1: Install production deps ──────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 # Clean install — omit dev and optional deps for a lean production image
 RUN npm ci --omit=dev --omit=optional && npm cache clean --force
 
 # ── Stage 2: Runtime ───────────────────────────────────────────────────────────
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 RUN apk add --no-cache dumb-init
 # Copy deps from builder
 COPY --from=builder /app/node_modules ./node_modules
 # Copy app source (migrations excluded via .dockerignore)
 COPY . .
-RUN rm -f .env .env.* && mkdir -p uploads/tickets
-# Create non-root user
+RUN rm -f .env .env.*
+# Create non-root user and fix ownership
+# uploads/vault is the only disk-based upload dir (document vault uses diskStorage).
+# Ticket uploads use multer memoryStorage — no directory needed.
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S civilier -u 1001 && \
-    mkdir -p /app/backend/uploads/tickets && \
+    mkdir -p /app/uploads/vault && \
     chown -R civilier:nodejs /app
 USER civilier
 EXPOSE 5000
