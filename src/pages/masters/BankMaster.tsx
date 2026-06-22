@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -25,8 +25,22 @@ import {
   AlertCircle,
   XCircle,
   RotateCcw,
+  Download,
+  Upload,
+  Loader2,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
+import {
+  exportToCsv,
+  parseCsv,
+  type ExportColumn as CsvExportColumn,
+} from "@/lib/export";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 import {
   getBanks,
@@ -140,6 +154,46 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Address", accessor: "address" },
   { header: "Status", accessor: (r) => (r.BActive ? "Active" : "Inactive") },
 ];
+
+// ─── CSV template / import column mapping ─────────────────────────────────────
+// Single source of truth for both the downloadable template and the importer,
+// so the headers a user downloads are exactly the headers the importer reads.
+const CSV_HEADERS = {
+  company: "Company Name",
+  bankName: "Bank Name",
+  branch: "Branch",
+  accountNo: "Account Number",
+  ifsc: "IFSC Code",
+  accountType: "Account Type",
+  bankType: "Bank Type",
+  holderName: "Account Holder Name",
+  openingBalance: "Opening Balance",
+  group: "Group Name",
+  address: "Address",
+  status: "Status (Active/Inactive)",
+} as const;
+
+const BANK_CSV_TEMPLATE_COLUMNS: CsvExportColumn[] = [
+  { header: CSV_HEADERS.company, accessor: "companyName" },
+  { header: CSV_HEADERS.bankName, accessor: "bankName" },
+  { header: CSV_HEADERS.branch, accessor: "branch" },
+  { header: CSV_HEADERS.accountNo, accessor: "accountNo" },
+  { header: CSV_HEADERS.ifsc, accessor: "ifsc" },
+  { header: CSV_HEADERS.accountType, accessor: "accountType" },
+  { header: CSV_HEADERS.bankType, accessor: "bankType" },
+  { header: CSV_HEADERS.holderName, accessor: "holderName" },
+  { header: CSV_HEADERS.openingBalance, accessor: "openingBalance" },
+  { header: CSV_HEADERS.group, accessor: "groupName" },
+  { header: CSV_HEADERS.address, accessor: "address" },
+  { header: CSV_HEADERS.status, accessor: "status" },
+];
+
+interface ImportRowResult {
+  row: number;
+  name: string;
+  status: "success" | "error";
+  message?: string;
+}
 
 const ACCOUNT_TYPES = ["Current", "Savings", "Overdraft (OD)", "Cash Credit"];
 const BANK_TYPES = [
@@ -412,8 +466,6 @@ const BankMaster: React.FC = () => {
   const [search, setSearch] = useState("");
   const [filterBankType, setFilterBankType] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [page, setPage] = useState(1);
-  const limit = 10;
 
   // ─── Filtered list ────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -432,13 +484,6 @@ const BankMaster: React.FC = () => {
       return matchSearch && matchType && matchStatus;
     });
   }, [dbBanks, search, filterBankType, filterStatus]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [search, filterBankType, filterStatus]);
-
-  const totalPages = Math.max(Math.ceil(filtered.length / limit), 1);
-  const paginated = filtered.slice((page - 1) * limit, page * limit);
 
   const toPayload = (f: FormState) => ({
     BName: f.bankName.trim() || null,
@@ -516,6 +561,204 @@ const BankMaster: React.FC = () => {
     setEditingId(null);
   };
 
+  // ── CSV import/export state ─────────────────────────────────────────────────
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState<ImportRowResult[] | null>(
+    null,
+  );
+
+  const handleDownloadTemplate = () => {
+    exportToCsv([], BANK_CSV_TEMPLATE_COLUMNS, "bank-master-template");
+    toast.success("Template downloaded — fill it in and use Import.");
+  };
+
+  const handleImportClick = () => {
+    importFileInputRef.current?.click();
+  };
+
+  const handleImportFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    // Allow picking the same filename again later.
+    e.target.value = "";
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast.error("Please select a .csv file.");
+      return;
+    }
+
+    setImporting(true);
+    setImportResults(null);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+
+      if (rows.length === 0) {
+        toast.error("The CSV file has no data rows.");
+        setImporting(false);
+        return;
+      }
+
+      const results: ImportRowResult[] = [];
+
+      // Sequential, not Promise.all — keeps row order in the result list
+      // predictable and avoids hammering the API with N parallel inserts.
+      for (let i = 0; i < rows.length; i++) {
+        const raw = rows[i];
+        const rowNum = i + 2; // +1 for header row, +1 for 1-based numbering
+        const nameForLog = raw[CSV_HEADERS.bankName] || "(blank)";
+
+        try {
+          const companyRaw = (raw[CSV_HEADERS.company] || "").trim();
+          const bankName = (raw[CSV_HEADERS.bankName] || "").trim();
+          const branch = (raw[CSV_HEADERS.branch] || "").trim();
+          const accountNo = (raw[CSV_HEADERS.accountNo] || "").trim();
+          const ifscRaw = (raw[CSV_HEADERS.ifsc] || "").trim().toUpperCase();
+          const accountTypeRaw = (raw[CSV_HEADERS.accountType] || "").trim();
+          const bankTypeRaw = (raw[CSV_HEADERS.bankType] || "").trim();
+          const holderName = (raw[CSV_HEADERS.holderName] || "").trim();
+          const openingBalanceRaw = (
+            raw[CSV_HEADERS.openingBalance] || ""
+          ).trim();
+          const groupRaw = (raw[CSV_HEADERS.group] || "").trim();
+          const address = (raw[CSV_HEADERS.address] || "").trim();
+          const statusRaw = (raw[CSV_HEADERS.status] || "")
+            .trim()
+            .toLowerCase();
+
+          if (!bankName) throw new Error("Bank Name is required");
+          if (!accountNo) throw new Error("Account Number is required");
+          if (!ifscRaw) throw new Error("IFSC Code is required");
+          if (!IFSC_REGEX.test(ifscRaw))
+            throw new Error(
+              `Invalid IFSC format — must be 4 letters + 0 + 6 alphanumeric (got "${ifscRaw}")`,
+            );
+
+          // Company Name is optional — when given, must match a known company
+          // (mirrors the form's dropdown, which only offers existing companies).
+          const companyMatch = companyRaw
+            ? companies.find(
+                (c) => c.label.toLowerCase() === companyRaw.toLowerCase(),
+              )
+            : null;
+          if (companyRaw && !companyMatch)
+            throw new Error(`Company not found: "${companyRaw}"`);
+
+          // Account Type is optional — validate against the known list when given.
+          const accountType = accountTypeRaw
+            ? ACCOUNT_TYPES.find(
+                (t) => t.toLowerCase() === accountTypeRaw.toLowerCase(),
+              )
+            : "";
+          if (accountTypeRaw && !accountType)
+            throw new Error(
+              `Account Type must be one of ${ACCOUNT_TYPES.join(", ")} (got "${accountTypeRaw}")`,
+            );
+
+          // Bank Type is optional — validate against the known list when given.
+          const bankType = bankTypeRaw
+            ? BANK_TYPES.find(
+                (t) => t.toLowerCase() === bankTypeRaw.toLowerCase(),
+              )
+            : "";
+          if (bankTypeRaw && !bankType)
+            throw new Error(
+              `Bank Type must be one of ${BANK_TYPES.join(", ")} (got "${bankTypeRaw}")`,
+            );
+
+          // Opening Balance defaults to 0 when blank; must be a number ≥ 0 otherwise.
+          let openingBalance = "0";
+          if (openingBalanceRaw !== "") {
+            const n = Number(openingBalanceRaw);
+            if (Number.isNaN(n) || n < 0)
+              throw new Error(
+                `Opening Balance must be 0 or greater (got "${openingBalanceRaw}")`,
+              );
+            openingBalance = String(n);
+          }
+
+          // Group Name is optional — resolved to the account group's ID by name.
+          let groupId = "";
+          if (groupRaw) {
+            const match = accountGroups.find(
+              (g) => g.name.toLowerCase() === groupRaw.toLowerCase(),
+            );
+            if (!match) throw new Error(`Group not found: "${groupRaw}"`);
+            groupId = match._id;
+          }
+
+          // Status defaults to Active when left blank, matching the form's default.
+          const isActive =
+            statusRaw === "" || statusRaw === "active"
+              ? true
+              : statusRaw === "inactive"
+                ? false
+                : null;
+          if (isActive === null)
+            throw new Error(
+              `Status must be "Active" or "Inactive" (got "${raw[CSV_HEADERS.status]}")`,
+            );
+
+          const rowForm: FormState = {
+            companyName: companyMatch ? companyMatch.label : "",
+            bankName,
+            branch,
+            accountNo,
+            ifsc: ifscRaw,
+            accountType: accountType || "",
+            bankType: bankType || "",
+            holderName,
+            openingBalance,
+            address,
+            groupId: groupId ? Number(groupId) : null,
+            status: isActive,
+            accountGroupId: groupId,
+          };
+
+          await addBank(toPayload(rowForm));
+          results.push({ row: rowNum, name: bankName, status: "success" });
+        } catch (err: any) {
+          results.push({
+            row: rowNum,
+            name: nameForLog,
+            status: "error",
+            message: err?.message || "Unknown error",
+          });
+        }
+      }
+
+      setImportResults(results);
+      const successCount = results.filter((r) => r.status === "success").length;
+      const errorCount = results.length - successCount;
+
+      if (successCount > 0) {
+        await queryClient.invalidateQueries({ queryKey: ["bank-master"] });
+      }
+      if (errorCount === 0) {
+        toast.success(
+          `Imported ${successCount} bank${successCount === 1 ? "" : "s"} ✓`,
+        );
+      } else if (successCount === 0) {
+        toast.error(
+          `Import failed for all ${errorCount} row${errorCount === 1 ? "" : "s"}.`,
+        );
+      } else {
+        toast.warning(
+          `Imported ${successCount} of ${results.length} rows — ${errorCount} failed. See details.`,
+        );
+      }
+    } catch (err: any) {
+      toast.error(
+        "Could not read CSV file: " + (err?.message || "Unknown error"),
+      );
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const handlePrint = (bank: BankRecord) => {
     const win = window.open("", "_blank", "width=700,height=600");
     if (!win) return;
@@ -570,21 +813,60 @@ const BankMaster: React.FC = () => {
         title="Bank Master"
         subtitle="Manage bank accounts with branch, IFSC and balance details"
         action={
-          <span
-            className="text-xs font-heading px-3 py-1.5 rounded-lg"
-            style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
-          >
-            {dbBanks.length} Banks
-          </span>
+          <div className="flex items-center gap-2">
+            <span
+              className="text-xs font-heading px-3 py-1.5 rounded-lg"
+              style={{
+                background: "rgba(99,102,241,0.12)",
+                border: "1px solid rgba(99,102,241,0.25)",
+                color: "#818cf8",
+              }}
+            >
+              {dbBanks.length} Banks
+            </span>
+            <input
+              ref={importFileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleImportFileChange}
+              className="hidden"
+            />
+            <button
+              onClick={handleDownloadTemplate}
+              title="Download a blank CSV with all bank fields"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+            >
+              <Download size={13} />
+              <span className="hidden sm:inline">Download Template</span>
+            </button>
+            <button
+              onClick={handleImportClick}
+              disabled={importing}
+              title="Import banks from a filled-in CSV"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {importing ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Upload size={13} />
+              )}
+              <span className="hidden sm:inline">
+                {importing ? "Importing..." : "Import CSV"}
+              </span>
+            </button>
+          </div>
         }
       >
-
         {/* ── Form Card ── */}
         <div
           className="rounded-xl overflow-hidden"
           style={{
-            background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.82)",
-            border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.16)",
+            background: isDark
+              ? "rgba(12,14,22,0.55)"
+              : "rgba(255,255,255,0.82)",
+            border: isDark
+              ? "1px solid rgba(99,102,241,0.20)"
+              : "1px solid rgba(99,102,241,0.16)",
             backdropFilter: "blur(18px) saturate(150%)",
             WebkitBackdropFilter: "blur(18px) saturate(150%)",
             boxShadow: isDark
@@ -596,8 +878,12 @@ const BankMaster: React.FC = () => {
           <div
             className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
             style={{
-              background: isDark ? "rgba(99,102,241,0.09)" : "rgba(99,102,241,0.05)",
-              borderBottom: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.13)",
+              background: isDark
+                ? "rgba(99,102,241,0.09)"
+                : "rgba(99,102,241,0.05)",
+              borderBottom: isDark
+                ? "1px solid rgba(99,102,241,0.18)"
+                : "1px solid rgba(99,102,241,0.13)",
             }}
           >
             <div>
@@ -989,10 +1275,11 @@ const BankMaster: React.FC = () => {
           {/* Table */}
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden [&_th:last-child]:text-left [&_td:last-child]:text-left">
             <DataTable
-              data={paginated}
+              key={`${search}-${filterBankType}-${filterStatus}`}
+              data={filtered}
               columns={columns}
               loading={isLoading}
-              searchPlaceholder="Search banks..."
+              searchable={false}
               emptyMessage="No banks yet. Add one above."
               exportConfig={{
                 title: "Bank Master",
@@ -1004,29 +1291,66 @@ const BankMaster: React.FC = () => {
               }
             />
           </div>
-          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
-            <span className="text-xs text-muted-foreground">
-              Page {page} of {totalPages}
-            </span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                disabled={page <= 1}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-                disabled={page >= totalPages}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          </div>
         </div>
       </FinanceShell>
+
+      {/* ── Import Results Modal ── */}
+      {importResults && (
+        <Dialog
+          open={!!importResults}
+          onOpenChange={() => setImportResults(null)}
+        >
+          <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="font-heading text-base">
+                Import Results
+              </DialogTitle>
+            </DialogHeader>
+            <div className="flex gap-3 text-sm mb-2">
+              <span className="text-emerald-600 font-medium">
+                ✓ {importResults.filter((r) => r.status === "success").length}{" "}
+                imported
+              </span>
+              <span className="text-destructive font-medium">
+                ✗ {importResults.filter((r) => r.status === "error").length}{" "}
+                failed
+              </span>
+            </div>
+            <div className="overflow-y-auto flex-1 space-y-1.5 pr-1">
+              {importResults.map((r) => (
+                <div
+                  key={r.row}
+                  className={`flex items-start gap-2.5 rounded-lg px-3 py-2 text-xs ${
+                    r.status === "success"
+                      ? "bg-emerald-500/8 text-emerald-700"
+                      : "bg-destructive/8 text-destructive"
+                  }`}
+                >
+                  <span className="font-mono shrink-0 text-muted-foreground">
+                    Row {r.row}
+                  </span>
+                  <span className="font-medium shrink-0">{r.name}</span>
+                  {r.status === "success" ? (
+                    <span className="ml-auto text-emerald-600">✓</span>
+                  ) : (
+                    <span className="ml-2 text-destructive/80">
+                      {r.message}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="pt-3 flex justify-end">
+              <button
+                onClick={() => setImportResults(null)}
+                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* ── View Detail Drawer ── */}
       {viewRow && (

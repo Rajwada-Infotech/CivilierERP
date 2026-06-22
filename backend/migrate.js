@@ -97,8 +97,16 @@ const MIGRATIONS_DIR = path.join(__dirname, "migrations");
 
 const umzug = new Umzug({
   migrations: {
-    // Glob all *.sql files; umzug sorts by name so NNN- prefix keeps order.
-    glob: ["*.sql", { cwd: MIGRATIONS_DIR }],
+    // "**/*.sql" so dated subfolders (e.g. migrations/210626/*.sql) are
+    // picked up too, not just files directly under migrations/. Umzug
+    // tracks each migration by basename only (path.basename(filepath) —
+    // see umzug/lib/umzug.js), so filenames must stay unique across the
+    // whole tree, including inside dated subfolders — two files named
+    // the same thing in different folders would collide as one tracked
+    // migration. Sort order is by full relative path, so a dated folder
+    // like "210626/" sorts wherever its leading character falls among
+    // existing NNN- prefixes (currently after everything through "199-").
+    glob: ["**/*.sql", { cwd: MIGRATIONS_DIR }],
 
     resolve({ name, path: filePath }) {
       return {

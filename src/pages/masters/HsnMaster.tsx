@@ -1,5 +1,5 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import React from "react";
+import React, { useRef, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import {
@@ -7,16 +7,21 @@ import {
   type DataChangeEvent,
   type RecordWithId,
 } from "@/components/MasterPage";
-import type { ExportColumn } from "@/lib/export";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Hash } from "lucide-react";
+import { Hash, Download, Upload, Loader2, Check, X } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 const BASE = "/api/hsn";
 
-const getHsn = () =>
-  fetchWithAuth(BASE).then((r) => r.json());
+const getHsn = () => fetchWithAuth(BASE).then((r) => r.json());
 const addHsn = (data: object) =>
   fetchWithAuth(BASE, {
     method: "POST",
@@ -30,9 +35,7 @@ const updateHsn = (code: string, data: object) =>
     body: JSON.stringify(data),
   }).then((r) => r.json());
 const deleteHsn = (code: string) =>
-  fetchWithAuth(`${BASE}/${code}`, { method: "DELETE" }).then(
-    (r) => r.json(),
-  );
+  fetchWithAuth(`${BASE}/${code}`, { method: "DELETE" }).then((r) => r.json());
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DbHsn {
@@ -55,6 +58,36 @@ const toPayload = (r: Record<string, unknown>) => ({
   HIGST: r.igstRate ? Number(r.igstRate) : 0,
   HStatus: r.status !== false,
 });
+
+// ── CSV template / import column mapping ─────────────────────────────────────
+// Single source of truth for both the downloadable template and the importer,
+// so the headers a user downloads are exactly the headers the importer reads.
+const CSV_HEADERS = {
+  code: "HSN Code",
+  shortDesc: "Short Description",
+  description: "Full Description",
+  cgst: "CGST Rate (%)",
+  sgst: "SGST Rate (%)",
+  igst: "IGST Rate (%)",
+  status: "Status (Active/Inactive)",
+} as const;
+
+const HSN_CSV_TEMPLATE_COLUMNS: ExportColumn[] = [
+  { header: CSV_HEADERS.code, accessor: "code" },
+  { header: CSV_HEADERS.shortDesc, accessor: "shortDesc" },
+  { header: CSV_HEADERS.description, accessor: "description" },
+  { header: CSV_HEADERS.cgst, accessor: "cgst" },
+  { header: CSV_HEADERS.sgst, accessor: "sgst" },
+  { header: CSV_HEADERS.igst, accessor: "igst" },
+  { header: CSV_HEADERS.status, accessor: "status" },
+];
+
+interface ImportRowResult {
+  row: number;
+  code: string;
+  status: "success" | "error";
+  message?: string;
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const HsnMaster: React.FC = () => {
@@ -82,6 +115,151 @@ const HsnMaster: React.FC = () => {
     igstRate: item.HIGST ?? "",
     status: item.HStatus,
   }));
+
+  // CSV import
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState<ImportRowResult[] | null>(
+    null,
+  );
+
+  // ── CSV template download ───────────────────────────────────────────────────
+  const handleDownloadTemplate = () => {
+    exportToCsv([], HSN_CSV_TEMPLATE_COLUMNS, "hsn-master-template");
+    toast.success("Template downloaded — fill it in and use Import.");
+  };
+
+  // ── CSV import ───────────────────────────────────────────────────────────────
+  const handleImportClick = () => {
+    importFileInputRef.current?.click();
+  };
+
+  const handleImportFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    // Allow picking the same filename again later.
+    e.target.value = "";
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast.error("Please select a .csv file.");
+      return;
+    }
+
+    setImporting(true);
+    setImportResults(null);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+
+      if (rows.length === 0) {
+        toast.error("The CSV file has no data rows.");
+        setImporting(false);
+        return;
+      }
+
+      const results: ImportRowResult[] = [];
+
+      // Sequential, not Promise.all — keeps row order in the result list
+      // predictable and avoids hammering the API with N parallel inserts.
+      for (let i = 0; i < rows.length; i++) {
+        const raw = rows[i];
+        const rowNum = i + 2; // +1 for header row, +1 for 1-based numbering
+        const codeForLog = raw[CSV_HEADERS.code] || "(blank)";
+
+        try {
+          const code = (raw[CSV_HEADERS.code] || "").trim().toUpperCase();
+          const shortDesc = (raw[CSV_HEADERS.shortDesc] || "").trim();
+          const description = (raw[CSV_HEADERS.description] || "").trim();
+          const cgstRaw = (raw[CSV_HEADERS.cgst] || "").trim();
+          const sgstRaw = (raw[CSV_HEADERS.sgst] || "").trim();
+          const igstRaw = (raw[CSV_HEADERS.igst] || "").trim();
+          const statusRaw = (raw[CSV_HEADERS.status] || "")
+            .trim()
+            .toLowerCase();
+
+          if (!code) throw new Error("HSN Code is required");
+          if (!shortDesc) throw new Error("Short Description is required");
+
+          const parseRate = (label: string, raw: string): number => {
+            if (!raw) return 0;
+            const n = Number(raw);
+            if (Number.isNaN(n))
+              throw new Error(`${label} must be a number (got "${raw}")`);
+            return n;
+          };
+          const cgstRate = parseRate("CGST Rate", cgstRaw);
+          const sgstRate = parseRate("SGST Rate", sgstRaw);
+          const igstRate = parseRate("IGST Rate", igstRaw);
+
+          // Status defaults to Active when left blank, matching the form's default.
+          const isActive =
+            statusRaw === "" ||
+            statusRaw === "active" ||
+            statusRaw === "yes" ||
+            statusRaw === "true"
+              ? true
+              : statusRaw === "inactive" ||
+                  statusRaw === "no" ||
+                  statusRaw === "false"
+                ? false
+                : null;
+          if (isActive === null)
+            throw new Error(
+              `Status must be "Active" or "Inactive" (got "${raw[CSV_HEADERS.status]}")`,
+            );
+
+          await addHsn(
+            toPayload({
+              code,
+              shortDesc,
+              description,
+              cgstRate,
+              sgstRate,
+              igstRate,
+              status: isActive,
+            }),
+          );
+          results.push({ row: rowNum, code, status: "success" });
+        } catch (err: any) {
+          results.push({
+            row: rowNum,
+            code: codeForLog,
+            status: "error",
+            message: err?.message || "Unknown error",
+          });
+        }
+      }
+
+      setImportResults(results);
+      const successCount = results.filter((r) => r.status === "success").length;
+      const errorCount = results.length - successCount;
+
+      if (successCount > 0) {
+        await queryClient.invalidateQueries({ queryKey: ["hsn"] });
+      }
+      if (errorCount === 0) {
+        toast.success(
+          `Imported ${successCount} HSN code${successCount === 1 ? "" : "s"} ✓`,
+        );
+      } else if (successCount === 0) {
+        toast.error(
+          `Import failed for all ${errorCount} row${errorCount === 1 ? "" : "s"}.`,
+        );
+      } else {
+        toast.warning(
+          `Imported ${successCount} of ${results.length} rows — ${errorCount} failed. See details.`,
+        );
+      }
+    } catch (err: any) {
+      toast.error(
+        "Could not read CSV file: " + (err?.message || "Unknown error"),
+      );
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
@@ -156,6 +334,40 @@ const HsnMaster: React.FC = () => {
         title="HSN Master"
         subtitle="HSN codes and GST rate configuration"
         icon={Hash}
+        action={
+          <div className="flex items-center gap-2">
+            <input
+              ref={importFileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleImportFileChange}
+              className="hidden"
+            />
+            <button
+              onClick={handleDownloadTemplate}
+              title="Download a blank CSV with all HSN fields"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+            >
+              <Download size={13} />
+              <span className="hidden sm:inline">Download Template</span>
+            </button>
+            <button
+              onClick={handleImportClick}
+              disabled={importing}
+              title="Import HSN codes from a filled-in CSV"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {importing ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Upload size={13} />
+              )}
+              <span className="hidden sm:inline">
+                {importing ? "Importing..." : "Import CSV"}
+              </span>
+            </button>
+          </div>
+        }
       >
         <MasterPage
           title="HSN"
@@ -204,15 +416,91 @@ const HsnMaster: React.FC = () => {
             title: "HSN Master",
             filename: "hsn-master",
             columns: [
-              { header: "HSN Code",   accessor: "code" },
+              { header: "HSN Code", accessor: "code" },
               { header: "Short Desc", accessor: "shortDesc" },
-              { header: "IGST %",     accessor: "igstRate" },
-              { header: "CGST %",     accessor: "cgstRate" },
-              { header: "SGST %",     accessor: "sgstRate" },
-              { header: "Status",     accessor: "status" },
+              { header: "IGST %", accessor: "igstRate" },
+              { header: "CGST %", accessor: "cgstRate" },
+              { header: "SGST %", accessor: "sgstRate" },
+              { header: "Status", accessor: "status" },
             ],
           }}
         />
+
+        {/* Import Results Modal */}
+        <Dialog
+          open={!!importResults}
+          onOpenChange={(open) => !open && setImportResults(null)}
+        >
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="font-heading text-base">
+                Import Results
+              </DialogTitle>
+            </DialogHeader>
+            {importResults && (
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="flex items-center gap-1.5 text-green-600">
+                    <Check size={14} />
+                    {
+                      importResults.filter((r) => r.status === "success").length
+                    }{" "}
+                    succeeded
+                  </span>
+                  {importResults.some((r) => r.status === "error") && (
+                    <span className="flex items-center gap-1.5 text-destructive">
+                      <X size={14} />
+                      {
+                        importResults.filter((r) => r.status === "error").length
+                      }{" "}
+                      failed
+                    </span>
+                  )}
+                </div>
+                <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+                  {importResults.map((r, i) => (
+                    <div
+                      key={i}
+                      className={`flex items-start gap-2 px-3 py-2 text-sm ${
+                        r.status === "error" ? "bg-destructive/5" : ""
+                      }`}
+                    >
+                      {r.status === "success" ? (
+                        <Check
+                          size={14}
+                          className="text-green-600 shrink-0 mt-0.5"
+                        />
+                      ) : (
+                        <X
+                          size={14}
+                          className="text-destructive shrink-0 mt-0.5"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">
+                          Row {r.row} — {r.code}
+                        </p>
+                        {r.message && (
+                          <p className="text-xs text-destructive">
+                            {r.message}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+              <button
+                onClick={() => setImportResults(null)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+              >
+                Close
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </MaterialShell>
     </>
   );

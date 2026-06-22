@@ -1,3 +1,4 @@
+import { generateUUID } from '../../utils/cryptoPolyfill';  
 import React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -38,7 +39,7 @@ const buildId = () => {
     typeof crypto !== "undefined" &&
     typeof crypto.randomUUID === "function"
   ) {
-    return crypto.randomUUID();
+    return generateUUID();
   }
   return `api-${Date.now()}`;
 };

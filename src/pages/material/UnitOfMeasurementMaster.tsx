@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import {
@@ -7,11 +7,17 @@ import {
   type FieldDef,
   type DataChangeEvent,
 } from "@/components/MasterPage";
-import type { ExportColumn } from "@/lib/export";
-import { Ruler, Hash } from "lucide-react";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
+import { Ruler, Hash, Download, Upload, Loader2, Check, X } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getUomList, addUom, updateUom, deleteUom } from "@/api/uomApi";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface DbUOM {
   Id: number;
@@ -72,6 +78,32 @@ const toPayload = (record: Record<string, unknown>) => ({
   IsActive: record.status !== false,
 });
 
+// ── CSV template / import column mapping ─────────────────────────────────────
+// Single source of truth for both the downloadable template and the importer,
+// so the headers a user downloads are exactly the headers the importer reads.
+const CSV_HEADERS = {
+  code: "Unit Code",
+  name: "Unit Name",
+  symbol: "Symbol",
+  remarks: "Remarks",
+  status: "Active (Yes/No)",
+} as const;
+
+const UOM_CSV_TEMPLATE_COLUMNS: ExportColumn[] = [
+  { header: CSV_HEADERS.code, accessor: "code" },
+  { header: CSV_HEADERS.name, accessor: "name" },
+  { header: CSV_HEADERS.symbol, accessor: "symbol" },
+  { header: CSV_HEADERS.remarks, accessor: "remarks" },
+  { header: CSV_HEADERS.status, accessor: "status" },
+];
+
+interface ImportRowResult {
+  row: number;
+  name: string;
+  status: "success" | "error";
+  message?: string;
+}
+
 const columnRenderers = {
   code: (value: unknown) => (
     <div className="flex items-center gap-2 min-w-[100px]">
@@ -131,6 +163,129 @@ export default function UnitOfMeasurementMaster() {
     status: Boolean(item.IsActive),
   }));
 
+  // CSV import
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState<ImportRowResult[] | null>(
+    null,
+  );
+
+  // ── CSV template download ───────────────────────────────────────────────────
+  const handleDownloadTemplate = () => {
+    exportToCsv([], UOM_CSV_TEMPLATE_COLUMNS, "uom-master-template");
+    toast.success("Template downloaded — fill it in and use Import.");
+  };
+
+  // ── CSV import ───────────────────────────────────────────────────────────────
+  const handleImportClick = () => {
+    importFileInputRef.current?.click();
+  };
+
+  const handleImportFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    // Allow picking the same filename again later.
+    e.target.value = "";
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast.error("Please select a .csv file.");
+      return;
+    }
+
+    setImporting(true);
+    setImportResults(null);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+
+      if (rows.length === 0) {
+        toast.error("The CSV file has no data rows.");
+        setImporting(false);
+        return;
+      }
+
+      const results: ImportRowResult[] = [];
+
+      // Sequential, not Promise.all — keeps row order in the result list
+      // predictable and avoids hammering the API with N parallel inserts.
+      for (let i = 0; i < rows.length; i++) {
+        const raw = rows[i];
+        const rowNum = i + 2; // +1 for header row, +1 for 1-based numbering
+        const nameForLog = raw[CSV_HEADERS.name] || "(blank)";
+
+        try {
+          const code = (raw[CSV_HEADERS.code] || "").trim().toUpperCase();
+          const name = (raw[CSV_HEADERS.name] || "").trim();
+          const symbol = (raw[CSV_HEADERS.symbol] || "").trim();
+          const remarks = (raw[CSV_HEADERS.remarks] || "").trim();
+          const statusRaw = (raw[CSV_HEADERS.status] || "")
+            .trim()
+            .toLowerCase();
+
+          if (!code) throw new Error("Unit Code is required");
+          if (!name) throw new Error("Unit Name is required");
+          if (!symbol) throw new Error("Symbol is required");
+
+          // Active defaults to Yes when left blank, matching the form's default.
+          const isActive =
+            statusRaw === "" ||
+            statusRaw === "yes" ||
+            statusRaw === "true" ||
+            statusRaw === "1"
+              ? true
+              : statusRaw === "no" || statusRaw === "false" || statusRaw === "0"
+                ? false
+                : null;
+          if (isActive === null)
+            throw new Error(
+              `Active must be "Yes" or "No" (got "${raw[CSV_HEADERS.status]}")`,
+            );
+
+          await addUom(
+            toPayload({ code, name, symbol, remarks, status: isActive }),
+          );
+          results.push({ row: rowNum, name, status: "success" });
+        } catch (err: any) {
+          results.push({
+            row: rowNum,
+            name: nameForLog,
+            status: "error",
+            message: err?.message || "Unknown error",
+          });
+        }
+      }
+
+      setImportResults(results);
+      const successCount = results.filter((r) => r.status === "success").length;
+      const errorCount = results.length - successCount;
+
+      if (successCount > 0) {
+        await queryClient.invalidateQueries({ queryKey: ["uom-master"] });
+      }
+      if (errorCount === 0) {
+        toast.success(
+          `Imported ${successCount} unit${successCount === 1 ? "" : "s"} ✓`,
+        );
+      } else if (successCount === 0) {
+        toast.error(
+          `Import failed for all ${errorCount} row${errorCount === 1 ? "" : "s"}.`,
+        );
+      } else {
+        toast.warning(
+          `Imported ${successCount} of ${results.length} rows — ${errorCount} failed. See details.`,
+        );
+      }
+    } catch (err: any) {
+      toast.error(
+        "Could not read CSV file: " + (err?.message || "Unknown error"),
+      );
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
       try {
@@ -180,25 +335,135 @@ export default function UnitOfMeasurementMaster() {
         title="Unit of Measurement"
         subtitle="Configure units used for items and stock"
         icon={Ruler}
+        action={
+          <div className="flex items-center gap-2">
+            <input
+              ref={importFileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleImportFileChange}
+              className="hidden"
+            />
+            <button
+              onClick={handleDownloadTemplate}
+              title="Download a blank CSV with all UOM fields"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+            >
+              <Download size={13} />
+              <span className="hidden sm:inline">Download Template</span>
+            </button>
+            <button
+              onClick={handleImportClick}
+              disabled={importing}
+              title="Import units from a filled-in CSV"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {importing ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Upload size={13} />
+              )}
+              <span className="hidden sm:inline">
+                {importing ? "Importing..." : "Import CSV"}
+              </span>
+            </button>
+          </div>
+        }
       >
-      <MasterPage
-        title="Unit of Measurement"
-        fields={FIELDS}
-        columns={COLUMNS}
-        initialData={mappedData}
-        columnRenderers={columnRenderers}
-        onDataEvent={handleDataEvent}
-        exportConfig={{
-          title: "Unit of Measurement Master",
-          filename: "uom-master",
-          columns: [
-            { header: "Code",   accessor: "code" },
-            { header: "Name",   accessor: "name" },
-            { header: "Symbol", accessor: "symbol" },
-            { header: "Status", accessor: "status" },
-          ],
-        }}
-      />
+        <MasterPage
+          title="Unit of Measurement"
+          fields={FIELDS}
+          columns={COLUMNS}
+          initialData={mappedData}
+          columnRenderers={columnRenderers}
+          onDataEvent={handleDataEvent}
+          exportConfig={{
+            title: "Unit of Measurement Master",
+            filename: "uom-master",
+            columns: [
+              { header: "Code", accessor: "code" },
+              { header: "Name", accessor: "name" },
+              { header: "Symbol", accessor: "symbol" },
+              { header: "Status", accessor: "status" },
+            ],
+          }}
+        />
+
+        {/* Import Results Modal */}
+        <Dialog
+          open={!!importResults}
+          onOpenChange={(open) => !open && setImportResults(null)}
+        >
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="font-heading text-base">
+                Import Results
+              </DialogTitle>
+            </DialogHeader>
+            {importResults && (
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="flex items-center gap-1.5 text-green-600">
+                    <Check size={14} />
+                    {
+                      importResults.filter((r) => r.status === "success").length
+                    }{" "}
+                    succeeded
+                  </span>
+                  {importResults.some((r) => r.status === "error") && (
+                    <span className="flex items-center gap-1.5 text-destructive">
+                      <X size={14} />
+                      {
+                        importResults.filter((r) => r.status === "error").length
+                      }{" "}
+                      failed
+                    </span>
+                  )}
+                </div>
+                <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+                  {importResults.map((r, i) => (
+                    <div
+                      key={i}
+                      className={`flex items-start gap-2 px-3 py-2 text-sm ${
+                        r.status === "error" ? "bg-destructive/5" : ""
+                      }`}
+                    >
+                      {r.status === "success" ? (
+                        <Check
+                          size={14}
+                          className="text-green-600 shrink-0 mt-0.5"
+                        />
+                      ) : (
+                        <X
+                          size={14}
+                          className="text-destructive shrink-0 mt-0.5"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">
+                          Row {r.row} — {r.name}
+                        </p>
+                        {r.message && (
+                          <p className="text-xs text-destructive">
+                            {r.message}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+              <button
+                onClick={() => setImportResults(null)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+              >
+                Close
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </MaterialShell>
     </>
   );

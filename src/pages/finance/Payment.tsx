@@ -54,6 +54,7 @@ import {
   Eye,
   Printer,
   ArrowRight,
+  CreditCard,
   RefreshCw,
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
@@ -92,6 +93,11 @@ interface DbPayment {
   PUpiTransactionId?: string | null;
   PRtgsReference?: string | null;
   PImpsReference?: string | null;
+  PCardReference?: string | null;
+  PCardId?: number | null;
+  PCardNumber?: string | null;
+  PCardNetwork?: string | null;
+  PCardHolderName?: string | null;
 }
 
 interface BankOption {
@@ -101,6 +107,16 @@ interface BankOption {
   ifscCode?: string | null;
   branch?: string | null;
   accountType?: string | null;
+}
+
+interface CardOption {
+  id: number;
+  bank_id: number | null;
+  card_holder_name: string | null;
+  card_number: string | null;
+  card_network: string | null;
+  card_type: string | null;
+  status: boolean;
 }
 
 interface ChequeLot {
@@ -203,6 +219,9 @@ interface PaymentRecord {
   upiTransactionId: string;
   rtgsReference: string;
   impsReference: string;
+  cardReference: string;
+  cardId: number | null;
+  cardDisplay: string; // read-only summary (network + last4 + holder) of the selected card, if any
   // GST breakdown from linked expense
   baseAmount: number | null;
   cgstRate: number | null;
@@ -221,6 +240,7 @@ const PAYMENT_MODES = [
   "UPI",
   "RTGS",
   "IMPS",
+  "Card",
 ] as const;
 
 type PaymentMode = (typeof PAYMENT_MODES)[number];
@@ -296,6 +316,27 @@ const fetchChequeLots = async (
   const res = await fetchWithAuth(url);
   if (!res.ok) return [];
   return res.json();
+};
+
+// Active cards for a bank — used by the Card-mode card selector.
+// Mirrors fetchChequeLots: returns [] for any bank with no cards on file
+// rather than erroring, since card registration is optional.
+const fetchCardsByBank = async (
+  bankId?: number | null,
+): Promise<CardOption[]> => {
+  if (!bankId) return [];
+  const res = await fetchWithAuth(`/api/card-master?bankId=${bankId}`);
+  if (!res.ok) return [];
+  const rows: any[] = await res.json();
+  return rows.map((r) => ({
+    id: r.id,
+    bank_id: r.bank_id ?? null,
+    card_holder_name: r.card_holder_name ?? null,
+    card_number: r.card_number ?? null,
+    card_network: r.card_network ?? null,
+    card_type: r.card_type ?? null,
+    status: !!r.status,
+  }));
 };
 
 const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
@@ -520,7 +561,9 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     upiTransactionId: "",
     rtgsReference: "",
     impsReference: "",
-    baseAmount: null,
+    cardReference: "",
+    cardId: null,
+    cardDisplay: "",
     cgstRate: null,
     sgstRate: null,
     igstRate: null,
@@ -558,6 +601,17 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     upiTransactionId: item.PUpiTransactionId || "",
     rtgsReference: item.PRtgsReference || "",
     impsReference: item.PImpsReference || "",
+    cardReference: item.PCardReference || "",
+    cardId: item.PCardId ?? null,
+    cardDisplay: item.PCardId
+      ? [
+          item.PCardNetwork,
+          maskCardNumber(item.PCardNumber ?? null),
+          item.PCardHolderName,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : "",
     baseAmount: null,
     cgstRate: null,
     sgstRate: null,
@@ -607,12 +661,17 @@ function SectionHeader({
       className="flex items-center gap-2.5 px-3 py-2 rounded-lg"
       style={{
         background: isDark ? "rgba(99,102,241,0.08)" : "rgba(99,102,241,0.06)",
-        border: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.15)",
+        border: isDark
+          ? "1px solid rgba(99,102,241,0.18)"
+          : "1px solid rgba(99,102,241,0.15)",
       }}
     >
       <div
         className="flex items-center justify-center w-5 h-5 rounded-md shrink-0"
-        style={{ background: "rgba(99,102,241,0.18)", border: "1px solid rgba(99,102,241,0.28)" }}
+        style={{
+          background: "rgba(99,102,241,0.18)",
+          border: "1px solid rgba(99,102,241,0.28)",
+        }}
       >
         <Icon size={11} style={{ color: "#818cf8" }} />
       </div>
@@ -998,7 +1057,9 @@ function FilterBar({
       className="rounded-xl p-3 space-y-3"
       style={{
         background: _fbDark ? "rgba(15,17,26,0.4)" : "rgba(248,250,252,0.72)",
-        border: _fbDark ? "1px solid rgba(99,102,241,0.14)" : "1px solid rgba(99,102,241,0.12)",
+        border: _fbDark
+          ? "1px solid rgba(99,102,241,0.14)"
+          : "1px solid rgba(99,102,241,0.12)",
         backdropFilter: "blur(12px)",
         WebkitBackdropFilter: "blur(12px)",
       }}
@@ -1011,7 +1072,10 @@ function FilterBar({
           >
             <Search size={11} style={{ color: "#818cf8" }} />
           </div>
-          <span className="text-[11px] font-heading uppercase tracking-wider" style={{ color: _fbDark ? "#64748b" : "#6366f1" }}>
+          <span
+            className="text-[11px] font-heading uppercase tracking-wider"
+            style={{ color: _fbDark ? "#64748b" : "#6366f1" }}
+          >
             Filter expense bookings
           </span>
           {activeCount > 0 && (
@@ -1382,6 +1446,10 @@ function ModeInfoBanner({ mode }: { mode: string }) {
       container: "bg-pink-500/5 border border-pink-500/20",
       icon: "text-pink-500",
     },
+    amber: {
+      container: "bg-amber-500/5 border border-amber-500/20",
+      icon: "text-amber-500",
+    },
   };
   const msgs: Record<
     string,
@@ -1421,6 +1489,11 @@ function ModeInfoBanner({ mode }: { mode: string }) {
       icon: Hash,
       color: "pink",
       text: "Post-transaction: enter the IMPS reference number. Record will go for approval after save.",
+    },
+    Card: {
+      icon: CreditCard,
+      color: "amber",
+      text: "Post-transaction: enter the card transaction/approval ID for reconciliation. Record will go for approval after save.",
     },
   };
   const m = msgs[mode];
@@ -1791,6 +1864,12 @@ function DigitalRefPanel({
       placeholder: "e.g. 412210987654",
       hint: "12-digit reference from IMPS transfer confirmation.",
     },
+    Card: {
+      field: "cardReference",
+      label: "Card Transaction / Approval ID",
+      placeholder: "e.g. AUTH123456",
+      hint: "Transaction or approval ID from the card terminal/statement.",
+    },
   };
   const cfg = configs[mode];
   if (!cfg) return null;
@@ -1805,6 +1884,119 @@ function DigitalRefPanel({
         onChange={(v) => set(cfg.field, v)}
         placeholder={cfg.placeholder}
       />
+    </Field>
+  );
+}
+
+// ─── Card Panel ────────────────────────────────────────────────────────────────
+// Lets the user pick which specific card (from Card Master) was used for a
+// "Card" mode payment, since one bank can have multiple cards on file.
+// Mirrors ChequePanel's bank → lot lookup, but cards are an optional layer on
+// top of the existing free-text cardReference (transaction/approval ID).
+
+interface CardPanelProps {
+  bankId: number | null;
+  form: Omit<PaymentRecord, "id">;
+  set: <K extends keyof Omit<PaymentRecord, "id">>(
+    field: K,
+    value: Omit<PaymentRecord, "id">[K],
+  ) => void;
+}
+
+function maskCardNumber(num: string | null): string {
+  const digits = (num || "").replace(/\D/g, "");
+  if (digits.length < 4) return "••••";
+  return `•••• ${digits.slice(-4)}`;
+}
+
+function CardPanel({ bankId, form, set }: CardPanelProps) {
+  const [cards, setCards] = useState<CardOption[]>([]);
+  const [loadingCards, setLoadingCards] = useState(false);
+
+  // Fetch cards whenever bankId changes; auto-select if there's exactly one
+  useEffect(() => {
+    if (!bankId) {
+      setCards([]);
+      return;
+    }
+    setLoadingCards(true);
+    fetchCardsByBank(bankId)
+      .then((fetched) => {
+        setCards(fetched);
+        if (fetched.length === 1 && !form.cardId) {
+          set("cardId", fetched[0].id);
+        }
+      })
+      .catch(() => setCards([]))
+      .finally(() => setLoadingCards(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bankId]);
+
+  if (!bankId) return null;
+
+  if (loadingCards) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        Loading cards…
+      </div>
+    );
+  }
+
+  if (cards.length === 0) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600">
+        <AlertTriangle size={12} />
+        No cards on file for this bank. You can still enter the transaction ID
+        below, or add a card in Card Master.
+      </div>
+    );
+  }
+
+  const selected = cards.find((c) => c.id === form.cardId) ?? null;
+
+  return (
+    <Field
+      label="Card Used"
+      hint="Select which card on file was used for this transaction."
+    >
+      <div className="relative">
+        <CreditCard
+          size={13}
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+        />
+        <select
+          value={form.cardId ? String(form.cardId) : ""}
+          onChange={(e) =>
+            set("cardId", e.target.value ? Number(e.target.value) : null)
+          }
+          className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+        >
+          <option value="">— Select card —</option>
+          {cards.map((c) => (
+            <option key={c.id} value={String(c.id)}>
+              {[
+                c.card_network,
+                maskCardNumber(c.card_number),
+                c.card_holder_name,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </option>
+          ))}
+        </select>
+        <ChevronDown
+          size={14}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+        />
+      </div>
+      {selected && (
+        <p className="text-[11px] text-muted-foreground/70 mt-1 pl-1">
+          {[selected.card_type, selected.card_holder_name]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
+      )}
     </Field>
   );
 }
@@ -1922,6 +2114,8 @@ const Payment: React.FC = () => {
       field("UPI Txn ID", rec.upiTransactionId || null),
       field("RTGS Ref.", rec.rtgsReference || null),
       field("IMPS Ref.", rec.impsReference || null),
+      field("Card Ref.", rec.cardReference || null),
+      field("Card Used", rec.cardDisplay || null),
     ].join("");
 
     const html = `<!DOCTYPE html>
@@ -2178,7 +2372,12 @@ const Payment: React.FC = () => {
     (k) => String(form[k] ?? "") !== String(blank[k] ?? ""),
   );
 
-  const canSave = !!(form.paymentName.trim() && form.mode && form.date && (Number(form.amount) > 0 || form.expenseRef));
+  const canSave = !!(
+    form.paymentName.trim() &&
+    form.mode &&
+    form.date &&
+    (Number(form.amount) > 0 || form.expenseRef)
+  );
 
   const handleReset = () => {
     setForm(blankForm());
@@ -2206,12 +2405,14 @@ const Payment: React.FC = () => {
           }
         : {}),
       // Clear digital fields when switching away from digital modes
-      ...(!["NEFT", "UPI", "RTGS", "IMPS"].includes(newMode)
+      ...(!["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(newMode)
         ? {
             neftNumber: "",
             upiTransactionId: "",
             rtgsReference: "",
             impsReference: "",
+            cardReference: "",
+            cardId: null,
           }
         : {}),
     }));
@@ -2494,6 +2695,8 @@ const Payment: React.FC = () => {
     set("chequeLotId", null);
     set("chequeLotNumber", "");
     set("chequeNo", "");
+    // Reset selected card when bank changes (cards are bank-specific)
+    set("cardId", null);
   };
 
   // ── Validation ─────────────────────────────────────────────────────────────
@@ -2514,7 +2717,9 @@ const Payment: React.FC = () => {
 
     const isChequeMode =
       form.mode === "Cheque" || form.mode === "Post-Dated Cheque";
-    const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS"].includes(form.mode);
+    const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(
+      form.mode,
+    );
 
     if (isChequeMode) {
       if (!form.bankId) {
@@ -2561,6 +2766,10 @@ const Payment: React.FC = () => {
         toast.error("IMPS reference is required.");
         return false;
       }
+      if (form.mode === "Card" && !form.cardReference.trim()) {
+        toast.error("Card transaction/approval ID is required.");
+        return false;
+      }
     }
 
     return true;
@@ -2600,6 +2809,8 @@ const Payment: React.FC = () => {
       upiTransactionId: form.upiTransactionId || null,
       rtgsReference: form.rtgsReference || null,
       impsReference: form.impsReference || null,
+      cardReference: form.cardReference || null,
+      cardId: form.cardId ?? null,
     } as any;
 
     try {
@@ -2637,7 +2848,9 @@ const Payment: React.FC = () => {
 
   const isChequeMode =
     form.mode === "Cheque" || form.mode === "Post-Dated Cheque";
-  const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS"].includes(form.mode);
+  const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(
+    form.mode,
+  );
   const isCashMode = form.mode === "Cash";
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -2689,7 +2902,6 @@ const Payment: React.FC = () => {
           ) : undefined
         }
       >
-
         {/* ── Summary stats ── */}
         {view === "list" && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -2766,8 +2978,12 @@ const Payment: React.FC = () => {
           <div
             className="rounded-2xl overflow-hidden"
             style={{
-              background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.80)",
-              border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.18)",
+              background: isDark
+                ? "rgba(12,14,22,0.55)"
+                : "rgba(255,255,255,0.80)",
+              border: isDark
+                ? "1px solid rgba(99,102,241,0.20)"
+                : "1px solid rgba(99,102,241,0.18)",
               backdropFilter: "blur(20px) saturate(160%)",
               WebkitBackdropFilter: "blur(20px) saturate(160%)",
               boxShadow: isDark
@@ -2779,14 +2995,21 @@ const Payment: React.FC = () => {
             <div
               className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
               style={{
-                background: isDark ? "rgba(99,102,241,0.10)" : "rgba(99,102,241,0.06)",
-                borderBottom: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.14)",
+                background: isDark
+                  ? "rgba(99,102,241,0.10)"
+                  : "rgba(99,102,241,0.06)",
+                borderBottom: isDark
+                  ? "1px solid rgba(99,102,241,0.18)"
+                  : "1px solid rgba(99,102,241,0.14)",
               }}
             >
               {/* Left accent stripe */}
               <div
                 className="absolute left-0 top-0 bottom-0 w-0.5"
-                style={{ background: "linear-gradient(to bottom, transparent 10%, #6366f1 30%, #6366f1 70%, transparent 90%)" }}
+                style={{
+                  background:
+                    "linear-gradient(to bottom, transparent 10%, #6366f1 30%, #6366f1 70%, transparent 90%)",
+                }}
               />
               <div className="flex items-center gap-3">
                 <button
@@ -2797,11 +3020,22 @@ const Payment: React.FC = () => {
                   <ArrowLeft size={15} />
                   <span className="hidden sm:inline">Back</span>
                 </button>
-                <span style={{ color: isDark ? "rgba(99,102,241,0.4)" : "rgba(99,102,241,0.3)" }}>|</span>
+                <span
+                  style={{
+                    color: isDark
+                      ? "rgba(99,102,241,0.4)"
+                      : "rgba(99,102,241,0.3)",
+                  }}
+                >
+                  |
+                </span>
                 <div className="flex items-center gap-2">
                   <div
                     className="w-6 h-6 rounded-lg flex items-center justify-center"
-                    style={{ background: "rgba(99,102,241,0.18)", border: "1px solid rgba(99,102,241,0.30)" }}
+                    style={{
+                      background: "rgba(99,102,241,0.18)",
+                      border: "1px solid rgba(99,102,241,0.30)",
+                    }}
                   >
                     <Receipt size={12} style={{ color: "#818cf8" }} />
                   </div>
@@ -3762,10 +3996,13 @@ const Payment: React.FC = () => {
                 </div>
               )}
 
-              {/* NEFT / UPI / RTGS / IMPS */}
+              {/* NEFT / UPI / RTGS / IMPS / Card */}
               {isDigitalMode && (
                 <div className="space-y-3">
                   <SectionHeader icon={Hash} label={`${form.mode} Reference`} />
+                  {form.mode === "Card" && (
+                    <CardPanel bankId={form.bankId} form={form} set={set} />
+                  )}
                   <DigitalRefPanel mode={form.mode} form={form} set={set} />
                 </div>
               )}
@@ -3773,9 +4010,13 @@ const Payment: React.FC = () => {
               {/* ── Save footer ── */}
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
                 <p className="text-[11px] text-muted-foreground hidden sm:block">
-                  {canSave
-                    ? <span className="text-emerald-500 font-medium">Ready to save</span>
-                    : "Fill in the required fields to save"}
+                  {canSave ? (
+                    <span className="text-emerald-500 font-medium">
+                      Ready to save
+                    </span>
+                  ) : (
+                    "Fill in the required fields to save"
+                  )}
                 </p>
                 <div className="flex items-center gap-2 sm:ml-auto">
                   <button
@@ -3798,7 +4039,11 @@ const Payment: React.FC = () => {
                     ) : (
                       <Plus size={14} />
                     )}
-                    {saving ? "Saving…" : editingId ? "Update Payment" : "Save Payment"}
+                    {saving
+                      ? "Saving…"
+                      : editingId
+                        ? "Update Payment"
+                        : "Save Payment"}
                   </button>
                 </div>
               </div>
@@ -4411,6 +4656,11 @@ const Payment: React.FC = () => {
                               <span className="font-mono text-xs text-muted-foreground">
                                 {rec.impsReference}
                               </span>
+                            ) : rec.cardReference ? (
+                              <span className="font-mono text-xs text-muted-foreground">
+                                {rec.cardDisplay ? `${rec.cardDisplay} · ` : ""}
+                                {rec.cardReference}
+                              </span>
                             ) : (
                               <span className="text-muted-foreground text-xs">
                                 —
@@ -4756,6 +5006,12 @@ const Payment: React.FC = () => {
                     : []),
                   ...(viewingRec.impsReference
                     ? [{ label: "IMPS Ref.", value: viewingRec.impsReference }]
+                    : []),
+                  ...(viewingRec.cardReference
+                    ? [{ label: "Card Ref.", value: viewingRec.cardReference }]
+                    : []),
+                  ...(viewingRec.cardDisplay
+                    ? [{ label: "Card Used", value: viewingRec.cardDisplay }]
                     : []),
                   ...(viewingRec.parentDocNo
                     ? [{ label: "Parent Doc", value: viewingRec.parentDocNo }]
