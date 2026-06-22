@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useCallback, useEffect } from "react";
+import { generateId } from "@/lib/generateId";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -29,6 +30,9 @@ import {
   ShoppingCart,
   Package,
   ExternalLink,
+  ArrowLeft,
+  RotateCcw,
+  Check,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -92,7 +96,7 @@ const defaultHeader: FormHeader = {
 };
 
 const blankCartItem = (): CartItem => ({
-  _key: crypto.randomUUID(),
+  _key: generateId(),
   ItemId: "",
   UOMCode: "",
   Quantity: "",
@@ -357,7 +361,8 @@ export default function MaterialRequest() {
         `Material Request ${rec?.DocNo || ""} created and sent for approval`,
       );
       invalidate();
-      goToList();
+      setSaved(true);
+      setTimeout(() => { setSaved(false); goToList(); }, 1500);
     },
     onError: (err: any) =>
       toast.error(err.message || "Failed to create request"),
@@ -368,7 +373,8 @@ export default function MaterialRequest() {
     onSuccess: () => {
       toast.success("Material Request updated");
       invalidate();
-      goToList();
+      setSaved(true);
+      setTimeout(() => { setSaved(false); goToList(); }, 1500);
     },
     onError: (err: any) =>
       toast.error(err.message || "Failed to update request"),
@@ -395,6 +401,7 @@ export default function MaterialRequest() {
   });
 
   const isSaving = createMutation.isPending || updateMutation.isPending;
+  const [saved, setSaved] = useState(false);
 
   // ── Navigation helpers ───────────────────────────────────────────────────────
 
@@ -404,6 +411,13 @@ export default function MaterialRequest() {
     setViewingRecord(null);
     setHeader(defaultHeader);
     setCart([blankCartItem()]);
+  };
+
+  const resetFields = () => {
+    setEditingId(null);
+    setHeader(defaultHeader);
+    setCart([blankCartItem()]);
+    setSaved(false);
   };
 
   const handleEdit = (record: any) => {
@@ -424,7 +438,7 @@ export default function MaterialRequest() {
       remarks: record.Remarks ?? "",
     });
     const items: CartItem[] = (record.items || []).map((it: any) => ({
-      _key: crypto.randomUUID(),
+      _key: generateId(),
       ItemId: String(it.ItemId ?? ""),
       ItemName: it.ItemName,
       UOMCode: String(it.UOMCode ?? ""),
@@ -664,55 +678,17 @@ export default function MaterialRequest() {
     return (
       <Card className="border-border shadow-sm">
         <CardHeader className="pb-3 border-b border-border">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-base font-semibold">
-                Request Register
-              </CardTitle>
-              {!loadingList && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {totalCount} record{totalCount !== 1 ? "s" : ""}
-                </p>
-              )}
-            </div>
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
-              {/* Status filter chips */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {[
-                  "",
-                  "Pending",
-                  "Approved",
-                  "Ordered",
-                  "Partially Ordered",
-                  "Draft",
-                ].map((s) => (
-                  <button
-                    key={s || "all"}
-                    onClick={() => {
-                      setStatusFilter(s);
-                      setPage(1);
-                      if (s) setSearchParams({ status: s });
-                      else setSearchParams({});
-                    }}
-                    className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
-                      statusFilter === s
-                        ? s === "Approved"
-                          ? "bg-emerald-500/15 text-emerald-600 border-emerald-400/40"
-                          : s === "Pending"
-                            ? "bg-amber-500/15 text-amber-600 border-amber-400/40"
-                            : s === "Draft"
-                              ? "bg-slate-500/15 text-slate-600 border-slate-400/40"
-                              : s === "Ordered"
-                                ? "bg-violet-500/15 text-violet-600 border-violet-400/40"
-                                : s === "Partially Ordered"
-                                  ? "bg-purple-500/15 text-purple-600 border-purple-400/40"
-                                  : "bg-primary/10 text-primary border-primary/30"
-                        : "bg-transparent text-muted-foreground border-border hover:bg-muted"
-                    }`}
-                  >
-                    {s || "All"}
-                  </button>
-                ))}
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-base font-semibold">
+                  Request Register
+                </CardTitle>
+                {!loadingList && (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {totalCount} record{totalCount !== 1 ? "s" : ""}
+                  </p>
+                )}
               </div>
               <div className="relative w-full sm:w-64">
                 <Search
@@ -726,9 +702,29 @@ export default function MaterialRequest() {
                     setPage(1);
                   }}
                   placeholder="Search doc no, company…"
-                  className="pl-9 h-9 text-sm"
+                  className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
                 />
               </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {["", "Pending", "Approved", "Ordered", "Partially Ordered", "Draft"].map((s) => (
+                <button
+                  key={s || "all"}
+                  onClick={() => {
+                    setStatusFilter(s);
+                    setPage(1);
+                    if (s) setSearchParams({ status: s });
+                    else setSearchParams({});
+                  }}
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    statusFilter === s
+                      ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm"
+                      : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"
+                  }`}
+                >
+                  {s || "All"}
+                </button>
+              ))}
             </div>
           </div>
         </CardHeader>
@@ -786,24 +782,23 @@ export default function MaterialRequest() {
     <div className="space-y-5">
       {/* Header card */}
       <Card className="border-border shadow-sm">
-        <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
-          <CardTitle className="text-base font-semibold flex items-center gap-2">
-            {editingId ? (
-              <Edit3 size={15} className="text-primary" />
-            ) : (
-              <FileText size={15} className="text-primary" />
-            )}
-            {editingId ? "Edit Material Request" : "New Material Request"}
-          </CardTitle>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={goToList}
-            className="h-8 w-8"
-          >
-            <X size={15} />
-          </Button>
-        </CardHeader>
+        <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
+          <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
+          <div className="flex items-center gap-3 min-w-0">
+            <button type="button" onClick={goToList} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0">
+              <ArrowLeft size={15} /><span className="hidden sm:inline">Back</span>
+            </button>
+            <span className="text-emerald-500/40">|</span>
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-emerald-500/[0.18] border border-emerald-500/30 shrink-0">
+                <ClipboardList size={12} className="text-emerald-400" />
+              </div>
+              <h2 className="text-sm font-heading font-bold text-foreground truncate">
+                {editingId ? "Edit Material Request" : "New Material Request"}
+              </h2>
+            </div>
+          </div>
+        </div>
 
         <CardContent className="p-5 space-y-4">
           {/* Doc number / Type of Doc */}
@@ -1045,7 +1040,7 @@ export default function MaterialRequest() {
           {cart.map((ci, idx) => (
             <div
               key={ci._key}
-              className="group relative rounded-xl border border-border bg-card hover:border-primary/30 hover:shadow-sm transition-all duration-150"
+              className="group relative rounded-xl border border-border bg-card hover:border-emerald-500/30 hover:shadow-sm transition-all duration-150"
             >
               {/* Row number pill */}
               <div className="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold text-muted-foreground shadow-sm">
@@ -1234,26 +1229,21 @@ export default function MaterialRequest() {
           All required fields must be filled before saving.
         </p>
         <div className="flex gap-2 sm:ml-auto">
-          <Button
-            variant="outline"
-            onClick={goToList}
+          <button
+            onClick={resetFields}
             disabled={isSaving}
-            className="flex-1 sm:flex-none flex items-center justify-center px-5 py-2 text-sm h-auto font-semibold"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition disabled:opacity-50"
           >
-            Cancel
-          </Button>
-          <Button
+            <RotateCcw size={14} /> Reset
+          </button>
+          <button
             onClick={onSave}
-            disabled={!canSave || isSaving}
-            className="flex-1 sm:flex-none whitespace-nowrap bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 px-5 py-2 text-sm h-auto font-semibold text-white gap-2"
+            disabled={!canSave || isSaving || saved}
+            className="flex-1 sm:flex-none whitespace-nowrap bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center justify-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
           >
-            {isSaving ? (
-              <RefreshCw size={14} className="animate-spin" />
-            ) : (
-              <Save size={14} />
-            )}
-            {isSaving ? "Saving…" : editingId ? "Update Request" : "Save Request"}
-          </Button>
+            {saved ? <Check size={14} /> : isSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+            {saved ? "Saved!" : isSaving ? "Saving…" : editingId ? "Update Request" : "Save Request"}
+          </button>
         </div>
       </div>
     </div>
@@ -1457,7 +1447,7 @@ export default function MaterialRequest() {
           viewMode === "list" ? (
             <Button
               onClick={() => setViewMode("form")}
-              className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition-all"
+              className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
             >
               <Plus size={13} /> New Request
             </Button>

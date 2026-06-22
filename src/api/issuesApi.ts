@@ -64,12 +64,14 @@ export const getIssues = async (params: {
   page: number;
   limit: number;
   search: string;
+  status?: string;
 }) => {
   const q = new URLSearchParams({
     page: String(params.page),
     limit: String(params.limit),
     search: params.search,
   });
+  if (params.status) q.set("status", params.status);
   const res = await fetchWithAuth(`${BASE}?${q}`);
   if (!res.ok) throw new Error("Failed to fetch issues");
   return res.json();
