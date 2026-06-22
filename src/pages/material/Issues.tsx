@@ -1,4 +1,4 @@
-import { generateUUID } from '../../utils/cryptoPolyfill';  
+import { generateUUID } from '../../utils/cryptoPolyfill';
 import React, { useMemo, useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -32,6 +32,9 @@ import {
   ArrowDownToLine,
   User,
   Layers,
+  ArrowLeft,
+  RotateCcw,
+  Check,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -178,6 +181,7 @@ export default function Issues() {
   const [viewingRecord, setViewingRecord] = useState<any>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [issueStatusFilter, setIssueStatusFilter] = useState("");
   const limit = 10;
 
   const [header, setHeader] = useState<IssueHeader>(defaultHeader);
@@ -237,8 +241,8 @@ export default function Issues() {
   });
 
   const { data: issuesData, isLoading: loadingIssues } = useQuery({
-    queryKey: ["issues-list", page, search],
-    queryFn: () => issuesApi.getIssues({ page, limit, search }),
+    queryKey: ["issues-list", page, search, issueStatusFilter],
+    queryFn: () => issuesApi.getIssues({ page, limit, search, status: issueStatusFilter || undefined }),
   });
 
   // ── Auto-select active fin year ──────────────────────────────────────────
@@ -437,7 +441,8 @@ export default function Issues() {
       );
       queryClient.invalidateQueries({ queryKey: ["issues-list"] });
       queryClient.invalidateQueries({ queryKey: ["issues-items"] });
-      goToList();
+      setSaved(true);
+      setTimeout(() => { setSaved(false); goToList(); }, 1500);
     },
     onError: (err: any) => toast.error(err.message || "Failed to create issue"),
   });
@@ -448,7 +453,8 @@ export default function Issues() {
       toast.success("Issue updated");
       queryClient.invalidateQueries({ queryKey: ["issues-list"] });
       queryClient.invalidateQueries({ queryKey: ["issues-items"] });
-      goToList();
+      setSaved(true);
+      setTimeout(() => { setSaved(false); goToList(); }, 1500);
     },
     onError: (err: any) => toast.error(err.message || "Failed to update issue"),
   });
@@ -464,6 +470,7 @@ export default function Issues() {
   });
 
   const isSaving = createMutation.isPending || updateMutation.isPending;
+  const [saved, setSaved] = useState(false);
 
   // ── Navigation helpers ───────────────────────────────────────────────────
 
@@ -473,6 +480,13 @@ export default function Issues() {
     setViewingRecord(null);
     setHeader(defaultHeader);
     setCart([blankCartItem()]);
+  };
+
+  const resetFields = () => {
+    setEditingId(null);
+    setHeader(defaultHeader);
+    setCart([blankCartItem()]);
+    setSaved(false);
   };
 
   const handleEdit = (record: any) => {
@@ -698,31 +712,45 @@ export default function Issues() {
     return (
       <Card className="border-border shadow-sm">
         <CardHeader className="pb-3 border-b border-border">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-base font-semibold">
-                Issue Register
-              </CardTitle>
-              {!loadingIssues && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {totalCount} record{totalCount !== 1 ? "s" : ""}
-                </p>
-              )}
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-base font-semibold">
+                  Issue Register
+                </CardTitle>
+                {!loadingIssues && (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {totalCount} record{totalCount !== 1 ? "s" : ""}
+                  </p>
+                )}
+              </div>
+              <div className="relative w-full sm:w-64">
+                <Search
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(1);
+                  }}
+                  placeholder="Search issue no, company…"
+                  className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
+                />
+              </div>
             </div>
-            <div className="relative w-full sm:w-64">
-              <Search
-                size={13}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setPage(1);
-                }}
-                placeholder="Search issue no, company…"
-                className="pl-9 h-9 text-sm"
-              />
+            <div className="flex flex-wrap items-center gap-2">
+              {["", "Pending", "Approved", "Rejected", "Draft"].map((s) => (
+                <button
+                  key={s || "all"}
+                  type="button"
+                  onClick={() => { setIssueStatusFilter(s); setPage(1); }}
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${issueStatusFilter === s ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"}`}
+                >
+                  {s || "All"}
+                </button>
+              ))}
             </div>
           </div>
         </CardHeader>
@@ -797,24 +825,23 @@ export default function Issues() {
       <div className="space-y-5">
         {/* ── Header card ── */}
         <Card className="border-border shadow-sm">
-          <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              {editingId ? (
-                <Edit3 size={15} className="text-primary" />
-              ) : (
-                <ArrowDownToLine size={15} className="text-primary" />
-              )}
-              {editingId ? "Edit Material Issue" : "New Material Issue"}
-            </CardTitle>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={goToList}
-              className="h-8 w-8"
-            >
-              <X size={15} />
-            </Button>
-          </CardHeader>
+          <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
+            <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
+            <div className="flex items-center gap-3 min-w-0">
+              <button type="button" onClick={goToList} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0">
+                <ArrowLeft size={15} /><span className="hidden sm:inline">Back</span>
+              </button>
+              <span className="text-emerald-500/40">|</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-emerald-500/[0.18] border border-emerald-500/30 shrink-0">
+                  <ArrowDownToLine size={12} className="text-emerald-400" />
+                </div>
+                <h2 className="text-sm font-heading font-bold text-foreground truncate">
+                  {editingId ? "Edit Material Issue" : "New Material Issue"}
+                </h2>
+              </div>
+            </div>
+          </div>
 
           <CardContent className="p-5 space-y-4">
             {/* Doc number */}
@@ -1410,26 +1437,21 @@ export default function Issues() {
               : "Ready to save"}
           </p>
           <div className="flex gap-3 sm:ml-auto">
-            <Button
-              variant="outline"
-              onClick={goToList}
+            <button
+              onClick={resetFields}
               disabled={isSaving}
-              className="flex-1 sm:flex-none justify-center px-6"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition disabled:opacity-50"
             >
-              Cancel
-            </Button>
-            <Button
+              <RotateCcw size={14} /> Reset
+            </button>
+            <button
               onClick={onSave}
-              disabled={!canSave || isSaving}
-              className="flex-1 sm:flex-none whitespace-nowrap bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 px-6 gap-2"
+              disabled={!canSave || isSaving || saved}
+              className="flex-1 sm:flex-none whitespace-nowrap bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center justify-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
             >
-              {isSaving ? (
-                <RefreshCw size={14} className="animate-spin" />
-              ) : (
-                <Save size={14} />
-              )}
-              {isSaving ? "Saving…" : editingId ? "Update Issue" : "Save Issue"}
-            </Button>
+              {saved ? <Check size={14} /> : isSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+              {saved ? "Saved!" : isSaving ? "Saving…" : editingId ? "Update Issue" : "Save Issue"}
+            </button>
           </div>
         </div>
       </div>
@@ -1653,7 +1675,7 @@ export default function Issues() {
                 setEditingId(null);
                 setViewMode("form");
               }}
-              className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition-all"
+              className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
             >
               <Plus size={15} /> New Issue
             </Button>

@@ -33,6 +33,9 @@ import {
   CopyPlus,
   Warehouse,
   ArrowLeftRight,
+  ArrowLeft,
+  RefreshCw,
+  RotateCcw,
 } from "lucide-react";
 import {
   Dialog,
@@ -42,6 +45,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import * as grnApi from "@/api/grnApi";
 import { getProjects } from "@/api/grnApi";
 import { getGodowns } from "@/api/godownsApi";
@@ -716,9 +721,11 @@ export default function GRN() {
   const navigate = useNavigate();
   const { finYears } = useFinYear();
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
   const [viewingGrn, setViewingGrn] = useState<any | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [grnStatusFilter, setGrnStatusFilter] = useState("All");
   const [loadingPO, setLoadingPO] = useState(false);
   const [selectedFinYear, setSelectedFinYear] = useState<string>("");
   const [deleteBlockInfo, setDeleteBlockInfo] = useState<{
@@ -896,6 +903,8 @@ export default function GRN() {
   const filteredGrns = grns.filter((grn: any) => {
     if (selectedFinYear && grn.FinYear && grn.FinYear !== selectedFinYear)
       return false;
+    if (grnStatusFilter !== "All" && grn.EStatus !== grnStatusFilter)
+      return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -930,6 +939,7 @@ export default function GRN() {
       const generated = res?.grnNo || "";
       setFormData(buildEmptyForm());
       setEditingId(null);
+      setShowForm(false);
       setErrors({});
       if (generated) setFormData((p) => ({ ...p, grnNo: generated }));
       toast.success(`GRN ${generated} created and sent for approval`);
@@ -945,6 +955,7 @@ export default function GRN() {
       setPage(1);
       setFormData(buildEmptyForm());
       setEditingId(null);
+      setShowForm(false);
       setErrors({});
       toast.success("GRN updated successfully");
     },
@@ -1083,6 +1094,7 @@ export default function GRN() {
         finYear: prev.finYear || activeFinYear || "",
       }));
       setEditingId(null);
+      setShowForm(true);
       toast.info(
         `Open the form and select PO ${pending.poNo ?? ""} to create a follow-up GRN.`,
       );
@@ -1146,6 +1158,7 @@ export default function GRN() {
         poReceivedAmount: Number(po.POTotalReceived ?? 0),
       });
       setEditingId(null);
+      setShowForm(true);
       setErrors({});
       window.scrollTo({ top: 0, behavior: "smooth" });
       toast.success(
@@ -1293,6 +1306,7 @@ export default function GRN() {
       godownId: fullGrn.GodownID ? String(fullGrn.GodownID) : "",
     });
     setEditingId(String(fullGrn.GRNID));
+    setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -1316,6 +1330,7 @@ export default function GRN() {
   const resetForm = () => {
     setFormData(buildEmptyForm());
     setEditingId(null);
+    setShowForm(false);
     setErrors({});
   };
 
@@ -1336,34 +1351,38 @@ export default function GRN() {
         title="Goods Receipt Note"
         subtitle="Record goods received against purchase orders"
         icon={Truck}
+        action={
+          !showForm && (
+            <button
+              onClick={() => { setShowForm(true); setEditingId(null); setFormData(buildEmptyForm()); setErrors({}); }}
+              className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
+            >
+              <Plus size={13} /> New GRN
+            </button>
+          )
+        }
       >
 
         {/* ══════════════════════════════════════════════════════════════════ */}
         {/*  FORM                                                              */}
         {/* ══════════════════════════════════════════════════════════════════ */}
-        <div className="rounded-2xl bg-card border border-border shadow-sm overflow-hidden">
-          {/* Form header */}
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-gradient-to-r from-muted/40 to-transparent">
-            <div className="flex items-center gap-2.5">
-              <div
-                className={`p-1.5 rounded-lg ${editingId ? "bg-amber-500/10" : "bg-primary/10"}`}
-              >
-                {editingId ? (
-                  <Edit3 size={14} className="text-amber-500" />
-                ) : (
-                  <Plus size={14} className="text-primary" />
-                )}
+        {showForm && <div className="rounded-2xl bg-card border border-border shadow-sm overflow-hidden">
+          {/* Form header — Finance Payment style with emerald theme */}
+          <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
+            <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
+            <div className="flex items-center gap-3 min-w-0">
+              <button type="button" onClick={resetForm} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0">
+                <ArrowLeft size={15} /><span className="hidden sm:inline">Back</span>
+              </button>
+              <span className="text-emerald-500/40">|</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-emerald-500/[0.18] border border-emerald-500/30 shrink-0">
+                  <Truck size={12} className="text-emerald-400" />
+                </div>
+                <h2 className="text-sm font-heading font-bold text-foreground truncate">
+                  {editingId ? "Edit Goods Receipt Note" : "New Goods Receipt Note"}
+                </h2>
               </div>
-              <span className="font-semibold text-sm text-foreground">
-                {editingId
-                  ? "Edit Goods Receipt Note"
-                  : "New Goods Receipt Note"}
-              </span>
-              {editingId && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-semibold">
-                  EDITING #{editingId}
-                </span>
-              )}
             </div>
           </div>
 
@@ -1978,59 +1997,75 @@ export default function GRN() {
             {/* ── Actions ── */}
             <div className="flex flex-col sm:flex-row items-center gap-3 pt-2 border-t border-border">
               <button
-                onClick={onSubmit}
+                onClick={() => { setFormData(buildEmptyForm()); setEditingId(null); setErrors({}); }}
                 disabled={createMutation.isPending || updateMutation.isPending}
-                className="w-full sm:w-auto bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow-sm transition disabled:opacity-60"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-border hover:bg-muted text-sm transition-colors disabled:opacity-50"
               >
-                <Save size={14} />
-                {createMutation.isPending || updateMutation.isPending
-                  ? "Saving…"
-                  : editingId
-                    ? "Update GRN"
-                    : "Save GRN"}
+                <RotateCcw size={14} /> Reset
               </button>
               <button
-                onClick={resetForm}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-border hover:bg-muted text-sm transition-colors"
+                onClick={onSubmit}
+                disabled={createMutation.isPending || updateMutation.isPending}
+                className="w-full sm:w-auto bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow-sm transition disabled:opacity-60"
               >
-                <X size={14} /> Cancel
+                {createMutation.isPending || updateMutation.isPending
+                  ? <RefreshCw size={14} className="animate-spin" />
+                  : <Save size={14} />}
+                {createMutation.isPending || updateMutation.isPending ? "Saving…" : editingId ? "Update GRN" : "Save GRN"}
               </button>
             </div>
           </div>
-        </div>
+        </div>}
 
         {/* ══════════════════════════════════════════════════════════════════ */}
         {/*  GRN HISTORY                                                       */}
         {/* ══════════════════════════════════════════════════════════════════ */}
-        <div className="rounded-2xl bg-card border border-border shadow-sm overflow-hidden">
-          <div className="flex flex-wrap gap-3 items-center justify-between px-5 py-3.5 border-b border-border bg-gradient-to-r from-muted/40 to-transparent">
-            <div className="flex items-center gap-2">
-              <Layers size={15} className="text-muted-foreground" />
-              <span className="font-semibold text-sm">GRN History</span>
+        <Card className="border-border shadow-sm">
+          <CardHeader className="pb-3 border-b border-border">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base font-semibold">GRN Register</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {totalRecords} record{totalRecords !== 1 ? "s" : ""}
+                  </p>
+                </div>
+                <div className="relative w-full sm:w-64">
+                  <Search
+                    size={13}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <Input
+                    placeholder="Search GRN, PO, Supplier…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
+                  />
+                  {search && (
+                    <button
+                      onClick={() => setSearch("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {["All", "Pending", "Approved", "Booked", "Rejected"].map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setGrnStatusFilter(s)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${grnStatusFilter === s ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"}`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="relative w-full sm:w-64">
-              <Search
-                size={13}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-              <input
-                type="text"
-                placeholder="Search GRN, PO, Supplier…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-8 w-full py-1.5 bg-muted border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-              {search && (
-                <button
-                  onClick={() => setSearch("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X size={12} />
-                </button>
-              )}
-            </div>
-          </div>
-
+          </CardHeader>
+          <CardContent className="p-0">
           <div
             className={`overflow-x-auto transition-opacity duration-200 ${fetchingGrns ? "opacity-60 pointer-events-none" : ""}`}
           >
@@ -2040,12 +2075,12 @@ export default function GRN() {
               searchable={false}
               paginated={true}
               defaultPageSize={20}
-              emptyMessage="No GRNs found."
+              emptyMessage="No GRNs found. Click 'New GRN' to create one."
             />
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-5 py-3 bg-muted/10">
-            <span className="text-muted-foreground text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 text-xs text-muted-foreground">
+            <span>
               Page {page} of {totalPages} · {totalRecords} record
               {totalRecords !== 1 ? "s" : ""}
             </span>
@@ -2066,7 +2101,8 @@ export default function GRN() {
               </button>
             </div>
           </div>
-        </div>
+          </CardContent>
+        </Card>
 
         {/* ══════════════════════════════════════════════════════════════════ */}
         {/*  VIEW MODAL                                                        */}

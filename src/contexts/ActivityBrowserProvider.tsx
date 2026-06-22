@@ -17,7 +17,11 @@ import {
   subscribeToActivityStream,
 } from "@/api/userActivityApi";
 
-import { getDeviceFingerprint, getDeviceInfo } from "@/utils/deviceFingerprint";
+import {
+  getDeviceFingerprint,
+  getDeviceInfo,
+  generateUUID,
+} from "@/utils/deviceFingerprint";
 
 import {
   ActivityBrowserContext,
