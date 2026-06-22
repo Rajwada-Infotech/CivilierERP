@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -37,8 +37,22 @@ import {
   HardHat,
   CreditCard,
   RotateCcw,
+  Download,
+  Upload,
+  Loader2,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
+import {
+  exportToCsv,
+  parseCsv,
+  type ExportColumn as CsvExportColumn,
+} from "@/lib/export";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CONTRACTOR_TYPE = "C";
@@ -139,6 +153,44 @@ const EXPORT_COLUMNS: ExportColumn[] = [
     accessor: (r) => (r.LHeadStatus ? "Active" : "Inactive"),
   },
 ];
+
+// ─── CSV template / import column mapping ─────────────────────────────────────
+// Single source of truth for both the downloadable template and the importer,
+// so the headers a user downloads are exactly the headers the importer reads.
+const CSV_HEADERS = {
+  name: "Contractor Name",
+  contactPerson: "Contact Person",
+  phone: "Phone",
+  email: "Email",
+  gst: "GST Number",
+  pan: "PAN Number",
+  contractorType: "Contractor Type",
+  paymentTerms: "Payment Terms",
+  group: "Group Name",
+  address: "Address",
+  status: "Status (Active/Inactive)",
+} as const;
+
+const CONTRACTOR_CSV_TEMPLATE_COLUMNS: CsvExportColumn[] = [
+  { header: CSV_HEADERS.name, accessor: "LHeadName" },
+  { header: CSV_HEADERS.contactPerson, accessor: "LHeadContactPerson" },
+  { header: CSV_HEADERS.phone, accessor: "LHeadPhone" },
+  { header: CSV_HEADERS.email, accessor: "LHeadEmail" },
+  { header: CSV_HEADERS.gst, accessor: "LGST" },
+  { header: CSV_HEADERS.pan, accessor: "LHeadPan" },
+  { header: CSV_HEADERS.contractorType, accessor: "contractorType" },
+  { header: CSV_HEADERS.paymentTerms, accessor: "LHeadPaymentTerms" },
+  { header: CSV_HEADERS.group, accessor: "GroupName" },
+  { header: CSV_HEADERS.address, accessor: "LHeadAddress" },
+  { header: CSV_HEADERS.status, accessor: "LHeadStatus" },
+];
+
+interface ImportRowResult {
+  row: number;
+  name: string;
+  status: "success" | "error";
+  message?: string;
+}
 
 // ─── Column builder ────────────────────────────────────────────────────────────
 function buildContractorColumns(
@@ -292,16 +344,10 @@ const ContractorMaster: React.FC = () => {
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [page, setPage] = useState(1);
-  const limit = 10;
   const [sortField, setSortField] = useState<
     "LHeadName" | "LHeadContactPerson" | "LHeadPhone"
   >("LHeadName");
   const [sortAsc, setSortAsc] = useState(true);
-
-  useEffect(() => {
-    setPage(1);
-  }, [search, filterCategory, filterStatus]);
 
   // ── Remote data ────────────────────────────────────────────────────────────
   const {
@@ -429,8 +475,173 @@ const ContractorMaster: React.FC = () => {
   });
 
   const saving = createMut.isPending || updateMut.isPending;
-  const isDirty = Object.keys(form).some((k) => String((form as Record<string,unknown>)[k] ?? "") !== String((EMPTY_FORM as Record<string,unknown>)[k] ?? ""));
+  const isDirty = Object.keys(form).some(
+    (k) =>
+      String((form as Record<string, unknown>)[k] ?? "") !==
+      String((EMPTY_FORM as Record<string, unknown>)[k] ?? ""),
+  );
   const canSave = form.LHeadName.trim() !== "";
+
+  // ── CSV import/export state ─────────────────────────────────────────────────
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState<ImportRowResult[] | null>(
+    null,
+  );
+
+  const handleDownloadTemplate = () => {
+    exportToCsv(
+      [],
+      CONTRACTOR_CSV_TEMPLATE_COLUMNS,
+      "contractor-master-template",
+    );
+    toast.success("Template downloaded — fill it in and use Import.");
+  };
+
+  const handleImportClick = () => {
+    importFileInputRef.current?.click();
+  };
+
+  const handleImportFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    // Allow picking the same filename again later.
+    e.target.value = "";
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast.error("Please select a .csv file.");
+      return;
+    }
+
+    setImporting(true);
+    setImportResults(null);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+
+      if (rows.length === 0) {
+        toast.error("The CSV file has no data rows.");
+        setImporting(false);
+        return;
+      }
+
+      const results: ImportRowResult[] = [];
+
+      // Sequential, not Promise.all — keeps row order in the result list
+      // predictable and avoids hammering the API with N parallel inserts.
+      for (let i = 0; i < rows.length; i++) {
+        const raw = rows[i];
+        const rowNum = i + 2; // +1 for header row, +1 for 1-based numbering
+        const nameForLog = raw[CSV_HEADERS.name] || "(blank)";
+
+        try {
+          const name = (raw[CSV_HEADERS.name] || "").trim();
+          const contactPerson = (raw[CSV_HEADERS.contactPerson] || "").trim();
+          const phone = (raw[CSV_HEADERS.phone] || "").trim();
+          const email = (raw[CSV_HEADERS.email] || "").trim();
+          const gst = (raw[CSV_HEADERS.gst] || "").trim();
+          const pan = (raw[CSV_HEADERS.pan] || "").trim();
+          const paymentTerms = (raw[CSV_HEADERS.paymentTerms] || "").trim();
+          const address = (raw[CSV_HEADERS.address] || "").trim();
+          const typeRaw = (raw[CSV_HEADERS.contractorType] || "").trim();
+          const groupRaw = (raw[CSV_HEADERS.group] || "").trim();
+          const statusRaw = (raw[CSV_HEADERS.status] || "")
+            .trim()
+            .toLowerCase();
+
+          if (!name) throw new Error("Contractor Name is required");
+
+          // Contractor Type is optional — validated against the live category
+          // list (Admin > Contractor Categories), not a hardcoded set, since
+          // that list is admin-configurable.
+          const contractorType = typeRaw
+            ? contractorCategories.find(
+                (c) => c.toLowerCase() === typeRaw.toLowerCase(),
+              )
+            : "";
+          if (typeRaw && !contractorType)
+            throw new Error(
+              `Contractor Type must be one of ${contractorCategories.join(", ")} (got "${typeRaw}")`,
+            );
+
+          // Group Name is optional — resolved to the account group's ID by name.
+          let groupId: number | "" = "";
+          if (groupRaw) {
+            const match = accountGroups.find(
+              (g) => g.name.toLowerCase() === groupRaw.toLowerCase(),
+            );
+            if (!match) throw new Error(`Group not found: "${groupRaw}"`);
+            groupId = Number(match._id);
+          }
+
+          // Status defaults to Active when left blank, matching the form's default.
+          const isActive =
+            statusRaw === "" || statusRaw === "active"
+              ? true
+              : statusRaw === "inactive"
+                ? false
+                : null;
+          if (isActive === null)
+            throw new Error(
+              `Status must be "Active" or "Inactive" (got "${raw[CSV_HEADERS.status]}")`,
+            );
+
+          const rowForm: ContractorForm = {
+            LHeadName: name,
+            LHeadContactPerson: contactPerson,
+            LHeadPhone: phone,
+            LHeadEmail: email,
+            LGST: gst,
+            LHeadPan: pan,
+            contractorType: contractorType || "",
+            LHeadPaymentTerms: paymentTerms,
+            LHeadAddress: address,
+            LBelongsTo: groupId,
+            LHeadStatus: isActive,
+          };
+
+          await addRecord(buildPayload(rowForm), CONTRACTOR_TYPE);
+          results.push({ row: rowNum, name, status: "success" });
+        } catch (err: any) {
+          results.push({
+            row: rowNum,
+            name: nameForLog,
+            status: "error",
+            message: err?.message || "Unknown error",
+          });
+        }
+      }
+
+      setImportResults(results);
+      const successCount = results.filter((r) => r.status === "success").length;
+      const errorCount = results.length - successCount;
+
+      if (successCount > 0) {
+        invalidate();
+      }
+      if (errorCount === 0) {
+        toast.success(
+          `Imported ${successCount} contractor${successCount === 1 ? "" : "s"} ✓`,
+        );
+      } else if (successCount === 0) {
+        toast.error(
+          `Import failed for all ${errorCount} row${errorCount === 1 ? "" : "s"}.`,
+        );
+      } else {
+        toast.warning(
+          `Imported ${successCount} of ${results.length} rows — ${errorCount} failed. See details.`,
+        );
+      }
+    } catch (err: any) {
+      toast.error(
+        "Could not read CSV file: " + (err?.message || "Unknown error"),
+      );
+    } finally {
+      setImporting(false);
+    }
+  };
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const startEdit = (c: Contractor) => {
@@ -553,9 +764,6 @@ const ContractorMaster: React.FC = () => {
   const inputCls =
     "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
 
-  const totalPages = Math.max(Math.ceil(filtered.length / limit), 1);
-  const paginated = filtered.slice((page - 1) * limit, page * limit);
-
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
@@ -567,21 +775,60 @@ const ContractorMaster: React.FC = () => {
         title="Contractor Master"
         subtitle="Manage contractor accounts with contact, GST and type details"
         action={
-          <span
-            className="text-xs font-heading px-3 py-1.5 rounded-lg"
-            style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
-          >
-            {contractors.length} Contractors
-          </span>
+          <div className="flex items-center gap-2">
+            <span
+              className="text-xs font-heading px-3 py-1.5 rounded-lg"
+              style={{
+                background: "rgba(99,102,241,0.12)",
+                border: "1px solid rgba(99,102,241,0.25)",
+                color: "#818cf8",
+              }}
+            >
+              {contractors.length} Contractors
+            </span>
+            <input
+              ref={importFileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleImportFileChange}
+              className="hidden"
+            />
+            <button
+              onClick={handleDownloadTemplate}
+              title="Download a blank CSV with all contractor fields"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+            >
+              <Download size={13} />
+              <span className="hidden sm:inline">Download Template</span>
+            </button>
+            <button
+              onClick={handleImportClick}
+              disabled={importing}
+              title="Import contractors from a filled-in CSV"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {importing ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Upload size={13} />
+              )}
+              <span className="hidden sm:inline">
+                {importing ? "Importing..." : "Import CSV"}
+              </span>
+            </button>
+          </div>
         }
       >
-
         {/* ── Form Card ── */}
         <div
           className="rounded-xl overflow-hidden"
           style={{
-            background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.82)",
-            border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.16)",
+            background: isDark
+              ? "rgba(12,14,22,0.55)"
+              : "rgba(255,255,255,0.82)",
+            border: isDark
+              ? "1px solid rgba(99,102,241,0.20)"
+              : "1px solid rgba(99,102,241,0.16)",
             backdropFilter: "blur(18px) saturate(150%)",
             WebkitBackdropFilter: "blur(18px) saturate(150%)",
             boxShadow: isDark
@@ -593,8 +840,12 @@ const ContractorMaster: React.FC = () => {
           <div
             className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
             style={{
-              background: isDark ? "rgba(99,102,241,0.09)" : "rgba(99,102,241,0.05)",
-              borderBottom: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.13)",
+              background: isDark
+                ? "rgba(99,102,241,0.09)"
+                : "rgba(99,102,241,0.05)",
+              borderBottom: isDark
+                ? "1px solid rgba(99,102,241,0.18)"
+                : "1px solid rgba(99,102,241,0.13)",
             }}
           >
             <div>
@@ -692,7 +943,12 @@ const ContractorMaster: React.FC = () => {
                   <TreeDropdown
                     variant="tree"
                     value={String(form.LBelongsTo)}
-                    onChange={(v) => setForm((p) => ({ ...p, LBelongsTo: v === "" ? "" : Number(v) }))}
+                    onChange={(v) =>
+                      setForm((p) => ({
+                        ...p,
+                        LBelongsTo: v === "" ? "" : Number(v),
+                      }))
+                    }
                     items={accountGroupTree}
                     allGroups={accountGroups}
                   />
@@ -985,10 +1241,11 @@ const ContractorMaster: React.FC = () => {
           {/* Table */}
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden [&_th:last-child]:text-left [&_td:last-child]:text-left">
             <DataTable
-              data={paginated}
+              key={`${search}|${filterCategory}|${filterStatus}`}
+              data={filtered}
               columns={columns}
               loading={isLoading}
-              searchPlaceholder="Search contractors..."
+              searchable={false}
               getRowId={(row) => String(row.LHeadId)}
               emptyMessage={
                 isError
@@ -1007,29 +1264,82 @@ const ContractorMaster: React.FC = () => {
               }
             />
           </div>
-          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
-            <span className="text-xs text-muted-foreground">
-              Page {page} of {totalPages}
-            </span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                disabled={page <= 1}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-                disabled={page >= totalPages}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          </div>
         </div>
       </FinanceShell>
+
+      {/* Import Results Modal */}
+      <Dialog
+        open={!!importResults}
+        onOpenChange={(open) => !open && setImportResults(null)}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-base">
+              Import Results
+            </DialogTitle>
+          </DialogHeader>
+          {importResults && (
+            <div className="space-y-3 pt-1">
+              <div className="flex items-center gap-3 text-sm">
+                <span className="flex items-center gap-1.5 text-green-600">
+                  <Check size={14} />
+                  {
+                    importResults.filter((r) => r.status === "success").length
+                  }{" "}
+                  succeeded
+                </span>
+                {importResults.some((r) => r.status === "error") && (
+                  <span className="flex items-center gap-1.5 text-destructive">
+                    <X size={14} />
+                    {
+                      importResults.filter((r) => r.status === "error").length
+                    }{" "}
+                    failed
+                  </span>
+                )}
+              </div>
+              <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+                {importResults.map((r, i) => (
+                  <div
+                    key={i}
+                    className={`flex items-start gap-2 px-3 py-2 text-sm ${
+                      r.status === "error" ? "bg-destructive/5" : ""
+                    }`}
+                  >
+                    {r.status === "success" ? (
+                      <Check
+                        size={14}
+                        className="text-green-600 shrink-0 mt-0.5"
+                      />
+                    ) : (
+                      <X
+                        size={14}
+                        className="text-destructive shrink-0 mt-0.5"
+                      />
+                    )}
+                    <div className="min-w-0">
+                      <p className="font-medium truncate">
+                        Row {r.row} — {r.name}
+                      </p>
+                      {r.message && (
+                        <p className="text-xs text-destructive">{r.message}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+            <button
+              onClick={() => setImportResults(null)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+            >
+              Close
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
