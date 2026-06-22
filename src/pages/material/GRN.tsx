@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { MaterialShell } from "@/components/material/MaterialShell";
 import {
   Truck,
   Package,
@@ -1331,18 +1332,11 @@ export default function GRN() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "GRN"]} />
-      <div className="space-y-6 mt-6 pb-10">
-        {/* ── Page header ── */}
-        <div className="flex items-center gap-3">
-          <div>
-            <h1 className="text-lg font-heading font-bold text-foreground leading-tight">
-              Goods Receipt Note
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              Record goods received against purchase orders
-            </p>
-          </div>
-        </div>
+      <MaterialShell
+        title="Goods Receipt Note"
+        subtitle="Record goods received against purchase orders"
+        icon={Truck}
+      >
 
         {/* ══════════════════════════════════════════════════════════════════ */}
         {/*  FORM                                                              */}
@@ -1986,7 +1980,7 @@ export default function GRN() {
               <button
                 onClick={onSubmit}
                 disabled={createMutation.isPending || updateMutation.isPending}
-                className="w-full sm:w-auto gradient-accent inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow-sm transition disabled:opacity-60"
+                className="w-full sm:w-auto bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow-sm transition disabled:opacity-60"
               >
                 <Save size={14} />
                 {createMutation.isPending || updateMutation.isPending
@@ -2518,7 +2512,7 @@ export default function GRN() {
               </div>
             );
           })()}
-      </div>
+      </MaterialShell>
 
       {/* GRN Delete Block Dialog */}
       <Dialog

@@ -50,6 +50,7 @@ import {
 import { useFinYear } from "@/contexts/FinYearContext";
 import { Badge } from "@/components/ui/badge";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { MaterialShell } from "@/components/material/MaterialShell";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1228,27 +1229,32 @@ export default function MaterialRequest() {
       </Card>
 
       {/* Save bar */}
-      <div className="flex items-center justify-center gap-3 pt-1">
-        <Button
-          onClick={onSave}
-          disabled={!canSave || isSaving}
-          className="gradient-accent px-5 py-2 text-sm h-auto font-semibold text-white gap-2"
-        >
-          {isSaving ? (
-            <RefreshCw size={14} className="animate-spin" />
-          ) : (
-            <Save size={14} />
-          )}
-          {isSaving ? "Saving…" : editingId ? "Update Request" : "Save Request"}
-        </Button>
-        <Button
-          variant="outline"
-          onClick={goToList}
-          disabled={isSaving}
-          className="px-5 py-2 text-sm h-auto font-semibold"
-        >
-          Cancel
-        </Button>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-1">
+        <p className="hidden sm:block text-xs text-muted-foreground">
+          All required fields must be filled before saving.
+        </p>
+        <div className="flex gap-2 sm:ml-auto">
+          <Button
+            variant="outline"
+            onClick={goToList}
+            disabled={isSaving}
+            className="flex-1 sm:flex-none flex items-center justify-center px-5 py-2 text-sm h-auto font-semibold"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={onSave}
+            disabled={!canSave || isSaving}
+            className="flex-1 sm:flex-none whitespace-nowrap bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 px-5 py-2 text-sm h-auto font-semibold text-white gap-2"
+          >
+            {isSaving ? (
+              <RefreshCw size={14} className="animate-spin" />
+            ) : (
+              <Save size={14} />
+            )}
+            {isSaving ? "Saving…" : editingId ? "Update Request" : "Save Request"}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -1443,32 +1449,25 @@ export default function MaterialRequest() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "Material Request"]} />
-      <div className="relative space-y-8 mt-6">
-        {/* ── Page header ── */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Material Requests
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Create and manage material requisitions for projects.
-            </p>
-          </div>
-          {viewMode === "list" && (
+      <MaterialShell
+        title="Material Requests"
+        subtitle="Request materials for projects"
+        icon={Send}
+        action={
+          viewMode === "list" ? (
             <Button
               onClick={() => setViewMode("form")}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+              className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition-all"
             >
-              <Plus size={15} /> New Request
+              <Plus size={13} /> New Request
             </Button>
-          )}
-        </div>
-
+          ) : undefined
+        }
+      >
         {viewMode === "list" && ListView()}
         {viewMode === "form" && FormView()}
         {viewMode === "view" && ViewMode()}
-      </div>
-      {/* end space-y-8 */}
+      </MaterialShell>
     </>
   );
 }

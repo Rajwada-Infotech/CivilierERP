@@ -138,13 +138,13 @@ export function DataTable<TData extends RowData>({
     <div className={className}>
       {/* ── Search bar ── */}
       {searchable && (
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60">
           <p className="text-[11px] text-muted-foreground">
             {loading
               ? "Loading..."
               : `${totalFiltered} record${totalFiltered !== 1 ? "s" : ""}`}
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             {exportConfig && (
               <ExportMenu
                 data={table
@@ -157,7 +157,7 @@ export function DataTable<TData extends RowData>({
                 disabled={loading || data.length === 0}
               />
             )}
-            <div className="relative">
+            <div className="relative flex-1 sm:flex-none">
               <Search
                 size={13}
                 className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
@@ -167,7 +167,7 @@ export function DataTable<TData extends RowData>({
                 value={globalFilter}
                 onChange={(e) => setGlobalFilter(e.target.value)}
                 placeholder={searchPlaceholder}
-                className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-36 sm:w-44"
+                className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-full sm:w-44"
               />
             </div>
           </div>
@@ -274,9 +274,9 @@ export function DataTable<TData extends RowData>({
 
       {/* ── Pagination ── */}
       {paginated && !loading && totalFiltered > 0 && (
-        <div className="flex items-center justify-between px-5 py-3 border-t border-border bg-card/40">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 border-t border-border bg-card/40">
           {/* Page size selector */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <span className="text-xs text-muted-foreground">Rows</span>
             <select
               value={pagination.pageSize}
@@ -298,13 +298,13 @@ export function DataTable<TData extends RowData>({
           </div>
 
           {/* Page info */}
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-muted-foreground shrink-0">
             Page {table.getState().pagination.pageIndex + 1} of{" "}
             {table.getPageCount()} &middot; {totalFiltered} total
           </span>
 
-          {/* Nav buttons */}
-          <div className="flex items-center gap-1">
+          {/* Nav buttons — pushed to right */}
+          <div className="flex items-center gap-1 ml-auto shrink-0">
             {[
               {
                 icon: ChevronsLeft,

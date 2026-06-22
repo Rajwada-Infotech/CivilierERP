@@ -24,6 +24,7 @@ import {
   Search,
   AlertCircle,
   XCircle,
+  RotateCcw,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
 
@@ -394,7 +395,7 @@ const BankMaster: React.FC = () => {
     reset,
     setValue,
     watch,
-    formState: { errors, isValid },
+    formState: { errors, isValid, isDirty },
   } = useForm<FormState>({
     resolver: zodResolver(bankFormSchema),
     defaultValues: EMPTY,
@@ -902,8 +903,8 @@ const BankMaster: React.FC = () => {
           </div>
 
           {/* Card footer — actions */}
-          <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-muted/20">
-            <p className="text-[11px] text-muted-foreground">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
+            <p className="text-[11px] text-muted-foreground hidden sm:block">
               {canSave ? (
                 <span className="text-emerald-500 font-medium">
                   Ready to save
@@ -912,21 +913,21 @@ const BankMaster: React.FC = () => {
                 "Fill in the required fields to save"
               )}
             </p>
-            <div className="flex items-center gap-2">
-              {editingId && (
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                >
-                  Cancel
-                </button>
-              )}
+            <div className="flex items-center gap-2 sm:ml-auto">
+              <button
+                type="button"
+                onClick={handleReset}
+                disabled={!isDirty && !editingId}
+                className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+              >
+                <RotateCcw size={12} />
+                {editingId ? "Cancel" : "Reset"}
+              </button>
               <button
                 type="button"
                 onClick={handleSubmit(handleSave)}
                 disabled={!canSave}
-                className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity"
+                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
               >
                 {editingId ? <Check size={14} /> : <Plus size={14} />}
                 {editingId ? "Update Bank" : "Save Bank"}
@@ -939,7 +940,7 @@ const BankMaster: React.FC = () => {
         <div>
           {/* Toolbar */}
           <div className="mb-3 flex items-center gap-3 flex-wrap">
-            <div className="relative">
+            <div className="relative flex-1 sm:flex-none">
               <Search
                 size={13}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -948,7 +949,7 @@ const BankMaster: React.FC = () => {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search name, account, IFSC…"
-                className="w-56 text-sm rounded-lg border border-border pl-9 pr-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                className="w-full sm:w-56 text-sm rounded-lg border border-border pl-9 pr-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
               />
             </div>
 

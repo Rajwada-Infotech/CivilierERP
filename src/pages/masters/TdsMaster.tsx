@@ -1,5 +1,6 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import React from "react";
+import { FileText } from "lucide-react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -138,7 +139,19 @@ const TdsMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Masters", "TDS Master"]} />
-      <FinanceShell title="TDS Master" subtitle="Configure TDS natures, names and rates for tax deduction at source">
+      <FinanceShell
+        title="TDS Master"
+        subtitle="Configure TDS natures, names and rates for tax deduction at source"
+        icon={FileText}
+        action={
+          <span
+            className="text-xs font-heading px-3 py-1.5 rounded-lg"
+            style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
+          >
+            {dbItems.length} TDS Rates
+          </span>
+        }
+      >
         <MasterPage
           title="TDS"
           fields={[

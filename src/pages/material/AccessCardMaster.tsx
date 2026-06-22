@@ -1,5 +1,6 @@
 import React from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { MaterialShell } from "@/components/material/MaterialShell";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -204,12 +205,12 @@ const AccessCardMaster = () => {
 
   return (
     <>
-      <Breadcrumbs
-        items={["Dashboard", "Material Module", "Access Card Master"]}
-      />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Access Card Master
-      </h1>
+      <Breadcrumbs items={["Dashboard", "Material", "Access Card Master"]} />
+      <MaterialShell
+        title="Access Card Master"
+        subtitle="Manage and track access cards"
+        icon={BadgeCheck}
+      >
       <MasterPage
         title="Card"
         fields={fields}
@@ -223,6 +224,7 @@ const AccessCardMaster = () => {
           filename: "access-card-master",
         }}
       />
+      </MaterialShell>
     </>
   );
 };

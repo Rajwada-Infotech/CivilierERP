@@ -26,6 +26,8 @@ import {
   Clock,
   ArrowLeft,
   Plus,
+  RotateCcw,
+  Check,
   Edit,
   Trash2,
   AlertCircle,
@@ -52,6 +54,7 @@ import {
   Eye,
   Printer,
   ArrowRight,
+  RefreshCw,
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -2170,6 +2173,20 @@ const Payment: React.FC = () => {
     setBookingFilters({ company: "", project: "", year: "", supplier: "" });
   };
 
+  const blank = blankForm();
+  const isDirty = (Object.keys(blank) as (keyof typeof blank)[]).some(
+    (k) => String(form[k] ?? "") !== String(blank[k] ?? ""),
+  );
+
+  const canSave = !!(form.paymentName.trim() && form.mode && form.date && (Number(form.amount) > 0 || form.expenseRef));
+
+  const handleReset = () => {
+    setForm(blankForm());
+    setLinkedGRNs([]);
+    setSupplierBookingFilter("");
+    setBookingFilters({ company: "", project: "", year: "", supplier: "" });
+  };
+
   // ── Mode change — clear irrelevant fields ──────────────────────────────────
 
   const handleModeChange = (newMode: string) => {
@@ -2631,9 +2648,17 @@ const Payment: React.FC = () => {
       <FinanceShell
         title="Payment Management"
         subtitle="Record and track payments linked to expense bookings"
+        icon={Wallet}
         action={
           view === "list" ? (
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <Button
+                onClick={openNew}
+                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-3 sm:px-4 py-1.5 text-xs h-auto"
+              >
+                <Plus size={13} className="sm:mr-1" />
+                <span className="hidden sm:inline">New Payment</span>
+              </Button>
               <ExportMenu
                 data={records as unknown as Record<string, unknown>[]}
                 columns={EXPORT_COLUMNS}
@@ -2650,13 +2675,16 @@ const Payment: React.FC = () => {
                   undefined
                 }
                 logoBase64={selectedCompanyDetail?.logo || undefined}
+                disabled={isLoading || records.length === 0}
               />
-              <Button
-                onClick={openNew}
-                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-4 py-1.5 text-xs h-auto"
+              <button
+                onClick={() => refetchPayments()}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors"
+                style={{ color: "#818cf8" }}
               >
-                <Plus size={13} className="mr-1" /> New Payment
-              </Button>
+                <RefreshCw size={13} />
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
             </div>
           ) : undefined
         }
@@ -2784,26 +2812,6 @@ const Payment: React.FC = () => {
                     {editingId ? "Edit Payment" : "New Payment"}
                   </h2>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={cancelForm}
-                  className="px-4 py-1.5 rounded-lg text-xs h-auto font-heading transition-colors"
-                  style={{
-                    border: isDark ? "1px solid rgba(99,102,241,0.25)" : "1px solid rgba(99,102,241,0.20)",
-                    color: isDark ? "#94a3b8" : "#6366f1",
-                    background: isDark ? "rgba(99,102,241,0.06)" : "rgba(99,102,241,0.04)",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="px-4 py-1.5 rounded-lg text-xs h-auto font-heading font-semibold gradient-accent text-white disabled:opacity-60"
-                >
-                  {saving ? "Saving…" : editingId ? "Update" : "Save Payment"}
-                </button>
               </div>
             </div>
 
@@ -3763,24 +3771,36 @@ const Payment: React.FC = () => {
               )}
 
               {/* ── Save footer ── */}
-              <div className="flex justify-end gap-2 pt-2 border-t border-border">
-                <button
-                  onClick={cancelForm}
-                  className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-60"
-                >
-                  {saving
-                    ? "Saving…"
-                    : editingId
-                      ? "Update Payment"
-                      : "Save Payment"}
-                </button>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
+                <p className="text-[11px] text-muted-foreground hidden sm:block">
+                  {canSave
+                    ? <span className="text-emerald-500 font-medium">Ready to save</span>
+                    : "Fill in the required fields to save"}
+                </p>
+                <div className="flex items-center gap-2 sm:ml-auto">
+                  <button
+                    onClick={handleReset}
+                    disabled={!isDirty && !editingId}
+                    className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                  >
+                    <RotateCcw size={12} />
+                    {editingId ? "Cancel" : "Reset"}
+                  </button>
+                  <button
+                    onClick={handleSave}
+                    disabled={saving || !canSave}
+                    className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                  >
+                    {saving ? (
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : editingId ? (
+                      <Check size={14} />
+                    ) : (
+                      <Plus size={14} />
+                    )}
+                    {saving ? "Saving…" : editingId ? "Update Payment" : "Save Payment"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { MaterialShell } from "@/components/material/MaterialShell";
 import {
   MasterPage,
   type FieldDef,
@@ -228,48 +229,41 @@ const BillingTermsMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Masters", "Billing Terms"]} />
-
-      <div className="mb-6">
-        <div className="flex items-center gap-3 mb-2">
-          <Book className="w-6 h-6 text-primary" />
-          <h1 className="text-xl font-heading font-bold text-foreground">
-            Billing Terms Master
-          </h1>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Configure standard billing terms for automated invoicing
-        </p>
-      </div>
-
-      {loading ? (
-        <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground">
-          <Loader2 size={18} className="animate-spin" />
-          <span className="text-sm font-heading">Loading billing terms…</span>
-        </div>
-      ) : (
-        <MasterPage
-          title="Billing Term"
-          fields={fields}
-          columns={columns}
-          columnRenderers={columnRenderers}
-          initialData={billingTerms as unknown as Record<string, unknown>[]}
-          onDataEvent={handleDataEvent}
-          exportConfig={{
-            title: "Billing Terms Master",
-            filename: "billing-terms-master",
-            columns: [
-              { header: "Term Name", accessor: "Name" },
-              { header: "Calculation Type", accessor: "CalculationType" },
-              { header: "Type", accessor: "DeductionType" },
-              { header: "Remarks", accessor: "Description" },
-              {
-                header: "Status",
-                accessor: (r) => (r.IsActive ? "Active" : "Inactive"),
-              },
-            ],
-          }}
-        />
-      )}
+      <MaterialShell
+        title="Billing Terms"
+        subtitle="Configure billing terms and deduction types"
+        icon={Book}
+      >
+        {loading ? (
+          <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground">
+            <Loader2 size={18} className="animate-spin" />
+            <span className="text-sm font-heading">Loading billing terms…</span>
+          </div>
+        ) : (
+          <MasterPage
+            title="Billing Term"
+            fields={fields}
+            columns={columns}
+            columnRenderers={columnRenderers}
+            initialData={billingTerms as unknown as Record<string, unknown>[]}
+            onDataEvent={handleDataEvent}
+            exportConfig={{
+              title: "Billing Terms Master",
+              filename: "billing-terms-master",
+              columns: [
+                { header: "Term Name", accessor: "Name" },
+                { header: "Calculation Type", accessor: "CalculationType" },
+                { header: "Type", accessor: "DeductionType" },
+                { header: "Remarks", accessor: "Description" },
+                {
+                  header: "Status",
+                  accessor: (r) => (r.IsActive ? "Active" : "Inactive"),
+                },
+              ],
+            }}
+          />
+        )}
+      </MaterialShell>
     </>
   );
 };

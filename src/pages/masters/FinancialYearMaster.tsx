@@ -1,4 +1,5 @@
 import React from "react";
+import { Calendar } from "lucide-react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -132,7 +133,19 @@ const FinancialYearMaster: React.FC = () => {
       <Breadcrumbs
         items={["Dashboard", "Finance Module", "Financial Year Master"]}
       />
-      <FinanceShell title="Financial Year Master" subtitle="Manage financial years with start / end dates, status and lock controls">
+      <FinanceShell
+        title="Financial Year Master"
+        subtitle="Manage financial years with start / end dates, status and lock controls"
+        icon={Calendar}
+        action={
+          <span
+            className="text-xs font-heading px-3 py-1.5 rounded-lg"
+            style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
+          >
+            {dbItems.length} Years
+          </span>
+        }
+      >
         <MasterPage
           title="Financial Year"
           fields={[
