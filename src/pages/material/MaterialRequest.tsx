@@ -1,4 +1,4 @@
-import { generateUUID } from '../../utils/cryptoPolyfill';
+import { generateUUID } from "../../utils/cryptoPolyfill";
 import React, { useMemo, useState, useCallback, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -362,7 +362,10 @@ export default function MaterialRequest() {
       );
       invalidate();
       setSaved(true);
-      setTimeout(() => { setSaved(false); goToList(); }, 1500);
+      setTimeout(() => {
+        setSaved(false);
+        goToList();
+      }, 1500);
     },
     onError: (err: any) =>
       toast.error(err.message || "Failed to create request"),
@@ -374,7 +377,10 @@ export default function MaterialRequest() {
       toast.success("Material Request updated");
       invalidate();
       setSaved(true);
-      setTimeout(() => { setSaved(false); goToList(); }, 1500);
+      setTimeout(() => {
+        setSaved(false);
+        goToList();
+      }, 1500);
     },
     onError: (err: any) =>
       toast.error(err.message || "Failed to update request"),
@@ -707,7 +713,14 @@ export default function MaterialRequest() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              {["", "Pending", "Approved", "Ordered", "Partially Ordered", "Draft"].map((s) => (
+              {[
+                "",
+                "Pending",
+                "Approved",
+                "Ordered",
+                "Partially Ordered",
+                "Draft",
+              ].map((s) => (
                 <button
                   key={s || "all"}
                   onClick={() => {
@@ -785,8 +798,13 @@ export default function MaterialRequest() {
         <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
           <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
           <div className="flex items-center gap-3 min-w-0">
-            <button type="button" onClick={goToList} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0">
-              <ArrowLeft size={15} /><span className="hidden sm:inline">Back</span>
+            <button
+              type="button"
+              onClick={goToList}
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            >
+              <ArrowLeft size={15} />
+              <span className="hidden sm:inline">Back</span>
             </button>
             <span className="text-emerald-500/40">|</span>
             <div className="flex items-center gap-2 min-w-0">
@@ -1241,8 +1259,20 @@ export default function MaterialRequest() {
             disabled={!canSave || isSaving || saved}
             className="flex-1 sm:flex-none whitespace-nowrap bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center justify-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
           >
-            {saved ? <Check size={14} /> : isSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
-            {saved ? "Saved!" : isSaving ? "Saving…" : editingId ? "Update Request" : "Save Request"}
+            {saved ? (
+              <Check size={14} />
+            ) : isSaving ? (
+              <RefreshCw size={14} className="animate-spin" />
+            ) : (
+              <Save size={14} />
+            )}
+            {saved
+              ? "Saved!"
+              : isSaving
+                ? "Saving…"
+                : editingId
+                  ? "Update Request"
+                  : "Save Request"}
           </button>
         </div>
       </div>
