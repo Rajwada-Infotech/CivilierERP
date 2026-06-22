@@ -12,6 +12,8 @@ import {
   Eye,
   Printer,
   Package,
+  Download,
+  Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -27,6 +29,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { getItemGroups } from "@/api/itemGroupApi";
 import { getUomList } from "@/api/uomApi";
 import { getHsn } from "@/api/hsnApi";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import {
   Dialog,
   DialogContent,
@@ -110,6 +113,38 @@ const EMPTY_FORM: Omit<Item, "_id"> = {
   uomCode: "",
   defaultSupplierId: "",
 };
+
+// ── CSV template / import column mapping ─────────────────────────────────────
+// Single source of truth for both the downloadable template and the importer,
+// so the headers a user downloads are exactly the headers the importer reads.
+const CSV_HEADERS = {
+  itemName: "Item Name",
+  shortCode: "Short Code",
+  itemType: "Item Type (Goods/Service)",
+  itemGroup: "Item Group",
+  uomCode: "UOM",
+  hsnCode: "HSN Code",
+  defaultSupplier: "Default Supplier",
+  description: "Description",
+} as const;
+
+const ITEM_CSV_TEMPLATE_COLUMNS: ExportColumn[] = [
+  { header: CSV_HEADERS.itemName, accessor: "itemName" },
+  { header: CSV_HEADERS.shortCode, accessor: "shortCode" },
+  { header: CSV_HEADERS.itemType, accessor: "itemType" },
+  { header: CSV_HEADERS.itemGroup, accessor: "itemGroup" },
+  { header: CSV_HEADERS.uomCode, accessor: "uomCode" },
+  { header: CSV_HEADERS.hsnCode, accessor: "hsnCode" },
+  { header: CSV_HEADERS.defaultSupplier, accessor: "defaultSupplier" },
+  { header: CSV_HEADERS.description, accessor: "description" },
+];
+
+interface ImportRowResult {
+  row: number;
+  itemName: string;
+  status: "success" | "error";
+  message?: string;
+}
 
 // ── Searchable HSN Dropdown ───────────────────────────────────────────────────
 const HsnDropdown: React.FC<{
@@ -364,6 +399,13 @@ const ItemMaster: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [viewRow, setViewRow] = useState<Item | null>(null);
 
+  // CSV import
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState<ImportRowResult[] | null>(
+    null,
+  );
+
   const set = useCallback(
     (key: keyof Omit<Item, "_id">, val: unknown) => {
       setFormState((p) => {
@@ -482,6 +524,182 @@ const ItemMaster: React.FC = () => {
     `);
     win.document.close();
     win.print();
+  };
+
+  // ── CSV template download ───────────────────────────────────────────────────
+  const handleDownloadTemplate = () => {
+    exportToCsv([], ITEM_CSV_TEMPLATE_COLUMNS, "item-master-template");
+    toast.success("Template downloaded — fill it in and use Import.");
+  };
+
+  // ── CSV import ───────────────────────────────────────────────────────────────
+  const handleImportClick = () => {
+    importFileInputRef.current?.click();
+  };
+
+  const handleImportFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    // Allow picking the same filename again later.
+    e.target.value = "";
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast.error("Please select a .csv file.");
+      return;
+    }
+
+    setImporting(true);
+    setImportResults(null);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+
+      if (rows.length === 0) {
+        toast.error("The CSV file has no data rows.");
+        setImporting(false);
+        return;
+      }
+
+      const results: ImportRowResult[] = [];
+
+      // Sequential, not Promise.all — keeps row order in the result list
+      // predictable and avoids hammering the API with N parallel inserts.
+      for (let i = 0; i < rows.length; i++) {
+        const raw = rows[i];
+        const rowNum = i + 2; // +1 for header row, +1 for 1-based numbering
+        const itemNameForLog = raw[CSV_HEADERS.itemName] || "(blank)";
+
+        try {
+          const itemName = (raw[CSV_HEADERS.itemName] || "").trim();
+          const shortCode = (raw[CSV_HEADERS.shortCode] || "").trim();
+          const itemTypeRaw = (raw[CSV_HEADERS.itemType] || "").trim();
+          const itemGroupRaw = (raw[CSV_HEADERS.itemGroup] || "").trim();
+          const uomRaw = (raw[CSV_HEADERS.uomCode] || "").trim();
+          const hsnRaw = (raw[CSV_HEADERS.hsnCode] || "").trim();
+          const supplierRaw = (raw[CSV_HEADERS.defaultSupplier] || "").trim();
+          const description = (raw[CSV_HEADERS.description] || "").trim();
+
+          if (!itemName) throw new Error("Item Name is required");
+          if (!shortCode) throw new Error("Short Code is required");
+
+          const itemType =
+            itemTypeRaw.toLowerCase() === "service"
+              ? "Service"
+              : itemTypeRaw.toLowerCase() === "goods"
+                ? "Goods"
+                : "";
+          if (!itemType)
+            throw new Error(
+              `Item Type must be "Goods" or "Service" (got "${itemTypeRaw}")`,
+            );
+
+          if (!itemGroupRaw) throw new Error("Item Group is required");
+          const group = itemGroups.find(
+            (g) => g.description.toLowerCase() === itemGroupRaw.toLowerCase(),
+          );
+          if (!group)
+            throw new Error(`Item Group "${itemGroupRaw}" was not found`);
+
+          // UOM is optional — resolve if provided, ignore silently if blank.
+          let uomCode = "";
+          if (uomRaw) {
+            const matchedUom = uomOptions.find(
+              (u) =>
+                u.value.toLowerCase() === uomRaw.toLowerCase() ||
+                u.label.toLowerCase().startsWith(uomRaw.toLowerCase()),
+            );
+            if (!matchedUom) throw new Error(`UOM "${uomRaw}" was not found`);
+            uomCode = matchedUom.value;
+          }
+
+          // Default supplier is optional — same resolve-if-present pattern.
+          let defaultSupplierId = "";
+          if (supplierRaw) {
+            const matchedSupplier = supplierOptions.find(
+              (s) => s.label.toLowerCase() === supplierRaw.toLowerCase(),
+            );
+            if (!matchedSupplier)
+              throw new Error(
+                `Default Supplier "${supplierRaw}" was not found`,
+              );
+            defaultSupplierId = matchedSupplier.value;
+          }
+
+          // HSN — required, and is now the sole source of GST rates.
+          // No CGST/SGST/IGST columns in the CSV; rates are always looked
+          // up from the HSN code, same as picking an HSN in the form.
+          let hsnCode = "";
+          let cgst = 0;
+          let sgst = 0;
+          let igst = 0;
+          if (hsnRaw) {
+            const matchedHsn = hsnCodes.find((h) => h.code === hsnRaw);
+            if (!matchedHsn)
+              throw new Error(`HSN Code "${hsnRaw}" was not found`);
+            hsnCode = matchedHsn.code;
+            cgst = matchedHsn.cgstRate ?? 0;
+            sgst = matchedHsn.sgstRate ?? 0;
+            igst = matchedHsn.igstRate ?? 0;
+          }
+
+          const payload = itemToPayload(
+            {
+              itemName,
+              description,
+              shortCode,
+              itemType,
+              hsnCode,
+              cgst,
+              sgst,
+              igst,
+              belongsTo: group.id,
+              uomCode,
+              defaultSupplierId,
+            },
+            group.description,
+          );
+
+          await addItem(payload);
+          results.push({ row: rowNum, itemName, status: "success" });
+        } catch (err: any) {
+          results.push({
+            row: rowNum,
+            itemName: itemNameForLog,
+            status: "error",
+            message: err?.message || "Unknown error",
+          });
+        }
+      }
+
+      setImportResults(results);
+      const successCount = results.filter((r) => r.status === "success").length;
+      const errorCount = results.length - successCount;
+
+      if (successCount > 0) {
+        await queryClient.invalidateQueries({ queryKey: ["item-master"] });
+      }
+      if (errorCount === 0) {
+        toast.success(
+          `Imported ${successCount} item${successCount === 1 ? "" : "s"} ✓`,
+        );
+      } else if (successCount === 0) {
+        toast.error(
+          `Import failed for all ${errorCount} row${errorCount === 1 ? "" : "s"}.`,
+        );
+      } else {
+        toast.warning(
+          `Imported ${successCount} of ${results.length} rows — ${errorCount} failed. See details.`,
+        );
+      }
+    } catch (err: any) {
+      toast.error(
+        "Could not read CSV file: " + (err?.message || "Unknown error"),
+      );
+    } finally {
+      setImporting(false);
+    }
   };
 
   const filtered = data.filter(
@@ -691,306 +909,429 @@ const ItemMaster: React.FC = () => {
         title="Item Master"
         subtitle="Manage your item catalog"
         icon={Package}
-      >
-
-      {/* ── Form ── */}
-      <div className="rounded-xl border border-border bg-card p-6 mb-6">
-        <h2 className="text-base font-heading font-semibold mb-4">
-          {editingId ? "Edit Item" : "Add Item"}
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {/* Item Name */}
-          <Field label="Item Name" required error={errors.itemName}>
+        action={
+          <div className="flex items-center gap-2">
             <input
-              type="text"
-              value={form.itemName}
-              onChange={(e) => set("itemName", e.target.value)}
-              className={inputCls(errors.itemName)}
-              placeholder="e.g. Cement UltraTech"
+              ref={importFileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleImportFileChange}
+              className="hidden"
             />
-          </Field>
-          {/* Short Code */}
-          <Field label="Short Code" required error={errors.shortCode}>
-            <input
-              type="text"
-              value={form.shortCode}
-              onChange={(e) => set("shortCode", e.target.value.toUpperCase())}
-              className={inputCls(errors.shortCode)}
-              placeholder="e.g. CEM"
-              maxLength={6}
-            />
-          </Field>
-          {/* Item Group */}
-          <Field label="Item Group (Parent)" required error={errors.belongsTo}>
-            <select
-              value={form.belongsTo}
-              onChange={(e) => set("belongsTo", e.target.value)}
-              className={inputCls(errors.belongsTo)}
+            <button
+              onClick={handleDownloadTemplate}
+              title="Download a blank CSV with all Item Master fields"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
             >
-              <option value="">Select group...</option>
-              {itemGroups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.description}
-                  {g.code ? ` (${g.code})` : ""}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {/* UOM */}
-          <Field label="Unit of Measure (UOM)">
-            <select
-              value={form.uomCode}
-              onChange={(e) => set("uomCode", e.target.value)}
-              className={inputCls()}
+              <Download size={13} />
+              <span className="hidden sm:inline">Download Template</span>
+            </button>
+            <button
+              onClick={handleImportClick}
+              disabled={importing}
+              title="Import items from a filled-in CSV"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              <option value="">Select UOM...</option>
-              {uomOptions.map((u) => (
-                <option key={u.value} value={u.value}>
-                  {u.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {/* Type of Item */}
-          <Field label="Type of Item" required error={errors.itemType}>
-            <select
-              value={form.itemType}
-              onChange={(e) => set("itemType", e.target.value)}
-              className={inputCls(errors.itemType)}
-            >
-              <option value="">Select type...</option>
-              <option value="Service">Service</option>
-              <option value="Goods">Goods</option>
-            </select>
-          </Field>
-          {/* HSN Code */}
-          <Field label="HSN Code">
-            <HsnDropdown
-              value={form.hsnCode}
-              onChange={(val) => set("hsnCode", val)}
-              hsnCodes={hsnCodes}
-            />
-          </Field>
-          {/* Description */}
-          <Field label="Description">
-            <input
-              type="text"
-              value={form.description}
-              onChange={(e) => set("description", e.target.value)}
-              className={inputCls()}
-              placeholder="Additional description (optional)"
-            />
-          </Field>
-          {/* Default Supplier */}
-          <Field label="Default Supplier">
-            <select
-              value={form.defaultSupplierId}
-              onChange={(e) => set("defaultSupplierId", e.target.value)}
-              className={inputCls()}
-            >
-              <option value="">— No default supplier —</option>
-              {supplierOptions.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
-
-        {/* ── Tax Rates ── */}
-        <div className="mt-4">
-          <p className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wide mb-2">
-            Tax Rates{" "}
-            {form.hsnCode && (
-              <span className="normal-case text-primary font-normal">
-                (auto-filled from HSN)
+              {importing ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Upload size={13} />
+              )}
+              <span className="hidden sm:inline">
+                {importing ? "Importing..." : "Import CSV"}
               </span>
-            )}
-          </p>
-          <div className="grid grid-cols-3 gap-4">
-            <Field label="CGST (%)">
-              <div className="relative">
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  step={0.5}
-                  value={form.cgst === 0 ? "" : form.cgst}
-                  onChange={(e) => set("cgst", parseFloat(e.target.value) || 0)}
-                  placeholder="0"
-                  className={inputCls() + " pr-8"}
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
-                  %
-                </span>
-              </div>
-            </Field>
-            <Field label="SGST (%)">
-              <div className="relative">
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  step={0.5}
-                  value={form.sgst === 0 ? "" : form.sgst}
-                  onChange={(e) => set("sgst", parseFloat(e.target.value) || 0)}
-                  placeholder="0"
-                  className={inputCls() + " pr-8"}
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
-                  %
-                </span>
-              </div>
-            </Field>
-            <Field label="IGST (%)">
-              <div className="relative">
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  step={0.5}
-                  value={form.igst === 0 ? "" : form.igst}
-                  onChange={(e) => set("igst", parseFloat(e.target.value) || 0)}
-                  placeholder="0"
-                  className={inputCls() + " pr-8"}
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
-                  %
-                </span>
-              </div>
-            </Field>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mt-5">
-          <p className="hidden sm:block text-xs text-muted-foreground">Ready to save</p>
-          <div className="flex gap-3 sm:ml-auto">
-            <button
-              onClick={handleReset}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
-            >
-              Reset
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="flex-1 sm:flex-none whitespace-nowrap px-5 py-2 rounded-lg font-heading text-sm font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-primary/20 hover:-translate-y-0.5 transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {saving && <Loader2 size={14} className="animate-spin" />}
-              {editingId ? "Update" : "Save"}
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* ── Table ── */}
-      <div className="rounded-xl border border-border bg-card p-4">
-        <div className="relative mb-4">
-          <Search
-            size={14}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-          />
-          <input
-            type="text"
-            placeholder="Search items..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-          />
-        </div>
-        <DataTable
-          data={filtered}
-          columns={ITEM_COLUMNS}
-          loading={false}
-          searchable={false}
-          paginated={true}
-          defaultPageSize={20}
-          emptyMessage={
-            search
-              ? "No items match your search."
-              : "No items yet. Add one above."
-          }
-          rowClassName={(row) =>
-            row.original._id === deleteConfirmId ? "bg-destructive/5" : ""
-          }
-        />
-      </div>
-
-      {/* View Detail Modal */}
-      <Dialog
-        open={!!viewRow}
-        onOpenChange={(open) => !open && setViewRow(null)}
+        }
       >
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="font-heading text-base">
-              Item Details
-            </DialogTitle>
-          </DialogHeader>
-          {viewRow &&
-            (() => {
-              const group = itemGroups.find((g) => g.id === viewRow.belongsTo);
-              const uomRaw = Array.isArray(dbUoms)
-                ? (dbUoms as any[]).find(
-                    (u: any) => u.UOMCode === viewRow.uomCode,
-                  )
-                : null;
-              const uomLabel = uomRaw
-                ? uomRaw.Symbol
-                  ? `${uomRaw.UOMName} (${uomRaw.Symbol})`
-                  : uomRaw.UOMName
-                : viewRow.uomCode;
-              return (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-1">
-                  {[
-                    { label: "Item Name", value: viewRow.itemName },
+        {/* ── Form ── */}
+        <div className="rounded-xl border border-border bg-card p-6 mb-6">
+          <h2 className="text-base font-heading font-semibold mb-4">
+            {editingId ? "Edit Item" : "Add Item"}
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Item Name */}
+            <Field label="Item Name" required error={errors.itemName}>
+              <input
+                type="text"
+                value={form.itemName}
+                onChange={(e) => set("itemName", e.target.value)}
+                className={inputCls(errors.itemName)}
+                placeholder="e.g. Cement UltraTech"
+              />
+            </Field>
+            {/* Short Code */}
+            <Field label="Short Code" required error={errors.shortCode}>
+              <input
+                type="text"
+                value={form.shortCode}
+                onChange={(e) => set("shortCode", e.target.value.toUpperCase())}
+                className={inputCls(errors.shortCode)}
+                placeholder="e.g. CEM"
+                maxLength={6}
+              />
+            </Field>
+            {/* Item Group */}
+            <Field
+              label="Item Group (Parent)"
+              required
+              error={errors.belongsTo}
+            >
+              <select
+                value={form.belongsTo}
+                onChange={(e) => set("belongsTo", e.target.value)}
+                className={inputCls(errors.belongsTo)}
+              >
+                <option value="">Select group...</option>
+                {itemGroups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.description}
+                    {g.code ? ` (${g.code})` : ""}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {/* UOM */}
+            <Field label="Unit of Measure (UOM)">
+              <select
+                value={form.uomCode}
+                onChange={(e) => set("uomCode", e.target.value)}
+                className={inputCls()}
+              >
+                <option value="">Select UOM...</option>
+                {uomOptions.map((u) => (
+                  <option key={u.value} value={u.value}>
+                    {u.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {/* Type of Item */}
+            <Field label="Type of Item" required error={errors.itemType}>
+              <select
+                value={form.itemType}
+                onChange={(e) => set("itemType", e.target.value)}
+                className={inputCls(errors.itemType)}
+              >
+                <option value="">Select type...</option>
+                <option value="Service">Service</option>
+                <option value="Goods">Goods</option>
+              </select>
+            </Field>
+            {/* HSN Code */}
+            <Field label="HSN Code">
+              <HsnDropdown
+                value={form.hsnCode}
+                onChange={(val) => set("hsnCode", val)}
+                hsnCodes={hsnCodes}
+              />
+            </Field>
+            {/* Description */}
+            <Field label="Description">
+              <input
+                type="text"
+                value={form.description}
+                onChange={(e) => set("description", e.target.value)}
+                className={inputCls()}
+                placeholder="Additional description (optional)"
+              />
+            </Field>
+            {/* Default Supplier */}
+            <Field label="Default Supplier">
+              <select
+                value={form.defaultSupplierId}
+                onChange={(e) => set("defaultSupplierId", e.target.value)}
+                className={inputCls()}
+              >
+                <option value="">— No default supplier —</option>
+                {supplierOptions.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+
+          {/* ── Tax Rates ── */}
+          <div className="mt-4">
+            <p className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wide mb-2">
+              Tax Rates{" "}
+              {form.hsnCode && (
+                <span className="normal-case text-primary font-normal">
+                  (auto-filled from HSN)
+                </span>
+              )}
+            </p>
+            <div className="grid grid-cols-3 gap-4">
+              <Field label="CGST (%)">
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.5}
+                    value={form.cgst === 0 ? "" : form.cgst}
+                    onChange={(e) =>
+                      set("cgst", parseFloat(e.target.value) || 0)
+                    }
+                    placeholder="0"
+                    className={inputCls() + " pr-8"}
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                    %
+                  </span>
+                </div>
+              </Field>
+              <Field label="SGST (%)">
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.5}
+                    value={form.sgst === 0 ? "" : form.sgst}
+                    onChange={(e) =>
+                      set("sgst", parseFloat(e.target.value) || 0)
+                    }
+                    placeholder="0"
+                    className={inputCls() + " pr-8"}
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                    %
+                  </span>
+                </div>
+              </Field>
+              <Field label="IGST (%)">
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.5}
+                    value={form.igst === 0 ? "" : form.igst}
+                    onChange={(e) =>
+                      set("igst", parseFloat(e.target.value) || 0)
+                    }
+                    placeholder="0"
+                    className={inputCls() + " pr-8"}
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                    %
+                  </span>
+                </div>
+              </Field>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mt-5">
+            <p className="hidden sm:block text-xs text-muted-foreground">
+              Ready to save
+            </p>
+            <div className="flex gap-3 sm:ml-auto">
+              <button
+                onClick={handleReset}
+                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
+              >
+                Reset
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex-1 sm:flex-none whitespace-nowrap px-5 py-2 rounded-lg font-heading text-sm font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-primary/20 hover:-translate-y-0.5 transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {saving && <Loader2 size={14} className="animate-spin" />}
+                {editingId ? "Update" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Table ── */}
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="relative mb-4">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
+            <input
+              type="text"
+              placeholder="Search items..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+          <DataTable
+            data={filtered}
+            columns={ITEM_COLUMNS}
+            loading={false}
+            searchable={false}
+            paginated={true}
+            defaultPageSize={20}
+            emptyMessage={
+              search
+                ? "No items match your search."
+                : "No items yet. Add one above."
+            }
+            rowClassName={(row) =>
+              row.original._id === deleteConfirmId ? "bg-destructive/5" : ""
+            }
+          />
+        </div>
+
+        {/* View Detail Modal */}
+        <Dialog
+          open={!!viewRow}
+          onOpenChange={(open) => !open && setViewRow(null)}
+        >
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="font-heading text-base">
+                Item Details
+              </DialogTitle>
+            </DialogHeader>
+            {viewRow &&
+              (() => {
+                const group = itemGroups.find(
+                  (g) => g.id === viewRow.belongsTo,
+                );
+                const uomRaw = Array.isArray(dbUoms)
+                  ? (dbUoms as any[]).find(
+                      (u: any) => u.UOMCode === viewRow.uomCode,
+                    )
+                  : null;
+                const uomLabel = uomRaw
+                  ? uomRaw.Symbol
+                    ? `${uomRaw.UOMName} (${uomRaw.Symbol})`
+                    : uomRaw.UOMName
+                  : viewRow.uomCode;
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-1">
+                    {[
+                      { label: "Item Name", value: viewRow.itemName },
+                      {
+                        label: "Short Code",
+                        value: viewRow.shortCode,
+                        mono: true,
+                      },
+                      { label: "Type", value: viewRow.itemType },
+                      { label: "Item Group", value: group?.description },
+                      { label: "HSN Code", value: viewRow.hsnCode, mono: true },
+                      { label: "CGST", value: `${viewRow.cgst}%` },
+                      { label: "SGST", value: `${viewRow.sgst}%` },
+                      { label: "IGST", value: `${viewRow.igst}%` },
+                      { label: "UOM", value: uomLabel },
+                      { label: "Description", value: viewRow.description },
+                    ].map(({ label, value, mono }) => (
+                      <div key={label}>
+                        <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
+                          {label}
+                        </p>
+                        <p
+                          className={`text-sm text-foreground break-words ${mono ? "font-mono" : "font-body"}`}
+                        >
+                          {value || "—"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+              {viewRow && (
+                <button
+                  onClick={() => handleItemPrint(viewRow)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-all"
+                >
+                  <Printer size={13} /> Print
+                </button>
+              )}
+              <button
+                onClick={() => setViewRow(null)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+              >
+                Close
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Import Results Modal */}
+        <Dialog
+          open={!!importResults}
+          onOpenChange={(open) => !open && setImportResults(null)}
+        >
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="font-heading text-base">
+                Import Results
+              </DialogTitle>
+            </DialogHeader>
+            {importResults && (
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="flex items-center gap-1.5 text-green-600">
+                    <Check size={14} />
                     {
-                      label: "Short Code",
-                      value: viewRow.shortCode,
-                      mono: true,
-                    },
-                    { label: "Type", value: viewRow.itemType },
-                    { label: "Item Group", value: group?.description },
-                    { label: "HSN Code", value: viewRow.hsnCode, mono: true },
-                    { label: "CGST", value: `${viewRow.cgst}%` },
-                    { label: "SGST", value: `${viewRow.sgst}%` },
-                    { label: "IGST", value: `${viewRow.igst}%` },
-                    { label: "UOM", value: uomLabel },
-                    { label: "Description", value: viewRow.description },
-                  ].map(({ label, value, mono }) => (
-                    <div key={label}>
-                      <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
-                        {label}
-                      </p>
-                      <p
-                        className={`text-sm text-foreground break-words ${mono ? "font-mono" : "font-body"}`}
-                      >
-                        {value || "—"}
-                      </p>
+                      importResults.filter((r) => r.status === "success").length
+                    }{" "}
+                    succeeded
+                  </span>
+                  {importResults.some((r) => r.status === "error") && (
+                    <span className="flex items-center gap-1.5 text-destructive">
+                      <X size={14} />
+                      {
+                        importResults.filter((r) => r.status === "error").length
+                      }{" "}
+                      failed
+                    </span>
+                  )}
+                </div>
+                <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+                  {importResults.map((r, i) => (
+                    <div
+                      key={i}
+                      className={`flex items-start gap-2 px-3 py-2 text-sm ${
+                        r.status === "error" ? "bg-destructive/5" : ""
+                      }`}
+                    >
+                      {r.status === "success" ? (
+                        <Check
+                          size={14}
+                          className="text-green-600 shrink-0 mt-0.5"
+                        />
+                      ) : (
+                        <X
+                          size={14}
+                          className="text-destructive shrink-0 mt-0.5"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">
+                          Row {r.row} — {r.itemName}
+                        </p>
+                        {r.message && (
+                          <p className="text-xs text-destructive">
+                            {r.message}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
-              );
-            })()}
-          <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
-            {viewRow && (
-              <button
-                onClick={() => handleItemPrint(viewRow)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-all"
-              >
-                <Printer size={13} /> Print
-              </button>
+              </div>
             )}
-            <button
-              onClick={() => setViewRow(null)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
-            >
-              Close
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
+            <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+              <button
+                onClick={() => setImportResults(null)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+              >
+                Close
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </MaterialShell>
     </>
   );
