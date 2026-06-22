@@ -51,6 +51,8 @@ interface TreeDropdownProps {
   invalidParents?: Set<string>;
   /** All flat groups (needed to look up selected group name/code/children) */
   allGroups?: AccountGroup[];
+  /** Open the panel above the trigger instead of below */
+  dropUp?: boolean;
 }
 
 // ─── Tree Node (internal recursive component) ─────────────────────────────────
@@ -77,40 +79,34 @@ function TreeNodeRow({
   const isSelected = selectedId === node._id;
   const isDisabled = invalidParents.has(node._id);
 
-  const handleRowClick = () => {
-    if (isDisabled) return;
-    if (hasChildren) onToggleNode(node._id);
-    else onSelect(node._id);
-  };
-
   return (
     <>
       <div
         className={`flex items-center select-none transition-colors rounded-md ${
           isDisabled
             ? "opacity-40 cursor-not-allowed"
-            : hasChildren
-              ? "cursor-pointer hover:bg-muted/60 text-foreground"
-              : isSelected
-                ? "bg-primary/10 text-primary cursor-pointer"
-                : "hover:bg-muted/60 text-foreground cursor-pointer"
+            : isSelected
+              ? "bg-primary/10 text-primary"
+              : "hover:bg-muted/60 text-foreground"
         }`}
         style={{ paddingLeft: `${depth * 16}px` }}
-        onClick={handleRowClick}
       >
-        {/* Chevron — visual indicator only, row click handles expand/collapse */}
-        <div
-          className={`w-8 h-8 flex items-center justify-center shrink-0 rounded transition-colors ${
-            hasChildren
-              ? "text-muted-foreground"
-              : "opacity-0 pointer-events-none"
+        {/* Chevron button — expands/collapses children only */}
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); if (hasChildren) onToggleNode(node._id); }}
+          className={`w-8 h-8 flex items-center justify-center shrink-0 rounded transition-colors hover:bg-muted/80 ${
+            hasChildren ? "text-muted-foreground cursor-pointer" : "opacity-0 pointer-events-none"
           }`}
         >
           {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        </div>
+        </button>
 
-        {/* Label area */}
-        <div className="flex items-center gap-2 flex-1 py-1.5 pr-2 min-w-0">
+        {/* Label area — clicking here SELECTS this node */}
+        <div
+          className={`flex items-center gap-2 flex-1 py-1.5 pr-2 min-w-0 ${isDisabled ? "cursor-not-allowed" : "cursor-pointer"}`}
+          onClick={() => { if (!isDisabled) { onSelect(node._id); if (hasChildren && !isOpen) onToggleNode(node._id); } }}
+        >
           {hasChildren ? (
             <FolderOpen size={13} className="text-amber-500 shrink-0" />
           ) : depth === 0 ? (
@@ -168,6 +164,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
   items = [],
   invalidParents = new Set<string>(),
   allGroups = [],
+  dropUp = false,
 }) => {
   const [open, setOpen] = useState(false);
   const [openNodes, setOpenNodes] = useState<Set<string>>(new Set());
@@ -271,7 +268,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
 
       {/* ── Dropdown panel ── */}
       {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+        <div className={`absolute z-50 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden ${dropUp ? "bottom-full mb-1" : "mt-1"}`}>
           {variant === "tree" ? (
             /* ── Tree panel ── */
             <>
