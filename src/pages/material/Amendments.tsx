@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { MaterialShell } from "@/components/material/MaterialShell";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -349,23 +350,20 @@ export default function Amendments() {
   return (
     <>
       <Breadcrumbs items={["Material", "Amendments"]} />
-
-      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="flex items-center gap-3 text-xl font-heading font-bold text-foreground">
-            <FilePenLine className="h-8 w-8 text-primary" />
-            Amendments
-          </h1>
-          <p className="mt-1 text-muted-foreground">
-            Track change requests for purchase orders, work orders, contracts, and more.
-          </p>
-        </div>
-
-        <Button onClick={openCreate}>
-          <Plus className="mr-2 h-4 w-4" />
-          New Amendment
-        </Button>
-      </div>
+      <MaterialShell
+        title="Amendments"
+        subtitle="Track change requests for purchase orders, work orders, contracts, and more"
+        icon={FilePenLine}
+        action={
+          <Button
+            onClick={openCreate}
+            className="gradient-accent text-white text-xs px-3 py-1.5 h-auto"
+          >
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            New Amendment
+          </Button>
+        }
+      >
 
       <Card className="mb-6">
         <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -870,6 +868,7 @@ export default function Amendments() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      </MaterialShell>
     </>
   );
 }

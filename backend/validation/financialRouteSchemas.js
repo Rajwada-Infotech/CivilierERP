@@ -231,6 +231,7 @@ const paymentBodySchema = z
       PRtgsReference: body.PRtgsReference ?? body.rtgsReference,
       PImpsReference: body.PImpsReference ?? body.impsReference,
       PCardReference: body.PCardReference ?? body.cardReference,
+      PCardId: body.PCardId ?? body.cardId,
     };
   },
   z
@@ -259,6 +260,7 @@ const paymentBodySchema = z
       PRtgsReference: optStr(100),
       PImpsReference: optStr(100),
       PCardReference: optStr(100),
+      PCardId: optInt,
     })
     .passthrough(),
   );

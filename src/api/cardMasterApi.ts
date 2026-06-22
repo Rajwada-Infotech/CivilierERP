@@ -23,6 +23,7 @@ async function handleResponse<T = unknown>(res: Response): Promise<T> {
 export interface DbCard {
   id: number;
   company_name: string | null;
+  bank_id: number | null;
   bank_name: string | null;
   account_number: string | null;
   ifsc_code: string | null;
@@ -53,6 +54,7 @@ export interface CompanyOption {
 
 export interface CardPayload {
   company_name: string | null;
+  bank_id: number | null;
   bank_name: string | null;
   account_number: string | null;
   ifsc_code: string | null;
@@ -71,6 +73,13 @@ export interface CardPayload {
 // ─── API calls ────────────────────────────────────────────────────────────────
 export const getCards = (): Promise<DbCard[]> =>
   fetchWithAuth(BASE).then((r) => handleResponse<DbCard[]>(r));
+
+// Active cards for a specific bank — used by the Payment form's card
+// selector so a bank with multiple cards can be disambiguated.
+export const getCardsByBank = (bankId: number): Promise<DbCard[]> =>
+  fetchWithAuth(`${BASE}?bankId=${bankId}`).then((r) =>
+    handleResponse<DbCard[]>(r),
+  );
 
 export const getBanksForCard = (): Promise<BankOption[]> =>
   fetchWithAuth(BANKS_URL).then((r) => handleResponse<BankOption[]>(r));

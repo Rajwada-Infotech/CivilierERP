@@ -36,6 +36,7 @@ import {
   type InventoryMasterRow,
 } from "@/api/inventoryMasterApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
+import { MaterialShell } from "@/components/material/MaterialShell";
 
 // ─── Field ────────────────────────────────────────────────────────────────────
 function Field({
@@ -312,25 +313,30 @@ function GodownDrawer({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-border flex gap-2 shrink-0">
-          <button
-            onClick={onClose}
-            className="flex-1 px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={isPending || !form.GodownName?.trim()}
-            className="flex-1 px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-          >
-            {isPending ? (
-              <RefreshCw size={13} className="animate-spin" />
-            ) : (
-              <Check size={13} />
-            )}
-            {editing ? "Save Changes" : "Create Godown"}
-          </button>
+        <div className="px-6 py-4 border-t border-border flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between shrink-0">
+          <p className="hidden sm:block text-xs text-muted-foreground">
+            {editing ? "Update godown details" : "Fill required fields to create"}
+          </p>
+          <div className="flex gap-2 sm:ml-auto">
+            <button
+              onClick={onClose}
+              className="flex-1 sm:flex-none flex items-center justify-center px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={isPending || !form.GodownName?.trim()}
+              className="flex-1 sm:flex-none whitespace-nowrap px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+            >
+              {isPending ? (
+                <RefreshCw size={13} className="animate-spin" />
+              ) : (
+                <Check size={13} />
+              )}
+              {editing ? "Save Changes" : "Create Godown"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -798,42 +804,34 @@ export default function InventoryMaster() {
         onClose={() => setDeletingGodown(null)}
       />
 
-      <div className="p-6 space-y-6">
-        {/* ── Header ── */}
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 flex items-center justify-center">
-                <Warehouse size={17} className="text-emerald-600" />
-              </div>
-              Inventory Master
-            </h1>
-            <p className="text-xs text-muted-foreground mt-1 ml-[2.6rem]">
-              Manage project godowns and storage locations across all sites
-            </p>
-          </div>
-
+      <MaterialShell
+        title="Inventory Master"
+        subtitle="Manage godowns and stock locations"
+        icon={Warehouse}
+        action={
           <div className="flex items-center gap-2">
             <button
               onClick={() => refetch()}
               disabled={isLoading}
-              className="p-2 rounded-lg border border-border hover:bg-muted transition-colors"
+              className="p-2 rounded-lg border border-emerald-500/30 hover:bg-emerald-500/10 transition-colors"
               title="Refresh"
+              style={{ color: "#34d399" }}
             >
               <RefreshCw
                 size={14}
-                className={`text-muted-foreground ${isLoading ? "animate-spin" : ""}`}
+                className={isLoading ? "animate-spin" : ""}
               />
             </button>
             <button
               onClick={handleAdd}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors shadow-md shadow-emerald-500/20"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-500/30 hover:bg-emerald-500/10 text-sm font-semibold transition-colors"
+              style={{ color: "#34d399" }}
             >
               <Plus size={14} /> New Godown
             </button>
           </div>
-        </div>
-
+        }
+      >
         {/* ── Stats strip ── */}
         {!isLoading && godowns.length > 0 && (
           <div className="flex items-center gap-3 flex-wrap">
@@ -970,7 +968,7 @@ export default function InventoryMaster() {
             </button>
           </div>
         )}
-      </div>
+      </MaterialShell>
     </>
   );
 }

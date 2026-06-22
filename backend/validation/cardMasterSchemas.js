@@ -9,6 +9,7 @@ const nullableString = (max) =>
 
 const cardMasterSchema = z.object({
   company_name: nullableString(200),
+  bank_id: z.coerce.number().int().nullable().optional(),
   bank_name: nullableString(200),
   account_number: nullableString(50),
   ifsc_code: nullableString(20),

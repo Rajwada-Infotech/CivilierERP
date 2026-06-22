@@ -2,6 +2,7 @@ import { generateUUID } from '../../utils/cryptoPolyfill';
 import { useEffect, useState, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { MaterialShell } from "@/components/material/MaterialShell";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -1685,25 +1686,20 @@ const PurchaseOrderMaster: React.FC = () => {
         <Breadcrumbs
           items={["Dashboard", "Material", "Purchase Order Master"]}
         />
-
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4 mt-6 mb-6">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Purchase Orders
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {totalRecords} orders total
-            </p>
-          </div>
-          <button
-            onClick={goToCreate}
-            className="gradient-accent inline-flex items-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white shrink-0 transition"
-          >
-            <Plus size={15} />
-            New Purchase Order
-          </button>
-        </div>
+        <MaterialShell
+          title="Purchase Orders"
+          subtitle="Create and manage purchase orders"
+          icon={ShoppingCart}
+          action={
+            <button
+              onClick={goToCreate}
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition-all"
+            >
+              <Plus size={13} />
+              New Purchase Order
+            </button>
+          }
+        >
 
         {/* PO Type Filter Tabs */}
         <div className="flex items-center gap-1 mb-3 bg-muted/30 rounded-xl p-1 w-fit">
@@ -2113,6 +2109,7 @@ const PurchaseOrderMaster: React.FC = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </MaterialShell>
       </>
     );
   }
@@ -2133,6 +2130,11 @@ const PurchaseOrderMaster: React.FC = () => {
           viewMode === "create" ? "New" : viewMode === "edit" ? "Edit" : "View",
         ]}
       />
+      <MaterialShell
+        title="Purchase Orders"
+        subtitle="Create and manage purchase orders"
+        icon={ShoppingCart}
+      >
 
       {/* Form Header */}
       <div className="flex items-center justify-between mb-6">
@@ -2170,7 +2172,7 @@ const PurchaseOrderMaster: React.FC = () => {
             <button
               onClick={handleSave}
               disabled={saving || saved}
-              className="gradient-accent inline-flex items-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
+              className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 inline-flex items-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
             >
               {saved ? (
                 <Check size={14} />
@@ -2202,7 +2204,7 @@ const PurchaseOrderMaster: React.FC = () => {
                 const item = listData.find((r) => r._id === editingId);
                 if (item) goToAmend(item);
               }}
-              className="gradient-accent inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold transition shadow-sm"
+              className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold transition shadow-sm"
             >
               <FilePenLine size={14} />
               Amend
@@ -3362,31 +3364,35 @@ const PurchaseOrderMaster: React.FC = () => {
 
         {/* Bottom action bar */}
         {!isReadOnly && (
-          <div className="flex items-center justify-end gap-3 pb-6">
-            <button
-              onClick={goToList}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition"
-            >
-              <RotateCcw size={14} />
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving || saved}
-              className="gradient-accent inline-flex items-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
-            >
-              {saved ? (
-                <Check size={14} />
-              ) : saving ? (
-                <RefreshCw size={14} className="animate-spin" />
-              ) : (
-                <Save size={14} />
-              )}
-              {saved ? "Saved!" : saving ? "Saving…" : "Save Purchase Order"}
-            </button>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pb-6">
+            <p className="hidden sm:block text-xs text-muted-foreground">Ready to save</p>
+            <div className="flex gap-3 sm:ml-auto">
+              <button
+                onClick={goToList}
+                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition"
+              >
+                <RotateCcw size={14} />
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving || saved}
+                className="flex-1 sm:flex-none whitespace-nowrap bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 inline-flex items-center justify-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
+              >
+                {saved ? (
+                  <Check size={14} />
+                ) : saving ? (
+                  <RefreshCw size={14} className="animate-spin" />
+                ) : (
+                  <Save size={14} />
+                )}
+                {saved ? "Saved!" : saving ? "Saving…" : "Save Purchase Order"}
+              </button>
+            </div>
           </div>
         )}
       </div>
+      </MaterialShell>
     </>
   );
 };

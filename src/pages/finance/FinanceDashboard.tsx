@@ -397,7 +397,7 @@ const FinanceDashboard = () => {
                   Recent Payments Made
                 </span>
               </div>
-              <button onClick={() => navigate("/payments")} className="text-[10px] font-medium hover:opacity-70 transition-opacity" style={{ color: "#818cf8" }}>
+              <button onClick={() => navigate("/payments")} className="text-[10px] font-medium hover:opacity-70 transition-opacity" style={{ color: "#f43f5e" }}>
                 View all →
               </button>
             </div>
@@ -445,7 +445,7 @@ const FinanceDashboard = () => {
                   Recent Received Payments
                 </span>
               </div>
-              <button onClick={() => navigate("/received-payments")} className="text-[10px] font-medium hover:opacity-70 transition-opacity" style={{ color: "#818cf8" }}>
+              <button onClick={() => navigate("/received-payments")} className="text-[10px] font-medium hover:opacity-70 transition-opacity" style={{ color: "#10b981" }}>
                 View all →
               </button>
             </div>
