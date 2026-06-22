@@ -418,7 +418,7 @@ router.post("/", async (req, res) => {
     const resolvedDeviceInfo =
       serverUA || normalizeNullableString(rest.deviceInfo, 255) || "unknown";
 
-    const activityId = crypto.randomUUID();
+    const activityId = generateUUID();
 
     const insertResult = await pool
       .request()
