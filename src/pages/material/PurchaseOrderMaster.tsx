@@ -1,5 +1,5 @@
+import { generateUUID } from '../../utils/cryptoPolyfill';  
 import { useEffect, useState, useMemo } from "react";
-import { generateId } from "@/lib/generateId";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaterialShell } from "@/components/material/MaterialShell";
@@ -978,21 +978,21 @@ const PurchaseOrderMaster: React.FC = () => {
       }
 
       return {
-        id: generateId(),
-        itemId: it.itemId || "",
-        itemName: it.itemDescription,
-        itemDescription: it.itemDescription,
-        quantity: qty,
-        uomId: uomMatch?.id ?? null,
-        unit: uomMatch?.name ?? it.unit ?? "",
-        rate,
-        cgstRate: halfGst,
-        sgstRate: halfGst,
-        igstRate: 0,
-        gstRate: totalGst,
-        taxAmount: taxAmt,
-        amount: base + taxAmt,
-      };
+  id: generateUUID(),
+  itemId: it.itemId || "",
+  itemName: it.itemDescription,
+  itemDescription: it.itemDescription,
+  quantity: qty,
+  uomId: uomMatch?.id ?? null,
+  unit: uomMatch?.name ?? it.unit ?? "",
+  rate,
+  cgstRate: halfGst,
+  sgstRate: halfGst,
+  igstRate: 0,
+  gstRate: totalGst,
+  taxAmount: taxAmt,
+  amount: base + taxAmt,
+};
     });
     if (prefillLines.length > 0) setLineItems(prefillLines);
     setSourceWO({

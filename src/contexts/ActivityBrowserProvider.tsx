@@ -1,3 +1,4 @@
+import { generateUUID } from '../utils/cryptoPolyfill';
 // ActivityBrowserProvider.tsx — only exports a component (React Fast Refresh safe)
 import React, {
   useState,
@@ -6,7 +7,6 @@ import React, {
   useMemo,
   useRef,
 } from "react";
-import { generateId } from "@/lib/generateId";
 
 import {
   type ActivityActionType,
@@ -17,7 +17,11 @@ import {
   subscribeToActivityStream,
 } from "@/api/userActivityApi";
 
-import { getDeviceFingerprint, getDeviceInfo } from "@/utils/deviceFingerprint";
+import {
+  getDeviceFingerprint,
+  getDeviceInfo,
+  generateUUID,
+} from "@/utils/deviceFingerprint";
 
 import {
   ActivityBrowserContext,
@@ -187,7 +191,7 @@ export const ActivityBrowserProvider: React.FC<{
     async (user: { id: string; name: string; email: string; role: string }) => {
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
-      const sessionId = generateId();
+      const sessionId = generateUUID();
       const loginTime = Date.now();
 
       localStorage.setItem("currentSessionId", sessionId);

@@ -1,5 +1,5 @@
+import { generateUUID } from "../../utils/cryptoPolyfill";
 import React, { useMemo, useState, useCallback, useEffect } from "react";
-import { generateId } from "@/lib/generateId";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -99,7 +99,7 @@ const defaultHeader: IssueHeader = {
 };
 
 const blankCartItem = (): CartItem => ({
-  _key: generateId(),
+  _key: generateUUID(),
   ItemId: "",
   UOMCode: "",
   Quantity: "",
@@ -242,7 +242,13 @@ export default function Issues() {
 
   const { data: issuesData, isLoading: loadingIssues } = useQuery({
     queryKey: ["issues-list", page, search, issueStatusFilter],
-    queryFn: () => issuesApi.getIssues({ page, limit, search, status: issueStatusFilter || undefined }),
+    queryFn: () =>
+      issuesApi.getIssues({
+        page,
+        limit,
+        search,
+        status: issueStatusFilter || undefined,
+      }),
   });
 
   // ── Auto-select active fin year ──────────────────────────────────────────
@@ -442,7 +448,10 @@ export default function Issues() {
       queryClient.invalidateQueries({ queryKey: ["issues-list"] });
       queryClient.invalidateQueries({ queryKey: ["issues-items"] });
       setSaved(true);
-      setTimeout(() => { setSaved(false); goToList(); }, 1500);
+      setTimeout(() => {
+        setSaved(false);
+        goToList();
+      }, 1500);
     },
     onError: (err: any) => toast.error(err.message || "Failed to create issue"),
   });
@@ -454,7 +463,10 @@ export default function Issues() {
       queryClient.invalidateQueries({ queryKey: ["issues-list"] });
       queryClient.invalidateQueries({ queryKey: ["issues-items"] });
       setSaved(true);
-      setTimeout(() => { setSaved(false); goToList(); }, 1500);
+      setTimeout(() => {
+        setSaved(false);
+        goToList();
+      }, 1500);
     },
     onError: (err: any) => toast.error(err.message || "Failed to update issue"),
   });
@@ -504,7 +516,7 @@ export default function Issues() {
       costCenter: record.CostCenter ?? "",
     });
     const items: CartItem[] = (record.items || []).map((it: any) => ({
-      _key: generateId(),
+      _key: generateUUID(),
       ItemId: String(it.ItemId ?? ""),
       UOMCode: String(it.UOMCode ?? ""),
       Quantity: String(it.Quantity ?? ""),
@@ -745,7 +757,10 @@ export default function Issues() {
                 <button
                   key={s || "all"}
                   type="button"
-                  onClick={() => { setIssueStatusFilter(s); setPage(1); }}
+                  onClick={() => {
+                    setIssueStatusFilter(s);
+                    setPage(1);
+                  }}
                   className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${issueStatusFilter === s ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"}`}
                 >
                   {s || "All"}
@@ -828,8 +843,13 @@ export default function Issues() {
           <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
             <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
             <div className="flex items-center gap-3 min-w-0">
-              <button type="button" onClick={goToList} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0">
-                <ArrowLeft size={15} /><span className="hidden sm:inline">Back</span>
+              <button
+                type="button"
+                onClick={goToList}
+                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              >
+                <ArrowLeft size={15} />
+                <span className="hidden sm:inline">Back</span>
               </button>
               <span className="text-emerald-500/40">|</span>
               <div className="flex items-center gap-2 min-w-0">
@@ -1449,8 +1469,20 @@ export default function Issues() {
               disabled={!canSave || isSaving || saved}
               className="flex-1 sm:flex-none whitespace-nowrap bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center justify-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
             >
-              {saved ? <Check size={14} /> : isSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
-              {saved ? "Saved!" : isSaving ? "Saving…" : editingId ? "Update Issue" : "Save Issue"}
+              {saved ? (
+                <Check size={14} />
+              ) : isSaving ? (
+                <RefreshCw size={14} className="animate-spin" />
+              ) : (
+                <Save size={14} />
+              )}
+              {saved
+                ? "Saved!"
+                : isSaving
+                  ? "Saving…"
+                  : editingId
+                    ? "Update Issue"
+                    : "Save Issue"}
             </button>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -23,6 +23,9 @@ import {
   Eye,
   Printer,
   ChevronDown,
+  Download,
+  Upload,
+  Loader2,
 } from "lucide-react";
 import {
   Dialog,
@@ -30,6 +33,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { exportToCsv, parseCsv } from "@/lib/export";
 import {
   getCheques,
   getBanksForCheque,
@@ -78,6 +82,28 @@ const EMPTY: FormState = {
 function calcTotal(start: number | "", end: number | ""): number {
   if (start === "" || end === "" || Number(end) < Number(start)) return 0;
   return Number(end) - Number(start) + 1;
+}
+
+// ─── CSV import ───────────────────────────────────────────────────────────────
+const CSV_HEADERS = {
+  company: "Company Name",
+  bank: "Bank Name",
+  lotNumber: "Lot Number",
+  startNumber: "Start Number",
+  endNumber: "End Number",
+  remarks: "Remarks",
+  status: "Status (Active/Inactive)",
+} as const;
+
+const CHEQUE_CSV_TEMPLATE_COLUMNS = CSV_HEADERS
+  ? Object.values(CSV_HEADERS).map((h) => ({ header: h, accessor: h }))
+  : [];
+
+interface ImportRowResult {
+  row: number;
+  name: string;
+  status: "success" | "error";
+  message?: string;
 }
 
 const inp =
@@ -398,6 +424,148 @@ const ChequeMaster: React.FC = () => {
     clearErrors();
   };
 
+  // ── CSV import/export ────────────────────────────────────────────────────────
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState<ImportRowResult[] | null>(
+    null,
+  );
+
+  const handleDownloadTemplate = () => {
+    exportToCsv([], CHEQUE_CSV_TEMPLATE_COLUMNS, "cheque-master-template");
+    toast.success("Template downloaded — fill it in and use Import.");
+  };
+
+  const handleImportClick = () => importFileInputRef.current?.click();
+
+  const handleImportFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast.error("Please select a .csv file.");
+      return;
+    }
+    setImporting(true);
+    setImportResults(null);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (rows.length === 0) {
+        toast.error("The CSV file has no data rows.");
+        setImporting(false);
+        return;
+      }
+      const results: ImportRowResult[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        const raw = rows[i];
+        const rowNum = i + 2;
+        const nameForLog = raw[CSV_HEADERS.lotNumber] || `Row ${rowNum}`;
+        try {
+          const companyRaw = (raw[CSV_HEADERS.company] || "").trim();
+          const bankRaw = (raw[CSV_HEADERS.bank] || "").trim();
+          const lotNumber = (raw[CSV_HEADERS.lotNumber] || "").trim();
+          const startRaw = (raw[CSV_HEADERS.startNumber] || "").trim();
+          const endRaw = (raw[CSV_HEADERS.endNumber] || "").trim();
+          const remarks = (raw[CSV_HEADERS.remarks] || "").trim();
+          const statusRaw = (raw[CSV_HEADERS.status] || "")
+            .trim()
+            .toLowerCase();
+
+          if (!companyRaw) throw new Error("Company Name is required");
+          if (!bankRaw) throw new Error("Bank Name is required");
+          if (!lotNumber) throw new Error("Lot Number is required");
+          if (!startRaw) throw new Error("Start Number is required");
+          if (!endRaw) throw new Error("End Number is required");
+
+          const companyMatch = companies.find(
+            (c) => c.label.toLowerCase() === companyRaw.toLowerCase(),
+          );
+          if (!companyMatch)
+            throw new Error(`Company not found: "${companyRaw}"`);
+
+          const bankMatch = dbBanks.find(
+            (b) => b.label.toLowerCase() === bankRaw.toLowerCase(),
+          );
+          if (!bankMatch) throw new Error(`Bank not found: "${bankRaw}"`);
+
+          const startNum = parseInt(startRaw);
+          const endNum = parseInt(endRaw);
+          if (isNaN(startNum) || startNum <= 0)
+            throw new Error(
+              `Start Number must be a positive integer (got "${startRaw}")`,
+            );
+          if (isNaN(endNum) || endNum <= 0)
+            throw new Error(
+              `End Number must be a positive integer (got "${endRaw}")`,
+            );
+          if (endNum < startNum)
+            throw new Error(
+              `End Number (${endNum}) must be ≥ Start Number (${startNum})`,
+            );
+
+          const isActive =
+            statusRaw === "" || statusRaw === "active"
+              ? true
+              : statusRaw === "inactive"
+                ? false
+                : null;
+          if (isActive === null)
+            throw new Error(
+              `Status must be "Active" or "Inactive" (got "${raw[CSV_HEADERS.status]}")`,
+            );
+
+          await addCheque({
+            CompanyId: companyMatch.id,
+            BankId: bankMatch.id,
+            AccountNumber: bankMatch.accountNumber || null,
+            IFSCCode: bankMatch.ifscCode || null,
+            ChequeLotNumber: lotNumber,
+            ChequeStartNumber: startNum,
+            ChequeEndNumber: endNum,
+            Remarks: remarks || null,
+            Status: isActive,
+          });
+          results.push({ row: rowNum, name: lotNumber, status: "success" });
+        } catch (err: any) {
+          results.push({
+            row: rowNum,
+            name: nameForLog,
+            status: "error",
+            message: err?.message || "Unknown error",
+          });
+        }
+      }
+      setImportResults(results);
+      const successCount = results.filter((r) => r.status === "success").length;
+      const errorCount = results.length - successCount;
+      if (successCount > 0) {
+        await queryClient.invalidateQueries({ queryKey: ["cheques"] });
+      }
+      if (errorCount === 0) {
+        toast.success(
+          `Imported ${successCount} cheque lot${successCount === 1 ? "" : "s"} ✓`,
+        );
+      } else if (successCount === 0) {
+        toast.error(
+          `Import failed for all ${errorCount} row${errorCount === 1 ? "" : "s"}.`,
+        );
+      } else {
+        toast.warning(
+          `Imported ${successCount} of ${results.length} rows — ${errorCount} failed. See details.`,
+        );
+      }
+    } catch (err: any) {
+      toast.error(
+        "Could not read CSV file: " + (err?.message || "Unknown error"),
+      );
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const columns = useMemo(
     () =>
       buildChequeColumns(
@@ -452,20 +620,60 @@ const ChequeMaster: React.FC = () => {
         subtitle="Register and manage cheque books / lots with bank and lot details"
         icon={BookOpen}
         action={
-          <span
-            className="text-xs font-heading px-3 py-1.5 rounded-lg"
-            style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
-          >
-            {dbCheques.length} Lots
-          </span>
+          <div className="flex items-center gap-2">
+            <span
+              className="text-xs font-heading px-3 py-1.5 rounded-lg"
+              style={{
+                background: "rgba(99,102,241,0.12)",
+                border: "1px solid rgba(99,102,241,0.25)",
+                color: "#818cf8",
+              }}
+            >
+              {dbCheques.length} Lots
+            </span>
+            <input
+              ref={importFileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleImportFileChange}
+              className="hidden"
+            />
+            <button
+              onClick={handleDownloadTemplate}
+              title="Download a blank CSV template"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+            >
+              <Download size={13} />
+              <span className="hidden sm:inline">Download Template</span>
+            </button>
+            <button
+              onClick={handleImportClick}
+              disabled={importing}
+              title="Import cheque lots from CSV"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {importing ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Upload size={13} />
+              )}
+              <span className="hidden sm:inline">
+                {importing ? "Importing..." : "Import CSV"}
+              </span>
+            </button>
+          </div>
         }
       >
         {/* Form */}
         <div
           className="rounded-xl overflow-hidden"
           style={{
-            background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.82)",
-            border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.16)",
+            background: isDark
+              ? "rgba(12,14,22,0.55)"
+              : "rgba(255,255,255,0.82)",
+            border: isDark
+              ? "1px solid rgba(99,102,241,0.20)"
+              : "1px solid rgba(99,102,241,0.16)",
             backdropFilter: "blur(18px) saturate(150%)",
             WebkitBackdropFilter: "blur(18px) saturate(150%)",
             boxShadow: isDark
@@ -476,8 +684,12 @@ const ChequeMaster: React.FC = () => {
           <div
             className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
             style={{
-              background: isDark ? "rgba(99,102,241,0.09)" : "rgba(99,102,241,0.05)",
-              borderBottom: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.13)",
+              background: isDark
+                ? "rgba(99,102,241,0.09)"
+                : "rgba(99,102,241,0.05)",
+              borderBottom: isDark
+                ? "1px solid rgba(99,102,241,0.18)"
+                : "1px solid rgba(99,102,241,0.13)",
             }}
           >
             <div>
@@ -485,13 +697,13 @@ const ChequeMaster: React.FC = () => {
                 {editingId ? "Edit Cheque Lot" : "Add Cheque Lot"}
               </h2>
               <p className="text-[11px] text-muted-foreground mt-0.5">
-                Fields marked <span className="text-destructive">*</span> are required
+                Fields marked <span className="text-destructive">*</span> are
+                required
               </p>
             </div>
           </div>
 
           <div className="px-5 sm:px-6 py-6 space-y-7">
-
             {/* ── Section: Bank Details ── */}
             <div className="space-y-3">
               <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
@@ -516,12 +728,21 @@ const ChequeMaster: React.FC = () => {
                     >
                       <option value="">Select Company...</option>
                       {companies.map((c) => (
-                        <option key={c.id} value={String(c.id)}>{c.label}</option>
+                        <option key={c.id} value={String(c.id)}>
+                          {c.label}
+                        </option>
                       ))}
                     </select>
-                    <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
                   </div>
-                  {errors.companyId && <p className="text-xs text-destructive mt-1">Company is required</p>}
+                  {errors.companyId && (
+                    <p className="text-xs text-destructive mt-1">
+                      Company is required
+                    </p>
+                  )}
                 </div>
 
                 {/* Bank */}
@@ -530,7 +751,10 @@ const ChequeMaster: React.FC = () => {
                     Bank Name <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
-                    <Landmark size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <Landmark
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
                     <select
                       value={form.bankId}
                       onChange={(e) => handleBankChange(e.target.value)}
@@ -539,45 +763,71 @@ const ChequeMaster: React.FC = () => {
                       <option value="">Select Bank...</option>
                       {dbBanks.map((b) => (
                         <option key={b.id} value={String(b.id)}>
-                          {b.label}{b.branchName ? ` — ${b.branchName}` : ""}
+                          {b.label}
+                          {b.branchName ? ` — ${b.branchName}` : ""}
                         </option>
                       ))}
                     </select>
-                    <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
                   </div>
-                  {errors.bankId && <p className="text-xs text-destructive mt-1">Bank is required</p>}
+                  {errors.bankId && (
+                    <p className="text-xs text-destructive mt-1">
+                      Bank is required
+                    </p>
+                  )}
                 </div>
 
                 {/* Account Number */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                     Account Number <span className="text-destructive">*</span>
-                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">(auto-filled)</span>
+                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">
+                      (auto-filled)
+                    </span>
                   </label>
                   <div className="relative">
-                    <Hash size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <Hash
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
                     <input
                       type="text"
                       value={form.accountNumber}
-                      onChange={(e) => setField("accountNumber", e.target.value)}
+                      onChange={(e) =>
+                        setField("accountNumber", e.target.value)
+                      }
                       placeholder="Auto-filled on bank selection"
                       className={`${inp} pl-8 font-mono tracking-widest ${errors.accountNumber ? "border-destructive" : ""}`}
                     />
                     {form.accountNumber && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">AUTO</span>
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                        AUTO
+                      </span>
                     )}
                   </div>
-                  {errors.accountNumber && <p className="text-xs text-destructive mt-1">Account number is required</p>}
+                  {errors.accountNumber && (
+                    <p className="text-xs text-destructive mt-1">
+                      Account number is required
+                    </p>
+                  )}
                 </div>
 
                 {/* IFSC */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                     IFSC Code
-                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">(auto-filled)</span>
+                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">
+                      (auto-filled)
+                    </span>
                   </label>
                   <div className="relative">
-                    <Hash size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <Hash
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
                     <input
                       type="text"
                       value={form.ifscCode}
@@ -586,7 +836,9 @@ const ChequeMaster: React.FC = () => {
                       className={`${inp} pl-8 font-mono tracking-widest bg-muted/50 cursor-default text-muted-foreground`}
                     />
                     {form.ifscCode && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">AUTO</span>
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                        AUTO
+                      </span>
                     )}
                   </div>
                 </div>
@@ -610,7 +862,10 @@ const ChequeMaster: React.FC = () => {
                     Lot Number <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
-                    <BookOpen size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <BookOpen
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
                     <input
                       type="text"
                       value={form.lotNumber}
@@ -619,7 +874,11 @@ const ChequeMaster: React.FC = () => {
                       className={`${inp} pl-8 ${errors.lotNumber ? "border-destructive" : ""}`}
                     />
                   </div>
-                  {errors.lotNumber && <p className="text-xs text-destructive mt-1">Lot number is required</p>}
+                  {errors.lotNumber && (
+                    <p className="text-xs text-destructive mt-1">
+                      Lot number is required
+                    </p>
+                  )}
                 </div>
 
                 {/* Start */}
@@ -628,16 +887,28 @@ const ChequeMaster: React.FC = () => {
                     Start Number <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
-                    <FileText size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <FileText
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
                     <input
                       type="number"
                       value={form.chqStart}
-                      onChange={(e) => setField("chqStart", e.target.value === "" ? "" : Number(e.target.value))}
+                      onChange={(e) =>
+                        setField(
+                          "chqStart",
+                          e.target.value === "" ? "" : Number(e.target.value),
+                        )
+                      }
                       placeholder="e.g. 100001"
                       className={`${inp} pl-8 font-mono ${errors.chqStart ? "border-destructive" : ""}`}
                     />
                   </div>
-                  {errors.chqStart && <p className="text-xs text-destructive mt-1">Start number is required</p>}
+                  {errors.chqStart && (
+                    <p className="text-xs text-destructive mt-1">
+                      Start number is required
+                    </p>
+                  )}
                 </div>
 
                 {/* End */}
@@ -646,18 +917,28 @@ const ChequeMaster: React.FC = () => {
                     End Number <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
-                    <FileText size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <FileText
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
                     <input
                       type="number"
                       value={form.chqEnd}
-                      onChange={(e) => setField("chqEnd", e.target.value === "" ? "" : Number(e.target.value))}
+                      onChange={(e) =>
+                        setField(
+                          "chqEnd",
+                          e.target.value === "" ? "" : Number(e.target.value),
+                        )
+                      }
                       placeholder="e.g. 100050"
                       className={`${inp} pl-8 font-mono ${errors.chqEnd ? "border-destructive" : ""}`}
                     />
                   </div>
                   {errors.chqEnd && (
                     <p className="text-xs text-destructive mt-1">
-                      {Number(form.chqEnd) < Number(form.chqStart) ? "End must be ≥ start" : "End number is required"}
+                      {Number(form.chqEnd) < Number(form.chqStart)
+                        ? "End must be ≥ start"
+                        : "End number is required"}
                     </p>
                   )}
                 </div>
@@ -666,24 +947,43 @@ const ChequeMaster: React.FC = () => {
                 <div className="space-y-1.5 sm:col-span-3">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                     Total Cheques
-                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">(auto-calculated)</span>
+                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">
+                      (auto-calculated)
+                    </span>
                   </label>
-                  <div className={`flex items-center gap-4 px-4 py-3 rounded-xl border transition-all ${rangeValid ? "bg-primary/5 border-primary/30" : "bg-muted/40 border-border"}`}>
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${rangeValid ? "bg-primary/10" : "bg-muted"}`}>
-                      <Calculator size={16} className={rangeValid ? "text-primary" : "text-muted-foreground"} />
+                  <div
+                    className={`flex items-center gap-4 px-4 py-3 rounded-xl border transition-all ${rangeValid ? "bg-primary/5 border-primary/30" : "bg-muted/40 border-border"}`}
+                  >
+                    <div
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${rangeValid ? "bg-primary/10" : "bg-muted"}`}
+                    >
+                      <Calculator
+                        size={16}
+                        className={
+                          rangeValid ? "text-primary" : "text-muted-foreground"
+                        }
+                      />
                     </div>
                     <div>
-                      <p className={`text-2xl font-heading font-bold leading-none ${rangeValid ? "text-primary" : "text-muted-foreground/40"}`}>
+                      <p
+                        className={`text-2xl font-heading font-bold leading-none ${rangeValid ? "text-primary" : "text-muted-foreground/40"}`}
+                      >
                         {rangeValid ? totalCheques.toLocaleString() : "—"}
                       </p>
                       <p className="text-[11px] text-muted-foreground mt-0.5">
-                        {rangeValid ? `Cheques from ${form.chqStart} to ${form.chqEnd}` : "Enter start and end numbers above"}
+                        {rangeValid
+                          ? `Cheques from ${form.chqStart} to ${form.chqEnd}`
+                          : "Enter start and end numbers above"}
                       </p>
                     </div>
                     {rangeValid && (
                       <div className="ml-auto text-right hidden sm:block">
-                        <p className="text-[10px] font-heading text-muted-foreground uppercase tracking-widest">Range</p>
-                        <p className="text-xs font-mono text-foreground">{form.chqStart} – {form.chqEnd}</p>
+                        <p className="text-[10px] font-heading text-muted-foreground uppercase tracking-widest">
+                          Range
+                        </p>
+                        <p className="text-xs font-mono text-foreground">
+                          {form.chqStart} – {form.chqEnd}
+                        </p>
                       </div>
                     )}
                   </div>
@@ -720,24 +1020,31 @@ const ChequeMaster: React.FC = () => {
                     onClick={() => setField("status", !form.status)}
                     className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${form.status ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
                   >
-                    <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.status ? "translate-x-4" : "translate-x-0.5"}`} />
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.status ? "translate-x-4" : "translate-x-0.5"}`}
+                    />
                   </button>
                   <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
                     Status —{" "}
-                    <span className={form.status ? "text-emerald-600" : "text-foreground"}>
+                    <span
+                      className={
+                        form.status ? "text-emerald-600" : "text-foreground"
+                      }
+                    >
                       {form.status ? "Active" : "Inactive"}
                     </span>
                   </span>
                 </div>
               </div>
             </div>
-
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
             <p className="text-[11px] text-muted-foreground hidden sm:block">
               {canSave ? (
-                <span className="text-emerald-500 font-medium">Ready to save</span>
+                <span className="text-emerald-500 font-medium">
+                  Ready to save
+                </span>
               ) : (
                 "Fill in the required fields to save"
               )}
@@ -820,6 +1127,64 @@ const ChequeMaster: React.FC = () => {
           </div>
         </div>
       </FinanceShell>
+
+      {/* Import Results Modal */}
+      {importResults && (
+        <Dialog
+          open={!!importResults}
+          onOpenChange={() => setImportResults(null)}
+        >
+          <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="font-heading text-base">
+                Import Results
+              </DialogTitle>
+            </DialogHeader>
+            <div className="flex gap-3 text-sm mb-2">
+              <span className="text-emerald-600 font-medium">
+                ✓ {importResults.filter((r) => r.status === "success").length}{" "}
+                imported
+              </span>
+              <span className="text-destructive font-medium">
+                ✗ {importResults.filter((r) => r.status === "error").length}{" "}
+                failed
+              </span>
+            </div>
+            <div className="overflow-y-auto flex-1 space-y-1.5 pr-1">
+              {importResults.map((r) => (
+                <div
+                  key={r.row}
+                  className={`flex items-start gap-2.5 rounded-lg px-3 py-2 text-xs ${
+                    r.status === "success"
+                      ? "bg-emerald-500/8 text-emerald-700"
+                      : "bg-destructive/8 text-destructive"
+                  }`}
+                >
+                  <span className="font-mono shrink-0 text-muted-foreground">
+                    Row {r.row}
+                  </span>
+                  <span className="font-medium shrink-0">{r.name}</span>
+                  {r.status === "success" ? (
+                    <span className="ml-auto text-emerald-600">✓</span>
+                  ) : (
+                    <span className="ml-2 text-destructive/80">
+                      {r.message}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="pt-3 flex justify-end">
+              <button
+                onClick={() => setImportResults(null)}
+                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* View Detail Modal */}
       <Dialog

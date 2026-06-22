@@ -97,6 +97,78 @@ export function exportToCsv(
   triggerDownload(blob, `${filename}.csv`);
 }
 
+/**
+ * Parses raw CSV text into an array of row objects keyed by header.
+ * Handles quoted fields containing commas, escaped quotes (""), and
+ * both \n and \r\n line endings. Blank trailing lines are ignored.
+ *
+ * This is intentionally dependency-free (no papaparse) to match the
+ * zero-dep philosophy of exportToCsv above.
+ */
+export function parseCsv(text: string): Record<string, string>[] {
+  // Strip a UTF-8 BOM if present (common when Excel saves CSVs).
+  const clean = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < clean.length; i++) {
+    const char = clean[i];
+    const next = clean[i + 1];
+
+    if (inQuotes) {
+      if (char === '"' && next === '"') {
+        field += '"';
+        i++; // skip the escaped quote pair
+      } else if (char === '"') {
+        inQuotes = false;
+      } else {
+        field += char;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = true;
+    } else if (char === ",") {
+      row.push(field);
+      field = "";
+    } else if (char === "\n" || char === "\r") {
+      // Treat \r\n as one break — skip the \n that follows a \r.
+      if (char === "\r" && next === "\n") i++;
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else {
+      field += char;
+    }
+  }
+  // Flush the final field/row if the file doesn't end in a newline.
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  // Drop fully-empty trailing rows (e.g. a stray blank line at EOF).
+  while (rows.length && rows[rows.length - 1].every((c) => c.trim() === "")) {
+    rows.pop();
+  }
+
+  if (rows.length === 0) return [];
+
+  const headers = rows[0].map((h) => h.trim());
+  return rows.slice(1).map((cells) => {
+    const obj: Record<string, string> = {};
+    headers.forEach((h, i) => {
+      obj[h] = (cells[i] ?? "").trim();
+    });
+    return obj;
+  });
+}
+
 // ─── XLSX (lightweight — no SheetJS) ─────────────────────────────────────────
 
 function escapeXml(v: string): string {

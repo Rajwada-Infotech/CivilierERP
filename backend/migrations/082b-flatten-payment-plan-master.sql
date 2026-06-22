@@ -1,7 +1,7 @@
 -- 082b-flatten-payment-plan-master.sql
 -- Replaces plan-grouped tables with a flat PaymentTermMaster
 -- ValueType: 'percent' | 'fixed'
--- NOTE: Seed data removed — terms are managed via Payment Plan Master UI.
+-- NOTE: Seed data removed - terms are managed via Payment Plan Master UI.
 
 -- Drop old tables (milestones first due to FK)
 IF OBJECT_ID('dbo.UnitPaymentTerms',    'U') IS NOT NULL DROP TABLE dbo.UnitPaymentTerms;
@@ -25,7 +25,6 @@ CREATE TABLE dbo.PaymentTermMaster (
 
 CREATE INDEX IX_PaymentTermMaster_IsActive ON dbo.PaymentTermMaster (IsActive);
 
--- Booking ↔ Term link table (populated via Bookings UI)
 CREATE TABLE dbo.BookingPaymentTerms (
   Id        INT IDENTITY(1,1) PRIMARY KEY,
   BookingID INT NOT NULL,

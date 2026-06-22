@@ -7,7 +7,6 @@ import React, {
   useMemo,
   useRef,
 } from "react";
-import { generateId } from "@/lib/generateId";
 
 import {
   type ActivityActionType,
@@ -18,7 +17,11 @@ import {
   subscribeToActivityStream,
 } from "@/api/userActivityApi";
 
-import { getDeviceFingerprint, getDeviceInfo } from "@/utils/deviceFingerprint";
+import {
+  getDeviceFingerprint,
+  getDeviceInfo,
+  generateUUID,
+} from "@/utils/deviceFingerprint";
 
 // ── ROLE GUARD ────────────────────────────────────────────────────────────────
 // Only these roles may read or write activity logs. Customers and any other
@@ -347,10 +350,15 @@ export const ActivityBrowserProvider: React.FC<{
 
   const recordLogin = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
-      if (!PRIVILEGED_ROLES.includes(user.role as typeof PRIVILEGED_ROLES[number])) return;
+      if (
+        !PRIVILEGED_ROLES.includes(
+          user.role as (typeof PRIVILEGED_ROLES)[number],
+        )
+      )
+        return;
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
-      const sessionId = generateId();
+      const sessionId = generateUUID();
       const loginTime = Date.now();
 
       localStorage.setItem("currentSessionId", sessionId);
@@ -386,7 +394,12 @@ export const ActivityBrowserProvider: React.FC<{
 
   const recordLogout = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
-      if (!PRIVILEGED_ROLES.includes(user.role as typeof PRIVILEGED_ROLES[number])) return;
+      if (
+        !PRIVILEGED_ROLES.includes(
+          user.role as (typeof PRIVILEGED_ROLES)[number],
+        )
+      )
+        return;
       const sessionId = localStorage.getItem("currentSessionId");
       if (!sessionId) return;
 
