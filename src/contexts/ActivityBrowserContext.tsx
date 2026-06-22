@@ -1,3 +1,4 @@
+import { generateUUID } from '../utils/cryptoPolyfill'; 
 import React, {
   createContext,
   useContext,
@@ -349,7 +350,7 @@ export const ActivityBrowserProvider: React.FC<{
       if (!PRIVILEGED_ROLES.includes(user.role as typeof PRIVILEGED_ROLES[number])) return;
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
-      const sessionId = crypto.randomUUID();
+      const sessionId = generateUUID();
       const loginTime = Date.now();
 
       localStorage.setItem("currentSessionId", sessionId);
