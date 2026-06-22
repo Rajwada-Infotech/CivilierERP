@@ -314,7 +314,7 @@ export function DocNumberPreview({
             onClick={handleRefresh}
             disabled={isSpinning}
             title="Refresh next number"
-            className="h-9 w-9 flex items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors shrink-0"
+            className="h-9 w-9 flex items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:text-foreground hover:border-emerald-500/40 transition-colors shrink-0"
           >
             <RefreshCw size={13} className={isSpinning ? "animate-spin" : ""} />
           </button>

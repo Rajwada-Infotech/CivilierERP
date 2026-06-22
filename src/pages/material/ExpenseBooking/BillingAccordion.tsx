@@ -87,12 +87,12 @@ function MasterTermPicker({
                 onSelect(term);
                 onClose();
               }}
-              className="w-full text-left rounded-xl border border-border bg-background hover:border-primary/40 hover:bg-primary/[0.03] transition-all px-4 py-3 group"
+              className="w-full text-left rounded-xl border border-border bg-background hover:border-emerald-500/40 hover:bg-emerald-500/[0.03] transition-all px-4 py-3 group"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-heading font-semibold text-foreground group-hover:text-primary transition-colors">
+                    <p className="text-sm font-heading font-semibold text-foreground group-hover:text-emerald-500 transition-colors">
                       {term.name}
                     </p>
                     {term.calculationType && (
@@ -109,7 +109,7 @@ function MasterTermPicker({
                 </div>
                 <ChevronDown
                   size={14}
-                  className="text-muted-foreground group-hover:text-primary rotate-[-90deg] shrink-0 mt-1 transition-colors"
+                  className="text-muted-foreground group-hover:text-emerald-500 rotate-[-90deg] shrink-0 mt-1 transition-colors"
                 />
               </div>
             </button>
@@ -266,7 +266,7 @@ function SingleTermRow({
                         "rounded-lg border px-3 py-1.5 text-xs font-heading font-semibold transition-all " +
                         (term.type === t
                           ? "border-primary bg-primary/[0.07] text-primary ring-1 ring-primary/20"
-                          : "border-border bg-background text-muted-foreground hover:border-primary/30")
+                          : "border-border bg-background text-muted-foreground hover:border-emerald-500/30")
                       }
                     >
                       {t === "percentage"
@@ -489,7 +489,7 @@ export function BillingAccordion({
                 variant="outline"
                 size="sm"
                 onClick={addTerm}
-                className="h-7 gap-1.5 text-xs border-primary/30 text-primary hover:bg-primary/[0.06]"
+                className="h-7 gap-1.5 text-xs border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/[0.06]"
               >
                 <Plus size={11} />
                 Add Term
@@ -534,7 +534,7 @@ export function BillingAccordion({
                     <button
                       type="button"
                       onClick={addTerm}
-                      className="w-full rounded-xl border border-dashed border-border hover:border-primary/40 hover:bg-primary/[0.03] transition-all px-4 py-3 flex items-center justify-center gap-2 text-xs text-muted-foreground hover:text-primary"
+                      className="w-full rounded-xl border border-dashed border-border hover:border-emerald-500/40 hover:bg-emerald-500/[0.03] transition-all px-4 py-3 flex items-center justify-center gap-2 text-xs text-muted-foreground hover:text-emerald-500"
                     >
                       <Plus size={13} />
                       Add another billing term
@@ -565,7 +565,7 @@ export function BillingAccordion({
                                   "rounded-lg border px-3 py-2 text-xs font-heading font-semibold transition-all " +
                                   (discount.type === t
                                     ? "border-primary bg-primary/[0.07] text-primary ring-1 ring-primary/20"
-                                    : "border-border bg-background text-muted-foreground hover:border-primary/30")
+                                    : "border-border bg-background text-muted-foreground hover:border-emerald-500/30")
                                 }
                               >
                                 {t === "percentage"

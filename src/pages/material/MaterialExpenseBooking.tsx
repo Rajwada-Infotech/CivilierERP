@@ -68,6 +68,10 @@ import {
   Truck,
   Package,
   AlertTriangle,
+  Save,
+  RefreshCw,
+  Check,
+  RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -1457,8 +1461,10 @@ export default function MaterialExpenseBooking() {
     }[];
   } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const saveInFlight = useRef(false);
   const [statusFilter, setStatusFilter] = useState<string>("All");
+  const [listSearch, setListSearch] = useState("");
   const [approvalTrail, setApprovalTrail] =
     useState<ExpenseRecord["approvalTrail"]>(undefined);
   const [liveEmiSchedule, setLiveEmiSchedule] = useState<
@@ -2303,9 +2309,10 @@ export default function MaterialExpenseBooking() {
           30000,
         );
         toast.success("Expense booking updated.");
-        cancelForm();
+        setSaved(true);
         await fetchRecords(page);
         fetchBookedSources();
+        setTimeout(() => { setSaved(false); cancelForm(); }, 1500);
       } else {
         const result = await apiFetch(
           API,
@@ -2319,9 +2326,10 @@ export default function MaterialExpenseBooking() {
           `Expense booking created and sent for approval — Ref: ${result?.docNo || form.bookingReference}`,
         );
 
-        cancelForm();
+        setSaved(true);
         await fetchRecords(page);
         fetchBookedSources();
+        setTimeout(() => { setSaved(false); cancelForm(); }, 1500);
       }
     } catch (err: any) {
       toast.error("Save failed: " + err.message);
@@ -2345,10 +2353,18 @@ export default function MaterialExpenseBooking() {
             : form.discount,
         );
 
-  const filteredRecords =
-    statusFilter && statusFilter !== "All"
-      ? records.filter((r) => r.status === statusFilter)
-      : records;
+  const filteredRecords = records.filter((r) => {
+    if (statusFilter && statusFilter !== "All" && r.status !== statusFilter) return false;
+    if (listSearch) {
+      const q = listSearch.toLowerCase();
+      if (
+        !r.bookingReference?.toLowerCase().includes(q) &&
+        !r.supplier?.toLowerCase().includes(q) &&
+        !r.companyName?.toLowerCase().includes(q)
+      ) return false;
+    }
+    return true;
+  });
   const totalNet = records.reduce((sum, r) => {
     if (r.status === "Draft") return sum;
     // GRN-linked records: recompute from grnTotalAmount + billing terms with
@@ -2414,7 +2430,7 @@ export default function MaterialExpenseBooking() {
           view === "list" ? (
             <Button
               onClick={openNew}
-              className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition-all"
+              className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
             >
               <Plus size={13} /> New Booking
             </Button>
@@ -2425,46 +2441,28 @@ export default function MaterialExpenseBooking() {
         {/* Form View */}
         {view === "form" && (
           <Card className="border-border shadow-sm">
-            <CardHeader className="pb-4 border-b border-border px-5 sm:px-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3 min-w-0 w-full sm:w-auto">
-                  <button
-                    type="button"
-                    onClick={cancelForm}
-                    className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                  >
-                    <ArrowLeft size={15} />
-                    <span className="hidden sm:inline">Back</span>
-                  </button>
-                  <span className="text-border">|</span>
-                  <CardTitle className="text-base font-heading truncate">
+            <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
+              <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
+              <div className="flex items-center gap-3 min-w-0">
+                <button type="button" onClick={cancelForm} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0">
+                  <ArrowLeft size={15} /><span className="hidden sm:inline">Back</span>
+                </button>
+                <span className="text-emerald-500/40">|</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-emerald-500/[0.18] border border-emerald-500/30 shrink-0">
+                    <Receipt size={12} className="text-emerald-400" />
+                  </div>
+                  <h2 className="text-sm font-heading font-bold text-foreground truncate">
                     {isEditing ? "Edit Expense Booking" : "New Expense Booking"}
-                  </CardTitle>
+                  </h2>
                   {form.bookingReference && (
-                    <span className="hidden sm:inline font-mono text-xs bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md shrink-0">
+                    <span className="hidden sm:inline font-mono text-xs bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-md shrink-0">
                       {form.bookingReference}
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 sm:flex-none"
-                    onClick={cancelForm}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex-1 sm:flex-none"
-                    onClick={handleSave}
-                    disabled={saving}
-                  >
-                    {saving ? "Saving…" : isEditing ? "Update" : "Save Booking"}
-                  </Button>
-                </div>
               </div>
-            </CardHeader>
+            </div>
 
             <CardContent className="pt-6 space-y-7 px-5 sm:px-6">
               {/* ── 0. Booking Information ─────────────────────────────── */}
@@ -3353,24 +3351,22 @@ export default function MaterialExpenseBooking() {
 
               {/* Save row */}
               <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-4 border-t border-border">
-                <Button
-                  variant="outline"
-                  className="w-full sm:w-auto"
-                  onClick={cancelForm}
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  disabled={saving || saved}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-border hover:bg-muted text-sm transition-colors disabled:opacity-50"
                 >
-                  Cancel
-                </Button>
-                <Button
-                  className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                  <RotateCcw size={14} /> Reset
+                </button>
+                <button
                   onClick={handleSave}
-                  disabled={saving}
+                  disabled={saving || saved}
+                  className="w-full sm:w-auto bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow-sm transition disabled:opacity-60"
                 >
-                  {saving
-                    ? "Saving…"
-                    : isEditing
-                      ? "Update Booking"
-                      : "Save Booking"}
-                </Button>
+                  {saved ? <Check size={14} /> : saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+                  {saved ? "Saved!" : saving ? "Saving…" : isEditing ? "Update Booking" : "Save Booking"}
+                </button>
               </div>
             </CardContent>
           </Card>
@@ -3419,37 +3415,57 @@ export default function MaterialExpenseBooking() {
             )}
             {!loading && (
               <>
-                <div className="flex flex-wrap items-center gap-2">
-                  {ALL_STATUSES.map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setStatusFilter(s)}
-                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === s ? "bg-primary text-primary-foreground border-primary shadow-sm" : "bg-background text-muted-foreground border-border hover:border-primary/40"}`}
-                    >
-                      {s}
-                      {s !== "All" && (
-                        <span className="ml-1.5 text-[10px] opacity-70">
-                          ({statusCounts[s] ?? 0})
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
+                <Card className="border-border shadow-sm">
+                  <CardHeader className="pb-3 border-b border-border">
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <CardTitle className="text-base font-semibold">Booking Register</CardTitle>
+                          <p className="text-xs text-muted-foreground mt-0.5">{totalRecords} record{totalRecords !== 1 ? "s" : ""}</p>
+                        </div>
+                        <div className="relative w-full sm:w-64">
+                          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            value={listSearch}
+                            onChange={(e) => setListSearch(e.target.value)}
+                            placeholder="Search doc no, supplier…"
+                            className="pl-9 pr-8 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
+                          />
+                          {listSearch && (
+                            <button onClick={() => setListSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                              <X size={12} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {ALL_STATUSES.map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setStatusFilter(s)}
+                            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === s ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"}`}
+                          >
+                            {s}
+                            {s !== "All" && (
+                              <span className="ml-1.5 text-[10px] opacity-70">
+                                ({statusCounts[s] ?? 0})
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-0">
 
                 {/* Mobile cards */}
-                <div className="flex flex-col gap-3 sm:hidden">
+                <div className="flex flex-col gap-3 sm:hidden p-3">
                   {filteredRecords.length === 0 && (
                     <div className="text-center py-16 text-muted-foreground text-sm border rounded-xl border-dashed border-border">
-                      <AlertCircle
-                        size={20}
-                        className="mx-auto mb-2 opacity-30"
-                      />
-                      No bookings
                       {statusFilter !== "All"
-                        ? ` with status "${statusFilter}"`
-                        : ""}
-                      .
+                        ? `No bookings with status "${statusFilter}". Try a different filter.`
+                        : `No bookings yet. Click 'New Booking' to get started.`}
                     </div>
                   )}
                   {filteredRecords.map((rec, index) => (
@@ -3469,8 +3485,7 @@ export default function MaterialExpenseBooking() {
                 </div>
 
                 {/* Records table */}
-                <Card className="hidden sm:block border-border shadow-sm">
-                  <CardContent className="p-0">
+                <div className="hidden sm:block">
                     <div className="rounded-md">
                       <Table>
                         <TableHeader>
@@ -3680,10 +3695,6 @@ export default function MaterialExpenseBooking() {
                                 colSpan={9}
                                 className="text-center py-14 text-muted-foreground text-sm"
                               >
-                                <AlertCircle
-                                  size={18}
-                                  className="mx-auto mb-2 opacity-30"
-                                />
                                 {statusFilter !== "All"
                                   ? `No bookings with status "${statusFilter}". Try a different filter.`
                                   : `No bookings yet. Click "New Booking" to get started.`}
@@ -3693,12 +3704,11 @@ export default function MaterialExpenseBooking() {
                         </TableBody>
                       </Table>
                     </div>
-                  </CardContent>
-                </Card>
+                </div>
 
                 {/* Pagination */}
                 {totalPages > 1 && (
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-2 px-1">
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
                     <p className="text-xs text-muted-foreground text-center sm:text-left">
                       Page {page} of {totalPages} · {totalRecords} total
                     </p>
@@ -3738,6 +3748,8 @@ export default function MaterialExpenseBooking() {
                     </div>
                   </div>
                 )}
+                  </CardContent>
+                </Card>
               </>
             )}
           </>
