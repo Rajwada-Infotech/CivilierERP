@@ -131,6 +131,122 @@ function InfoPill({
   );
 }
 
+// ── Mobile card (shown < sm, replaces the DataTable on small screens) ────────
+function VehicleCard({
+  rec,
+  onView,
+  onEdit,
+  onDelete,
+}: {
+  rec: any;
+  onView: (r: any) => void;
+  onEdit: (r: any) => void;
+  onDelete: (id: number) => void;
+}) {
+  const statusCls =
+    rec.Status === "Approved"
+      ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+      : rec.Status === "Rejected"
+        ? "bg-red-500/10 text-red-600 border-red-500/20"
+        : "bg-amber-500/10 text-amber-600 border-amber-500/20";
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+      {/* Top row: Doc No + Status */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-mono text-sm font-bold text-foreground truncate">
+            {rec.DocNo || "—"}
+          </p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            {rec.DocDate
+              ? new Date(rec.DocDate).toLocaleDateString("en-IN")
+              : "—"}
+          </p>
+        </div>
+        <span
+          className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${statusCls}`}
+        >
+          {rec.Status === "Approved" ? (
+            <CheckCircle2 size={9} />
+          ) : (
+            <Clock size={9} />
+          )}
+          {rec.Status}
+        </span>
+      </div>
+
+      {/* Vehicle No */}
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/15">
+        <Truck size={13} className="text-primary shrink-0" />
+        <span className="font-mono text-sm font-semibold text-primary truncate">
+          {rec.VehicleNo || "—"}
+        </span>
+      </div>
+
+      {/* Supplier / PO / Entry / Challan grid */}
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="min-w-0">
+          <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
+            Supplier
+          </p>
+          <p className="truncate">{rec.SupplierName || "—"}</p>
+        </div>
+        <div className="min-w-0">
+          <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
+            PO No
+          </p>
+          <p className="font-mono truncate">{rec.PONumber || "—"}</p>
+        </div>
+        <div className="min-w-0">
+          <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
+            Entry Time
+          </p>
+          <p className="truncate">
+            {rec.EntryTime
+              ? new Date(rec.EntryTime).toLocaleString("en-IN", {
+                  dateStyle: "short",
+                  timeStyle: "short",
+                })
+              : "—"}
+          </p>
+        </div>
+        <div className="min-w-0">
+          <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
+            Challan No
+          </p>
+          <p className="truncate">{rec.ChallanNo || "—"}</p>
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center justify-end gap-1 pt-2 border-t border-border/60">
+        <button
+          onClick={() => onView(rec)}
+          className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
+          title="View"
+        >
+          <Eye size={15} />
+        </button>
+        <button
+          onClick={() => onEdit(rec)}
+          className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
+          title="Edit"
+        >
+          <RefreshCw size={15} />
+        </button>
+        <button
+          onClick={() => onDelete(rec.VehicleInOutID)}
+          className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
+          title="Delete"
+        >
+          <Trash2 size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Local time helpers ──────────────────────────────────────────────────────────
 // toISOString() always converts to UTC, which is wrong for <input type="date">
 // and <input type="datetime-local">: those inputs expect/display local wall-clock
@@ -1150,8 +1266,30 @@ export default function VehicleInOut() {
           </CardHeader>
 
           <CardContent className="p-0">
+            {/* Mobile: stacked cards (table is hard to use on phones) */}
             <div
-              className={`overflow-x-auto transition-opacity duration-200 ${isFetching ? "opacity-60 pointer-events-none" : ""}`}
+              className={`sm:hidden p-3 space-y-3 transition-opacity duration-200 ${isFetching ? "opacity-60 pointer-events-none" : ""}`}
+            >
+              {filteredRecords.length === 0 ? (
+                <p className="text-center text-muted-foreground text-sm py-10">
+                  No Vehicle In/Out records. Click 'New Entry' to create one.
+                </p>
+              ) : (
+                filteredRecords.map((rec: any) => (
+                  <VehicleCard
+                    key={rec.VehicleInOutID}
+                    rec={rec}
+                    onView={_onView}
+                    onEdit={_onEdit}
+                    onDelete={_onDelete}
+                  />
+                ))
+              )}
+            </div>
+
+            {/* Desktop / tablet: full table */}
+            <div
+              className={`hidden sm:block overflow-x-auto transition-opacity duration-200 ${isFetching ? "opacity-60 pointer-events-none" : ""}`}
             >
               <DataTable
                 data={filteredRecords}
