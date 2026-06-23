@@ -130,6 +130,7 @@ const FinancialYearMaster = lazy(
 );
 const ChequeMaster = lazy(() => import("./pages/masters/ChequeMaster"));
 const GRN = lazy(() => import("./pages/material/GRN"));
+const VehicleInOut = lazy(() => import("./pages/material/VehicleInOut"));
 const MaterialDashboard = lazy(
   () => import("./pages/material/MaterialDashboard"),
 );
@@ -1052,6 +1053,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <GRN />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/vehicle-in-out"
+        element={
+          <ProtectedRoute>
+            <VehicleInOut />
           </ProtectedRoute>
         }
       />
