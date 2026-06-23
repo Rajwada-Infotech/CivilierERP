@@ -795,7 +795,6 @@ export default function VehicleInOut() {
                             contactPerson: sup?.contactPerson ?? "",
                             poId: null,
                             poNumber: "",
-                            contactPerson: "",
                           });
                         }}
                         className={inpSel}
