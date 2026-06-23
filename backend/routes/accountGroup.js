@@ -12,7 +12,12 @@ router.get("/", cache("account-group", 300), async (req, res) => {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT ag.AGId,
-             ISNULL(ag.Name, CONCAT('Unnamed-', ag.AGId)) AS Name,
+             LTRIM(
+               CASE WHEN LEFT(ISNULL(ag.Name, CONCAT('Unnamed-', ag.AGId)), 1) = '?'
+                    THEN SUBSTRING(ISNULL(ag.Name, CONCAT('Unnamed-', ag.AGId)), 2, 4000)
+                    ELSE ISNULL(ag.Name, CONCAT('Unnamed-', ag.AGId))
+               END
+             ) AS Name,
              ag.Code, ag.ParentGroupId, ag.Status,
              ag.CreatedAt, ag.UpdatedAt,
              parent.Name AS ParentName
@@ -36,7 +41,9 @@ router.post("/", authenticateToken, async (req, res) => {
 
     const parentId = ParentGroupId != null ? parseInt(ParentGroupId, 10) : null;
     if (ParentGroupId != null && !Number.isFinite(parentId)) {
-      return res.status(400).json({ error: "ParentGroupId must be a valid integer" });
+      return res
+        .status(400)
+        .json({ error: "ParentGroupId must be a valid integer" });
     }
 
     const pool = getPool();
@@ -74,7 +81,9 @@ router.put("/:id", authenticateToken, async (req, res) => {
 
     const parentId = ParentGroupId != null ? parseInt(ParentGroupId, 10) : null;
     if (ParentGroupId != null && !Number.isFinite(parentId)) {
-      return res.status(400).json({ error: "ParentGroupId must be a valid integer" });
+      return res
+        .status(400)
+        .json({ error: "ParentGroupId must be a valid integer" });
     }
 
     const pool = getPool();

@@ -131,9 +131,22 @@ function InfoPill({
   );
 }
 
+// ── Local time helpers ──────────────────────────────────────────────────────────
+// toISOString() always converts to UTC, which is wrong for <input type="date">
+// and <input type="datetime-local">: those inputs expect/display local wall-clock
+// time. Using toISOString() here made entry/exit time off by the IST offset
+// (+5:30), e.g. showing 11:08 AM when the local clock read 4:38 PM.
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+const toLocalDateInput = (d: Date) =>
+  `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+const toLocalDateTimeInput = (d: Date) =>
+  `${toLocalDateInput(d)}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+
 // ── Form default ───────────────────────────────────────────────────────────────
 const buildEmpty = (activeFinYear?: string) => ({
-  docDate: new Date().toISOString().slice(0, 10),
+  docDate: toLocalDateInput(new Date()),
   companyId: null as number | null,
   projectId: null as number | null,
   finYear: activeFinYear || "",
@@ -143,7 +156,7 @@ const buildEmpty = (activeFinYear?: string) => ({
   poId: null as number | null,
   poNumber: "",
   vehicleNo: "",
-  entryTime: new Date().toISOString().slice(0, 16), // datetime-local
+  entryTime: toLocalDateTimeInput(new Date()), // datetime-local
   exitTime: null as string | null,
   challanNo: "",
   attachmentPath: null as string | null,
@@ -499,10 +512,10 @@ export default function VehicleInOut() {
       poNumber: rec.PONumber ?? "",
       vehicleNo: rec.VehicleNo ?? "",
       entryTime: rec.EntryTime
-        ? new Date(rec.EntryTime).toISOString().slice(0, 16)
+        ? toLocalDateTimeInput(new Date(rec.EntryTime))
         : "",
       exitTime: rec.ExitTime
-        ? new Date(rec.ExitTime).toISOString().slice(0, 16)
+        ? toLocalDateTimeInput(new Date(rec.ExitTime))
         : null,
       challanNo: rec.ChallanNo ?? "",
       attachmentPath: rec.AttachmentPath ?? null,
