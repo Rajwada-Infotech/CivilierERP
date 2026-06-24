@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -446,6 +447,7 @@ function DateField({
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function TrialBalance() {
+  const rights = usePageRights("trial-balance");
   // ── filter mode ───────────────────────────────────────────────────────────
   const [filterMode, setFilterMode] = useState<FilterMode>("fy");
 
@@ -863,7 +865,7 @@ export default function TrialBalance() {
                   title="Trial Balance"
                   filename={`trial-balance-${periodLabel()?.replace(/\s/g, "-").toLowerCase() ?? "report"}`}
                   subtitle={exportSubtitle || undefined}
-                  disabled={notReady || rows.length === 0}
+                  disabled={notReady || rows.length === 0 || !rights.canExport}
                   stats={pdfStats}
                   columnPadding={{
                     0: {

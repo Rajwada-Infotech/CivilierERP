@@ -46,6 +46,7 @@ import {
   Printer,
 } from "lucide-react";
 import { getAccountGroups } from "@/api/accountApi";
+import { usePageRights } from "@/hooks/usePageRights";
 import TreeDropdown from "@/components/common/TreeDropdown";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -209,6 +210,9 @@ function buildCustomerColumns(
   deleteMut: { mutate: (id: number) => void },
   onView: (c: Customer) => void,
   onPrint: (c: Customer) => void,
+  canEdit: boolean,
+  canDelete: boolean,
+  canPrint: boolean,
 ): ColumnDef<Customer, unknown>[] {
   return [
     {
@@ -311,27 +315,33 @@ function buildCustomerColumns(
             >
               <Eye size={15} />
             </button>
-            <button
-              onClick={() => onPrint(row.original)}
-              className="p-1 rounded text-amber-500 hover:bg-amber-500/10 transition-colors"
-              title="Print"
-            >
-              <Printer size={15} />
-            </button>
-            <button
-              onClick={() => startEdit(row.original)}
-              className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
-              title="Edit"
-            >
-              <Pencil size={15} />
-            </button>
-            <button
-              onClick={() => setDeleteConfirm(id)}
-              className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
-              title="Delete"
-            >
-              <Trash2 size={15} />
-            </button>
+            {canPrint && (
+              <button
+                onClick={() => onPrint(row.original)}
+                className="p-1 rounded text-amber-500 hover:bg-amber-500/10 transition-colors"
+                title="Print"
+              >
+                <Printer size={15} />
+              </button>
+            )}
+            {canEdit && (
+              <button
+                onClick={() => startEdit(row.original)}
+                className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
+                title="Edit"
+              >
+                <Pencil size={15} />
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={() => setDeleteConfirm(id)}
+                className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                title="Delete"
+              >
+                <Trash2 size={15} />
+              </button>
+            )}
           </div>
         );
       },
@@ -343,6 +353,7 @@ function buildCustomerColumns(
 
 const CustomerMaster: React.FC = () => {
   const qc = useQueryClient();
+  const rights = usePageRights("customer-master");
 
   // ── Local state ────────────────────────────────────────────────────────────
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -552,9 +563,12 @@ const CustomerMaster: React.FC = () => {
         deleteMut,
         setViewRecord,
         handlePrint,
+        rights.canEdit,
+        rights.canDelete,
+        rights.canPrint,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editingId, deleteConfirm],
+    [editingId, deleteConfirm, rights.canEdit, rights.canDelete, rights.canPrint],
   );
 
   // ── Filter + paginate ──────────────────────────────────────────────────────
@@ -605,6 +619,7 @@ const CustomerMaster: React.FC = () => {
         </div>
 
         {/* ── Form Card ── */}
+        {rights.canCreate && (
         <div className="rounded-xl border border-border bg-card shadow-sm">
           {/* Card header */}
           <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
@@ -931,6 +946,7 @@ const CustomerMaster: React.FC = () => {
             </div>
           </div>
         </div>
+        )}
 
         {/* ── Table Section ── */}
         <div>
@@ -988,11 +1004,11 @@ const CustomerMaster: React.FC = () => {
                     ? "No customers yet."
                     : "No results match your search."
               }
-              exportConfig={{
+              exportConfig={rights.canExport ? {
                 title: "Customer Master",
                 filename: "customer-master",
                 columns: EXPORT_COLUMNS,
-              }}
+              } : undefined}
               rowClassName={(row) =>
                 row.original.LHeadId === editingId ? "bg-primary/5" : ""
               }

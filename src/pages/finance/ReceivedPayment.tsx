@@ -68,6 +68,7 @@ import {
 import { formatINR } from "@/utils/formatCurrency";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
@@ -346,6 +347,7 @@ export default function ReceivedPaymentPage() {
   const { theme } = useTheme();
   const isDark = theme !== "light";
   const { finYears } = useFinYear();
+  const rights = usePageRights("received-payment");
 
   const [payments, setPayments] = useState<ReceivedPayment[]>([]);
   const [view, setView] = useState<"list" | "form">("list");
@@ -868,19 +870,21 @@ export default function ReceivedPaymentPage() {
         action={
           view === "list" ? (
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-              <Button
-                onClick={openAdd}
-                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-3 sm:px-4 py-1.5 text-xs h-auto"
-              >
-                <Plus size={13} className="sm:mr-1" />
-                <span className="hidden sm:inline">Add Payment</span>
-              </Button>
+              {rights.canCreate && (
+                <Button
+                  onClick={openAdd}
+                  className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-3 sm:px-4 py-1.5 text-xs h-auto"
+                >
+                  <Plus size={13} className="sm:mr-1" />
+                  <span className="hidden sm:inline">Add Payment</span>
+                </Button>
+              )}
               <ExportMenu
                 data={payments as unknown as Record<string, unknown>[]}
                 columns={EXPORT_COLUMNS}
                 title="Received Payments"
                 filename="received-payments"
-                disabled={apiLoading || payments.length === 0}
+                disabled={apiLoading || payments.length === 0 || !rights.canExport}
               />
               <button
                 onClick={() => loadPayments(1)}
@@ -1060,14 +1064,16 @@ export default function ReceivedPaymentPage() {
                             >
                               <Eye size={13} />
                             </button>
-                            <button
-                              onClick={() => handlePrintPayment(p)}
-                              title="Print"
-                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-sky-600 hover:bg-sky-500/10 transition-colors"
-                            >
-                              <Printer size={13} />
-                            </button>
-                            {p.status === "Draft" && (
+                            {rights.canPrint && (
+                              <button
+                                onClick={() => handlePrintPayment(p)}
+                                title="Print"
+                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-sky-600 hover:bg-sky-500/10 transition-colors"
+                              >
+                                <Printer size={13} />
+                              </button>
+                            )}
+                            {rights.canEdit && p.status === "Draft" && (
                               <button
                                 onClick={() => openEdit(p)}
                                 title="Edit"
@@ -1093,13 +1099,15 @@ export default function ReceivedPaymentPage() {
                                 <Clock size={13} />
                               </span>
                             )}
-                            <button
-                              onClick={() => deletePayment(p.id)}
-                              title="Delete"
-                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
-                            >
-                              <Trash2 size={13} />
-                            </button>
+                            {rights.canDelete && (
+                              <button
+                                onClick={() => deletePayment(p.id)}
+                                title="Delete"
+                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1150,14 +1158,16 @@ export default function ReceivedPaymentPage() {
                         >
                           <Eye size={13} />
                         </button>
-                        <button
-                          onClick={() => handlePrintPayment(p)}
-                          className="p-1.5 text-muted-foreground/50 hover:text-sky-600"
-                          title="Print"
-                        >
-                          <Printer size={13} />
-                        </button>
-                        {p.status === "Draft" && (
+                        {rights.canPrint && (
+                          <button
+                            onClick={() => handlePrintPayment(p)}
+                            className="p-1.5 text-muted-foreground/50 hover:text-sky-600"
+                            title="Print"
+                          >
+                            <Printer size={13} />
+                          </button>
+                        )}
+                        {rights.canEdit && p.status === "Draft" && (
                           <button
                             onClick={() => openEdit(p)}
                             className="p-1.5 text-muted-foreground/50 hover:text-blue-500"
@@ -1182,12 +1192,14 @@ export default function ReceivedPaymentPage() {
                             <Clock size={13} />
                           </span>
                         )}
-                        <button
-                          onClick={() => deletePayment(p.id)}
-                          className="p-1.5 text-muted-foreground/50 hover:text-destructive"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        {rights.canDelete && (
+                          <button
+                            onClick={() => deletePayment(p.id)}
+                            className="p-1.5 text-muted-foreground/50 hover:text-destructive"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1707,13 +1719,15 @@ export default function ReceivedPaymentPage() {
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => handlePrintPayment(viewingPayment)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
-                  title="Print"
-                >
-                  <Printer size={12} /> Print
-                </button>
+                {rights.canPrint && (
+                  <button
+                    onClick={() => handlePrintPayment(viewingPayment)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                    title="Print"
+                  >
+                    <Printer size={12} /> Print
+                  </button>
+                )}
                 <button
                   onClick={() => setViewingPayment(null)}
                   className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -1837,15 +1851,17 @@ export default function ReceivedPaymentPage() {
               )}
               {viewingPayment.status === "Draft" && (
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      setViewingPayment(null);
-                      openEdit(viewingPayment);
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
-                  >
-                    <Pencil size={12} /> Edit
-                  </button>
+                  {rights.canEdit && (
+                    <button
+                      onClick={() => {
+                        setViewingPayment(null);
+                        openEdit(viewingPayment);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                    >
+                      <Pencil size={12} /> Edit
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       const p = viewingPayment;

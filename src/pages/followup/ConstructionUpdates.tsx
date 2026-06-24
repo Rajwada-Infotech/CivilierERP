@@ -20,7 +20,7 @@ import {
   Calendar as CalendarIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
@@ -417,8 +417,7 @@ async function deleteUpdate(id: number) {
 
 export function ConstructionUpdatesPage() {
   const qc = useQueryClient();
-  const { currentUser } = useAuth();
-  const canDeleteRecords = currentUser?.role !== "engineer";
+  const rights = usePageRights("followup-construction-updates");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<CUStatus | "">("");
@@ -1191,7 +1190,7 @@ export function ConstructionUpdatesPage() {
                                 onClick={(e) => {
                                   if (openMenuId === cu.Id) { setOpenMenuId(null); return; }
                                   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                  const menuH = canDeleteRecords ? 82 : 42;
+                                  const menuH = rights.canDelete ? 82 : 42;
                                   const top = window.innerHeight - rect.bottom < menuH + 8
                                     ? rect.top - menuH - 4
                                     : rect.bottom + 4;
@@ -1212,7 +1211,7 @@ export function ConstructionUpdatesPage() {
                                   >
                                     <Pencil size={13} /> Edit
                                   </button>
-                                  {canDeleteRecords && (
+                                  {rights.canDelete && (
                                     <button
                                       className="cu-menu-item danger"
                                       onClick={() => {

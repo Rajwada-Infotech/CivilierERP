@@ -28,6 +28,7 @@ import {
   type DbActivity,
 } from "@/api/activityMasterApi";
 import { getHsn } from "@/api/hsnApi";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 const StatusBadge = ({ active }: { active: boolean }) => (
@@ -190,6 +191,7 @@ const exportToCSV = (items: DbActivity[], groups: DbActivity[]) => {
 // ─── Main Component ───────────────────────────────────────────────────────────
 const ActivityMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const rights = usePageRights("activity-master");
   const [treeSearch, setTreeSearch] = useState("");
   const [viewRecord, setViewRecord] = useState<DbActivity | null>(null);
 
@@ -408,6 +410,7 @@ const ActivityMaster: React.FC = () => {
 
           <div className="flex items-center gap-2">
             {/* Export Button */}
+            {rights.canExport && (
             <button
               onClick={() => exportToCSV(dbItems, groups)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border bg-background hover:bg-muted transition-colors text-foreground"
@@ -415,6 +418,7 @@ const ActivityMaster: React.FC = () => {
               <Download size={12} />
               Export
             </button>
+            )}
 
             {/* Search */}
             <div className="relative">

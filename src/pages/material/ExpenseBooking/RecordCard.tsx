@@ -13,6 +13,8 @@ interface Props {
   onPreview: () => void;
   onDelete: () => void;
   onApprovalSuccess: () => void;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }
 
 export function RecordCard({
@@ -20,6 +22,8 @@ export function RecordCard({
   onEdit,
   onDelete,
   onApprovalSuccess,
+  canEdit = true,
+  canDelete = true,
 }: Props) {
   const rbd = computeBreakdown(
     rec.basicAmount,
@@ -100,6 +104,7 @@ export function RecordCard({
               onSuccess={onApprovalSuccess}
             />
           </div>
+          {canEdit && (
           <Button
             variant="outline"
             size="sm"
@@ -108,6 +113,8 @@ export function RecordCard({
           >
             <Edit size={13} />
           </Button>
+          )}
+          {canDelete && (
           <Button
             variant="destructive"
             size="sm"
@@ -116,6 +123,7 @@ export function RecordCard({
           >
             <Trash2 size={13} />
           </Button>
+          )}
         </div>
       </div>
     </div>

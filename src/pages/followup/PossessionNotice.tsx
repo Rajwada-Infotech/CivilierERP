@@ -22,7 +22,7 @@ import {
   Bell,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
@@ -441,8 +441,7 @@ function DaysRemainingBadge({ record }: { record: PossessionNotice }) {
 
 export function PossessionNoticePage() {
   const qc = useQueryClient();
-  const { currentUser } = useAuth();
-  const canDeleteRecords = currentUser?.role !== "engineer";
+  const rights = usePageRights("followup-possession-notice");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<PNStatus | "">("");
@@ -1135,7 +1134,7 @@ export function PossessionNoticePage() {
                                 >
                                   <Pencil size={14} /> Edit
                                 </button>
-                                {canDeleteRecords && (
+                                {rights.canDelete && (
                                   <button
                                     className="pn-menu-item danger"
                                     onClick={() => {

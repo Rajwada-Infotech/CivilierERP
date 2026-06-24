@@ -25,7 +25,7 @@ import {
   FileCheck,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
@@ -451,8 +451,7 @@ function Combobox({
 
 export function NOCPage() {
   const qc = useQueryClient();
-  const { currentUser } = useAuth();
-  const canDeleteRecords = currentUser?.role !== "engineer";
+  const rights = usePageRights("followup-noc");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<NOCStatus | "">("");
@@ -1325,7 +1324,7 @@ export function NOCPage() {
                                   >
                                     <Pencil size={13} /> Edit
                                   </button>
-                                  {canDeleteRecords && (
+                                  {rights.canDelete && (
                                     <button
                                       className="noc-menu-item danger"
                                       onClick={() => {

@@ -11,6 +11,7 @@ import {
 } from "@/api/itemGroupApi";
 import { toast } from "sonner";
 import { Layers, Download, Upload, Loader2, Check, X } from "lucide-react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import {
   Dialog,
@@ -78,6 +79,7 @@ interface ImportRowResult {
 
 const ItemGroupMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const rights = usePageRights("item-group");
 
   const {
     data: dbData,
@@ -315,7 +317,7 @@ const ItemGroupMaster: React.FC = () => {
           ]}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
-          exportConfig={{
+          exportConfig={rights.canExport ? {
             title: "Item Group Master",
             filename: "item-group-master",
             columns: [
@@ -323,7 +325,7 @@ const ItemGroupMaster: React.FC = () => {
               { header: "Code", accessor: "Code" },
               { header: "Description", accessor: "Description" },
             ],
-          }}
+          } : undefined}
         />
 
         {/* Import Results Modal */}

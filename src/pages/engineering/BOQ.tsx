@@ -38,7 +38,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useFinYear } from "@/contexts/FinYearContext";
-import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 
@@ -1679,6 +1679,7 @@ interface DetailModalProps {
   onPrint: () => void;
   onRefresh: () => void;
   canDelete: boolean;
+  canPrint: boolean;
 }
 
 const DetailModal: React.FC<DetailModalProps> = ({
@@ -1689,6 +1690,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
   onPrint,
   onRefresh,
   canDelete,
+  canPrint,
 }) => {
   const [lineTab, setLineTab] = useState<"items" | "activities">("items");
   const [acting, setActing] = useState(false);
@@ -1932,9 +1934,11 @@ const DetailModal: React.FC<DetailModalProps> = ({
             </Button>
           )}
           <div style={{ display: "flex", gap: 8 }}>
-            <Button variant="outline" onClick={onPrint} className="gap-1.5">
-              <Printer size={14} /> Print
-            </Button>
+            {canPrint && (
+              <Button variant="outline" onClick={onPrint} className="gap-1.5">
+                <Printer size={14} /> Print
+              </Button>
+            )}
             <Button variant="outline" onClick={onClose}>
               Close
             </Button>
@@ -2018,8 +2022,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
 
 export default function BOQ() {
   const { finYears } = useFinYear();
-  const { currentUser } = useAuth();
-  const canDeleteRecords = currentUser?.role !== "engineer";
+  const rights = usePageRights("boq");
   const [page, setPage] = useState(1);
   const PAGE_LIMIT = 10;
   const [search, setSearch] = useState("");
@@ -2384,23 +2387,25 @@ export default function BOQ() {
           >
             <Eye size={14} />
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0 text-violet-600"
-            onClick={async () => {
-              const full = await apiFetch(`/boq/${row.original.BoqID}`).catch(
-                () => row.original,
-              );
-              handlePrint({
-                ...full,
-                BoqItems: full.BoqItems ?? [],
-                BoqActivities: full.BoqActivities ?? [],
-              });
-            }}
-          >
-            <Printer size={14} />
-          </Button>
+          {rights.canPrint && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 text-violet-600"
+              onClick={async () => {
+                const full = await apiFetch(`/boq/${row.original.BoqID}`).catch(
+                  () => row.original,
+                );
+                handlePrint({
+                  ...full,
+                  BoqItems: full.BoqItems ?? [],
+                  BoqActivities: full.BoqActivities ?? [],
+                });
+              }}
+            >
+              <Printer size={14} />
+            </Button>
+          )}
           {canEditBoq(row.original.Status) && (
             <Button
               variant="ghost"
@@ -2476,7 +2481,8 @@ export default function BOQ() {
             setViewRecord(null);
             loadList();
           }}
-          canDelete={canDeleteRecords}
+          canDelete={rights.canDelete}
+          canPrint={rights.canPrint}
         />
       )}
 
@@ -2509,15 +2515,17 @@ export default function BOQ() {
                 />
                 Refresh
               </button>
-              <Button
-                onClick={() => {
-                  setEditRecord(null);
-                  setShowForm(true);
-                }}
-                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-              >
-                <Plus size={15} /> New BOQ
-              </Button>
+              {rights.canCreate && (
+                <Button
+                  onClick={() => {
+                    setEditRecord(null);
+                    setShowForm(true);
+                  }}
+                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                >
+                  <Plus size={15} /> New BOQ
+                </Button>
+              )}
             </div>
           </div>
 

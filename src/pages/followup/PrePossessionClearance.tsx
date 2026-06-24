@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -488,8 +488,7 @@ function ChecklistToggle({
 
 export function PrePossessionClearancePage() {
   const qc = useQueryClient();
-  const { currentUser } = useAuth();
-  const canDeleteRecords = currentUser?.role !== "engineer";
+  const rights = usePageRights("followup-pre-possession");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<PPStatus | "">("");
@@ -1129,7 +1128,7 @@ export function PrePossessionClearancePage() {
                                 >
                                   <Pencil size={14} /> Edit
                                 </button>
-                                {canDeleteRecords && (
+                                {rights.canDelete && (
                                   <button
                                     className="pp-menu-item danger"
                                     onClick={() => {
