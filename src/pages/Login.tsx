@@ -1414,7 +1414,7 @@ export default function Login() {
               </ShimmerButton>
             </motion.form>
 
-            {/* Demo credentials */}
+            {/* Demo credentials — commented out, uncomment to restore
             <div className="mt-5">
               <motion.button
                 type="button"
@@ -1484,6 +1484,7 @@ export default function Login() {
                 )}
               </AnimatePresence>
             </div>
+            */}
           </div>
         </TiltCard>
       </motion.div>
