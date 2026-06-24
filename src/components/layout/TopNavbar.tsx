@@ -106,18 +106,20 @@ const MODULE_GLOW_RGB: Record<string, string> = {
   engineering: "249,115,22",
   ticket: "236,72,153",
   sales: "168,85,247",
+  records: "245,158,11",
   admin: "59,130,246",
 };
 
 // HSL values derived from MODULE_HEADER hex colors in AppSidebar for consistency
 const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
-  finance: { h: 239, s: 84, l: 67 },     // #6366f1 indigo
-  material: { h: 160, s: 84, l: 39 },    // #10b981 emerald
-  followup: { h: 235, s: 90, l: 74 },    // #818cf8 light indigo-violet
-  engineering: { h: 25, s: 95, l: 53 },  // #f97316 orange
-  ticket: { h: 330, s: 81, l: 60 },      // #ec4899 pink
-  sales: { h: 271, s: 91, l: 65 },       // #a855f7 purple
-  admin: { h: 217, s: 91, l: 60 },       // #3b82f6 blue
+  finance: { h: 239, s: 84, l: 67 }, // #6366f1 indigo
+  material: { h: 160, s: 84, l: 39 }, // #10b981 emerald
+  followup: { h: 235, s: 90, l: 74 }, // #818cf8 light indigo-violet
+  engineering: { h: 25, s: 95, l: 53 }, // #f97316 orange
+  ticket: { h: 330, s: 81, l: 60 }, // #ec4899 pink
+  sales: { h: 271, s: 91, l: 65 }, // #a855f7 purple
+  records: { h: 38, s: 92, l: 50 }, // #f59e0b amber
+  admin: { h: 217, s: 91, l: 60 }, // #3b82f6 blue
 };
 
 function moduleColorVars(id: string): React.CSSProperties {
@@ -373,12 +375,18 @@ const SetupDropdown = ({
         <button
           onClick={onToggle}
           className={`nav-pill-btn ${open ? "nav-pill-btn--active" : ""}`}
-          style={open ? {
-            background: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.12)",
-            borderColor: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.4)",
-            color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))",
-            ...modVars,
-          } : modVars}
+          style={
+            open
+              ? {
+                  background:
+                    "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.12)",
+                  borderColor:
+                    "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.4)",
+                  color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))",
+                  ...modVars,
+                }
+              : modVars
+          }
         >
           <SlidersHorizontal size={13} />
           <span>Setup</span>
@@ -427,7 +435,9 @@ const SetupDropdown = ({
               </p>
               <p
                 className="text-[10px] font-heading mt-0.5 leading-none"
-                style={{ color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)` }}
+                style={{
+                  color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)`,
+                }}
               >
                 Configure {moduleLabel}
               </p>
@@ -448,31 +458,46 @@ const SetupDropdown = ({
 
       {/* ── Items grid ── */}
       <div className="p-3">
-        <div className={`grid grid-cols-3 sm:grid-cols-4 gap-2 ${open ? "setup-grid-open" : ""}`}>
+        <div
+          className={`grid grid-cols-3 sm:grid-cols-4 gap-2 ${open ? "setup-grid-open" : ""}`}
+        >
           {items.map(({ icon: Icon, label, path, color }, i) => {
             const isActivePath = location.pathname === path;
             return (
               <button
                 key={path}
-                onClick={() => { navigate(path); onClose(); }}
+                onClick={() => {
+                  navigate(path);
+                  onClose();
+                }}
                 className={`setup-item group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all duration-200 active:scale-[0.93] cursor-pointer
                   ${isActivePath ? "shadow-sm" : "border-transparent hover:border-border hover:bg-muted/50"}`}
                 style={{
                   animationDelay: `${i * 35}ms`,
-                  ...(isActivePath ? {
-                    borderColor: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.45)`,
-                    background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.08)`,
-                  } : {}),
+                  ...(isActivePath
+                    ? {
+                        borderColor: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.45)`,
+                        background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.08)`,
+                      }
+                    : {}),
                 }}
               >
                 <div className="relative w-9 h-9 flex items-center justify-center">
                   <div
                     className={`absolute inset-0 rounded-xl transition-all duration-200 ${isActivePath ? "" : "bg-muted/60 group-hover:bg-muted"}`}
-                    style={isActivePath ? { background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.16)` } : undefined}
+                    style={
+                      isActivePath
+                        ? {
+                            background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.16)`,
+                          }
+                        : undefined
+                    }
                   />
                   <div
                     className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                    style={{ boxShadow: `0 0 0 1.5px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35), 0 4px 12px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.2)` }}
+                    style={{
+                      boxShadow: `0 0 0 1.5px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35), 0 4px 12px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.2)`,
+                    }}
                   />
                   <div
                     className="setup-icon-shimmer absolute inset-0 rounded-xl pointer-events-none opacity-0 group-hover:opacity-100"
@@ -490,7 +515,11 @@ const SetupDropdown = ({
                 <span
                   className={`text-[9px] font-heading text-center leading-tight line-clamp-2 transition-colors duration-150
                     ${isActivePath ? "font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
-                  style={isActivePath ? { color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l))` } : undefined}
+                  style={
+                    isActivePath
+                      ? { color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l))` }
+                      : undefined
+                  }
                 >
                   {label}
                 </span>
@@ -514,11 +543,15 @@ const SetupDropdown = ({
         <div className="flex items-center gap-1">
           <div
             className="w-1.5 h-1.5 rounded-full"
-            style={{ background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.7)` }}
+            style={{
+              background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.7)`,
+            }}
           />
           <p
             className="text-[9px] font-heading font-medium"
-            style={{ color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)` }}
+            style={{
+              color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)`,
+            }}
           >
             {moduleLabel} Module
           </p>
@@ -641,9 +674,9 @@ export const TopNavbar = () => {
       ADMIN_PATHS.some((p) => location.pathname.startsWith(p)));
   const isDbaPage = isDba && location.pathname.startsWith("/dba");
 
-  const activeGlowRgb = MODULE_GLOW_RGB[
-    isAdminPage ? "admin" : (activeModule ?? "finance")
-  ] ?? MODULE_GLOW_RGB.finance;
+  const activeGlowRgb =
+    MODULE_GLOW_RGB[isAdminPage ? "admin" : (activeModule ?? "finance")] ??
+    MODULE_GLOW_RGB.finance;
 
   const RoleIcon = isSuperAdmin
     ? Crown
@@ -892,23 +925,29 @@ export const TopNavbar = () => {
         {/* ── Center pill nav — absolute center of the header ── */}
         <nav
           className={`hidden md:flex items-center gap-0.5 absolute left-1/2 ${pillNavClass}`}
-          style={isDark ? {
-            borderRadius: "9999px",
-            padding: "0.25rem",
-            background: "rgba(15, 17, 26, 0.52)",
-            border: "1px solid rgba(255,255,255,0.13)",
-            boxShadow: "0 2px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.10)",
-            backdropFilter: "blur(22px) saturate(160%)",
-            WebkitBackdropFilter: "blur(22px) saturate(160%)",
-          } : {
-            borderRadius: "9999px",
-            padding: "0.25rem",
-            background: "rgba(255,255,255,0.42)",
-            border: "1px solid rgba(255,255,255,0.65)",
-            boxShadow: "0 2px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.85)",
-            backdropFilter: "blur(22px) saturate(180%)",
-            WebkitBackdropFilter: "blur(22px) saturate(180%)",
-          }}
+          style={
+            isDark
+              ? {
+                  borderRadius: "9999px",
+                  padding: "0.25rem",
+                  background: "rgba(15, 17, 26, 0.52)",
+                  border: "1px solid rgba(255,255,255,0.13)",
+                  boxShadow:
+                    "0 2px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.10)",
+                  backdropFilter: "blur(22px) saturate(160%)",
+                  WebkitBackdropFilter: "blur(22px) saturate(160%)",
+                }
+              : {
+                  borderRadius: "9999px",
+                  padding: "0.25rem",
+                  background: "rgba(255,255,255,0.42)",
+                  border: "1px solid rgba(255,255,255,0.65)",
+                  boxShadow:
+                    "0 2px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.85)",
+                  backdropFilter: "blur(22px) saturate(180%)",
+                  WebkitBackdropFilter: "blur(22px) saturate(180%)",
+                }
+          }
         >
           {/* Dot grid + glow — clipped to pill, tracks active module color */}
           {(() => {
@@ -984,8 +1023,7 @@ export const TopNavbar = () => {
             <span
               className="absolute -inset-[2px] rounded-full pointer-events-none opacity-70"
               style={{
-                background:
-                  `conic-gradient(from 0deg, transparent 60%, rgba(${activeGlowRgb},0.85) 80%, transparent 100%)`,
+                background: `conic-gradient(from 0deg, transparent 60%, rgba(${activeGlowRgb},0.85) 80%, transparent 100%)`,
                 animation: "spin-ring 3s linear infinite",
               }}
             />

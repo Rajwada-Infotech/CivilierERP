@@ -17,6 +17,7 @@ import {
   Package,
   ShieldCheck,
   ShelvingUnit,
+  Archive,
   User,
   Wrench,
 } from "lucide-react";
@@ -31,6 +32,7 @@ import { dbaNavItems } from "./sidebars/DbaSidebar";
 import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
 import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { salesNavItems } from "./sidebars/SalesSidebar";
+import { recordsNavItems } from "./sidebars/RecordsSidebar";
 import { SidebarNav, NavItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar ──────────────────────────────────────────────────────────────
@@ -91,6 +93,13 @@ const MODULE_HEADER: Record<
     color: "#a855f7",
     from: "from-purple-500/30",
     to: "to-purple-500/0",
+  },
+  records: {
+    label: "Records",
+    icon: Archive,
+    color: "#f59e0b",
+    from: "from-amber-500/30",
+    to: "to-amber-500/0",
   },
   admin: {
     label: "Admin",
@@ -228,6 +237,8 @@ export const AppSidebar = () => {
         return buildTicketNavItems(isAdminTier);
       case "sales":
         return salesNavItems;
+      case "records":
+        return recordsNavItems;
       case "admin":
         return buildAdminNavItems(pendingApprovalCount);
       default:
@@ -352,7 +363,11 @@ export const AppSidebar = () => {
           transition={{ duration: 0.2, ease: "easeOut", delay: 0.06 }}
           className="relative z-10 flex-1 overflow-y-auto p-2 space-y-0.5"
         >
-          <SidebarNav items={getNavItems()} collapsed={false} accentColor={accentColor} />
+          <SidebarNav
+            items={getNavItems()}
+            collapsed={false}
+            accentColor={accentColor}
+          />
         </motion.div>
 
         {/* ── Footer ──────────────────────────────────────────────────────────── */}

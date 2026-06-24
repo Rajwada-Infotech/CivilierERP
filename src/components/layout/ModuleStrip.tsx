@@ -11,6 +11,7 @@ import {
   ShelvingUnit,
   ShieldCheck,
   Wrench,
+  Archive,
 } from "lucide-react";
 import {
   useModule,
@@ -20,7 +21,6 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./layoutContexts";
 import { useTheme } from "@/contexts/ThemeContext";
-
 
 // ── Module definitions ────────────────────────────────────────────────────────
 // ringRgb: raw "r,g,b" used to build valid RGBA strings at runtime
@@ -79,6 +79,15 @@ const MODULES = [
     color: "#a855f7",
     bg: "rgba(168,85,247,0.22)",
     ringRgb: "168,85,247",
+  },
+  {
+    id: "records" as Module,
+    icon: Archive,
+    label: "Records",
+    desc: "Every attachment, in one place",
+    color: "#f59e0b",
+    bg: "rgba(245,158,11,0.22)",
+    ringRgb: "245,158,11",
   },
 ];
 
@@ -155,19 +164,25 @@ export const ModuleStrip: React.FC = () => {
         {/* ── Inner oval pill strip (fully rounded top + bottom) ───────────── */}
         <div
           className="relative flex-1 flex flex-col overflow-hidden rounded-[28px]"
-          style={isDark ? {
-            background: "rgba(15, 17, 26, 0.52)",
-            border: "1px solid rgba(255,255,255,0.13)",
-            boxShadow: "0 2px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.10)",
-            backdropFilter: "blur(22px) saturate(160%)",
-            WebkitBackdropFilter: "blur(22px) saturate(160%)",
-          } : {
-            background: "rgba(255,255,255,0.42)",
-            border: "1px solid rgba(255,255,255,0.65)",
-            boxShadow: "0 2px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.85)",
-            backdropFilter: "blur(22px) saturate(180%)",
-            WebkitBackdropFilter: "blur(22px) saturate(180%)",
-          }}
+          style={
+            isDark
+              ? {
+                  background: "rgba(15, 17, 26, 0.52)",
+                  border: "1px solid rgba(255,255,255,0.13)",
+                  boxShadow:
+                    "0 2px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.10)",
+                  backdropFilter: "blur(22px) saturate(160%)",
+                  WebkitBackdropFilter: "blur(22px) saturate(160%)",
+                }
+              : {
+                  background: "rgba(255,255,255,0.42)",
+                  border: "1px solid rgba(255,255,255,0.65)",
+                  boxShadow:
+                    "0 2px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.85)",
+                  backdropFilter: "blur(22px) saturate(180%)",
+                  WebkitBackdropFilter: "blur(22px) saturate(180%)",
+                }
+          }
         >
           {/* Dot-grid overlay */}
           <div
@@ -241,7 +256,11 @@ export const ModuleStrip: React.FC = () => {
               {/* Pulsing dot — subtle, no scale change, just opacity + soft glow */}
               <motion.div
                 className="rounded-full"
-                style={{ width: 5, height: 5, background: activeModuleItem.color }}
+                style={{
+                  width: 5,
+                  height: 5,
+                  background: activeModuleItem.color,
+                }}
                 animate={{
                   opacity: [0.45, 1, 0.45],
                   boxShadow: [

@@ -104,7 +104,7 @@ const Tasks = lazy(() => import("./pages/Tasks"));
 const Transactions = lazy(() => import("./pages/finance/Transactions"));
 const Payment = lazy(() => import("./pages/finance/Payment"));
 const Brs = lazy(() => import("./pages/finance/Brs"));
-const Records = lazy(() => import("./pages/finance/Records"));
+const Records = lazy(() => import("./pages/records/Records"));
 const ReceivedPayment = lazy(() => import("./pages/finance/ReceivedPayment"));
 const TrialBalance = lazy(() => import("./pages/finance/TrialBalance"));
 
