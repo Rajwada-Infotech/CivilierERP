@@ -1,12 +1,3 @@
-import TicketDashboard from "@/pages/ticket/TicketDashboard";
-
-import CreateTicket from "@/pages/ticket/CreateTicket";
-
-import MyTickets from "@/pages/ticket/MyTickets";
-
-import PendingTickets from "@/pages/ticket/PendingTickets";
-
-import ResolvedTickets from "@/pages/ticket/ResolvedTickets";
 import React, { Suspense, lazy, useState, useEffect } from "react";
 import { RouteErrorBoundary } from "./components/ErrorBoundary";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -20,11 +11,9 @@ import {
   useLocation,
 } from "react-router-dom";
 
-// Static imports
+// Static imports (needed synchronously for auth shell)
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
-import CustomerPortal from "@/pages/customer/CustomerPortal";
-import { CustomerLayout } from "@/components/layout/CustomerLayout";
 import Maintenance from "./pages/Maintenance";
 
 // Layout
@@ -91,6 +80,21 @@ function PageSkeleton() {
 }
 
 // ─── Lazy Pages ───────────────────────────────────────────────────────────────
+// Ticket Pages
+const TicketDashboard = lazy(() => import("@/pages/ticket/TicketDashboard"));
+const CreateTicket = lazy(() => import("@/pages/ticket/CreateTicket"));
+const MyTickets = lazy(() => import("@/pages/ticket/MyTickets"));
+const PendingTickets = lazy(() => import("@/pages/ticket/PendingTickets"));
+const ResolvedTickets = lazy(() => import("@/pages/ticket/ResolvedTickets"));
+
+// Customer Portal
+const CustomerPortal = lazy(() => import("@/pages/customer/CustomerPortal"));
+const CustomerLayout = lazy(() =>
+  import("@/components/layout/CustomerLayout").then((m) => ({
+    default: m.CustomerLayout,
+  })),
+);
+
 // Main Pages
 const FinanceDashboard = lazy(() => import("./pages/finance/FinanceDashboard"));
 const Reports = lazy(() => import("./pages/Reports"));
@@ -126,6 +130,7 @@ const FinancialYearMaster = lazy(
 );
 const ChequeMaster = lazy(() => import("./pages/masters/ChequeMaster"));
 const GRN = lazy(() => import("./pages/material/GRN"));
+const VehicleInOut = lazy(() => import("./pages/material/VehicleInOut"));
 const MaterialDashboard = lazy(
   () => import("./pages/material/MaterialDashboard"),
 );
@@ -1048,6 +1053,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <GRN />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/vehicle-in-out"
+        element={
+          <ProtectedRoute>
+            <VehicleInOut />
           </ProtectedRoute>
         }
       />
