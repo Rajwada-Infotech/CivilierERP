@@ -151,6 +151,13 @@ const MODULE_STYLES: Record<
 );
 
 // ─── Setup Items ──────────────────────────────────────────────────────────────
+type SetupItem = {
+  icon: React.ElementType<any>;
+  label: string;
+  path: string;
+  color: string;
+  pageKey?: string;
+};
 
 const financeSetupItems = [
   {
@@ -158,54 +165,63 @@ const financeSetupItems = [
     label: "AC Group",
     path: "/masters/account-group",
     color: "text-indigo-400",
+    pageKey: "account-head",
   },
   {
     icon: Receipt,
     label: "General Ledger",
     path: "/masters/general-ledger",
     color: "text-orange-400",
+    pageKey: "general-ledger",
   },
   {
     icon: Truck,
     label: "Suppliers",
     path: "/masters/suppliers",
     color: "text-blue-400",
+    pageKey: "supplier-master",
   },
   {
     icon: HardHat,
     label: "Contractors",
     path: "/masters/contractors",
     color: "text-amber-500",
+    pageKey: "contractor-master",
   },
   {
     icon: Landmark,
     label: "Banks",
     path: "/masters/banks",
     color: "text-emerald-500",
+    pageKey: "bank-master",
   },
   {
     icon: Calendar,
     label: "Fin Year",
     path: "/masters/financial-year",
     color: "text-purple-400",
+    pageKey: "financial-year-master",
   },
   {
     icon: BookOpen,
     label: "Cheque",
     path: "/masters/cheque",
     color: "text-cyan-500",
+    pageKey: "cheque-master",
   },
   {
     icon: CreditCard,
     label: "Card",
     path: "/masters/card",
     color: "text-rose-500",
+    pageKey: "card-master",
   },
   {
     icon: FileText,
     label: "TDS",
     path: "/masters/tds",
     color: "text-green-500",
+    pageKey: "tds-master",
   },
 ];
 
@@ -215,42 +231,49 @@ const materialSetupItems = [
     label: "Items",
     path: "/masters/items",
     color: "text-teal-500",
+    pageKey: "item-master",
   },
   {
     icon: Layers,
     label: "Items Group",
     path: "/masters/item-groups",
     color: "text-indigo-400",
+    pageKey: "item-group",
   },
   {
     icon: Hash,
     label: "Unit of Measurement",
     path: "/masters/unit-measurement",
     color: "text-orange-400",
+    pageKey: "unit-of-measurement",
   },
   {
     icon: ReceiptIndianRupee,
     label: "HSN",
     path: "/masters/hsn",
     color: "text-pink-400",
+    pageKey: "hsn-master",
   },
   {
     icon: BillingIcon,
     label: "Billing",
     path: "/masters/billing-terms",
     color: "text-lime-500",
+    pageKey: "billing-terms",
   },
   {
     icon: FileText,
     label: "T&C",
     path: "/material/t-c-master",
     color: "text-purple-500",
+    pageKey: "t-c-master",
   },
   {
     icon: ClipboardList,
     label: "Inventory",
     path: "/material/inventory-master",
     color: "text-sky-400",
+    pageKey: "inventory-master",
   },
 ];
 
@@ -345,12 +368,7 @@ const SetupDropdown = ({
   open: boolean;
   onClose: () => void;
   onToggle: () => void;
-  items: {
-    icon: React.ElementType<any>;
-    label: string;
-    path: string;
-    color: string;
-  }[];
+  items: SetupItem[];
   moduleLabel: string;
   colorStyle: React.CSSProperties;
   setupAvailable: boolean;
@@ -607,7 +625,7 @@ export const TopNavbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { activeModule } = useModule();
-  const { currentUser } = useAuth();
+  const { currentUser, canAccessPage } = useAuth();
   const { navCollapsed, setNavCollapsed } = useNavbarCollapse();
   const { handleLogout, overlay: logoutOverlay } = useGracefulLogout();
 
@@ -658,6 +676,15 @@ export const TopNavbar = () => {
       ? "bg-emerald-600"
       : "bg-blue-600";
 
+  const isPrivilegedUser = ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "");
+
+  // Filter setup items by page rights for non-privileged users.
+  // Items without a pageKey are always shown.
+  const filterSetupItems = (items: SetupItem[]): SetupItem[] => {
+    if (isPrivilegedUser) return items;
+    return items.filter((item) => !item.pageKey || canAccessPage(item.pageKey as any));
+  };
+
   const setupConfig = (() => {
     const makeColorStyle = (id: string) =>
       ({
@@ -669,35 +696,35 @@ export const TopNavbar = () => {
 
     if (isAdminPage)
       return {
-        items: adminSetupItems,
+        items: filterSetupItems(adminSetupItems),
         label: "Admin",
         colorStyle: makeColorStyle("admin"),
         available: true,
       };
     if (activeModule === "material")
       return {
-        items: materialSetupItems,
+        items: filterSetupItems(materialSetupItems),
         label: "Material",
         colorStyle: makeColorStyle("material"),
         available: true,
       };
     if (activeModule === "followup")
       return {
-        items: followupSetupItems,
+        items: filterSetupItems(followupSetupItems),
         label: "Follow-Up",
         colorStyle: makeColorStyle("followup"),
         available: true,
       };
     if (activeModule === "engineering")
       return {
-        items: engineeringSetupItems,
+        items: filterSetupItems(engineeringSetupItems),
         label: "Engineering",
         colorStyle: makeColorStyle("engineering"),
         available: true,
       };
     if (activeModule === "finance")
       return {
-        items: financeSetupItems,
+        items: filterSetupItems(financeSetupItems),
         label: "Finance",
         colorStyle: makeColorStyle("finance"),
         available: true,
