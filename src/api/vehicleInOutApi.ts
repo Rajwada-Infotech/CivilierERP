@@ -10,6 +10,16 @@ const authHeaders = () => ({
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+/** A single attachment (camera capture or file pick), stored as binary in the DB. */
+export interface VehicleAttachment {
+  id: number;
+  filename: string;
+  mimeType: string;
+  size: number;
+  /** GET this URL to stream the file (auth required, same as any other API call). */
+  url: string;
+}
+
 export interface VehicleInOutRecord {
   VehicleInOutID: number;
   DocNo: string | null;
@@ -27,7 +37,10 @@ export interface VehicleInOutRecord {
   EntryTime: string;
   ExitTime: string | null;
   ChallanNo: string | null;
-  AttachmentPath: string | null;
+  /** Present on list rows instead of the full Attachments array (cheaper query). */
+  AttachmentCount?: number;
+  /** Present on the single-record GET /:id response. */
+  Attachments?: VehicleAttachment[];
   Remarks: string | null;
   Status: string;
   CreatedAt: string;
@@ -46,7 +59,11 @@ export interface VehicleInOutPayload {
   entryTime: string;
   exitTime: string | null;
   challanNo: string;
-  attachmentPath: string | null;
+  /** Ids of attachments uploaded via uploadVehicleAttachments() during this
+   *  session, still unlinked — the backend attaches them to this record on
+   *  save. Already-linked attachments on an existing record don't need to
+   *  be resent here. */
+  attachmentIds: number[];
   remarks: string;
 }
 
@@ -130,13 +147,22 @@ export async function deleteVehicleInOut(id: number): Promise<void> {
   }
 }
 
-/** Upload a file (attachment or camera photo) and return its server path. */
-export async function uploadVehicleAttachment(
-  file: File,
-): Promise<{ path: string; originalName: string; size: number }> {
+/**
+ * Upload one or more files (attachments or camera-capture blobs) to be
+ * stored as binary in dbo.VehicleInOutAttachments. Returns each attachment's
+ * id + streamable url. These ids start out unlinked (VehicleInOutID = NULL)
+ * — pass them in `attachmentIds` on create/update to attach them to a record.
+ */
+export async function uploadVehicleAttachments(
+  files: File[],
+): Promise<{
+  success: boolean;
+  attachments: VehicleAttachment[];
+  ids: number[];
+}> {
   const token = localStorage.getItem("token") ?? "";
   const form = new FormData();
-  form.append("file", file);
+  for (const file of files) form.append("file", file);
 
   const res = await fetch(`${BASE}/upload`, {
     method: "POST",
@@ -148,4 +174,18 @@ export async function uploadVehicleAttachment(
     throw new Error(err.error || "Upload failed");
   }
   return res.json();
+}
+
+/** Remove a single attachment — e.g. user un-attaches a photo before saving. */
+export async function deleteVehicleAttachment(
+  attachmentId: number,
+): Promise<void> {
+  const res = await fetch(`${BASE}/attachment/${attachmentId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || "Failed to remove attachment");
+  }
 }

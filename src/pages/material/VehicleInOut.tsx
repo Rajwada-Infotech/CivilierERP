@@ -1,4 +1,5 @@
-import React, { useRef, useState, useMemo } from "react";
+import React, { useRef, useState, useMemo, useCallback } from "react";
+import Webcam from "react-webcam";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -6,6 +7,7 @@ import { MaterialShell } from "@/components/material/MaterialShell";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { parseJsonArray } from "@/utils/parseJsonArray";
 import {
   Dialog,
   DialogContent,
@@ -24,6 +26,7 @@ import {
   Calendar,
   Search,
   X,
+  XCircle,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -41,6 +44,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Filter,
+  SwitchCamera,
+  Image as ImageIcon,
 } from "lucide-react";
 import * as vehApi from "@/api/vehicleInOutApi";
 import type { VehicleInOutPayload } from "@/api/vehicleInOutApi";
@@ -131,6 +136,111 @@ function InfoPill({
   );
 }
 
+// ── Auth-gated attachment blob cache ──────────────────────────────────────────
+// Attachments now stream from the DB via an authenticated endpoint
+// (/api/vehicle-in-out/attachment/:id), so a plain <img src="..."> or
+// <a href="..."> can't load them — the browser won't attach the bearer
+// token. Fetch via fetchWithAuth(), convert to an object URL, and cache it
+// so each attachment is only fetched once per page session.
+const vehAttachmentBlobCache = new Map<string, string>();
+let vehAttachmentCleanupRegistered = false;
+const registerVehAttachmentCleanup = () => {
+  if (vehAttachmentCleanupRegistered || typeof window === "undefined") return;
+  vehAttachmentCleanupRegistered = true;
+  window.addEventListener("pagehide", () => {
+    vehAttachmentBlobCache.forEach((u) => URL.revokeObjectURL(u));
+    vehAttachmentBlobCache.clear();
+  });
+};
+
+/** Thumbnail/link for one attachment — resolves its authenticated blob URL
+ *  before rendering an <img> (for images) or a download link (for PDFs etc). */
+function AttachmentThumb({
+  attachment,
+  onRemove,
+}: {
+  attachment: vehApi.VehicleAttachment;
+  onRemove?: () => void;
+}) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(
+    vehAttachmentBlobCache.get(attachment.url) ?? null,
+  );
+  const [failed, setFailed] = useState(false);
+  const isImage = attachment.mimeType?.startsWith("image/");
+
+  React.useEffect(() => {
+    if (blobUrl || !isImage) return;
+    let alive = true;
+    fetchWithAuth(attachment.url)
+      .then((res) => {
+        if (!res.ok) throw new Error("fetch failed");
+        return res.blob();
+      })
+      .then((blob) => {
+        if (!alive) return;
+        const url = URL.createObjectURL(blob);
+        vehAttachmentBlobCache.set(attachment.url, url);
+        registerVehAttachmentCleanup();
+        setBlobUrl(url);
+      })
+      .catch(() => alive && setFailed(true));
+    return () => {
+      alive = false;
+    };
+  }, [attachment.url, blobUrl, isImage]);
+
+  // Open (and cache) the full file in a new tab on click — works for both
+  // images and PDFs, using the same authenticated-fetch + blob-URL approach.
+  const openFile = async () => {
+    try {
+      let url = vehAttachmentBlobCache.get(attachment.url);
+      if (!url) {
+        const res = await fetchWithAuth(attachment.url);
+        if (!res.ok) throw new Error("fetch failed");
+        const blob = await res.blob();
+        url = URL.createObjectURL(blob);
+        vehAttachmentBlobCache.set(attachment.url, url);
+        registerVehAttachmentCleanup();
+      }
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch {
+      toast.error("Failed to open attachment");
+    }
+  };
+
+  return (
+    <div className="relative inline-flex items-center gap-2 pl-2 pr-7 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-700 dark:text-emerald-400">
+      {isImage && blobUrl && !failed ? (
+        <button type="button" onClick={openFile}>
+          <img
+            src={blobUrl}
+            alt={attachment.filename}
+            className="h-8 w-8 rounded object-cover border border-emerald-500/30"
+          />
+        </button>
+      ) : (
+        <FileText size={13} />
+      )}
+      <button
+        type="button"
+        onClick={openFile}
+        className="underline underline-offset-2 truncate max-w-[140px] text-left"
+      >
+        {attachment.filename}
+      </button>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 text-destructive hover:opacity-80"
+        >
+          <X size={11} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── Mobile card (shown < sm, replaces the DataTable on small screens) ────────
 function VehicleCard({
   rec,
@@ -175,6 +285,14 @@ function VehicleCard({
           {rec.Status}
         </span>
       </div>
+
+      {/* Attachment count */}
+      {Number(rec.AttachmentCount) > 0 && (
+        <div className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+          <Paperclip size={10} />
+          {rec.AttachmentCount} attachment{rec.AttachmentCount > 1 ? "s" : ""}
+        </div>
+      )}
 
       {/* Vehicle No */}
       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/15">
@@ -275,7 +393,7 @@ const buildEmpty = (activeFinYear?: string) => ({
   entryTime: toLocalDateTimeInput(new Date()), // datetime-local
   exitTime: null as string | null,
   challanNo: "",
-  attachmentPath: null as string | null,
+  attachments: [] as vehApi.VehicleAttachment[],
   remarks: "",
 });
 
@@ -430,7 +548,12 @@ export default function VehicleInOut() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [showCamera, setShowCamera] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [facingMode, setFacingMode] = useState<"user" | "environment">(
+    "environment",
+  );
+  const webcamRef = useRef<Webcam>(null);
 
   const [form, setForm] = useState(buildEmpty(activeFinYear));
   const pf = (patch: Partial<typeof form>) =>
@@ -583,7 +706,10 @@ export default function VehicleInOut() {
     entryTime: form.entryTime,
     exitTime: form.exitTime || null,
     challanNo: form.challanNo,
-    attachmentPath: form.attachmentPath,
+    // Backend links any of these ids that are still unlinked (newly
+    // uploaded during this session); already-linked ids are a harmless
+    // no-op, so it's safe to always send the full current list.
+    attachmentIds: form.attachments.map((a) => a.id),
     remarks: form.remarks,
   });
 
@@ -613,29 +739,39 @@ export default function VehicleInOut() {
     }
   };
 
-  _onEdit = (rec: any) => {
+  _onEdit = async (rec: any) => {
+    // List rows only carry AttachmentCount (cheap query) — fetch the full
+    // record so we have the actual Attachments[] (id/filename/url) to edit.
+    let full = rec;
+    if (!Array.isArray(rec.Attachments)) {
+      try {
+        full = await vehApi.getVehicleInOut(rec.VehicleInOutID);
+      } catch {
+        toast.error("Failed to load attachments for this record");
+      }
+    }
     setForm({
-      docDate: rec.DocDate ? String(rec.DocDate).slice(0, 10) : "",
-      companyId: rec.CompanyID ?? null,
-      projectId: rec.ProjectID ?? null,
-      finYear: rec.FinYear ?? "",
-      supplierId: rec.SupplierID ?? null,
-      supplierName: rec.SupplierName ?? "",
+      docDate: full.DocDate ? String(full.DocDate).slice(0, 10) : "",
+      companyId: full.CompanyID ?? null,
+      projectId: full.ProjectID ?? null,
+      finYear: full.FinYear ?? "",
+      supplierId: full.SupplierID ?? null,
+      supplierName: full.SupplierName ?? "",
       contactPerson:
-        (suppliers as any[]).find((s: any) => Number(s.id) === rec.SupplierID)
+        (suppliers as any[]).find((s: any) => Number(s.id) === full.SupplierID)
           ?.contactPerson ?? "",
-      poId: rec.POID ?? null,
-      poNumber: rec.PONumber ?? "",
-      vehicleNo: rec.VehicleNo ?? "",
-      entryTime: rec.EntryTime
-        ? toLocalDateTimeInput(new Date(rec.EntryTime))
+      poId: full.POID ?? null,
+      poNumber: full.PONumber ?? "",
+      vehicleNo: full.VehicleNo ?? "",
+      entryTime: full.EntryTime
+        ? toLocalDateTimeInput(new Date(full.EntryTime))
         : "",
-      exitTime: rec.ExitTime
-        ? toLocalDateTimeInput(new Date(rec.ExitTime))
+      exitTime: full.ExitTime
+        ? toLocalDateTimeInput(new Date(full.ExitTime))
         : null,
-      challanNo: rec.ChallanNo ?? "",
-      attachmentPath: rec.AttachmentPath ?? null,
-      remarks: rec.Remarks ?? "",
+      challanNo: full.ChallanNo ?? "",
+      attachments: Array.isArray(full.Attachments) ? full.Attachments : [],
+      remarks: full.Remarks ?? "",
     });
     setEditingId(rec.VehicleInOutID);
     setShowForm(true);
@@ -644,19 +780,64 @@ export default function VehicleInOut() {
 
   _onDelete = (id: number) => setDeleteId(id);
 
-  // ── File upload ───────────────────────────────────────────────────────────────
-  const handleFileUpload = async (file: File) => {
+  // ── File upload (supports multiple files — appends, doesn't replace) ────────
+  // Files are sent straight to the DB-backed /upload endpoint (no local disk
+  // involved) and come back with server-assigned ids + streamable urls.
+  const handleFileUpload = async (files: File[]) => {
+    if (files.length === 0) return;
     setUploading(true);
     try {
-      const result = await vehApi.uploadVehicleAttachment(file);
-      pf({ attachmentPath: result.path });
-      toast.success("Attachment uploaded");
+      const result = await vehApi.uploadVehicleAttachments(files);
+      pf({ attachments: [...form.attachments, ...result.attachments] });
+      toast.success(
+        result.attachments.length > 1
+          ? `${result.attachments.length} attachments uploaded`
+          : "Attachment uploaded",
+      );
     } catch (err: any) {
       toast.error(err.message || "Upload failed");
     } finally {
       setUploading(false);
     }
   };
+
+  const removeAttachment = async (attachmentId: number) => {
+    // Optimistically drop it from the form; roll back if the delete fails.
+    const prev = form.attachments;
+    pf({ attachments: prev.filter((a) => a.id !== attachmentId) });
+    try {
+      await vehApi.deleteVehicleAttachment(attachmentId);
+    } catch (err: any) {
+      pf({ attachments: prev });
+      toast.error(err.message || "Failed to remove attachment");
+    }
+  };
+
+  // ── Camera capture ───────────────────────────────────────────────────────────
+  const capturePhoto = useCallback(async () => {
+    const dataUrl = webcamRef.current?.getScreenshot();
+    if (!dataUrl) {
+      toast.error("Could not capture photo — try again");
+      return;
+    }
+    setUploading(true);
+    try {
+      const blob = await fetch(dataUrl).then((r) => r.blob());
+      const file = new File([blob], `vehicle-capture-${Date.now()}.jpg`, {
+        type: "image/jpeg",
+      });
+      const result = await vehApi.uploadVehicleAttachments([file]);
+      pf({ attachments: [...form.attachments, ...result.attachments] });
+      toast.success("Photo captured");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save captured photo");
+    } finally {
+      setUploading(false);
+    }
+  }, [form.attachments]);
+
+  const switchCamera = () =>
+    setFacingMode((prev) => (prev === "environment" ? "user" : "environment"));
 
   // ── Filtered list ─────────────────────────────────────────────────────────────
   const filteredRecords = records.filter((r: any) => {
@@ -1091,17 +1272,18 @@ export default function VehicleInOut() {
 
                   {/* Attachment / Camera */}
                   <div className="sm:col-span-2">
-                    <FieldLabel>Attachment / Car Plate Photo</FieldLabel>
+                    <FieldLabel>Attachments / Car Plate Photos</FieldLabel>
                     <div className="flex items-center gap-2 flex-wrap">
-                      {/* File pick */}
+                      {/* File pick — multiple files at once */}
                       <input
                         ref={fileInputRef}
                         type="file"
                         accept="image/*,application/pdf"
+                        multiple
                         className="hidden"
                         onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) handleFileUpload(f);
+                          const files = Array.from(e.target.files ?? []);
+                          if (files.length) handleFileUpload(files);
                           e.target.value = "";
                         }}
                       />
@@ -1112,53 +1294,35 @@ export default function VehicleInOut() {
                         className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50"
                       >
                         <Paperclip size={12} />
-                        {uploading ? "Uploading…" : "Attach File"}
+                        {uploading ? "Uploading…" : "Attach Files"}
                       </button>
 
-                      {/* Camera capture */}
-                      <input
-                        ref={cameraInputRef}
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        className="hidden"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) handleFileUpload(f);
-                          e.target.value = "";
-                        }}
-                      />
+                      {/* Camera capture — opens live in-page camera */}
                       <button
                         type="button"
-                        onClick={() => cameraInputRef.current?.click()}
+                        onClick={() => {
+                          setCameraError(null);
+                          setShowCamera(true);
+                        }}
                         disabled={uploading}
                         className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50"
                       >
                         <Camera size={12} /> Camera
                       </button>
-
-                      {/* Preview */}
-                      {form.attachmentPath && (
-                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-700 dark:text-emerald-400">
-                          <CheckCircle2 size={11} />
-                          <a
-                            href={form.attachmentPath}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="underline underline-offset-2 truncate max-w-[180px]"
-                          >
-                            {form.attachmentPath.split("/").pop()}
-                          </a>
-                          <button
-                            type="button"
-                            onClick={() => pf({ attachmentPath: null })}
-                            className="ml-1 text-destructive hover:opacity-80"
-                          >
-                            <X size={11} />
-                          </button>
-                        </div>
-                      )}
                     </div>
+
+                    {/* Preview list — multiple attachments */}
+                    {form.attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2.5">
+                        {form.attachments.map((a) => (
+                          <AttachmentThumb
+                            key={a.id}
+                            attachment={a}
+                            onRemove={() => removeAttachment(a.id)}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </SectionCard>
@@ -1425,22 +1589,73 @@ export default function VehicleInOut() {
                   </div>
                 </div>
 
-                {/* Attachment */}
-                {viewingRec.AttachmentPath && (
+                {/* Attachments — new records use the DB-backed Attachments[]
+                    (binary stored in dbo.VehicleInOutAttachments); older
+                    records created before this change may still only have
+                    legacy disk paths in AttachmentPath. */}
+                {Array.isArray(viewingRec.Attachments) &&
+                viewingRec.Attachments.length > 0 ? (
                   <div>
                     <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
-                      Attachment
+                      Attachments ({viewingRec.Attachments.length})
                     </p>
-                    <a
-                      href={viewingRec.AttachmentPath}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary/5 border border-primary/20 text-sm text-primary font-medium hover:bg-primary/10 transition-colors"
-                    >
-                      <Paperclip size={13} />
-                      {viewingRec.AttachmentPath.split("/").pop()}
-                    </a>
+                    <div className="flex flex-wrap gap-2">
+                      {viewingRec.Attachments.map(
+                        (a: vehApi.VehicleAttachment) => (
+                          <AttachmentThumb key={a.id} attachment={a} />
+                        ),
+                      )}
+                    </div>
                   </div>
+                ) : (
+                  (() => {
+                    // Legacy fallback: pre-migration rows that still hold
+                    // disk paths (single string or JSON array) instead of
+                    // DB-backed attachment rows.
+                    const legacyPaths = parseJsonArray<string>(
+                      viewingRec.AttachmentPath,
+                    ).length
+                      ? parseJsonArray<string>(viewingRec.AttachmentPath)
+                      : viewingRec.AttachmentPath
+                        ? [viewingRec.AttachmentPath]
+                        : [];
+                    if (legacyPaths.length === 0) return null;
+                    return (
+                      <div>
+                        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                          Attachments ({legacyPaths.length})
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {legacyPaths.map((p) => {
+                            const isImage =
+                              /\.(jpe?g|png|gif|webp|heic)$/i.test(p);
+                            return (
+                              <a
+                                key={p}
+                                href={p}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-primary/5 border border-primary/20 text-sm text-primary font-medium hover:bg-primary/10 transition-colors"
+                              >
+                                {isImage ? (
+                                  <img
+                                    src={p}
+                                    alt="attachment"
+                                    className="h-7 w-7 rounded object-cover"
+                                  />
+                                ) : (
+                                  <Paperclip size={13} />
+                                )}
+                                <span className="truncate max-w-[160px]">
+                                  {p.split("/").pop()}
+                                </span>
+                              </a>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()
                 )}
 
                 {/* Remarks */}
@@ -1472,6 +1687,109 @@ export default function VehicleInOut() {
           </div>
         )}
       </MaterialShell>
+
+      {/* ── Camera capture modal ── */}
+      {showCamera && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Camera size={15} className="text-muted-foreground" />
+                <h2 className="text-sm font-semibold text-foreground">
+                  Capture Vehicle / Plate Photo
+                </h2>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => setShowCamera(false)}
+              >
+                <XCircle size={15} />
+              </Button>
+            </div>
+
+            <div className="p-4">
+              {cameraError ? (
+                <div className="flex flex-col items-center justify-center py-8 gap-3 text-center">
+                  <XCircle size={32} className="text-red-400" />
+                  <p className="text-sm text-muted-foreground">{cameraError}</p>
+                  <p className="text-xs text-muted-foreground/60">
+                    Please allow camera access in your browser settings and try
+                    again.
+                  </p>
+                </div>
+              ) : (
+                <div className="relative">
+                  <Webcam
+                    ref={webcamRef}
+                    audio={false}
+                    screenshotFormat="image/jpeg"
+                    className="rounded-xl w-full"
+                    width={640}
+                    height={480}
+                    mirrored={facingMode === "user"}
+                    videoConstraints={{
+                      width: 640,
+                      height: 480,
+                      facingMode: { ideal: facingMode },
+                    }}
+                    onUserMediaError={(err) => {
+                      const msg =
+                        err instanceof Error ? err.message : String(err);
+                      setCameraError(
+                        msg.toLowerCase().includes("permission")
+                          ? "Camera permission denied."
+                          : "Could not access camera: " + msg,
+                      );
+                    }}
+                  />
+
+                  {/* Switch camera (front/back) */}
+                  <button
+                    type="button"
+                    onClick={switchCamera}
+                    title="Switch camera"
+                    className="absolute top-2 right-2 inline-flex items-center justify-center w-9 h-9 rounded-full bg-black/55 text-white hover:bg-black/70 transition-colors backdrop-blur-sm"
+                  >
+                    <SwitchCamera size={16} />
+                  </button>
+
+                  {/* Multi-capture hint */}
+                  {form.attachments.length > 0 && (
+                    <div className="absolute bottom-2 left-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/55 text-white text-[11px] backdrop-blur-sm">
+                      <ImageIcon size={11} />
+                      {form.attachments.length} attached
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 px-5 py-4 border-t border-border">
+              <Button
+                className="flex-1 gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                onClick={capturePhoto}
+                disabled={!!cameraError || uploading}
+              >
+                {uploading ? (
+                  <RefreshCw size={14} className="animate-spin" />
+                ) : (
+                  <CheckCircle2 size={14} />
+                )}
+                {uploading ? "Saving…" : "Capture"}
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setShowCamera(false)}
+              >
+                Done
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete confirm */}
       <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
