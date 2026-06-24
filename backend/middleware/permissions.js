@@ -219,13 +219,19 @@ const checkPermission = (module, subModule, action = "CanView") => {
         });
       }
 
-      const permission = await permissionCache.get(roleId, module, subModule);
-
-      if (permission && Number(permission[action]) === 1) {
+      // Check user-level rights first (UserPageRightsJson) — these are the
+      // granular per-user permissions set via MenuRights and are the single
+      // source of truth for non-privileged users.
+      if (userId && await userHasPermission(userId, module, subModule, action)) {
         return next();
       }
 
-      if (await userHasPermission(userId, module, subModule, action)) {
+      // Fall back to role-level rights (RoleRights) only when no user-level
+      // row exists for this user. This prevents a denying RoleRights row from
+      // silently overriding user-level grants set in MenuRights.
+      const permission = await permissionCache.get(roleId, module, subModule);
+
+      if (permission && Number(permission[action]) === 1) {
         return next();
       }
 
@@ -234,6 +240,7 @@ const checkPermission = (module, subModule, action = "CanView") => {
           roleId,
           module,
           subModule,
+          userId,
         });
         return res.status(403).json({ error: "Access denied (no permission)" });
       }
@@ -243,6 +250,7 @@ const checkPermission = (module, subModule, action = "CanView") => {
         module,
         subModule,
         action,
+        userId,
       });
       return res.status(403).json({ error: "Access denied (action blocked)" });
     } catch (err) {

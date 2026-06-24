@@ -445,14 +445,46 @@ function SuperAdminRoute({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ─── Page-level Rights Guard ──────────────────────────────────────────────────
+// Wraps a route and checks canAccessPage(pageKey) before rendering.
+// Privileged roles (super_admin, admin, dba) always pass.
+// Regular users are redirected to home with an "Access Denied" flash if denied.
+function PageGuard({
+  pageKey,
+  children,
+}: {
+  pageKey: string;
+  children: React.ReactNode;
+}) {
+  const { currentUser, canAccessPage } = useAuth();
+  const role = currentUser?.role ?? "";
+  const privileged = ["super_admin", "admin", "dba"].includes(role);
+  if (!privileged && !canAccessPage(pageKey as any)) {
+    return <Navigate to="/home" replace state={{ denied: pageKey }} />;
+  }
+  return <>{children}</>;
+}
+
 // ─── Protected Route ──────────────────────────────────────────────────────────
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute({
+  children,
+  pageKey,
+}: {
+  children: React.ReactNode;
+  pageKey?: string;
+}) {
   return (
     <RequireAuth>
       <ProtectedProviders>
         <AppLayout>
           <RouteErrorBoundary>
-            <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+            <Suspense fallback={<PageSkeleton />}>
+              {pageKey ? (
+                <PageGuard pageKey={pageKey}>{children}</PageGuard>
+              ) : (
+                children
+              )}
+            </Suspense>
           </RouteErrorBoundary>
         </AppLayout>
       </ProtectedProviders>
@@ -524,7 +556,7 @@ function AppRoutes() {
       <Route
         path="/finance"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="finance-dashboard">
             <FinanceDashboard />
           </ProtectedRoute>
         }
@@ -532,7 +564,7 @@ function AppRoutes() {
       <Route
         path="/transactions"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="transactions">
             <TrialBalance />
           </ProtectedRoute>
         }
@@ -580,7 +612,7 @@ function AppRoutes() {
       <Route
         path="/payments"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="new-payment">
             <Payment />
           </ProtectedRoute>
         }
@@ -588,7 +620,7 @@ function AppRoutes() {
       <Route
         path="/received-payments"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="received-payment">
             <ReceivedPayment />
           </ProtectedRoute>
         }
@@ -596,7 +628,7 @@ function AppRoutes() {
       <Route
         path="/brs"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="brs">
             <Brs />
           </ProtectedRoute>
         }
@@ -612,7 +644,7 @@ function AppRoutes() {
       <Route
         path="/followup"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-dashboard">
             <FollowupDashboard />
           </ProtectedRoute>
         }
@@ -692,7 +724,7 @@ function AppRoutes() {
       <Route
         path="/followup/follow-ups/tasks"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-tasks">
             <FollowupTasks />
           </ProtectedRoute>
         }
@@ -748,7 +780,7 @@ function AppRoutes() {
       <Route
         path="/followup/sales/applications/:id"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-applications">
             <ApplicantDetail />
           </ProtectedRoute>
         }
@@ -756,7 +788,7 @@ function AppRoutes() {
       <Route
         path="/followup/sales/applicants/:id"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-applicants">
             <ApplicantDetail />
           </ProtectedRoute>
         }
@@ -772,7 +804,7 @@ function AppRoutes() {
       <Route
         path="/followup/sales/applications"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-applications">
             <FollowupApplications />
           </ProtectedRoute>
         }
@@ -780,7 +812,7 @@ function AppRoutes() {
       <Route
         path="/followup/sales/bookings"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-bookings">
             <BookingsPage />
           </ProtectedRoute>
         }
@@ -788,7 +820,7 @@ function AppRoutes() {
       <Route
         path="/followup/sales/unit-selection"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-unit-selections">
             <FollowupUnitSelection />
           </ProtectedRoute>
         }
@@ -796,7 +828,7 @@ function AppRoutes() {
       <Route
         path="/followup/agreement/agreements"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-agreements">
             <FollowupAgreements />
           </ProtectedRoute>
         }
@@ -804,7 +836,7 @@ function AppRoutes() {
       <Route
         path="/followup/sales/welcome-calls"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-welcome-calls">
             <WelcomeCallsPage />
           </ProtectedRoute>
         }
@@ -812,7 +844,7 @@ function AppRoutes() {
       <Route
         path="/followup/closure/noc"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-noc">
             <NocPage />
           </ProtectedRoute>
         }
@@ -820,7 +852,7 @@ function AppRoutes() {
       <Route
         path="/followup/closure/bank-noc"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-noc">
             <BankNOCPage />
           </ProtectedRoute>
         }
@@ -828,7 +860,7 @@ function AppRoutes() {
       <Route
         path="/followup/closure/sales-deed"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-sales-deed">
             <SalesDeedPage />
           </ProtectedRoute>
         }
@@ -836,7 +868,7 @@ function AppRoutes() {
       <Route
         path="/followup/closure/handover"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-handover">
             <HandoverPage />
           </ProtectedRoute>
         }
@@ -844,7 +876,7 @@ function AppRoutes() {
       <Route
         path="/followup/legal/milestones"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-legal-milestones">
             <LegalMilestonesPage />
           </ProtectedRoute>
         }
@@ -852,7 +884,7 @@ function AppRoutes() {
       <Route
         path="/followup/closure/pre-possession"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-pre-possession">
             <PrePossessionPage />
           </ProtectedRoute>
         }
@@ -860,7 +892,7 @@ function AppRoutes() {
       <Route
         path="/followup/closure/possession-notice"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-possession-notice">
             <PossessionNoticePage />
           </ProtectedRoute>
         }
@@ -868,7 +900,7 @@ function AppRoutes() {
       <Route
         path="/followup/construction/updates"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-construction-updates">
             <ConstructionUpdatesPage />
           </ProtectedRoute>
         }
@@ -876,7 +908,7 @@ function AppRoutes() {
       <Route
         path="/followup/finance/demands"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-demands">
             <FinanceDemandsPage />
           </ProtectedRoute>
         }
@@ -884,7 +916,7 @@ function AppRoutes() {
       <Route
         path="/followup/finance/payments"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-payments">
             <FollowupPaymentsPage />
           </ProtectedRoute>
         }
@@ -916,7 +948,7 @@ function AppRoutes() {
       <Route
         path="/followup/agreement/workflow"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-agreements">
             <AgreementWorkflowPage />
           </ProtectedRoute>
         }
@@ -924,7 +956,7 @@ function AppRoutes() {
       <Route
         path="/followup/agreement/document-vault"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-document-vault">
             <DocumentVaultPage />
           </ProtectedRoute>
         }
@@ -932,7 +964,7 @@ function AppRoutes() {
       <Route
         path="/followup/agreement/communicator"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-communicator">
             <CommunicatorPage />
           </ProtectedRoute>
         }
@@ -940,7 +972,7 @@ function AppRoutes() {
       <Route
         path="/followup/sales/pipeline/applicants"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-applicants">
             <ApplicantsPipelinePage />
           </ProtectedRoute>
         }
@@ -948,7 +980,7 @@ function AppRoutes() {
       <Route
         path="/followup/sales/pipeline/unit-selections"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-unit-selections">
             <UnitSelectionPipelinePage />
           </ProtectedRoute>
         }
@@ -1027,7 +1059,7 @@ function AppRoutes() {
       <Route
         path="/masters/financial-year"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="financial-year-master">
             <FinancialYearMaster />
           </ProtectedRoute>
         }
@@ -1043,7 +1075,7 @@ function AppRoutes() {
       <Route
         path="/material"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="material-dashboard">
             <MaterialDashboard />
           </ProtectedRoute>
         }
@@ -1051,7 +1083,7 @@ function AppRoutes() {
       <Route
         path="/material/grn"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="grn-master">
             <GRN />
           </ProtectedRoute>
         }
@@ -1059,7 +1091,7 @@ function AppRoutes() {
       <Route
         path="/material/vehicle-in-out"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="vehicle-in-out">
             <VehicleInOut />
           </ProtectedRoute>
         }
@@ -1067,7 +1099,7 @@ function AppRoutes() {
       <Route
         path="/material/expense-booking"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="expense-booking">
             <MaterialExpenseBookingMaster />
           </ProtectedRoute>
         }
@@ -1075,7 +1107,7 @@ function AppRoutes() {
       <Route
         path="/material/debit-note"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="debit-note">
             <DebitNoteMaster />
           </ProtectedRoute>
         }
@@ -1100,7 +1132,7 @@ function AppRoutes() {
       <Route
         path="/material/amendments"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="amendments">
             <Amendments />
           </ProtectedRoute>
         }
@@ -1108,7 +1140,7 @@ function AppRoutes() {
       <Route
         path="/material/amendment-menu"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="amendments">
             <AmendmentMenu />
           </ProtectedRoute>
         }
@@ -1116,7 +1148,7 @@ function AppRoutes() {
       <Route
         path="/material/material-request"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="material-request">
             <MaterialRequestPage />
           </ProtectedRoute>
         }
@@ -1124,7 +1156,7 @@ function AppRoutes() {
       <Route
         path="/material/issues"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="material-issues">
             <Issues />
           </ProtectedRoute>
         }
@@ -1132,7 +1164,7 @@ function AppRoutes() {
       <Route
         path="/material/purchase-order"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="purchase-orders">
             <PurchaseOrderMaster />
           </ProtectedRoute>
         }
@@ -1156,7 +1188,7 @@ function AppRoutes() {
       <Route
         path="/material/stock"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="stock-ledger">
             <Stock />
           </ProtectedRoute>
         }
@@ -1164,7 +1196,7 @@ function AppRoutes() {
       <Route
         path="/material/stock-transfer"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="stock-transfers">
             <StockTransfer />
           </ProtectedRoute>
         }
@@ -1174,7 +1206,7 @@ function AppRoutes() {
       <Route
         path="/sales/sale-order"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="sale-order">
             <SaleOrder />
           </ProtectedRoute>
         }
@@ -1182,7 +1214,7 @@ function AppRoutes() {
       <Route
         path="/sales/sale-invoice"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="sale-invoice">
             <SaleInvoice />
           </ProtectedRoute>
         }
@@ -1190,7 +1222,7 @@ function AppRoutes() {
       <Route
         path="/sales/payment"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="sales-payment">
             <SalesPayment />
           </ProtectedRoute>
         }
@@ -1200,7 +1232,7 @@ function AppRoutes() {
       <Route
         path="/engineering"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="engineering-dashboard">
             <EngineeringDashboard />
           </ProtectedRoute>
         }
@@ -1208,7 +1240,7 @@ function AppRoutes() {
       <Route
         path="/ticket"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="ticket-dashboard">
             <TicketDashboard />
           </ProtectedRoute>
         }
@@ -1217,7 +1249,7 @@ function AppRoutes() {
       <Route
         path="/ticket/create"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="tickets">
             <CreateTicket />
           </ProtectedRoute>
         }
@@ -1226,7 +1258,7 @@ function AppRoutes() {
       <Route
         path="/ticket/my-tickets"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="tickets">
             <MyTickets />
           </ProtectedRoute>
         }
@@ -1244,7 +1276,7 @@ function AppRoutes() {
       <Route
         path="/ticket/resolved"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="tickets">
             <ResolvedTickets />
           </ProtectedRoute>
         }
@@ -1252,7 +1284,7 @@ function AppRoutes() {
       <Route
         path="/engineering/work-done"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="work-done">
             <WorkDone />
           </ProtectedRoute>
         }
@@ -1261,7 +1293,7 @@ function AppRoutes() {
       <Route
         path="/engineering/work-order"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="engineering-work-order">
             <WorkOrderMaster />
           </ProtectedRoute>
         }
@@ -1269,7 +1301,7 @@ function AppRoutes() {
       <Route
         path="/engineering/boq"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="boq">
             <BOQ />
           </ProtectedRoute>
         }
@@ -1277,7 +1309,7 @@ function AppRoutes() {
       <Route
         path="/engineering/dpr"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="dpr">
             <DailyProgressReport />
           </ProtectedRoute>
         }

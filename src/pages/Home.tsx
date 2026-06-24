@@ -79,18 +79,13 @@ function getAccessibleModules(role: UserRoleStr) {
       sales: false,
     };
   }
-  // role === "user" — per-page pagePermissions from DB
-  // Map page keys that relate to modules:
-  //   "payments" / "transactions" → finance
-  //   "master_items" → material
-  //   "tasks" → general (show if they have tasks)
-  // Tickets are always accessible (any logged-in user can submit tickets)
+  // Fallback — should not be reached for "user" role (handled by deriveUserModuleAccess at call site)
   return {
-    finance: false, // computed per-user below using pagePermissions
+    finance: false,
     material: false,
     engineering: false,
     followup: false,
-    ticket: true, // ticket module is open to all non-customer roles
+    ticket: true,
     approvals: false,
     admin: false,
     dba: false,
@@ -98,7 +93,8 @@ function getAccessibleModules(role: UserRoleStr) {
   };
 }
 
-// For "user" role, derive module access from pagePermissions
+// For "user" role, derive module access from pagePermissions.
+// A module is visible if the user has view access to at least one of its pages.
 function deriveUserModuleAccess(
   pagePermissions: { page: string; actions: string[] }[],
 ) {
@@ -107,16 +103,36 @@ function deriveUserModuleAccess(
       .filter((p) => p.actions.includes("view"))
       .map((p) => p.page),
   );
+
+  const hasAny = (...keys: string[]) => keys.some((k) => pages.has(k));
+
   return {
-    finance: pages.has("payments") || pages.has("transactions"),
-    material: pages.has("master_items") || pages.has("master_suppliers"),
-    engineering: false, // engineering module is not in PAGE_DEFINITIONS — role-gated only
-    followup: pages.has("master_customers"),
-    ticket: true, // always
+    finance:
+      hasAny("finance-dashboard", "new-payment", "received-payment", "brs", "transactions"),
+    material:
+      hasAny(
+        "material-dashboard", "material-request", "purchase-orders",
+        "vehicle-in-out", "grn-master", "material-issues", "expense-booking",
+        "stock-ledger", "stock-transfers", "debit-note", "amendments",
+      ),
+    engineering:
+      hasAny("engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"),
+    followup:
+      hasAny(
+        "followup-dashboard", "followup-applications", "followup-applicants",
+        "followup-bookings", "followup-unit-selections", "followup-welcome-calls",
+        "followup-agreements", "followup-legal-milestones", "followup-document-vault",
+        "followup-communicator", "followup-demands", "followup-payments",
+        "followup-construction-updates", "followup-noc", "followup-sales-deed",
+        "followup-pre-possession", "followup-possession-notice", "followup-handover",
+        "followup-tasks", "followup-reminders",
+      ),
+    sales:
+      hasAny("sale-order", "sale-invoice", "sales-payment"),
+    ticket: true, // ticket module is open to all non-customer roles
     approvals: false,
     admin: false,
     dba: false,
-    sales: false,
   };
 }
 
@@ -563,7 +579,7 @@ function LockedCard({ title, delay = 0 }: { title: string; delay?: number }) {
 
 // ─── HomePage ─────────────────────────────────────────────────────────────────
 export default function HomePage() {
-  const { currentUser } = useAuth();
+  const { currentUser, canAccessPage } = useAuth();
   const navigate = useNavigate();
 
   const role: UserRoleStr = currentUser?.role ?? "";
@@ -576,11 +592,35 @@ export default function HomePage() {
   const isDba = role === "dba";
   const isAdmin = privileged;
 
-  // Compute which modules this user can see
-  const access =
-    role === "user"
-      ? deriveUserModuleAccess(currentUser?.pagePermissions ?? [])
-      : getAccessibleModules(role);
+  // Compute which modules this user can see.
+  // Uses canAccessPage (same source as ModuleStrip) so all roles — including
+  // "engineer", custom roles, etc. — get the correct tile set based on their
+  // actual DB-assigned pagePermissions rather than hardcoded role strings.
+  const MODULE_PAGES: Record<string, string[]> = {
+    finance:     ["finance-dashboard", "new-payment", "received-payment", "brs", "transactions"],
+    material:    ["material-dashboard", "purchase-orders", "grn-master", "material-request", "material-issues", "stock-ledger"],
+    followup:    ["followup-dashboard", "followup-applications", "followup-bookings", "followup-agreements", "followup-demands"],
+    engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
+    ticket:      ["ticket-dashboard", "tickets"],
+    sales:       ["sale-order", "sale-invoice", "sales-payment"],
+  };
+
+  const hasModuleAccess = (moduleId: string): boolean => {
+    if (privileged) return true;
+    return (MODULE_PAGES[moduleId] ?? []).some((pk) => canAccessPage(pk as any));
+  };
+
+  const access = {
+    finance:     hasModuleAccess("finance"),
+    material:    hasModuleAccess("material"),
+    engineering: hasModuleAccess("engineering"),
+    followup:    hasModuleAccess("followup"),
+    ticket:      hasModuleAccess("ticket"),
+    sales:       hasModuleAccess("sales"),
+    approvals:   privileged,
+    admin:       privileged && !isDba,
+    dba:         isDba,
+  };
 
   const hour = new Date().getHours();
   const greeting =
@@ -588,8 +628,9 @@ export default function HomePage() {
 
   const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } =
     useQuery<HomeDashboardData>({
-      queryKey: ["home-dashboard", role],
-      queryFn: () => fetchHomeDashboard(isAdmin, role),
+      // Include access flags in key so the query refires when permissions change
+      queryKey: ["home-dashboard", role, access.finance, access.material, access.engineering],
+      queryFn: () => fetchHomeDashboard(isAdmin, access),
       staleTime: 2 * 60 * 1000,
       refetchInterval: 5 * 60 * 1000,
       retry: 2,
@@ -937,7 +978,7 @@ export default function HomePage() {
                   {
                     label: "Paid this month (₹L)",
                     value: Math.round(
-                      (fin?.payments?.totalAmount ?? 0) / 100000,
+                      (fin?.payments?.thisMonthAmount ?? 0) / 100000,
                     ),
                     accent: "#10b981",
                     icon: TrendingUp,

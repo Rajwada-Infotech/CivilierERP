@@ -9,6 +9,8 @@ export interface SubItem {
   path: string;
   badge?: number;
   state?: Record<string, unknown>;
+  /** Page key that must appear in user's pagePermissions to show this item */
+  pageKey?: string;
 }
 
 export interface SubSection {
@@ -21,6 +23,8 @@ export interface NavItem {
   label: string;
   icon: React.ElementType;
   path?: string;
+  /** Page key for leaf items (items without children) */
+  pageKey?: string;
   children?: SubItem[];
   sections?: SubSection[];
 }
