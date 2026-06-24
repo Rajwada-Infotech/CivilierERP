@@ -132,14 +132,14 @@ router.post("/login", async (req, res) => {
         can_accept_tickets: !!user.can_accept_tickets,
         pagePermissions: await (async () => {
           try {
-            const pr = await pool
-              .request()
-              .input("UserId", sql.Int, user.id)
-              .query(
-                `SELECT RightsJson FROM dbo.UserPageRightsJson WHERE UserId = @UserId AND IsActive = 1`,
-              );
-            const row = pr.recordset[0];
-            return row?.RightsJson ? JSON.parse(row.RightsJson) : null;
+            const {
+              getEffectivePagePermissions,
+            } = require("../middleware/permissions");
+            const merged = await getEffectivePagePermissions(
+              user.id,
+              user.RoleId,
+            );
+            return merged.length ? merged : null;
           } catch {
             return null;
           }

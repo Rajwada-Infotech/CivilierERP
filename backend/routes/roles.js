@@ -18,6 +18,92 @@ const cleanStr = (v, len = 255) => {
   return String(v).trim().slice(0, len);
 };
 
+// ─── ROLE RIGHTS ↔ PAGE KEY MAP ───────────────────────────────────────────────
+// Single source of truth for translating between the page keys the Permission
+// Editor / Role Rights UI sends and the exact {Module, SubModule} pair each
+// route actually checks via checkPermission()/checkPermissionForMethod().
+//
+// Previously this list only covered 6 page keys; every other page (e.g.
+// "engineering-work-order") fell back to `page.replace(/-/g, " ")` for BOTH
+// Module and SubModule — producing values like Module="engineering work
+// order" that never match any route's real check (Engineering/WorkOrders),
+// so granting that right from the UI silently did nothing and the page kept
+// 403'ing. This map is built directly from a grep of every checkPermission /
+// checkPermissionForMethod call in routes/, so it reflects what's actually
+// enforced.
+const ROLE_RIGHTS_PAGE_MAP = {
+  "document-type": { module: "Admin", submodule: "DocumentType" },
+  typeofdoc: { module: "Admin", submodule: "DocumentType" },
+  "type-of-doc": { module: "Admin", submodule: "DocumentType" },
+  boq: { module: "Engineering", submodule: "BOQ" },
+  "engineering-boq": { module: "Engineering", submodule: "BOQ" },
+  "work-done": { module: "Engineering", submodule: "WorkDone" },
+  "engineering-dashboard": { module: "Engineering", submodule: "WorkDone" },
+  "work-order": { module: "Engineering", submodule: "WorkOrders" },
+  "engineering-work-order": { module: "Engineering", submodule: "WorkOrders" },
+  brs: { module: "Finance", submodule: "BRS" },
+  "expense-booking": { module: "Finance", submodule: "ExpenseBooking" },
+  "new-payment": { module: "Finance", submodule: "Payments" },
+  payments: { module: "Finance", submodule: "Payments" },
+  "received-payment": { module: "Finance", submodule: "ReceivedPayments" },
+  reports: { module: "Finance", submodule: "Reports" },
+  transactions: { module: "Finance", submodule: "Transactions" },
+  "trial-balance": { module: "Finance", submodule: "Transactions" },
+  "followup-agreement-workflow": {
+    module: "Followup",
+    submodule: "AgreementWorkflow",
+  },
+  "followup-agreements": { module: "Followup", submodule: "Agreements" },
+  "followup-construction-updates": {
+    module: "Followup",
+    submodule: "ConstructionUpdates",
+  },
+  "followup-escalation": { module: "Followup", submodule: "Escalation" },
+  "followup-handover": { module: "Followup", submodule: "Handover" },
+  "followup-legal-milestones": {
+    module: "Followup",
+    submodule: "LegalMilestones",
+  },
+  "followup-noc": { module: "Followup", submodule: "NOC" },
+  "followup-possession-notice": {
+    module: "Followup",
+    submodule: "PossessionNotice",
+  },
+  "followup-pre-possession": { module: "Followup", submodule: "PrePossession" },
+  "followup-sales-deed": { module: "Followup", submodule: "SalesDeed" },
+  "followup-unit-selections": {
+    module: "Followup",
+    submodule: "UnitSelections",
+  },
+  "followup-unit-selection": {
+    module: "Followup",
+    submodule: "UnitSelections",
+  },
+  "sale-order": { module: "Material", submodule: "CustomerSaleOrders" },
+  "grn-master": { module: "Material", submodule: "GRN" },
+  grns: { module: "Material", submodule: "GRN" },
+  "purchase-orders": { module: "Material", submodule: "PurchaseOrders" },
+  "vehicle-in-out": { module: "Material", submodule: "VehicleInOut" },
+  "menu-rights": { module: "Rights", submodule: "Menu" },
+  admin_menu_rights: { module: "Rights", submodule: "Menu" },
+  roles: { module: "Rights", submodule: "Menu" },
+  "widgets-rights": { module: "Rights", submodule: "Widgets" },
+  "fin-year": { module: "Rights", submodule: "Financial Year" },
+  "user-activity": { module: "UserActivity", submodule: "List" },
+  "activity-browser": { module: "UserActivity", submodule: "List" },
+  users: { module: "Users", submodule: "List" },
+};
+
+// Reverse lookup (Module_SubModule -> page key) for GET, built from the same
+// map above so the read and write directions can never drift apart again.
+const ROLE_RIGHTS_REVERSE_MAP = {};
+for (const [page, { module, submodule }] of Object.entries(
+  ROLE_RIGHTS_PAGE_MAP,
+)) {
+  const key = `${module}_${submodule}`;
+  if (!ROLE_RIGHTS_REVERSE_MAP[key]) ROLE_RIGHTS_REVERSE_MAP[key] = page; // first match wins
+}
+
 function generateRoleCode(rName) {
   if (!rName) return null;
   const words = rName
@@ -232,18 +318,10 @@ router.get("/:roleId/rights", authMiddleware, async (req, res) => {
         FROM dbo.RoleRights WHERE RoleId = @RoleId
       `);
 
-    const PAGE_MAPPINGS = {
-      Rights_Menu: "menu-rights",
-      "Rights_Role Master": "roles",
-      Rights_Widgets: "widgets-rights",
-      "Rights_Financial Year": "fin-year",
-      "User Control_Manage Users": "users",
-      UserActivity_List: "activity-browser",
-    };
-
     const frontendRights = result.recordset.map((row) => {
       const key = `${row.Module}_${row.SubModule}`.trim();
-      const page = PAGE_MAPPINGS[key] || key.toLowerCase().replace(/\s+/g, "-");
+      const page =
+        ROLE_RIGHTS_REVERSE_MAP[key] || key.toLowerCase().replace(/\s+/g, "-");
       const actions = [];
       if (Number(row.CanView) === 1) actions.push("view");
       if (Number(row.CanAdd) === 1) actions.push("create");
@@ -265,15 +343,6 @@ router.post("/:roleId/rights", authMiddleware, async (req, res) => {
     const roleId = parseInt(req.params.roleId);
     const { pagePermissions } = req.body;
 
-    const PAGE_MAPPINGS = {
-      "menu-rights": { module: "Rights", submodule: "Menu" },
-      roles: { module: "Rights", submodule: "Role Master" },
-      "widgets-rights": { module: "Rights", submodule: "Widgets" },
-      "fin-year": { module: "Rights", submodule: "Financial Year" },
-      users: { module: "User Control", submodule: "Manage Users" },
-      "activity-browser": { module: "UserActivity", submodule: "List" },
-    };
-
     const pool = getPool();
     const transaction = new sql.Transaction(pool);
     await transaction.begin();
@@ -283,7 +352,7 @@ router.post("/:roleId/rights", authMiddleware, async (req, res) => {
       .query("DELETE FROM dbo.RoleRights WHERE RoleId=@RoleId");
 
     for (const permission of pagePermissions || []) {
-      const mapping = PAGE_MAPPINGS[permission.page] || {
+      const mapping = ROLE_RIGHTS_PAGE_MAP[permission.page] || {
         module: permission.page.replace(/-/g, " "),
         submodule: permission.page.replace(/-/g, " "),
       };
