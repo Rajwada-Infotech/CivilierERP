@@ -7,7 +7,7 @@ import {
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  getFinYears,
+  getAllFinYears,
   addFinYear as apiAddFinYear,
   updateFinYear as apiUpdateFinYear,
   deleteFinYear as apiDeleteFinYear,
@@ -55,7 +55,7 @@ export const FinYearProvider = ({ children }: { children: ReactNode }) => {
 
   const { data: dbData, isLoading } = useQuery({
     queryKey: QUERY_KEY,
-    queryFn: getFinYears,
+    queryFn: getAllFinYears, // Admin context — needs all years to manage them
     enabled: !!localStorage.getItem("token"),
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
