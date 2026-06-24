@@ -447,7 +447,7 @@ export default function Amendments() {
               ) : (
                 rows.map((amendment) => (
                   <TableRow key={amendment.Id}>
-                    <TableCell className="font-medium text-primary">
+                    <TableCell className="font-medium text-emerald-600 dark:text-emerald-400">
                       {amendment.AmendmentNo}
                     </TableCell>
                     <TableCell>

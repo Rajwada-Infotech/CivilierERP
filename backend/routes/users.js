@@ -41,7 +41,6 @@ router.post("/login", async (req, res) => {
   const lockKey = `login:lock:${normalizedEmail}`;
   const attemptsKey = `login:attempts:${normalizedEmail}`;
 
-
   // Skip rate limiting for local development
   const isLocal =
     req.ip === "::1" ||
@@ -65,8 +64,7 @@ router.post("/login", async (req, res) => {
     const pool = getPool();
     const result = await pool
       .request()
-      .input("email", sql.NVarChar, normalizedEmail)
-      .query(`
+      .input("email", sql.NVarChar, normalizedEmail).query(`
         SELECT u.id, u.name, u.email, u.RoleId, u.password, u.discontinue,
                ISNULL(u.can_accept_tickets, 0) AS can_accept_tickets,
                r.RName AS roleName
@@ -74,7 +72,6 @@ router.post("/login", async (req, res) => {
         LEFT JOIN dbo.Role r ON u.RoleId = r.RId
         WHERE u.email = @email
       `);
-
 
     const user = result.recordset[0];
     if (!user) {
@@ -85,7 +82,6 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-
     if (user.discontinue) {
       return res.status(403).json({ error: "User inactive" });
     }
@@ -93,11 +89,13 @@ router.post("/login", async (req, res) => {
     const match = await bcrypt.compare(password, user.password);
 
     if (process.env.NODE_ENV === "development") {
-      console.warn("[Login] bcrypt compare result:", { matched: match, email: normalizedEmail });
+      console.warn("[Login] bcrypt compare result:", {
+        matched: match,
+        email: normalizedEmail,
+      });
     }
 
     if (!match) {
-
       if (!isLocal) await incrementLoginAttempts(attemptsKey, lockKey);
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -133,14 +131,19 @@ router.post("/login", async (req, res) => {
         roleId: user.RoleId,
         can_accept_tickets: !!user.can_accept_tickets,
         pagePermissions: await (async () => {
-        try {
-          const pr = await pool.request()
-            .input("UserId", sql.Int, user.id)
-            .query(`SELECT RightsJson FROM dbo.UserPageRightsJson WHERE UserId = @UserId AND IsActive = 1`);
-          const row = pr.recordset[0];
-          return row?.RightsJson ? JSON.parse(row.RightsJson) : null;
-        } catch { return null; }
-      })(),
+          try {
+            const {
+              getEffectivePagePermissions,
+            } = require("../middleware/permissions");
+            const merged = await getEffectivePagePermissions(
+              user.id,
+              user.RoleId,
+            );
+            return merged.length ? merged : null;
+          } catch {
+            return null;
+          }
+        })(),
       },
     });
   } catch (err) {
@@ -223,7 +226,8 @@ router.post(
   authMiddleware,
   checkPermission("Users", "List", "CanAdd"),
   async (req, res) => {
-    const { name, email, RoleId, roleId, password, can_accept_tickets } = req.body;
+    const { name, email, RoleId, roleId, password, can_accept_tickets } =
+      req.body;
     if (!password) {
       return res.status(400).json({ error: "Password required" });
     }
@@ -238,8 +242,12 @@ router.post(
         .input("RoleId", sql.Int, assignedRoleId)
         .input("can_accept_tickets", sql.Bit, can_accept_tickets ? 1 : 0)
         .input("password", sql.NVarChar, hashed).query(`
-          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue, can_accept_tickets)
-          VALUES (@name, @email, @password, @RoleId, GETDATE(), 0, @can_accept_tickets)
+          INSERT INTO dbo.users (name, email, password, RoleId, role, created_datetime, discontinue, can_accept_tickets)
+          VALUES (
+            @name, @email, @password, @RoleId,
+            (SELECT RName FROM dbo.Role WHERE RId = @RoleId),
+            GETDATE(), 0, @can_accept_tickets
+          )
         `);
       res.json({ message: "User created" });
     } catch (err) {
@@ -267,7 +275,8 @@ router.put(
   checkPermission("Users", "List", "CanEdit"),
   async (req, res) => {
     const { id } = req.params;
-    const { name, email, RoleId, roleId, discontinue, can_accept_tickets } = req.body;
+    const { name, email, RoleId, roleId, discontinue, can_accept_tickets } =
+      req.body;
     try {
       const pool = getPool();
 
@@ -298,13 +307,18 @@ router.put(
           .input(
             "can_accept_tickets",
             sql.Bit,
-            can_accept_tickets === undefined ? null : can_accept_tickets ? 1 : 0,
+            can_accept_tickets === undefined
+              ? null
+              : can_accept_tickets
+                ? 1
+                : 0,
           )
           .input("discontinue", sql.Bit, discontinue ? 1 : 0).query(`
           UPDATE dbo.users
           SET name=@name,
               email=@email,
               RoleId=@RoleId,
+              role=(SELECT RName FROM dbo.Role WHERE RId = @RoleId),
               discontinue=@discontinue,
               can_accept_tickets=COALESCE(@can_accept_tickets, can_accept_tickets)
           WHERE id=@id
@@ -348,8 +362,7 @@ router.delete(
       await pool
         .request()
         .input("id", sql.Int, id)
-        .input("adminId", sql.Int, req.user.userId)
-        .query(`
+        .input("adminId", sql.Int, req.user.userId).query(`
           -- NOT NULL CreatedBy/UserId/AssignedTo: reassign to the deleting admin
           UPDATE dbo.AccountGroup         SET CreatedBy  = @adminId WHERE CreatedBy  = @id;
           UPDATE dbo.BankMaster           SET CreatedBy  = @adminId WHERE CreatedBy  = @id;
@@ -396,7 +409,12 @@ router.delete(
 
       res.json({ message: "User deleted" });
     } catch (err) {
-      console.error("[DELETE USER] SQL error:", err.message, "| errNum:", err.number);
+      console.error(
+        "[DELETE USER] SQL error:",
+        err.message,
+        "| errNum:",
+        err.number,
+      );
       res.status(500).json({ error: err.message });
     }
   },
@@ -428,8 +446,7 @@ router.patch(
       await pool
         .request()
         .input("id", sql.Int, id)
-        .input("perms", sql.NVarChar(sql.MAX), jsonStr)
-        .query(`
+        .input("perms", sql.NVarChar(sql.MAX), jsonStr).query(`
           MERGE dbo.UserPageRightsJson AS target
           USING (VALUES (@id, @perms)) AS source (UserId, RightsJson)
           ON target.UserId = source.UserId
@@ -532,7 +549,3 @@ router.patch(
 );
 
 module.exports = router;
-
-
-
-

@@ -2,20 +2,9 @@ const { getPool, sql } = require("../db");
 const { normalizeRole } = require("./role");
 
 // ─── IN-PROCESS PERMISSION CACHE ─────────────────────────────────────────────
-// RoleRights rows are static config — they only change when an admin edits
-// them via MenuRights/PostApprovalRights. Caching them in-process eliminates
-// a ~100-200 ms SQL Server round-trip on EVERY authenticated request that uses
-// checkPermission (user-activity, approval-inbox, etc.).
-//
-// TTL: 5 minutes. Short enough that a rights change is effective within one
-// polling cycle, long enough to absorb all normal traffic load.
-// On POST/PUT to RoleRights, call permissionCache.invalidateRole(roleId) so
-// the change is visible immediately without waiting for TTL expiry.
-
 const PERMISSION_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const permissionCache = (() => {
-  // key: `${roleId}:${module}:${subModule}` → { row, fetchedAt }
   const store = new Map();
 
   function key(roleId, module, subModule) {
@@ -26,7 +15,7 @@ const permissionCache = (() => {
     const k = key(roleId, module, subModule);
     const entry = store.get(k);
     if (entry && Date.now() - entry.fetchedAt < PERMISSION_CACHE_TTL_MS) {
-      return entry.row; // null means "no permission row" — still cached
+      return entry.row;
     }
 
     const pool = getPool();
@@ -47,8 +36,6 @@ const permissionCache = (() => {
     return row;
   }
 
-  // Call after any write to RoleRights for this role so the next request
-  // re-fetches rather than serving stale cached permissions.
   function invalidateRole(roleId) {
     for (const k of store.keys()) {
       if (k.startsWith(`${roleId}:`)) store.delete(k);
@@ -76,9 +63,8 @@ const userPermissionCache = (() => {
     }
 
     const pool = getPool();
-    const result = await pool
-      .request()
-      .input("UserId", sql.Int, Number(userId)).query(`
+    const result = await pool.request().input("UserId", sql.Int, Number(userId))
+      .query(`
         SELECT RightsJson
         FROM dbo.UserPageRightsJson
         WHERE UserId = @UserId AND IsActive = 1
@@ -163,12 +149,69 @@ function getCandidatePageKeys(module, subModule) {
   const mapped = PERMISSION_PAGE_KEYS[key] || [];
   const sub = kebab(subModule);
   const mod = kebab(module);
-  return [...new Set([...mapped, sub, `${mod}-${sub}`])];
+  const all = [...new Set([...mapped, sub, `${mod}-${sub}`])];
+  return all;
+}
+
+async function getRolePagePermissions(roleId) {
+  if (!roleId) return [];
+  const pool = getPool();
+  const result = await pool.request().input("RoleId", sql.Int, roleId).query(`
+      SELECT Module, SubModule, CanView, CanAdd, CanEdit, CanDelete
+      FROM dbo.RoleRights
+      WHERE RoleId = @RoleId
+    `);
+
+  const byPage = new Map();
+  for (const row of result.recordset) {
+    const actions = [];
+    if (row.CanView) actions.push("view");
+    if (row.CanAdd) actions.push("create");
+    if (row.CanEdit) actions.push("edit");
+    if (row.CanDelete) actions.push("delete");
+    if (actions.length === 0) continue;
+
+    for (const page of getCandidatePageKeys(row.Module, row.SubModule)) {
+      const existing = byPage.get(page) ?? new Set();
+      actions.forEach((a) => existing.add(a));
+      byPage.set(page, existing);
+    }
+  }
+
+  return Array.from(byPage.entries()).map(([page, actions]) => ({
+    page,
+    actions: Array.from(actions),
+  }));
+}
+
+function mergePagePermissions(...lists) {
+  const byPage = new Map();
+  for (const list of lists) {
+    for (const entry of list || []) {
+      const page = String(entry?.page || "").toLowerCase();
+      if (!page) continue;
+      const actions = Array.isArray(entry?.actions) ? entry.actions : [];
+      const existing = byPage.get(page) ?? new Set();
+      actions.forEach((a) => existing.add(String(a).toLowerCase()));
+      byPage.set(page, existing);
+    }
+  }
+  return Array.from(byPage.entries()).map(([page, actions]) => ({
+    page,
+    actions: Array.from(actions),
+  }));
+}
+
+async function getEffectivePagePermissions(userId, roleId) {
+  const [rolePerms, userPerms] = await Promise.all([
+    getRolePagePermissions(roleId),
+    userPermissionCache.get(userId),
+  ]);
+  return mergePagePermissions(rolePerms, userPerms);
 }
 
 async function userHasPermission(userId, module, subModule, action) {
   if (!userId) return false;
-
   const pageAction = ACTION_TO_PAGE_ACTION[action];
   if (!pageAction) return false;
 
@@ -203,21 +246,8 @@ const checkPermission = (module, subModule, action = "CanView") => {
           .json({ error: "Invalid token - missing roleId" });
       }
 
-      // super_admin / dba / admin bypass RoleRights entirely — they always
-      // have full access. Without this, the Activity Browser (and any other
-      // checkPermission-gated route) returns 403 for privileged users who
-      // don't have an explicit RoleRights row, silently emptying the page.
+      // Super users bypass permission checks
       if (SUPERUSER_ROLES.has(role)) return next();
-
-      if (process.env.DEBUG === "true") {
-        console.log("CHECK PERMISSION:", {
-          roleId,
-          role,
-          module,
-          subModule,
-          action,
-        });
-      }
 
       const permission = await permissionCache.get(roleId, module, subModule);
 
@@ -229,22 +259,7 @@ const checkPermission = (module, subModule, action = "CanView") => {
         return next();
       }
 
-      if (!permission) {
-        console.log("[DENIED] No permission row found", {
-          roleId,
-          module,
-          subModule,
-        });
-        return res.status(403).json({ error: "Access denied (no permission)" });
-      }
-
-      console.log("[DENIED] Action not allowed:", {
-        roleId,
-        module,
-        subModule,
-        action,
-      });
-      return res.status(403).json({ error: "Access denied (action blocked)" });
+      return res.status(403).json({ error: "Access denied" });
     } catch (err) {
       console.error("Permission check failed:", err);
       res.status(500).json({ error: "Permission check error" });
@@ -252,4 +267,9 @@ const checkPermission = (module, subModule, action = "CanView") => {
   };
 };
 
-module.exports = { checkPermission, permissionCache, userPermissionCache };
+module.exports = {
+  checkPermission,
+  permissionCache,
+  userPermissionCache,
+  getEffectivePagePermissions,
+};

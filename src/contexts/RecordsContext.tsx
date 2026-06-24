@@ -1,113 +1,85 @@
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useCallback,
-} from "react";
+import React, { createContext, useState, useEffect, useCallback } from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 
+// A single attachment as returned by GET /api/records — already normalized
+// across every source module (Ticket, Vehicle In/Out, Document Vault, and
+// any future module that registers itself in backend/routes/recordsRoutes.js).
+export type UnifiedRecord = {
+  /** Composite key: `${source}-${sourceId}`, stable for the DataTable's getRowId */
+  id: string;
+  source: string; // "ticket" | "vehicle" | "vault" | ...
+  sourceId: number;
+  module: string; // human-readable module name, e.g. "Ticket"
+  docRef: string; // e.g. "TKT-104", "VEH-2026-00031", "DV000012"
+  docLabel: string; // e.g. ticket subject, vehicle number, document name
+  filename: string;
+  mimeType: string;
+  size: number;
+  uploadedBy: string | null;
+  uploadedAt: string; // ISO string
+  url: string; // streams the file from its original module's endpoint
+};
+
+// Kept for backward compatibility with any code still importing the old
+// localStorage-based attachment shape — no longer used internally.
 export type RecordFileAttachment = {
   name: string;
   type: string;
   size: number;
-  dataUrl: string; // base64
+  dataUrl: string;
   uploadedAt: string;
 };
 
-export type UnifiedRecord = {
-  id: string;
-  docNumber: string;
-  date: string;           // ISO string
-  entryType: "Payment" | "Expense" | "Receipt";
-  project: string;
-  amount: number;
-  mode?: string;
-  docType?: string;
-  status: string;
-  attachment?: RecordFileAttachment;
+type RawRecord = {
+  source: string;
+  sourceId: number;
+  module: string;
+  docRef: string;
+  docLabel: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  uploadedBy: string | null;
+  uploadedAt: string;
+  url: string;
 };
 
 type RecordsContextType = {
   records: UnifiedRecord[];
   loading: boolean;
   error: string | null;
-  attachFile: (id: string, file: RecordFileAttachment) => void;
   refreshRecords: () => void;
 };
 
 const RecordsContext = createContext<RecordsContextType | null>(null);
 
-// Walk all pages of a paginated endpoint
-const MAX_PAGES = 500; // hard ceiling — guards against a malformed totalPages response
-
-async function fetchAllPages(
-  baseUrl: string,
-  signal: AbortSignal
-): Promise<Record<string, unknown>[]> {
-  let page = 1;
-  let totalPages = 1;
-  const all: Record<string, unknown>[] = [];
-
-  while (page <= totalPages && page <= MAX_PAGES) {
-    const res = await fetchWithAuth(
-      `${baseUrl}?page=${page}&limit=100`,
-      { signal }
-    );
-    if (!res.ok) throw new Error(`${baseUrl} failed: ${res.status}`);
-    const json = await res.json();
-    const rows = Array.isArray(json) ? json : (json.data ?? []);
-    all.push(...rows);
-    const reportedTotal = Number(json.totalPages);
-    totalPages = Number.isFinite(reportedTotal) && reportedTotal > 0
-      ? reportedTotal
-      : 1;
-    page++;
-  }
-  return all;
-}
-
-function mapPayment(p: Record<string, unknown>): UnifiedRecord {
+function mapRecord(r: RawRecord): UnifiedRecord {
   return {
-    id: String(p.PPaymentID ?? ""),
-    docNumber: String(p.PPaymentName ?? p.PPaymentID ?? ""),
-    date: String(p.PDate ?? ""),
-    entryType: "Payment",
-    project: String(p.PProject ?? ""),
-    amount: Number(p.PAmount ?? 0),
-    mode: p.PMode ? String(p.PMode) : undefined,
-    docType: p.PDocType ? String(p.PDocType) : undefined,
-    status: "pending",
-  };
-}
-
-function mapExpense(e: Record<string, unknown>): UnifiedRecord {
-  return {
-    id: String(e.Eid ?? ""),
-    docNumber: String(e.EDocNo ?? e.Eid ?? ""),
-    date: String(e.EDocDate ?? ""),
-    entryType: "Expense",
-    project: String(e.EProjectName ?? ""),
-    amount: Number(e.EAmount ?? 0),
-    docType: e.EDocumentType ? String(e.EDocumentType) : undefined,
-    status: String(e.EStatus ?? "pending"),
+    id: `${r.source}-${r.sourceId}`,
+    source: r.source,
+    sourceId: r.sourceId,
+    module: r.module,
+    docRef: r.docRef,
+    docLabel: r.docLabel,
+    filename: r.filename,
+    mimeType: r.mimeType,
+    size: r.size,
+    uploadedBy: r.uploadedBy,
+    uploadedAt: r.uploadedAt,
+    url: r.url,
   };
 }
 
 export function RecordsProvider({ children }: { children: React.ReactNode }) {
   const { currentUser } = useAuth();
-  // Only fetch for roles that have Finance module access.
-  // Others (customer, engineer, site_engineer, etc.) get 403 on these endpoints.
-  const FINANCE_ROLES = ["admin", "super_admin", "dba", "finance_manager", "branch_manager"];
-  const isCustomer = !currentUser || !FINANCE_ROLES.includes(currentUser.role);
   const [records, setRecords] = useState<UnifiedRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    if (isCustomer) {
+    if (!currentUser) {
       setRecords([]);
       setLoading(false);
       setError(null);
@@ -118,29 +90,21 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     setError(null);
 
-    // Load saved attachments (still local — blob storage is task #26)
-    const attachments: Record<string, RecordFileAttachment> = JSON.parse(
-      localStorage.getItem("recordAttachments") || "{}"
-    );
-
-    Promise.all([
-      fetchAllPages("/api/new-payment", controller.signal),
-      fetchAllPages("/api/expense-booking", controller.signal),
-    ])
-      .then(([payments, expenses]) => {
-        const merged: UnifiedRecord[] = [
-          ...payments.map((p) => mapPayment(p as Record<string, unknown>)),
-          ...expenses.map((e) => mapExpense(e as Record<string, unknown>)),
-        ]
-          .map((r) =>
-            attachments[r.id] ? { ...r, attachment: attachments[r.id] } : r
-          )
-          .sort(
-            (a, b) =>
-              new Date(b.date).getTime() - new Date(a.date).getTime()
+    fetchWithAuth("/api/records", { signal: controller.signal })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(
+            body.error || `Failed to load records (${res.status})`,
           );
-
-        setRecords(merged);
+        }
+        return res.json();
+      })
+      .then((json) => {
+        const rows: RawRecord[] = Array.isArray(json)
+          ? json
+          : (json.data ?? []);
+        setRecords(rows.map(mapRecord));
         setLoading(false);
       })
       .catch((err) => {
@@ -150,31 +114,20 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
       });
 
     return () => controller.abort();
-  }, [tick, isCustomer]);
+  }, [tick, currentUser]);
 
   const refreshRecords = useCallback(() => setTick((t) => t + 1), []);
 
-  const attachFile = useCallback((id: string, file: RecordFileAttachment) => {
-    const attachments: Record<string, RecordFileAttachment> = JSON.parse(
-      localStorage.getItem("recordAttachments") || "{}"
-    );
-    attachments[id] = file;
-    localStorage.setItem("recordAttachments", JSON.stringify(attachments));
-    setRecords((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, attachment: file } : r))
-    );
-  }, []);
-
   return (
     <RecordsContext.Provider
-      value={{ records, loading, error, attachFile, refreshRecords }}
+      value={{ records, loading, error, refreshRecords }}
     >
       {children}
     </RecordsContext.Provider>
   );
 }
 
-export { RecordsContext }
-  
+export { RecordsContext };
+
 // useRecords moved to src/hooks/useRecords.ts for HMR compatibility
 // import { useRecords } from '@/hooks/useRecords'

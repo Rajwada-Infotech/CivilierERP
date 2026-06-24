@@ -38,8 +38,19 @@ router.get("/", async (req, res) => {
       : null;
 
     // ── 1. Account groups ────────────────────────────────────────────────────
+    // Some existing rows have a stray leading "?" (a corrupted/garbled
+    // character from an earlier import — SQL Server substitutes "?" for any
+    // Unicode character it can't represent when text is inserted through a
+    // non-Unicode (VARCHAR) literal/connection). Strip it here so the UI
+    // shows a clean name regardless of what's stored.
     const groupsRes = await pool.request().query(`
-      SELECT AGId, ISNULL(Name, CONCAT('Group-', AGId)) AS Name,
+      SELECT AGId,
+             LTRIM(
+               CASE WHEN LEFT(ISNULL(Name, CONCAT('Group-', AGId)), 1) = '?'
+                    THEN SUBSTRING(ISNULL(Name, CONCAT('Group-', AGId)), 2, 4000)
+                    ELSE ISNULL(Name, CONCAT('Group-', AGId))
+               END
+             ) AS Name,
              Code, ParentGroupId
       FROM dbo.AccountGroup
       ORDER BY Name

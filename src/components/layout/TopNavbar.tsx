@@ -98,15 +98,28 @@ const Dropdown = ({
 
 // ─── Module color helpers ──────────────────────────────────────────────────────
 
+// RGB triplets for dynamic glow (matches ModuleStrip ringRgb values)
+const MODULE_GLOW_RGB: Record<string, string> = {
+  finance: "99,102,241",
+  material: "16,185,129",
+  followup: "129,140,248",
+  engineering: "249,115,22",
+  ticket: "236,72,153",
+  sales: "168,85,247",
+  records: "245,158,11",
+  admin: "59,130,246",
+};
+
 // HSL values derived from MODULE_HEADER hex colors in AppSidebar for consistency
 const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
-  finance: { h: 239, s: 84, l: 67 },     // #6366f1 indigo
-  material: { h: 160, s: 84, l: 39 },    // #10b981 emerald
-  followup: { h: 235, s: 90, l: 74 },    // #818cf8 light indigo-violet
-  engineering: { h: 25, s: 95, l: 53 },  // #f97316 orange
-  ticket: { h: 330, s: 81, l: 60 },      // #ec4899 pink
-  sales: { h: 271, s: 91, l: 65 },       // #a855f7 purple
-  admin: { h: 217, s: 91, l: 60 },       // #3b82f6 blue
+  finance: { h: 239, s: 84, l: 67 }, // #6366f1 indigo
+  material: { h: 160, s: 84, l: 39 }, // #10b981 emerald
+  followup: { h: 235, s: 90, l: 74 }, // #818cf8 light indigo-violet
+  engineering: { h: 25, s: 95, l: 53 }, // #f97316 orange
+  ticket: { h: 330, s: 81, l: 60 }, // #ec4899 pink
+  sales: { h: 271, s: 91, l: 65 }, // #a855f7 purple
+  records: { h: 38, s: 92, l: 50 }, // #f59e0b amber
+  admin: { h: 217, s: 91, l: 60 }, // #3b82f6 blue
 };
 
 function moduleColorVars(id: string): React.CSSProperties {
@@ -140,6 +153,13 @@ const MODULE_STYLES: Record<
 );
 
 // ─── Setup Items ──────────────────────────────────────────────────────────────
+type SetupItem = {
+  icon: React.ElementType<any>;
+  label: string;
+  path: string;
+  color: string;
+  pageKey?: string;
+};
 
 const financeSetupItems = [
   {
@@ -147,54 +167,63 @@ const financeSetupItems = [
     label: "AC Group",
     path: "/masters/account-group",
     color: "text-indigo-400",
+    pageKey: "account-head",
   },
   {
     icon: Receipt,
     label: "General Ledger",
     path: "/masters/general-ledger",
     color: "text-orange-400",
+    pageKey: "general-ledger",
   },
   {
     icon: Truck,
     label: "Suppliers",
     path: "/masters/suppliers",
     color: "text-blue-400",
+    pageKey: "supplier-master",
   },
   {
     icon: HardHat,
     label: "Contractors",
     path: "/masters/contractors",
     color: "text-amber-500",
+    pageKey: "contractor-master",
   },
   {
     icon: Landmark,
     label: "Banks",
     path: "/masters/banks",
     color: "text-emerald-500",
+    pageKey: "bank-master",
   },
   {
     icon: Calendar,
     label: "Fin Year",
     path: "/masters/financial-year",
     color: "text-purple-400",
+    pageKey: "financial-year-master",
   },
   {
     icon: BookOpen,
     label: "Cheque",
     path: "/masters/cheque",
     color: "text-cyan-500",
+    pageKey: "cheque-master",
   },
   {
     icon: CreditCard,
     label: "Card",
     path: "/masters/card",
     color: "text-rose-500",
+    pageKey: "card-master",
   },
   {
     icon: FileText,
     label: "TDS",
     path: "/masters/tds",
     color: "text-green-500",
+    pageKey: "tds-master",
   },
 ];
 
@@ -204,42 +233,49 @@ const materialSetupItems = [
     label: "Items",
     path: "/masters/items",
     color: "text-teal-500",
+    pageKey: "item-master",
   },
   {
     icon: Layers,
     label: "Items Group",
     path: "/masters/item-groups",
     color: "text-indigo-400",
+    pageKey: "item-group",
   },
   {
     icon: Hash,
     label: "Unit of Measurement",
     path: "/masters/unit-measurement",
     color: "text-orange-400",
+    pageKey: "unit-of-measurement",
   },
   {
     icon: ReceiptIndianRupee,
     label: "HSN",
     path: "/masters/hsn",
     color: "text-pink-400",
+    pageKey: "hsn-master",
   },
   {
     icon: BillingIcon,
     label: "Billing",
     path: "/masters/billing-terms",
     color: "text-lime-500",
+    pageKey: "billing-terms",
   },
   {
     icon: FileText,
     label: "T&C",
     path: "/material/t-c-master",
     color: "text-purple-500",
+    pageKey: "t-c-master",
   },
   {
     icon: ClipboardList,
     label: "Inventory",
     path: "/material/inventory-master",
     color: "text-sky-400",
+    pageKey: "inventory-master",
   },
 ];
 
@@ -334,12 +370,7 @@ const SetupDropdown = ({
   open: boolean;
   onClose: () => void;
   onToggle: () => void;
-  items: {
-    icon: React.ElementType<any>;
-    label: string;
-    path: string;
-    color: string;
-  }[];
+  items: SetupItem[];
   moduleLabel: string;
   colorStyle: React.CSSProperties;
   setupAvailable: boolean;
@@ -362,12 +393,18 @@ const SetupDropdown = ({
         <button
           onClick={onToggle}
           className={`nav-pill-btn ${open ? "nav-pill-btn--active" : ""}`}
-          style={open ? {
-            background: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.12)",
-            borderColor: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.4)",
-            color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))",
-            ...modVars,
-          } : modVars}
+          style={
+            open
+              ? {
+                  background:
+                    "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.12)",
+                  borderColor:
+                    "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.4)",
+                  color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))",
+                  ...modVars,
+                }
+              : modVars
+          }
         >
           <SlidersHorizontal size={13} />
           <span>Setup</span>
@@ -416,7 +453,9 @@ const SetupDropdown = ({
               </p>
               <p
                 className="text-[10px] font-heading mt-0.5 leading-none"
-                style={{ color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)` }}
+                style={{
+                  color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)`,
+                }}
               >
                 Configure {moduleLabel}
               </p>
@@ -437,31 +476,46 @@ const SetupDropdown = ({
 
       {/* ── Items grid ── */}
       <div className="p-3">
-        <div className={`grid grid-cols-3 sm:grid-cols-4 gap-2 ${open ? "setup-grid-open" : ""}`}>
+        <div
+          className={`grid grid-cols-3 sm:grid-cols-4 gap-2 ${open ? "setup-grid-open" : ""}`}
+        >
           {items.map(({ icon: Icon, label, path, color }, i) => {
             const isActivePath = location.pathname === path;
             return (
               <button
                 key={path}
-                onClick={() => { navigate(path); onClose(); }}
+                onClick={() => {
+                  navigate(path);
+                  onClose();
+                }}
                 className={`setup-item group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all duration-200 active:scale-[0.93] cursor-pointer
                   ${isActivePath ? "shadow-sm" : "border-transparent hover:border-border hover:bg-muted/50"}`}
                 style={{
                   animationDelay: `${i * 35}ms`,
-                  ...(isActivePath ? {
-                    borderColor: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.45)`,
-                    background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.08)`,
-                  } : {}),
+                  ...(isActivePath
+                    ? {
+                        borderColor: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.45)`,
+                        background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.08)`,
+                      }
+                    : {}),
                 }}
               >
                 <div className="relative w-9 h-9 flex items-center justify-center">
                   <div
                     className={`absolute inset-0 rounded-xl transition-all duration-200 ${isActivePath ? "" : "bg-muted/60 group-hover:bg-muted"}`}
-                    style={isActivePath ? { background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.16)` } : undefined}
+                    style={
+                      isActivePath
+                        ? {
+                            background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.16)`,
+                          }
+                        : undefined
+                    }
                   />
                   <div
                     className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                    style={{ boxShadow: `0 0 0 1.5px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35), 0 4px 12px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.2)` }}
+                    style={{
+                      boxShadow: `0 0 0 1.5px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35), 0 4px 12px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.2)`,
+                    }}
                   />
                   <div
                     className="setup-icon-shimmer absolute inset-0 rounded-xl pointer-events-none opacity-0 group-hover:opacity-100"
@@ -479,7 +533,11 @@ const SetupDropdown = ({
                 <span
                   className={`text-[9px] font-heading text-center leading-tight line-clamp-2 transition-colors duration-150
                     ${isActivePath ? "font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
-                  style={isActivePath ? { color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l))` } : undefined}
+                  style={
+                    isActivePath
+                      ? { color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l))` }
+                      : undefined
+                  }
                 >
                   {label}
                 </span>
@@ -503,11 +561,15 @@ const SetupDropdown = ({
         <div className="flex items-center gap-1">
           <div
             className="w-1.5 h-1.5 rounded-full"
-            style={{ background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.7)` }}
+            style={{
+              background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.7)`,
+            }}
           />
           <p
             className="text-[9px] font-heading font-medium"
-            style={{ color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)` }}
+            style={{
+              color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)`,
+            }}
           >
             {moduleLabel} Module
           </p>
@@ -596,7 +658,7 @@ export const TopNavbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { activeModule } = useModule();
-  const { currentUser } = useAuth();
+  const { currentUser, canAccessPage } = useAuth();
   const { navCollapsed, setNavCollapsed } = useNavbarCollapse();
   const { handleLogout, overlay: logoutOverlay } = useGracefulLogout();
 
@@ -630,6 +692,10 @@ export const TopNavbar = () => {
       ADMIN_PATHS.some((p) => location.pathname.startsWith(p)));
   const isDbaPage = isDba && location.pathname.startsWith("/dba");
 
+  const activeGlowRgb =
+    MODULE_GLOW_RGB[isAdminPage ? "admin" : (activeModule ?? "finance")] ??
+    MODULE_GLOW_RGB.finance;
+
   const RoleIcon = isSuperAdmin
     ? Crown
     : isDba
@@ -643,6 +709,15 @@ export const TopNavbar = () => {
       ? "bg-emerald-600"
       : "bg-blue-600";
 
+  const isPrivilegedUser = ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "");
+
+  // Filter setup items by page rights for non-privileged users.
+  // Items without a pageKey are always shown.
+  const filterSetupItems = (items: SetupItem[]): SetupItem[] => {
+    if (isPrivilegedUser) return items;
+    return items.filter((item) => !item.pageKey || canAccessPage(item.pageKey as any));
+  };
+
   const setupConfig = (() => {
     const makeColorStyle = (id: string) =>
       ({
@@ -654,35 +729,35 @@ export const TopNavbar = () => {
 
     if (isAdminPage)
       return {
-        items: adminSetupItems,
+        items: filterSetupItems(adminSetupItems),
         label: "Admin",
         colorStyle: makeColorStyle("admin"),
         available: true,
       };
     if (activeModule === "material")
       return {
-        items: materialSetupItems,
+        items: filterSetupItems(materialSetupItems),
         label: "Material",
         colorStyle: makeColorStyle("material"),
         available: true,
       };
     if (activeModule === "followup")
       return {
-        items: followupSetupItems,
+        items: filterSetupItems(followupSetupItems),
         label: "Follow-Up",
         colorStyle: makeColorStyle("followup"),
         available: true,
       };
     if (activeModule === "engineering")
       return {
-        items: engineeringSetupItems,
+        items: filterSetupItems(engineeringSetupItems),
         label: "Engineering",
         colorStyle: makeColorStyle("engineering"),
         available: true,
       };
     if (activeModule === "finance")
       return {
-        items: financeSetupItems,
+        items: filterSetupItems(financeSetupItems),
         label: "Finance",
         colorStyle: makeColorStyle("finance"),
         available: true,
@@ -877,44 +952,55 @@ export const TopNavbar = () => {
         {/* ── Center pill nav — absolute center of the header ── */}
         <nav
           className={`hidden md:flex items-center gap-0.5 absolute left-1/2 ${pillNavClass}`}
-          style={isDark ? {
-            borderRadius: "9999px",
-            padding: "0.25rem",
-            background: "rgba(15, 17, 26, 0.52)",
-            border: "1px solid rgba(255,255,255,0.13)",
-            boxShadow: "0 2px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.10)",
-            backdropFilter: "blur(22px) saturate(160%)",
-            WebkitBackdropFilter: "blur(22px) saturate(160%)",
-          } : {
-            borderRadius: "9999px",
-            padding: "0.25rem",
-            background: "rgba(255,255,255,0.42)",
-            border: "1px solid rgba(255,255,255,0.65)",
-            boxShadow: "0 2px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.85)",
-            backdropFilter: "blur(22px) saturate(180%)",
-            WebkitBackdropFilter: "blur(22px) saturate(180%)",
-          }}
+          style={
+            isDark
+              ? {
+                  borderRadius: "9999px",
+                  padding: "0.25rem",
+                  background: "rgba(15, 17, 26, 0.52)",
+                  border: "1px solid rgba(255,255,255,0.13)",
+                  boxShadow:
+                    "0 2px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.10)",
+                  backdropFilter: "blur(22px) saturate(160%)",
+                  WebkitBackdropFilter: "blur(22px) saturate(160%)",
+                }
+              : {
+                  borderRadius: "9999px",
+                  padding: "0.25rem",
+                  background: "rgba(255,255,255,0.42)",
+                  border: "1px solid rgba(255,255,255,0.65)",
+                  boxShadow:
+                    "0 2px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.85)",
+                  backdropFilter: "blur(22px) saturate(180%)",
+                  WebkitBackdropFilter: "blur(22px) saturate(180%)",
+                }
+          }
         >
-          {/* Dot grid + glow — clipped to pill */}
-          <div className="absolute inset-0 rounded-full overflow-hidden pointer-events-none z-0">
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                backgroundImage:
-                  "radial-gradient(circle, hsl(var(--foreground) / 0.10) 1px, transparent 1px)",
-                backgroundSize: "14px 14px",
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                background:
-                  "radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.22) 0%, transparent 70%)",
-              }}
-            />
-          </div>
+          {/* Dot grid + glow — clipped to pill, tracks active module color */}
+          {(() => {
+            const modKey = isAdminPage ? "admin" : (activeModule ?? "finance");
+            const glowRgb = MODULE_GLOW_RGB[modKey] ?? MODULE_GLOW_RGB.finance;
+            return (
+              <div className="absolute inset-0 rounded-full overflow-hidden pointer-events-none z-0">
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    backgroundImage:
+                      "radial-gradient(circle, hsl(var(--foreground) / 0.10) 1px, transparent 1px)",
+                    backgroundSize: "14px 14px",
+                  }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: `radial-gradient(ellipse at 50% 0%, rgba(${glowRgb},0.38) 0%, rgba(${glowRgb},0.12) 50%, transparent 80%)`,
+                  }}
+                />
+              </div>
+            );
+          })()}
 
           {/* Content — sits above glow */}
           <div className="relative z-10 flex items-center gap-0.5">
@@ -964,8 +1050,7 @@ export const TopNavbar = () => {
             <span
               className="absolute -inset-[2px] rounded-full pointer-events-none opacity-70"
               style={{
-                background:
-                  "conic-gradient(from 0deg, transparent 60%, hsl(var(--primary) / 0.7) 80%, transparent 100%)",
+                background: `conic-gradient(from 0deg, transparent 60%, rgba(${activeGlowRgb},0.85) 80%, transparent 100%)`,
                 animation: "spin-ring 3s linear infinite",
               }}
             />

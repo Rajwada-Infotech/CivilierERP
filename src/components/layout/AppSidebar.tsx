@@ -17,6 +17,7 @@ import {
   Package,
   ShieldCheck,
   ShelvingUnit,
+  Archive,
   User,
   Wrench,
 } from "lucide-react";
@@ -31,7 +32,8 @@ import { dbaNavItems } from "./sidebars/DbaSidebar";
 import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
 import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { salesNavItems } from "./sidebars/SalesSidebar";
-import { SidebarNav, NavItem } from "./sidebars/SidebarPrimitives";
+import { recordsNavItems } from "./sidebars/RecordsSidebar";
+import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar ──────────────────────────────────────────────────────────────
 const userNavItems: NavItem[] = [
@@ -91,6 +93,13 @@ const MODULE_HEADER: Record<
     color: "#a855f7",
     from: "from-purple-500/30",
     to: "to-purple-500/0",
+  },
+  records: {
+    label: "Records",
+    icon: Archive,
+    color: "#f59e0b",
+    from: "from-amber-500/30",
+    to: "to-amber-500/0",
   },
   admin: {
     label: "Admin",
@@ -186,8 +195,37 @@ export const AppSidebar = () => {
   const { version } = useAppVersion();
   const pendingApprovalCount = useApprovalCount();
 
+  const { canAccessPage } = useAuth();
+
   const role = currentUser?.role ?? "";
   const isAdminTier = ["super_admin", "admin", "dba"].includes(role);
+
+  // Filter nav items by user's page rights.
+  // Privileged roles always see everything.
+  // For regular users: leaf items (path only) are hidden if no view right.
+  // Group items (children) have their children filtered — the group disappears
+  // entirely if all its children are hidden.
+  const filterByRights = (items: NavItem[]): NavItem[] => {
+    if (isAdminTier) return items;
+    return items.reduce<NavItem[]>((acc, item) => {
+      if (item.children) {
+        const visibleChildren = item.children.filter(
+          (child: SubItem) =>
+            !child.pageKey || canAccessPage(child.pageKey as any),
+        );
+        if (visibleChildren.length > 0) {
+          acc.push({ ...item, children: visibleChildren });
+        }
+      } else if (item.sections) {
+        acc.push(item); // sections don't have individual pageKeys yet
+      } else {
+        if (!item.pageKey || canAccessPage(item.pageKey as any)) {
+          acc.push(item);
+        }
+      }
+      return acc;
+    }, []);
+  };
 
   const ADMIN_SETUP_PATHS = [
     "/masters/named-entry-type",
@@ -215,24 +253,37 @@ export const AppSidebar = () => {
     if (isDbaPage) return dbaNavItems;
     if (isUserProfilePage) return userNavItems;
     if (isAdminPage) return buildAdminNavItems(pendingApprovalCount);
+
+    let raw: NavItem[] = [];
     switch (activeModule) {
       case "engineering":
-        return engineeringNavItems;
+        raw = engineeringNavItems;
+        break;
       case "finance":
-        return buildFinanceNavItems(overdueCount);
+        raw = buildFinanceNavItems(overdueCount);
+        break;
       case "material":
-        return materialNavItems;
+        raw = materialNavItems;
+        break;
       case "followup":
-        return followupNavItems;
+        raw = followupNavItems;
+        break;
       case "ticket":
-        return buildTicketNavItems(isAdminTier);
+        raw = buildTicketNavItems(isAdminTier);
+        break;
       case "sales":
-        return salesNavItems;
+        raw = salesNavItems;
+        break;
+      case "records":
+        raw = recordsNavItems;
+        break;
       case "admin":
-        return buildAdminNavItems(pendingApprovalCount);
+        raw = buildAdminNavItems(pendingApprovalCount);
+        break;
       default:
-        return [];
+        raw = [];
     }
+    return filterByRights(raw);
   };
 
   // Resolve which header to show
@@ -352,7 +403,11 @@ export const AppSidebar = () => {
           transition={{ duration: 0.2, ease: "easeOut", delay: 0.06 }}
           className="relative z-10 flex-1 overflow-y-auto p-2 space-y-0.5"
         >
-          <SidebarNav items={getNavItems()} collapsed={false} />
+          <SidebarNav
+            items={getNavItems()}
+            collapsed={false}
+            accentColor={accentColor}
+          />
         </motion.div>
 
         {/* ── Footer ──────────────────────────────────────────────────────────── */}
