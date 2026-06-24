@@ -248,16 +248,16 @@ const EMPTY_FORM = (): POForm => ({
 // ─── Shared styles (matching WorkOrderMaster) ─────────────────────────────────
 
 const inputCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer";
+  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer";
 
 const selectCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none";
+  "w-full text-sm rounded-lg border border-border px-3 py-2.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
 
 const cellInput =
-  "w-full text-sm rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
+  "w-full text-sm rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition";
 
 const cellSelect =
-  "w-full text-sm rounded-md border border-border px-2.5 py-1.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none";
+  "w-full text-sm rounded-md border border-border px-2.5 py-1.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
 
 const FieldLabel: React.FC<{
   children: React.ReactNode;
@@ -295,7 +295,7 @@ const getStatusConfig = (status: string) => {
   if (s === "partially received")
     return {
       icon: <AlertCircle size={12} />,
-      cls: "bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800",
+      cls: "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800",
     };
   return {
     icon: <FileText size={12} />,
@@ -1813,7 +1813,7 @@ const PurchaseOrderMaster: React.FC = () => {
                           </span>
                           {item.poType === "WO_PO" && (
                             <span
-                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
                               title={
                                 item.sourceWODocNo
                                   ? `From Work Order: ${item.sourceWODocNo}`
@@ -2203,7 +2203,7 @@ const PurchaseOrderMaster: React.FC = () => {
           !isReadOnly && (
             <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
               <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                <ClipboardList size={11} className="text-primary" />
+                <ClipboardList size={11} className="text-emerald-600 dark:text-emerald-400" />
                 Load from Material Request
               </h3>
               <p className="text-xs text-muted-foreground mb-3">
@@ -2337,12 +2337,12 @@ const PurchaseOrderMaster: React.FC = () => {
         )}
 
         {sourceWO && !isReadOnly && (
-          <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-4 py-3 flex items-center gap-3 text-sm">
+          <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 flex items-center gap-3 text-sm">
             <ClipboardList
               size={15}
-              className="text-blue-600 dark:text-blue-400 shrink-0"
+              className="text-emerald-600 dark:text-emerald-400 shrink-0"
             />
-            <span className="text-blue-700 dark:text-blue-300">
+            <span className="text-emerald-700 dark:text-emerald-300">
               Creating <span className="font-semibold">Material PO</span> from
               Work Order{" "}
               <span className="font-mono font-bold">{sourceWO.docNo}</span>.
@@ -2354,7 +2354,7 @@ const PurchaseOrderMaster: React.FC = () => {
         {!isReadOnly && (
           <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-4">
-              <Hash size={11} className="text-primary" />
+              <Hash size={11} className="text-emerald-600 dark:text-emerald-400" />
               Document Configuration
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2394,7 +2394,7 @@ const PurchaseOrderMaster: React.FC = () => {
                         size={13}
                         className="text-muted-foreground shrink-0"
                       />
-                      <span className="font-mono text-xs font-semibold text-primary">
+                      <span className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
                         WO_PO
                       </span>
                       <span className="text-xs opacity-40">·</span>
@@ -2404,7 +2404,7 @@ const PurchaseOrderMaster: React.FC = () => {
                     </div>
                     {poDocNo && (
                       <div className="flex items-center gap-2 px-1">
-                        <span className="font-mono text-sm font-bold text-primary tracking-wider">
+                        <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 tracking-wider">
                           {poDocNo}
                         </span>
                         {selectedFinYear && (
@@ -2434,7 +2434,7 @@ const PurchaseOrderMaster: React.FC = () => {
         {/* ── Header Details Card ───────────────────────────────────────────── */}
         <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-4">
-            <FileText size={11} className="text-primary" />
+            <FileText size={11} className="text-emerald-600 dark:text-emerald-400" />
             Order Details
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -2605,7 +2605,7 @@ const PurchaseOrderMaster: React.FC = () => {
             {supplierDetails && (
               <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
                 <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                  <Truck size={11} className="text-primary" />
+                  <Truck size={11} className="text-emerald-600 dark:text-emerald-400" />
                   Supplier Details
                 </h3>
                 <dl className="space-y-2 text-sm">
@@ -2657,7 +2657,7 @@ const PurchaseOrderMaster: React.FC = () => {
                       <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                         GSTIN
                       </dt>
-                      <dd className="font-mono text-xs font-semibold text-primary mt-0.5 bg-primary/5 px-2 py-1 rounded-md inline-block">
+                      <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
                         {supplierDetails.LGST}
                       </dd>
                     </div>
@@ -2670,7 +2670,7 @@ const PurchaseOrderMaster: React.FC = () => {
             {companyDetails && (
               <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
                 <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                  <CircleDollarSign size={11} className="text-primary" />
+                  <CircleDollarSign size={11} className="text-emerald-600 dark:text-emerald-400" />
                   Company Details
                 </h3>
                 <dl className="space-y-2 text-sm">
@@ -2697,7 +2697,7 @@ const PurchaseOrderMaster: React.FC = () => {
                       <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                         GSTIN
                       </dt>
-                      <dd className="font-mono text-xs font-semibold text-primary mt-0.5 bg-primary/5 px-2 py-1 rounded-md inline-block">
+                      <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
                         {companyDetails.gst_no}
                       </dd>
                     </div>
@@ -2734,20 +2734,22 @@ const PurchaseOrderMaster: React.FC = () => {
         <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
           <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/20">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-              <Boxes size={11} className="text-primary" />
+              <Boxes size={11} className="text-emerald-600 dark:text-emerald-400" />
               Item Cart
-              <span className="ml-1 inline-flex items-center justify-center rounded-full bg-primary/10 text-primary text-[10px] font-bold px-1.5 py-0.5 min-w-[18px]">
+              <span className="ml-1 inline-flex items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 min-w-[18px]">
                 {lineItems.length}
               </span>
             </h3>
             {!isReadOnly && (
-              <button
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
                 onClick={addLine}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition"
+                className="gap-1.5 h-8 text-xs"
               >
-                <Plus size={13} />
-                Add Item
-              </button>
+                <Plus size={13} /> Add Item
+              </Button>
             )}
           </div>
 
@@ -2942,7 +2944,7 @@ const PurchaseOrderMaster: React.FC = () => {
                     <td className="px-3 py-2 text-center">
                       {li.gstRate > 0 ? (
                         <div className="flex flex-col items-center gap-0.5">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-semibold">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold">
                             {li.gstRate}%
                           </span>
                           {li.igstRate > 0 ? (
@@ -3040,7 +3042,7 @@ const PurchaseOrderMaster: React.FC = () => {
                 )}
                 <div className="flex justify-between text-base font-bold text-foreground border-t border-border pt-2">
                   <span>Grand Total</span>
-                  <span className="font-mono text-primary">
+                  <span className="font-mono text-emerald-600 dark:text-emerald-400">
                     {fmt(grandTotal)}
                   </span>
                 </div>
@@ -3053,14 +3055,14 @@ const PurchaseOrderMaster: React.FC = () => {
         <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-              <ClipboardList size={11} className="text-primary" />
+              <ClipboardList size={11} className="text-emerald-600 dark:text-emerald-400" />
               Terms &amp; Conditions
             </h3>
             {!isReadOnly && (
               <div className="relative">
                 <button
                   onClick={() => setTcDropdownOpen((o) => !o)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition"
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border bg-background text-xs font-medium hover:bg-muted transition-colors"
                 >
                   <Plus size={13} />
                   Add T&amp;C
@@ -3099,10 +3101,10 @@ const PurchaseOrderMaster: React.FC = () => {
                                       : [...prev, tc],
                                   );
                                 }}
-                                className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSelected ? "bg-primary/5" : ""}`}
+                                className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSelected ? "bg-emerald-500/[0.05]" : ""}`}
                               >
                                 <span
-                                  className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? "bg-primary border-primary" : "border-border"}`}
+                                  className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? "bg-emerald-500 border-emerald-500" : "border-border"}`}
                                 >
                                   {isSelected && (
                                     <Check
@@ -3147,7 +3149,7 @@ const PurchaseOrderMaster: React.FC = () => {
                   key={tc.id}
                   className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3"
                 >
-                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center mt-0.5">
+                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold flex items-center justify-center mt-0.5">
                     {idx + 1}
                   </span>
                   <div className="flex-1 min-w-0">
@@ -3203,7 +3205,7 @@ const PurchaseOrderMaster: React.FC = () => {
         {isReadOnly && (
           <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-4">
-              <Link2 size={11} className="text-primary" />
+              <Link2 size={11} className="text-emerald-600 dark:text-emerald-400" />
               Purchase Flow Status
             </h3>
 
@@ -3291,14 +3293,14 @@ const PurchaseOrderMaster: React.FC = () => {
                 <div
                   className={`rounded-xl border p-3 flex items-start gap-3 ${
                     poChainStatus?.isPaid
-                      ? "border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20"
+                      ? "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20"
                       : "border-border bg-muted/20"
                   }`}
                 >
                   <div
                     className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
                       poChainStatus?.isPaid
-                        ? "bg-blue-100 dark:bg-blue-950/40"
+                        ? "bg-emerald-100 dark:bg-emerald-950/40"
                         : "bg-muted"
                     }`}
                   >
@@ -3306,7 +3308,7 @@ const PurchaseOrderMaster: React.FC = () => {
                       size={13}
                       className={
                         poChainStatus?.isPaid
-                          ? "text-blue-600 dark:text-blue-400"
+                          ? "text-emerald-600 dark:text-emerald-400"
                           : "text-muted-foreground"
                       }
                     />
@@ -3317,7 +3319,7 @@ const PurchaseOrderMaster: React.FC = () => {
                     </p>
                     {poChainStatus?.isPaid ? (
                       <>
-                        <p className="text-xs font-semibold text-blue-700 dark:text-blue-400">
+                        <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
                           {poChainStatus.paymentCount} payment
                           {poChainStatus.paymentCount > 1 ? "s" : ""}
                         </p>
@@ -3343,35 +3345,34 @@ const PurchaseOrderMaster: React.FC = () => {
         )}
 
         {/* Bottom action bar */}
-        {!isReadOnly && (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pb-6">
-            <p className="hidden sm:block text-xs text-muted-foreground">Ready to save</p>
-            <div className="flex gap-3 sm:ml-auto">
-              <button
-                onClick={goToCreate}
-                disabled={saving || saved}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition disabled:opacity-50"
-              >
-                <RotateCcw size={14} />
-                Reset
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving || saved}
-                className="flex-1 sm:flex-none whitespace-nowrap bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center justify-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
-              >
-                {saved ? (
-                  <Check size={14} />
-                ) : saving ? (
-                  <RefreshCw size={14} className="animate-spin" />
-                ) : (
-                  <Save size={14} />
-                )}
-                {saved ? "Saved!" : saving ? "Saving…" : "Save Purchase Order"}
-              </button>
+        {!isReadOnly && (() => {
+          const poCanSave = !!(form.supplierId && form.companyId && form.projectId && lineItems.some((li) => li.itemName || li.rate > 0));
+          const poIsDirty = !!(form.supplierId || form.companyId || form.projectId || form.remarks || form.expectedDate || lineItems.some((li) => li.itemName || li.rate > 0));
+          return (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border pb-6">
+              <p className="text-[11px] text-muted-foreground hidden sm:block">
+                {saved ? <span className="text-emerald-500 font-medium">Saved!</span> : poCanSave ? <span className="text-emerald-500 font-medium">Ready to save</span> : "Fill in the required fields to save"}
+              </p>
+              <div className="flex items-center gap-2 sm:ml-auto">
+                <button
+                  onClick={goToCreate}
+                  disabled={saving || saved || !poIsDirty}
+                  className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <RotateCcw size={12} /> Reset
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || saved || !poCanSave}
+                  className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                >
+                  {saved ? <Check size={14} /> : saving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />}
+                  {saved ? "Saved!" : saving ? "Saving…" : "Save Purchase Order"}
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
       </MaterialShell>
     </>

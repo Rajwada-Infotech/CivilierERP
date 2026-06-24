@@ -165,7 +165,7 @@ const AccessCardMaster = () => {
   const columnRenderers = {
     cardNumber: (value: unknown) => (
       <div className="flex items-center gap-2 min-w-[140px]">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
           <FileBadge2 size={15} />
         </span>
         <span className="font-heading font-semibold text-foreground">
@@ -175,12 +175,12 @@ const AccessCardMaster = () => {
     ),
     cardType: (value: unknown) => (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 px-2.5 py-1 text-[11px] font-heading text-foreground">
-        <BadgeCheck size={11} className="text-primary" />
+        <BadgeCheck size={11} className="text-emerald-600 dark:text-emerald-400" />
         {String(value ?? "")}
       </span>
     ),
     accessLevel: (value: unknown) => (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] font-heading text-primary">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-heading text-emerald-600 dark:text-emerald-400">
         <ShieldCheck size={11} />
         {String(value ?? "")}
       </span>

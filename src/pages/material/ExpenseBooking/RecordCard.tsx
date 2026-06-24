@@ -37,7 +37,7 @@ export function RecordCard({
           <p className="text-[10px] text-muted-foreground font-medium truncate">
             {rec.docTypeName || "No Doc Type"}
           </p>
-          <p className="font-mono text-xs font-semibold text-primary">
+          <p className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
             {rec.bookingReference || "—"}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5 truncate">
@@ -71,7 +71,7 @@ export function RecordCard({
         <div>
           <span className="text-muted-foreground">EMI: </span>
           {rec.emi.enabled ? (
-            <span className="text-primary font-medium">
+            <span className="text-emerald-600 dark:text-emerald-400 font-medium">
               {rec.emi.installmentCount}x
             </span>
           ) : (

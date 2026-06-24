@@ -83,7 +83,7 @@ const COLUMNS: ColumnDef[] = [
 const columnRenderers = {
   name: (value: unknown) => (
     <div className="flex items-center gap-2">
-      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
         <FileText size={13} />
       </div>
       <span className="font-heading font-semibold text-sm">

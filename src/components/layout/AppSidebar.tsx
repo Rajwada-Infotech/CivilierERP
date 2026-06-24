@@ -352,7 +352,7 @@ export const AppSidebar = () => {
           transition={{ duration: 0.2, ease: "easeOut", delay: 0.06 }}
           className="relative z-10 flex-1 overflow-y-auto p-2 space-y-0.5"
         >
-          <SidebarNav items={getNavItems()} collapsed={false} />
+          <SidebarNav items={getNavItems()} collapsed={false} accentColor={accentColor} />
         </motion.div>
 
         {/* ── Footer ──────────────────────────────────────────────────────────── */}

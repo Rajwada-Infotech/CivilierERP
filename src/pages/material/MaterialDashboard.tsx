@@ -127,8 +127,8 @@ const statusColors: Record<string, string> = {
   "Partially Ordered": "bg-purple-500/10 text-purple-600 border-purple-400/20",
   Pending: "bg-amber-500/10 text-amber-600 border-amber-400/20",
   Draft: "bg-muted text-muted-foreground border-border",
-  Open: "bg-blue-500/10 text-blue-600 border-blue-400/20",
-  "Partially Received": "bg-blue-500/10 text-blue-600 border-blue-400/20",
+  Open: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
+  "Partially Received": "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
   Rejected: "bg-red-500/10 text-red-500 border-red-400/20",
   Cancelled: "bg-red-500/10 text-red-500 border-red-400/20",
 };
@@ -327,7 +327,7 @@ function StatusBreakdown({
                 ? "bg-amber-500"
                 : r.Status === "Rejected" || r.Status === "Cancelled"
                   ? "bg-red-500"
-                  : "bg-blue-500";
+                  : "bg-emerald-500";
 
           return (
             <div key={r.Status} className="space-y-0.5">
@@ -369,7 +369,7 @@ function makeRecentCols(
       accessorKey: docNoKey,
       header: "Doc No",
       cell: ({ row }: any) => (
-        <span className="font-mono text-xs font-medium text-primary">
+        <span className="font-mono text-xs font-medium text-emerald-600 dark:text-emerald-400">
           {row.original[docNoKey] || `#${row.original[docNoFallback]}`}
         </span>
       ),
@@ -446,7 +446,7 @@ const ISSUE_DASH_COLS: ColumnDef<any, unknown>[] = [
     accessorKey: "DocNo",
     header: "Doc No",
     cell: ({ row }: any) => (
-      <span className="font-mono text-xs font-medium text-primary">
+      <span className="font-mono text-xs font-medium text-emerald-600 dark:text-emerald-400">
         {row.original.DocNo || `#${row.original.IssueId}`}
       </span>
     ),
@@ -491,7 +491,7 @@ const REQUEST_DASH_COLS: ColumnDef<any, unknown>[] = [
     accessorKey: "DocNo",
     header: "Doc No",
     cell: ({ row }: any) => (
-      <span className="font-mono text-xs font-medium text-primary">
+      <span className="font-mono text-xs font-medium text-emerald-600 dark:text-emerald-400">
         {row.original.DocNo || `#${row.original.MRId}`}
       </span>
     ),
@@ -523,7 +523,7 @@ const REQUEST_DASH_COLS: ColumnDef<any, unknown>[] = [
         p === "High" || p === "Urgent"
           ? "bg-red-500/10 text-red-600 border-red-400/20"
           : p === "Normal"
-            ? "bg-blue-500/10 text-blue-600 border-blue-400/20"
+            ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/20"
             : "bg-muted text-muted-foreground border-border";
       return (
         <span
@@ -549,7 +549,7 @@ const ITEMS_MODAL_COLS: ColumnDef<any, unknown>[] = [
     accessorKey: "M_code",
     header: "Code",
     cell: ({ getValue }: any) => (
-      <span className="font-mono text-xs text-primary">
+      <span className="font-mono text-xs text-emerald-600 dark:text-emerald-400">
         {(getValue() as string) || "—"}
       </span>
     ),
@@ -1170,7 +1170,7 @@ export default function MaterialDashboard() {
                       }
                     >
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-foreground font-medium group-hover:text-primary transition-colors">
+                        <span className="text-foreground font-medium group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
                           {label}
                         </span>
                         <span className="text-muted-foreground">
@@ -1296,7 +1296,7 @@ export default function MaterialDashboard() {
               )}
               {openModal === "grns" && (
                 <>
-                  <Truck size={16} className="text-blue-600" /> GRN List{" "}
+                  <Truck size={16} className="text-emerald-600" /> GRN List{" "}
                   {grnsData && (
                     <span className="ml-1 text-xs font-normal text-muted-foreground">
                       ({grnsData.length} records)
@@ -1493,7 +1493,7 @@ export default function MaterialDashboard() {
                       accessorKey: "DocNo",
                       header: "Ref Doc",
                       cell: ({ getValue }: any) => (
-                        <span className="font-mono text-xs text-primary">
+                        <span className="font-mono text-xs text-emerald-600 dark:text-emerald-400">
                           {(getValue() as string) || "—"}
                         </span>
                       ),
