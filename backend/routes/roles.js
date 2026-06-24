@@ -111,6 +111,12 @@ router.post(
         OUTPUT INSERTED.*
         VALUES (@RName, @RCode, @RDesc, @RCreatedBy)
       `);
+
+      // Invalidate cached GET /api/roles and /api/roles/list so the new
+      // row is visible immediately instead of waiting out the cache TTL.
+      await bumpCacheVersion("roles");
+      await bumpCacheVersion("roles:list");
+
       res.status(201).json(result.recordset[0]);
     } catch (err) {
       console.error("CREATE ROLE ERROR:", err);
@@ -171,6 +177,12 @@ router.put(
           WHERE RId=@RId
         `);
       }
+
+      // Invalidate cached GET /api/roles and /api/roles/list so the update
+      // is visible immediately instead of waiting out the cache TTL.
+      await bumpCacheVersion("roles");
+      await bumpCacheVersion("roles:list");
+
       res.json({ success: true, message: "Role updated successfully" });
     } catch (err) {
       console.error("UPDATE ROLE ERROR:", err);
@@ -193,6 +205,12 @@ router.delete(
         .request()
         .input("RId", sql.Int, parseInt(req.params.id))
         .query("DELETE FROM dbo.Role WHERE RId=@RId");
+
+      // Invalidate cached GET /api/roles and /api/roles/list so the
+      // deletion is reflected immediately instead of waiting out the TTL.
+      await bumpCacheVersion("roles");
+      await bumpCacheVersion("roles:list");
+
       res.json({ success: true, message: "Role deleted successfully" });
     } catch (err) {
       console.error("DELETE ROLE ERROR:", err);
@@ -292,7 +310,9 @@ router.post("/:roleId/rights", authMiddleware, async (req, res) => {
     try {
       const { permissionCache } = require("../middleware/permissions");
       permissionCache.invalidateRole(roleId);
-    } catch { /* permissions module not loaded yet — no-op */ }
+    } catch {
+      /* permissions module not loaded yet — no-op */
+    }
 
     return res.json({ success: true });
   } catch (err) {
@@ -302,7 +322,3 @@ router.post("/:roleId/rights", authMiddleware, async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
