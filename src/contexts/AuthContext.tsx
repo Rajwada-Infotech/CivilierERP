@@ -170,6 +170,37 @@ export const AuthProvider = ({
         /* silently ignore — avatar is cosmetic */
       });
   }, [currentUser?.id]);
+
+  // ── POLL RIGHTS EVERY 5 MIN ───────────────────────────────────────────────
+  // When an admin changes a user's rights via MenuRights, the backend cache is
+  // busted immediately but the user's active browser session still holds the
+  // old pagePermissions in state and localStorage. This poll detects changes
+  // and refreshes without forcing a re-login.
+  useEffect(() => {
+    const PRIVILEGED = ["super_admin", "admin", "dba"];
+    if (!currentUser?.id || PRIVILEGED.includes(currentUser.role)) return;
+
+    const fetchRights = () => {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+      fetch("/api/user-rights/my", { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((result) => {
+          if (!result?.rightsJson || !Array.isArray(result.rightsJson)) return;
+          setCurrentUser((prev) => {
+            if (!prev) return prev;
+            const updated = { ...prev, pagePermissions: result.rightsJson };
+            localStorage.setItem("user", JSON.stringify(updated));
+            return updated;
+          });
+        })
+        .catch(() => {});
+    };
+
+    const interval = setInterval(fetchRights, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [currentUser?.id, currentUser?.role]);
+
   const login = useCallback(async (email: string, password: string) => {
     try {
       const data = await loginUser(email, password);
@@ -203,21 +234,27 @@ export const AuthProvider = ({
       // subscribeToActivityStream (which would use the token from mount time).
       connectSocket();
 
-      setCurrentUser(userWithInitials);
-      // Fetch fresh permissions from DB for non-privileged roles
+      // Fetch fresh permissions from DB for non-privileged roles.
+      // Awaited so the user session has correct rights before the redirect.
       if (!["super_admin", "admin", "dba"].includes(data.user.role)) {
-        fetch("/api/user-rights/my", {
-          headers: { Authorization: `Bearer ${data.token}` },
-        })
-          .then(r => r.ok ? r.json() : null)
-          .then(result => {
-            if (result?.rightsJson && Array.isArray(result.rightsJson) && result.rightsJson.length > 0) {
-              const updated = { ...userWithInitials, pagePermissions: result.rightsJson };
-              localStorage.setItem("user", JSON.stringify(updated));
-              setCurrentUser(updated);
-            }
-          })
-          .catch(() => {});
+        try {
+          const rightsRes = await fetch("/api/user-rights/my", {
+            headers: { Authorization: `Bearer ${data.token}` },
+          });
+          const rightsData = rightsRes.ok ? await rightsRes.json() : null;
+          if (rightsData?.rightsJson && Array.isArray(rightsData.rightsJson) && rightsData.rightsJson.length > 0) {
+            const updated = { ...userWithInitials, pagePermissions: rightsData.rightsJson };
+            localStorage.setItem("user", JSON.stringify(updated));
+            setCurrentUser(updated);
+          } else {
+            setCurrentUser(userWithInitials);
+          }
+        } catch {
+          // Network error — fall back to JWT-embedded permissions
+          setCurrentUser(userWithInitials);
+        }
+      } else {
+        setCurrentUser(userWithInitials);
       }
 
       // Fire-and-forget: log the login event to UserActivityLog.

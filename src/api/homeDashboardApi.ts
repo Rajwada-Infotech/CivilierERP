@@ -11,6 +11,7 @@ export interface FinanceDashboardData {
     todayCount: number;
     totalAmount: number;
     todayAmount: number;
+    thisMonthAmount: number;
   };
   purchaseOrders: {
     totalCount: number;
@@ -48,6 +49,7 @@ interface FinanceDashboardApiData {
     todayCount: number;
     totalAmount: number;
     todayAmount: number;
+    thisMonthAmount?: number;
   };
   receivedPayments?: {
     totalCount: number;
@@ -220,6 +222,7 @@ function normalizeFinanceDashboard(
       todayCount: raw.paymentsMade?.todayCount ?? 0,
       totalAmount: raw.paymentsMade?.totalAmount ?? 0,
       todayAmount: raw.paymentsMade?.todayAmount ?? 0,
+      thisMonthAmount: raw.paymentsMade?.thisMonthAmount ?? 0,
     },
     purchaseOrders: raw.purchaseOrders ?? {
       totalCount: 0,
@@ -247,24 +250,26 @@ function normalizeFinanceDashboard(
 
 // ─── Main fetcher ─────────────────────────────────────────────────────────────
 
-const FINANCE_ROLES = [
-  "admin",
-  "super_admin",
-  "dba",
-  "finance_manager",
-  "branch_manager",
-];
-
 export async function fetchHomeDashboard(
   isAdmin: boolean,
-  role?: string,
+  moduleAccess?: {
+    finance?: boolean;
+    material?: boolean;
+    engineering?: boolean;
+    followup?: boolean;
+    ticket?: boolean;
+    sales?: boolean;
+  },
 ): Promise<HomeDashboardData> {
-  const hasFinanceAccess = FINANCE_ROLES.includes(role ?? "");
+  const hasFinanceAccess = moduleAccess?.finance ?? false;
+  const hasMaterialAccess = moduleAccess?.material ?? false;
   const baseRequests = [
     hasFinanceAccess
       ? safeFetch<FinanceDashboardApiData>("/api/finance-dashboard")
       : Promise.resolve({ data: null, error: null }),
-    safeFetch<MaterialDashboardData>("/api/material-dashboard"),
+    hasMaterialAccess
+      ? safeFetch<MaterialDashboardData>("/api/material-dashboard")
+      : Promise.resolve({ data: null, error: null }),
     safeFetch<ApprovalInboxItem[]>("/api/approval-inbox"),
     safeFetch<{ data: TaskSummary[] }>(
       "/api/tasks?limit=5&sort=dueDate&order=asc",
