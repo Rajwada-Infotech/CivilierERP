@@ -157,14 +157,14 @@ function GodownBadge({
   isMain?: boolean;
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary/10 text-primary text-xs font-semibold border border-primary/20">
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold border border-emerald-500/20">
       <Warehouse size={11} />
       {name}
       {code && (
-        <span className="font-mono text-[10px] text-primary/70">({code})</span>
+        <span className="font-mono text-[10px] text-emerald-600/70 dark:text-emerald-400/70">({code})</span>
       )}
       {isMain && (
-        <span className="px-1 py-0 rounded bg-primary/20 text-[9px] font-bold uppercase tracking-wider">
+        <span className="px-1 py-0 rounded bg-emerald-500/20 text-[9px] font-bold uppercase tracking-wider">
           Main
         </span>
       )}
@@ -583,7 +583,7 @@ export default function Issues() {
       accessorKey: "DocNo",
       header: "Doc No",
       cell: ({ row, getValue }) => (
-        <span className="font-mono font-bold text-primary text-sm">
+        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
           {String(getValue() || row.original.IssueNo || "—")}
         </span>
       ),
@@ -615,7 +615,7 @@ export default function Issues() {
         const name = getValue() as string;
         return name ? (
           <div className="flex items-center gap-1.5 text-sm">
-            <Warehouse size={12} className="text-primary/70 shrink-0" />
+            <Warehouse size={12} className="text-emerald-600/70 dark:text-emerald-400/70 shrink-0" />
             <span>{name}</span>
             {row.original.GodownCode && (
               <span className="text-xs text-muted-foreground font-mono">
@@ -689,7 +689,7 @@ export default function Issues() {
           <button
             type="button"
             onClick={() => handleEdit(row.original)}
-            className="p-1.5 rounded hover:bg-primary/10 text-primary transition-colors"
+            className="p-1.5 rounded hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 transition-colors"
             title="Edit"
           >
             <Edit3 size={14} />
@@ -871,7 +871,7 @@ export default function Issues() {
                 Issue No:
               </span>
               {editingId ? (
-                <span className="font-mono font-bold text-primary text-sm">
+                <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
                   {viewingRecord?.DocNo ?? "Immutable after creation"}
                 </span>
               ) : (
@@ -894,9 +894,9 @@ export default function Issues() {
             </div>
 
             {/* ── Godown selector — prominent, full-width banner ── */}
-            <div className="rounded-xl border-2 border-primary/20 bg-gradient-to-r from-primary/5 to-primary/10 p-4">
+            <div className="rounded-xl border-2 border-emerald-500/20 bg-gradient-to-r from-emerald-500/[0.05] to-emerald-500/10 p-4">
               <div className="flex items-center gap-2 mb-3">
-                <Warehouse size={16} className="text-primary" />
+                <Warehouse size={16} className="text-emerald-600 dark:text-emerald-400" />
                 <span className="text-sm font-semibold text-foreground">
                   Source Godown
                 </span>
@@ -912,8 +912,8 @@ export default function Issues() {
                     value={header.godownId}
                     onValueChange={handleGodownChange}
                   >
-                    <SelectTrigger className="h-10 bg-background border-primary/30 focus:ring-primary/30 gap-2 text-sm font-medium">
-                      <Warehouse size={14} className="text-primary shrink-0" />
+                    <SelectTrigger className="h-10 bg-background border-emerald-500/30 focus:ring-emerald-500/30 gap-2 text-sm font-medium">
+                      <Warehouse size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
                       <SelectValue
                         placeholder={
                           loadingGodowns ? "Loading godowns…" : "Select godown"
@@ -924,7 +924,7 @@ export default function Issues() {
                       {(godowns as any[]).map((g) => (
                         <SelectItem key={g.id} value={String(g.id)}>
                           <div className="flex items-center gap-2">
-                            <Warehouse size={12} className="text-primary/70" />
+                            <Warehouse size={12} className="text-emerald-600/70 dark:text-emerald-400/70" />
                             <span className="font-medium">{g.name}</span>
                             {g.code && (
                               <span className="font-mono text-xs text-muted-foreground">
@@ -932,7 +932,7 @@ export default function Issues() {
                               </span>
                             )}
                             {g.isMain && (
-                              <span className="px-1.5 py-0 rounded bg-primary/15 text-primary text-[10px] font-bold uppercase tracking-wider">
+                              <span className="px-1.5 py-0 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
                                 Main
                               </span>
                             )}
@@ -1076,7 +1076,7 @@ export default function Issues() {
                     type="date"
                     value={header.date}
                     onChange={(e) => setH("date", e.target.value)}
-                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                   />
                 </div>
               </Field>
@@ -1137,9 +1137,9 @@ export default function Issues() {
         <Card className="border-border shadow-sm">
           <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <ShoppingCart size={15} className="text-primary" />
+              <ShoppingCart size={15} className="text-emerald-600 dark:text-emerald-400" />
               <CardTitle className="text-base font-semibold">Items</CardTitle>
-              <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-semibold">
+              <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
                 {cart.length}
               </span>
               {/* Godown pill — reminds user which godown stock is from */}
@@ -1446,43 +1446,25 @@ export default function Issues() {
         </Card>
 
         {/* ── Save bar ── */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-1">
-          <p className="hidden sm:block text-xs text-muted-foreground">
-            {!canSave
-              ? !headerIsValid
-                ? !header.godownId
-                  ? "Select a source godown"
-                  : "Fill all required header fields"
-                : "Fix cart errors above"
-              : "Ready to save"}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
+          <p className="text-[11px] text-muted-foreground hidden sm:block">
+            {canSave ? <span className="text-emerald-500 font-medium">Ready to save</span> : !headerIsValid ? !header.godownId ? "Select a source godown" : "Fill in the required fields to save" : "Fix cart errors above"}
           </p>
-          <div className="flex gap-3 sm:ml-auto">
+          <div className="flex items-center gap-2 sm:ml-auto">
             <button
               onClick={resetFields}
-              disabled={isSaving}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition disabled:opacity-50"
+              disabled={isSaving || (!header.companyId && !header.projectId && !header.reason.trim() && !header.remarks.trim() && !header.issuedTo && cart.every((ci) => !ci.ItemId && !ci.Quantity))}
+              className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
             >
-              <RotateCcw size={14} /> Reset
+              <RotateCcw size={12} /> Reset
             </button>
             <button
               onClick={onSave}
               disabled={!canSave || isSaving || saved}
-              className="flex-1 sm:flex-none whitespace-nowrap bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center justify-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
+              className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
             >
-              {saved ? (
-                <Check size={14} />
-              ) : isSaving ? (
-                <RefreshCw size={14} className="animate-spin" />
-              ) : (
-                <Save size={14} />
-              )}
-              {saved
-                ? "Saved!"
-                : isSaving
-                  ? "Saving…"
-                  : editingId
-                    ? "Update Issue"
-                    : "Save Issue"}
+              {saved ? <Check size={14} /> : isSaving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />}
+              {saved ? "Saved!" : isSaving ? "Saving…" : editingId ? "Update Issue" : "Save Issue"}
             </button>
           </div>
         </div>
@@ -1501,7 +1483,7 @@ export default function Issues() {
         <Card className="border-border shadow-sm">
           <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
             <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <FileText size={15} className="text-primary" />
+              <FileText size={15} className="text-emerald-600 dark:text-emerald-400" />
               Issue —{" "}
               {viewingRecord.DocNo ||
                 viewingRecord.IssueNo ||
@@ -1531,7 +1513,7 @@ export default function Issues() {
               <DetailRow
                 label="Doc No"
                 value={
-                  <span className="font-mono font-bold text-primary">
+                  <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
                     {viewingRecord.DocNo || viewingRecord.IssueNo}
                   </span>
                 }
@@ -1606,7 +1588,7 @@ export default function Issues() {
         <Card className="border-border shadow-sm">
           <CardHeader className="pb-3 border-b border-border bg-muted/20">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <ShoppingCart size={14} className="text-primary" />
+              <ShoppingCart size={14} className="text-emerald-600 dark:text-emerald-400" />
               Issued Items
               <Badge variant="secondary" className="text-xs">
                 {items.length}

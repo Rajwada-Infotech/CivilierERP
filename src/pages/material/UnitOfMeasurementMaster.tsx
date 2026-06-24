@@ -107,7 +107,7 @@ interface ImportRowResult {
 const columnRenderers = {
   code: (value: unknown) => (
     <div className="flex items-center gap-2 min-w-[100px]">
-      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
         <Hash size={15} />
       </span>
       <span className="font-heading font-semibold text-foreground">
@@ -117,7 +117,7 @@ const columnRenderers = {
   ),
   symbol: (value: unknown) => (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 px-2.5 py-1 text-[11px] font-heading text-foreground">
-      <Ruler size={11} className="text-primary" />
+      <Ruler size={11} className="text-emerald-600 dark:text-emerald-400" />
       {String(value ?? "")}
     </span>
   ),
@@ -356,7 +356,7 @@ export default function UnitOfMeasurementMaster() {
               onClick={handleImportClick}
               disabled={importing}
               title="Import units from a filled-in CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-emerald-500/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {importing ? (
                 <Loader2 size={13} className="animate-spin" />
@@ -457,7 +457,7 @@ export default function UnitOfMeasurementMaster() {
             <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
               <button
                 onClick={() => setImportResults(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-emerald-500 text-primary-foreground hover:bg-emerald-500/90 transition-all"
               >
                 Close
               </button>

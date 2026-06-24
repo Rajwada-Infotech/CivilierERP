@@ -19,7 +19,7 @@ export const materialNavItems: NavItem[] = [
       { label: "Purchase Order", path: "/material/purchase-order" },
       { label: "GRN", path: "/material/grn" },
       { label: "Issues", path: "/material/issues" },
-      { label: "Expense Booking", path: "/material/expense-booking" },
+      { label: "Invoice", path: "/material/expense-booking" },
     ],
   },
   { label: "Stock", icon: ArrowLeftRight, path: "/material/stock" },

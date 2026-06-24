@@ -96,10 +96,10 @@ function FilterSelect({
   const c =
     color === "blue"
       ? {
-          border: "border-blue-400/40 focus:border-blue-500/60",
-          bg: "bg-blue-500/5",
-          icon: "text-blue-500",
-          label: "text-blue-600 dark:text-blue-400",
+          border: "border-emerald-400/40 focus:border-emerald-500/60",
+          bg: "bg-emerald-500/[0.05]",
+          icon: "text-emerald-500",
+          label: "text-emerald-600 dark:text-emerald-400",
         }
       : {
           border: "border-violet-400/40 focus:border-violet-500/60",
@@ -568,7 +568,7 @@ function MakeGRNModal({
         </div>
 
         {/* Info note */}
-        <div className="mx-5 mb-4 flex items-start gap-2 rounded-lg bg-blue-500/5 border border-blue-400/20 px-3 py-2.5 text-xs text-blue-700 dark:text-blue-400">
+        <div className="mx-5 mb-4 flex items-start gap-2 rounded-lg bg-emerald-500/[0.05] border border-emerald-400/20 px-3 py-2.5 text-xs text-emerald-700 dark:text-emerald-400">
           <AlertCircle size={12} className="mt-0.5 shrink-0" />
           <span>
             Stock will be credited to <strong>{transfer.ToGodownName}</strong>.
@@ -749,7 +749,7 @@ function TransferHistory() {
                       key={t.TransferID}
                       className="border-b border-border hover:bg-muted/20 transition-colors"
                     >
-                      <td className="px-4 py-3 font-mono text-primary font-semibold">
+                      <td className="px-4 py-3 font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
                         {t.DocNo}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
@@ -1123,7 +1123,7 @@ export default function StockTransfer() {
               {(filterCompanyId || filterProjectId) && (
                 <div className="flex flex-wrap gap-2 pt-1">
                   {filterCompanyId && (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-blue-500/10 text-blue-600 border border-blue-400/20 font-medium">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-emerald-500/10 text-emerald-600 border border-emerald-400/20 font-medium">
                       <Building2 size={10} />
                       {
                         companyOptions.find((o) => o.value === filterCompanyId)
