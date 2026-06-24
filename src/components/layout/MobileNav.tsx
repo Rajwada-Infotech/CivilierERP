@@ -127,6 +127,14 @@ const MODULE_META: Record<
     label: "Ticket",
     route: MODULE_DASHBOARD_ROUTES.ticket,
   },
+  records: {
+    h: 45,
+    s: 93,
+    l: 47,
+    icon: Archive,
+    label: "Records",
+    route: MODULE_DASHBOARD_ROUTES.records,
+  },
   admin: {
     h: 217,
     s: 91,
@@ -592,7 +600,6 @@ export const MobileNav: React.FC = () => {
               { label: "Tasks", path: "/tasks", icon: CheckCircle2 },
             ],
           },
-          { label: "Records", icon: Archive, path: "/records" },
         ];
       case "followup":
         return [
@@ -764,6 +771,8 @@ export const MobileNav: React.FC = () => {
             ],
           },
         ];
+      case "records":
+        return [{ label: "All Records", icon: Archive, path: "/records" }];
       default:
         return [];
     }
@@ -790,7 +799,7 @@ export const MobileNav: React.FC = () => {
     if (id === "__none__") return false;
     if (id === "admin") return isAdmin;
     if (currentUser?.role?.toLowerCase() === "engineer") {
-      return ["followup", "engineering", "ticket"].includes(id);
+      return ["followup", "engineering", "ticket", "records"].includes(id);
     }
     return true;
   });
