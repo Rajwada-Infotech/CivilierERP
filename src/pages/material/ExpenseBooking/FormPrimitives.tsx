@@ -65,7 +65,7 @@ export function ReadonlyField({
         className={
           "rounded-lg border px-3 py-2 text-sm font-mono min-h-[38px] flex items-center " +
           (highlight
-            ? "border-primary/30 bg-primary/5 text-foreground font-semibold"
+            ? "border-emerald-500/30 bg-emerald-500/[0.05] text-foreground font-semibold"
             : "border-border/60 bg-muted/30 text-foreground")
         }
       >
@@ -122,7 +122,7 @@ export function BreakdownRow({
     neutral: "text-foreground text-xs font-mono",
     debit: "text-destructive text-xs font-mono",
     addition: "text-green-500 text-xs font-mono",
-    tax: "text-primary text-xs font-mono",
+    tax: "text-emerald-600 dark:text-emerald-400 text-xs font-mono",
     subtotal: "text-foreground text-xs font-mono font-semibold",
     total: "text-foreground text-sm font-mono font-bold",
   };

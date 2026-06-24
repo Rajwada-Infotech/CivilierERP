@@ -63,7 +63,7 @@ export function ApprovalTrailPanel({ trail, currentStatus }: Props) {
                       : isRejected
                         ? "border-red-400 bg-red-50"
                         : isActive
-                          ? "border-primary bg-primary/10"
+                          ? "border-emerald-500 bg-emerald-500/10"
                           : "border-border bg-muted/40")
                   }
                 >
@@ -72,7 +72,7 @@ export function ApprovalTrailPanel({ trail, currentStatus }: Props) {
                   ) : isRejected ? (
                     <XCircle size={13} className="text-red-500" />
                   ) : isActive ? (
-                    <Clock size={13} className="text-primary" />
+                    <Clock size={13} className="text-emerald-600 dark:text-emerald-400" />
                   ) : (
                     <Shield size={13} className="text-muted-foreground/50" />
                   )}
@@ -99,7 +99,7 @@ export function ApprovalTrailPanel({ trail, currentStatus }: Props) {
                         : isRejected
                           ? "text-red-600"
                           : isActive
-                            ? "text-primary"
+                            ? "text-emerald-600 dark:text-emerald-400"
                             : "text-muted-foreground")
                     }
                   >

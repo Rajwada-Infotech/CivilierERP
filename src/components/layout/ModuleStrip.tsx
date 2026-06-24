@@ -111,6 +111,10 @@ export const ModuleStrip: React.FC = () => {
   const role = currentUser?.role ?? "";
   const isAdminTier = ["super_admin", "admin", "dba"].includes(role);
 
+  const activeModuleItem =
+    [...MODULES, ADMIN_MODULE].find((m) => m.id === activeModule) ?? MODULES[0];
+  const activeRingRgb = activeModuleItem.ringRgb;
+
   const [tooltip, setTooltip] = useState<TooltipState>(null);
 
   // Regular modules always shown; admin only for admin-tier users
@@ -175,14 +179,20 @@ export const ModuleStrip: React.FC = () => {
             }}
           />
 
-          {/* Top radial glow */}
-          <div
-            className="absolute top-0 left-0 right-0 h-28 pointer-events-none z-0"
-            style={{
-              background:
-                "radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.22) 0%, transparent 70%)",
-            }}
-          />
+          {/* Top radial glow — tracks active module color */}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeModuleItem.id as string}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.4 }}
+              className="absolute top-0 left-0 right-0 h-36 pointer-events-none z-0"
+              style={{
+                background: `radial-gradient(ellipse at 50% 0%, rgba(${activeRingRgb},0.45) 0%, rgba(${activeRingRgb},0.15) 40%, transparent 70%)`,
+              }}
+            />
+          </AnimatePresence>
 
           {/* ── Logo / Sparkle section ─────────────────────────────────────── */}
           <div className="relative z-10 flex justify-center items-center pt-5 pb-5">
@@ -225,20 +235,19 @@ export const ModuleStrip: React.FC = () => {
               <div
                 className="w-px h-5"
                 style={{
-                  background:
-                    "linear-gradient(to bottom, transparent, rgba(129,140,248,0.6))",
+                  background: `linear-gradient(to bottom, transparent, rgba(${activeRingRgb},0.6))`,
                 }}
               />
               {/* Pulsing dot — subtle, no scale change, just opacity + soft glow */}
               <motion.div
                 className="rounded-full"
-                style={{ width: 5, height: 5, background: "#818cf8" }}
+                style={{ width: 5, height: 5, background: activeModuleItem.color }}
                 animate={{
                   opacity: [0.45, 1, 0.45],
                   boxShadow: [
-                    "0 0 0px rgba(129,140,248,0)",
-                    "0 0 5px 1px rgba(129,140,248,0.70)",
-                    "0 0 0px rgba(129,140,248,0)",
+                    `0 0 0px rgba(${activeRingRgb},0)`,
+                    `0 0 5px 1px rgba(${activeRingRgb},0.70)`,
+                    `0 0 0px rgba(${activeRingRgb},0)`,
                   ],
                 }}
                 transition={{
@@ -251,8 +260,7 @@ export const ModuleStrip: React.FC = () => {
               <div
                 className="w-px h-5"
                 style={{
-                  background:
-                    "linear-gradient(to top, transparent, rgba(129,140,248,0.6))",
+                  background: `linear-gradient(to top, transparent, rgba(${activeRingRgb},0.6))`,
                 }}
               />
             </div>

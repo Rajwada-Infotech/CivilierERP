@@ -306,8 +306,8 @@ function SectionHeader({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
       {Icon && (
-        <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-          <Icon size={12} className="text-primary" />
+        <div className="flex items-center justify-center w-6 h-6 rounded-md bg-emerald-500/10 shrink-0">
+          <Icon size={12} className="text-emerald-500" />
         </div>
       )}
       <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
@@ -455,7 +455,7 @@ function RateInput({
         step={0.5}
         value={value ?? ""}
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-        className={`pl-7 font-mono ${highlighted ? "border-primary/40 bg-primary/5" : ""}`}
+        className={`pl-7 font-mono ${highlighted ? "border-emerald-500/40 bg-emerald-500/5" : ""}`}
         placeholder="0"
       />
     </div>
@@ -702,11 +702,11 @@ function DocSelectorPanel({
             : FileText;
     const colors = isPO
       ? {
-          ring: "border-blue-500/30 bg-blue-500/5",
-          icon: "bg-blue-500/10",
-          text: "text-blue-500",
+          ring: "border-emerald-500/30 bg-emerald-500/[0.05]",
+          icon: "bg-emerald-500/10",
+          text: "text-emerald-500",
           badge:
-            "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
+            "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
         }
       : isWorkDone
         ? {
@@ -939,7 +939,7 @@ function DocSelectorPanel({
               setTab(t.id as SourceKind);
               setSearch("");
             }}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 -mb-px whitespace-nowrap ${tab === t.id ? "border-primary text-primary bg-background" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 -mb-px whitespace-nowrap ${tab === t.id ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 bg-background" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           >
             <t.icon size={11} />
             {t.label}
@@ -959,7 +959,7 @@ function DocSelectorPanel({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={placeholder}
-            className="w-full pl-8 pr-8 py-2 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground"
+            className="w-full pl-8 pr-8 py-2 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-emerald-500/30 placeholder:text-muted-foreground"
           />
           {search && (
             <button
@@ -987,10 +987,10 @@ function DocSelectorPanel({
               return (
                 <PickerRow
                   key={po.PurchaseOrderID}
-                  icon={<ShoppingCart size={12} className="text-blue-500" />}
-                  iconBg="bg-blue-500/10"
+                  icon={<ShoppingCart size={12} className="text-emerald-500" />}
+                  iconBg="bg-emerald-500/10"
                   primary={docNo}
-                  primaryColor="text-blue-600 dark:text-blue-400"
+                  primaryColor="text-emerald-600 dark:text-emerald-400"
                   secondary={[po.SupplierName, po.PODate?.slice(0, 10)]
                     .filter(Boolean)
                     .join(" · ")}
@@ -1203,7 +1203,7 @@ function DocSelectorPanel({
                           </span>
                         )}
                         {g.PONumber && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                             PO: {g.PONumber}
                           </span>
                         )}
@@ -2421,9 +2421,9 @@ export default function MaterialExpenseBooking() {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Material", "Expense Booking"]} />
+      <Breadcrumbs items={["Dashboard", "Material", "Invoice"]} />
       <MaterialShell
-        title="Expense Booking"
+        title="Invoice"
         subtitle="Book expenses against purchase orders, confirmed work done, or invoice documents"
         icon={Receipt}
         action={
@@ -2432,7 +2432,7 @@ export default function MaterialExpenseBooking() {
               onClick={openNew}
               className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
             >
-              <Plus size={13} /> New Booking
+              <Plus size={13} /> New Invoice
             </Button>
           ) : undefined
         }
@@ -2453,7 +2453,7 @@ export default function MaterialExpenseBooking() {
                     <Receipt size={12} className="text-emerald-400" />
                   </div>
                   <h2 className="text-sm font-heading font-bold text-foreground truncate">
-                    {isEditing ? "Edit Expense Booking" : "New Expense Booking"}
+                    {isEditing ? "Edit Invoice" : "New Invoice"}
                   </h2>
                   {form.bookingReference && (
                     <span className="hidden sm:inline font-mono text-xs bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-md shrink-0">
@@ -2604,7 +2604,7 @@ export default function MaterialExpenseBooking() {
                         type="date"
                         value={form.bookingDate}
                         onChange={(e) => set("bookingDate", e.target.value)}
-                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                       />
                     </div>
                   </Field>
@@ -2632,7 +2632,7 @@ export default function MaterialExpenseBooking() {
                           }
                           set("dueDate", val);
                         }}
-                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                       />
                     </div>
                   </Field>
@@ -2711,7 +2711,7 @@ export default function MaterialExpenseBooking() {
                         selectedDoc.kind === "PO" ||
                         selectedDoc.kind === "GRN") && (
                         <div
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium ${selectedDoc.kind === "GRN" ? "border-teal-500/30 bg-teal-500/5 text-teal-600 dark:text-teal-400" : "border-primary/30 bg-primary/5 text-primary"}`}
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium ${selectedDoc.kind === "GRN" ? "border-teal-500/30 bg-teal-500/5 text-teal-600 dark:text-teal-400" : "border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"}`}
                         >
                           <span className="shrink-0">←</span>
                           <span className="font-mono font-semibold">
@@ -2735,7 +2735,7 @@ export default function MaterialExpenseBooking() {
                               </>
                             )}
                           <span
-                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${selectedDoc.kind === "WORK_DONE" ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400" : selectedDoc.kind === "GRN" ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400" : "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400"}`}
+                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${selectedDoc.kind === "WORK_DONE" ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400" : selectedDoc.kind === "GRN" ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400" : "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400"}`}
                           >
                             {selectedDoc.kind === "WORK_DONE"
                               ? "Work Done"
@@ -2793,8 +2793,8 @@ export default function MaterialExpenseBooking() {
                 <SectionHeader label="Amount & GST" />
                 {/* Info banner — for PO/WO_PO show auto-filled GST summary */}
                 {hasParentGST && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
-                    <BadgePercent size={12} className="text-primary shrink-0" />
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-xs">
+                    <BadgePercent size={12} className="text-emerald-500 shrink-0" />
                     {(selectedDoc!.derivedCgstRate ?? 0) > 0 ||
                     (selectedDoc!.derivedSgstRate ?? 0) > 0 ? (
                       <span className="text-foreground">
@@ -2934,14 +2934,14 @@ export default function MaterialExpenseBooking() {
                           : form.discount.applicable
                       }
                     />
-                    <div className="flex items-center justify-between rounded-xl bg-primary/8 border border-primary/20 px-5 py-4">
+                    <div className="flex items-center justify-between rounded-xl bg-emerald-500/[0.08] border border-emerald-500/20 px-5 py-4">
                       <div className="flex items-center gap-2">
-                        <TrendingUp size={15} className="text-primary" />
+                        <TrendingUp size={15} className="text-emerald-500" />
                         <span className="text-sm font-heading font-semibold text-foreground">
                           Net Payable Amount
                         </span>
                       </div>
-                      <span className="font-mono text-xl font-bold text-primary">
+                      <span className="font-mono text-xl font-bold text-emerald-600 dark:text-emerald-400">
                         ₹{fmt(bd.netAmount)}
                       </span>
                     </div>
@@ -3002,7 +3002,7 @@ export default function MaterialExpenseBooking() {
                                 <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
                                   Incl. GST (₹)
                                 </th>
-                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-blue-600 dark:text-blue-400 text-[10px]">
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400 text-[10px]">
                                   Base (₹)
                                 </th>
                                 <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-violet-600 dark:text-violet-400 text-[10px]">
@@ -3061,7 +3061,7 @@ export default function MaterialExpenseBooking() {
                                         ? `₹${fmt(Number(item.totalAmountInclGST))}`
                                         : "—"}
                                     </td>
-                                    <td className="px-3 py-2.5 text-right font-mono font-semibold text-blue-600 dark:text-blue-400">
+                                    <td className="px-3 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
                                       {item.baseAmount != null
                                         ? `₹${fmt(item.baseAmount)}`
                                         : "—"}
@@ -3123,7 +3123,7 @@ export default function MaterialExpenseBooking() {
                                       ),
                                   )}
                                 </td>
-                                <td className="px-3 py-2.5 text-right font-mono text-xs font-bold text-blue-600 dark:text-blue-400">
+                                <td className="px-3 py-2.5 text-right font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
                                   {gstBreakdown
                                     ? `₹${fmt(gstBreakdown.totals.totalBase)}`
                                     : "—"}
@@ -3157,7 +3157,7 @@ export default function MaterialExpenseBooking() {
                               {
                                 label: "Base Amount",
                                 value: gstBreakdown.totals.totalBase,
-                                cls: "border-blue-500/30 bg-blue-500/5 text-blue-700 dark:text-blue-300",
+                                cls: "border-emerald-500/30 bg-emerald-500/[0.05] text-emerald-700 dark:text-emerald-300",
                               },
                               {
                                 label: "CGST",
@@ -3189,8 +3189,8 @@ export default function MaterialExpenseBooking() {
                             ))}
                           </div>
 
-                          <div className="px-4 py-2.5 bg-muted/10 border-t border-blue-500/10 flex flex-wrap items-center gap-1.5 text-[11px] font-mono mt-3">
-                            <span className="text-blue-600 dark:text-blue-400 font-semibold">
+                          <div className="px-4 py-2.5 bg-muted/10 border-t border-emerald-500/10 flex flex-wrap items-center gap-1.5 text-[11px] font-mono mt-3">
+                            <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
                               ₹{fmt(gstBreakdown.totals.totalBase)}
                             </span>
                             <span className="text-muted-foreground">
@@ -3345,29 +3345,40 @@ export default function MaterialExpenseBooking() {
                   onChange={(e) => set("remarks", e.target.value)}
                   placeholder="Optional notes or internal comments…"
                   rows={3}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none text-foreground placeholder:text-muted-foreground"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 resize-none text-foreground placeholder:text-muted-foreground"
                 />
               </div>
 
               {/* Save row */}
-              <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-4 border-t border-border">
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  disabled={saving || saved}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-border hover:bg-muted text-sm transition-colors disabled:opacity-50"
-                >
-                  <RotateCcw size={14} /> Reset
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving || saved}
-                  className="w-full sm:w-auto bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow-sm transition disabled:opacity-60"
-                >
-                  {saved ? <Check size={14} /> : saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
-                  {saved ? "Saved!" : saving ? "Saving…" : isEditing ? "Update Booking" : "Save Booking"}
-                </button>
-              </div>
+              {(() => {
+                const ebCanSave = !!(form.bookingReference.trim() && form.bookingDate && form.companyId && (selectedDoc?.kind === "GRN" || (form.basicAmount && form.basicAmount > 0)));
+                const ebIsDirty = !!(form.companyId || form.supplier || form.invoiceReference || form.basicAmount || form.poId || form.bookingReference.trim());
+                return (
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
+                    <p className="text-[11px] text-muted-foreground hidden sm:block">
+                      {saved ? <span className="text-emerald-500 font-medium">Saved!</span> : ebCanSave ? <span className="text-emerald-500 font-medium">Ready to save</span> : "Fill in the required fields to save"}
+                    </p>
+                    <div className="flex items-center gap-2 sm:ml-auto">
+                      <button
+                        type="button"
+                        onClick={resetForm}
+                        disabled={saving || saved || !ebIsDirty}
+                        className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                      >
+                        <RotateCcw size={12} /> Reset
+                      </button>
+                      <button
+                        onClick={handleSave}
+                        disabled={saving || saved || !ebCanSave}
+                        className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                      >
+                        {saved ? <Check size={14} /> : saving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />}
+                        {saved ? "Saved!" : saving ? "Saving…" : isEditing ? "Update Booking" : "Save Invoice"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
         )}
@@ -3381,8 +3392,8 @@ export default function MaterialExpenseBooking() {
                   label="Total Booked"
                   value={`₹${fmt(totalNet)}`}
                   icon={Receipt}
-                  color="text-primary bg-primary/10"
-                  accentColor="border-l-primary"
+                  color="text-emerald-500 bg-emerald-500/10"
+                  accentColor="border-l-emerald-500"
                 />
                 <StatCard
                   label="Approved"
@@ -3409,7 +3420,7 @@ export default function MaterialExpenseBooking() {
             )}
             {loading && (
               <div className="text-center py-16 text-muted-foreground text-sm">
-                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
                 Loading bookings…
               </div>
             )}
@@ -3465,7 +3476,7 @@ export default function MaterialExpenseBooking() {
                     <div className="text-center py-16 text-muted-foreground text-sm border rounded-xl border-dashed border-border">
                       {statusFilter !== "All"
                         ? `No bookings with status "${statusFilter}". Try a different filter.`
-                        : `No bookings yet. Click 'New Booking' to get started.`}
+                        : `No bookings yet. Click 'New Invoice' to get started.`}
                     </div>
                   )}
                   {filteredRecords.map((rec, index) => (
@@ -3571,7 +3582,7 @@ export default function MaterialExpenseBooking() {
                                     </p>
                                   ) : (
                                     <p
-                                      className="font-mono text-[11px] font-semibold text-primary leading-tight max-w-[160px] truncate"
+                                      className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 leading-tight max-w-[160px] truncate"
                                       title={rec.bookingReference || ""}
                                     >
                                       {rec.bookingReference || "—"}
@@ -3697,7 +3708,7 @@ export default function MaterialExpenseBooking() {
                               >
                                 {statusFilter !== "All"
                                   ? `No bookings with status "${statusFilter}". Try a different filter.`
-                                  : `No bookings yet. Click "New Booking" to get started.`}
+                                  : `No bookings yet. Click "New Invoice" to get started.`}
                               </TableCell>
                             </TableRow>
                           )}
@@ -3729,7 +3740,7 @@ export default function MaterialExpenseBooking() {
                             <button
                               key={pg}
                               onClick={() => fetchRecords(pg)}
-                              className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${pg === page ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                              className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${pg === page ? "border-emerald-500 bg-emerald-500 text-white" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
                             >
                               {pg}
                             </button>
