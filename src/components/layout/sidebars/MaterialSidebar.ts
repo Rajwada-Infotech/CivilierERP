@@ -5,7 +5,6 @@ import {
   ArrowLeftRight,
   Repeat2,
   FilePenLine,
-  IdCard,
 } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
@@ -17,6 +16,7 @@ export const materialNavItems: NavItem[] = [
     children: [
       { label: "Material Request", path: "/material/material-request" },
       { label: "Purchase Order", path: "/material/purchase-order" },
+      { label: "Vehicle In/Out", path: "/material/vehicle-in-out" }, // ← NEW
       { label: "GRN", path: "/material/grn" },
       { label: "Issues", path: "/material/issues" },
       { label: "Expense Booking", path: "/material/expense-booking" },

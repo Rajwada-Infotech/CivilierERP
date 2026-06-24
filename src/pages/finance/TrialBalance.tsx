@@ -74,6 +74,7 @@ interface FinYearRow {
   FStartDate: string;
   FEndDate: string;
   FStatus?: number | boolean;
+  FisLocked?: number | boolean;
 }
 
 type FilterMode = "fy" | "range" | "ason";
@@ -458,7 +459,12 @@ export default function TrialBalance() {
     fetchWithAuth("/api/fin-year")
       .then((r) => (r.ok ? r.json() : []))
       .then((data: FinYearRow[]) => {
-        const sorted = [...data].sort(
+        // Only unlocked fin years are selectable for Trial Balance reporting —
+        // locked years are closed for the period and shouldn't be queried here.
+        const unlocked = data.filter(
+          (f) => !(f.FisLocked === 1 || f.FisLocked === true),
+        );
+        const sorted = [...unlocked].sort(
           (a, b) =>
             new Date(b.FEndDate).getTime() - new Date(a.FEndDate).getTime(),
         );
@@ -714,7 +720,11 @@ export default function TrialBalance() {
       <Breadcrumbs items={["Dashboard", "Finance", "Trial Balance"]} />
       <FinanceShell
         title="Trial Balance"
-        subtitle={asOf ? `${visible.length} entries · Refreshed ${fmtDate(asOf)}` : "Account-wise opening, transaction and closing balances"}
+        subtitle={
+          asOf
+            ? `${visible.length} entries · Refreshed ${fmtDate(asOf)}`
+            : "Account-wise opening, transaction and closing balances"
+        }
         icon={Scale}
         action={
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
@@ -744,7 +754,6 @@ export default function TrialBalance() {
           </div>
         }
       >
-
         {/* ── Main card ───────────────────────────────────────────────────── */}
         <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
           {/* ── Filter bar ─────────────────────────────────────────────────── */}
@@ -1038,7 +1047,9 @@ export default function TrialBalance() {
                       className="px-4 py-20 text-center text-muted-foreground text-sm"
                     >
                       {rows.length === 0
-                        ? (loading ? "Loading Trial Balance…" : "No entries found for the selected period.")
+                        ? loading
+                          ? "Loading Trial Balance…"
+                          : "No entries found for the selected period."
                         : "No accounts match your search."}
                     </td>
                   </tr>
