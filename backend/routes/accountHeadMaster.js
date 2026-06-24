@@ -321,7 +321,7 @@ router.post("/", async (req, res) => {
 router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
-    let query = `SELECT LHeadId AS id, LHeadName AS label
+    let query = `SELECT LHeadId AS id, LHeadName AS label, LHeadContactPerson AS contactPerson
                  FROM dbo.AccountHeadMaster WHERE LHeadStatus = 1`;
     const request = pool.request();
     if (req.query.type) {

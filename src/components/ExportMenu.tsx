@@ -55,6 +55,18 @@ export interface ExportMenuProps {
   logoBase64?: string;
   /** Summary stat cards rendered below the PDF header band */
   stats?: PdfStatCard[];
+  /** Optional per-column cellPadding override for the PDF export (by column index) */
+  columnPadding?: Record<
+    number,
+    {
+      cellPadding?: {
+        top?: number;
+        bottom?: number;
+        left?: number;
+        right?: number;
+      };
+    }
+  >;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -69,6 +81,7 @@ export function ExportMenu({
   companyName,
   logoBase64,
   stats,
+  columnPadding,
 }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState<"pdf" | "xlsx" | "csv" | null>(null);
@@ -119,6 +132,7 @@ export function ExportMenu({
           companyName,
           logoBase64,
           stats,
+          columnPadding,
         }),
     },
     {

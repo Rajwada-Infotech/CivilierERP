@@ -12,10 +12,13 @@ const { getPool, sql } = require("../db");
  *
  * Column mapping (verified against live routes):
  *   AccountHeadMaster: LHeadId, LHeadName, LHeadType (S/C/B/A/GL), LBelongsTo→AGId, BankOpeningBalance
- *   ExpenseBooking   : EDocDate, ECreatedAt, ENetAmount/EAmount, EName, ESourceType, ESourceId
- *   NewPayment       : PDate, PAmount, PBankID→LHeadId(B), PExpenseRef, Status
- *   PurchaseOrders   : PODate, TotalAmount, SupplierID→LHeadId(S), Status
- *   ReceivedPayment  : RPDocDate, RPAmount, RPDepositBankId→LHeadId(B), RPReceivedFrom, RPStatus
+ *   ExpenseBooking   : EDocDate, ECreatedAt, ENetAmount/EAmount, EName, ESourceType, ESourceId,
+ *                       ECompanyId (int), EProjectName (varchar — holds project id as text, no EProjectId column)
+ *   NewPayment       : PDate, PAmount, PBankID→LHeadId(B), PExpenseRef, Status,
+ *                       PCompany / PProject (varchar — hold ids as text, no PCompanyId/PProjectId columns)
+ *   PurchaseOrders   : PODate, TotalAmount, SupplierID→LHeadId(S), Status, CompanyId, ProjectId (int)
+ *   ReceivedPayment  : RPDocDate, RPAmount, RPDepositBankId→LHeadId(B), RPReceivedFrom, RPStatus,
+ *                       RPCompanyId, RPProjectId (int)
  *   GoodsReceiptNotes: GRNId, SupplierID→LHeadId(S)
  */
 router.get("/", async (req, res) => {
@@ -35,8 +38,19 @@ router.get("/", async (req, res) => {
       : null;
 
     // ── 1. Account groups ────────────────────────────────────────────────────
+    // Some existing rows have a stray leading "?" (a corrupted/garbled
+    // character from an earlier import — SQL Server substitutes "?" for any
+    // Unicode character it can't represent when text is inserted through a
+    // non-Unicode (VARCHAR) literal/connection). Strip it here so the UI
+    // shows a clean name regardless of what's stored.
     const groupsRes = await pool.request().query(`
-      SELECT AGId, ISNULL(Name, CONCAT('Group-', AGId)) AS Name,
+      SELECT AGId,
+             LTRIM(
+               CASE WHEN LEFT(ISNULL(Name, CONCAT('Group-', AGId)), 1) = '?'
+                    THEN SUBSTRING(ISNULL(Name, CONCAT('Group-', AGId)), 2, 4000)
+                    ELSE ISNULL(Name, CONCAT('Group-', AGId))
+               END
+             ) AS Name,
              Code, ParentGroupId
       FROM dbo.AccountGroup
       ORDER BY Name
@@ -82,8 +96,8 @@ router.get("/", async (req, res) => {
             WHERE grn.SupplierID = ahm.LHeadId
               AND np.Status IN ('Approved','Completed')
               AND CAST(np.PDate AS DATE) < @from
-              AND (@companyId IS NULL OR np.PCompanyId = @companyId)
-              AND (@projectId IS NULL OR np.PProjectId = @projectId)
+              AND (@companyId IS NULL OR TRY_CAST(np.PCompany AS INT) = @companyId)
+              AND (@projectId IS NULL OR TRY_CAST(np.PProject AS INT) = @projectId)
           ), 0) AS opening_debit,
 
           ISNULL((
@@ -105,8 +119,8 @@ router.get("/", async (req, res) => {
             WHERE grn.SupplierID = ahm.LHeadId
               AND np.Status IN ('Approved','Completed')
               AND CAST(np.PDate AS DATE) BETWEEN @from AND @to
-              AND (@companyId IS NULL OR np.PCompanyId = @companyId)
-              AND (@projectId IS NULL OR np.PProjectId = @projectId)
+              AND (@companyId IS NULL OR TRY_CAST(np.PCompany AS INT) = @companyId)
+              AND (@projectId IS NULL OR TRY_CAST(np.PProject AS INT) = @projectId)
           ), 0) AS txn_debit,
 
           ISNULL((
@@ -138,8 +152,8 @@ router.get("/", async (req, res) => {
               AND eb.ESourceType IN ('WO_PO','WORK_DONE','PO')
               AND np.Status IN ('Approved','Completed')
               AND CAST(np.PDate AS DATE) < @from
-              AND (@companyId IS NULL OR np.PCompanyId = @companyId)
-              AND (@projectId IS NULL OR np.PProjectId = @projectId)
+              AND (@companyId IS NULL OR TRY_CAST(np.PCompany AS INT) = @companyId)
+              AND (@projectId IS NULL OR TRY_CAST(np.PProject AS INT) = @projectId)
           ), 0),
 
           ISNULL((
@@ -149,7 +163,7 @@ router.get("/", async (req, res) => {
               AND eb.ESourceType IN ('WO_PO','WORK_DONE','PO')
               AND CAST(eb.ECreatedAt AS DATE) < @from
               AND (@companyId IS NULL OR eb.ECompanyId = @companyId)
-              AND (@projectId IS NULL OR eb.EProjectId = @projectId)
+              AND (@projectId IS NULL OR TRY_CAST(eb.EProjectName AS INT) = @projectId)
           ), 0),
 
           ISNULL((
@@ -160,8 +174,8 @@ router.get("/", async (req, res) => {
               AND eb.ESourceType IN ('WO_PO','WORK_DONE','PO')
               AND np.Status IN ('Approved','Completed')
               AND CAST(np.PDate AS DATE) BETWEEN @from AND @to
-              AND (@companyId IS NULL OR np.PCompanyId = @companyId)
-              AND (@projectId IS NULL OR np.PProjectId = @projectId)
+              AND (@companyId IS NULL OR TRY_CAST(np.PCompany AS INT) = @companyId)
+              AND (@projectId IS NULL OR TRY_CAST(np.PProject AS INT) = @projectId)
           ), 0),
 
           ISNULL((
@@ -171,7 +185,7 @@ router.get("/", async (req, res) => {
               AND eb.ESourceType IN ('WO_PO','WORK_DONE','PO')
               AND CAST(eb.ECreatedAt AS DATE) BETWEEN @from AND @to
               AND (@companyId IS NULL OR eb.ECompanyId = @companyId)
-              AND (@projectId IS NULL OR eb.EProjectId = @projectId)
+              AND (@projectId IS NULL OR TRY_CAST(eb.EProjectName AS INT) = @projectId)
           ), 0)
 
         FROM dbo.AccountHeadMaster ahm
@@ -196,8 +210,8 @@ router.get("/", async (req, res) => {
             WHERE np.PBankID = ahm.LHeadId
               AND np.Status IN ('Approved','Completed')
               AND CAST(np.PDate AS DATE) BETWEEN @from AND @to
-              AND (@companyId IS NULL OR np.PCompanyId = @companyId)
-              AND (@projectId IS NULL OR np.PProjectId = @projectId)
+              AND (@companyId IS NULL OR TRY_CAST(np.PCompany AS INT) = @companyId)
+              AND (@projectId IS NULL OR TRY_CAST(np.PProject AS INT) = @projectId)
           ), 0) AS txn_debit,
 
           ISNULL((
