@@ -11,9 +11,20 @@ import {
 } from "@/api/widgetsApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
-  Puzzle, BarChart2, TrendingUp, PieChart, Hash, Table2,
-  Calendar, Bell, MessageSquare, Map, Paperclip, RefreshCw,
-  Calculator, X,
+  Puzzle,
+  BarChart2,
+  TrendingUp,
+  PieChart,
+  Hash,
+  Table2,
+  Calendar,
+  Bell,
+  MessageSquare,
+  Map,
+  Paperclip,
+  RefreshCw,
+  Calculator,
+  X,
 } from "lucide-react";
 
 // ─── WIDGET REGISTRY — single source of truth ─────────────────────────────────
@@ -35,7 +46,11 @@ const widgetIcons: Record<string, React.ElementType> = {
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 const fmtCur = (n: number) =>
-  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(n);
 const fmtNum = (n: number) => new Intl.NumberFormat("en-IN").format(n);
 const fmtTime = (s: string) => {
   const diff = Math.floor((Date.now() - new Date(s).getTime()) / 60000);
@@ -65,7 +80,11 @@ function useWidgetsData() {
 }
 
 function useWidgetCatalog() {
-  const { data = [], isLoading, isError } = useQuery<WidgetCatalogItem[]>({
+  const {
+    data = [],
+    isLoading,
+    isError,
+  } = useQuery<WidgetCatalogItem[]>({
     queryKey: ["widget-catalog"],
     queryFn: getWidgetCatalog,
     staleTime: 5 * 60 * 1000,
@@ -83,13 +102,14 @@ function useAllowedWidgets() {
       if (!res.ok) throw new Error("Failed to load widget rights");
       return res.json();
     },
-    staleTime: 5 * 60 * 1000,  // re-fetch every 5 min
-    retry: false,                // don't retry on 404 — graceful fallback
+    staleTime: 5 * 60 * 1000, // re-fetch every 5 min
+    retry: false, // don't retry on 404 — graceful fallback
   });
 
   // While loading, show nothing (avoids flash of all widgets then filtered)
   if (isLoading) return { allowedSet: null, loading: true };
-  if (isError) return { allowedSet: new Set<string>(), loading: false, error: true };
+  // On error, return null so the catalog falls back to showing everything
+  if (isError) return { allowedSet: null, loading: false, error: true };
   const allowed = data?.allowedWidgets ?? [];
   return { allowedSet: new Set(allowed), loading: false, error: false };
 }
@@ -103,24 +123,32 @@ function BarChartWidget() {
   if (loading) return <Spinner />;
   const flow = data?.trends?.dailyFlow || [];
   const items = flow.length
-    ? flow.map((f: any) => ({ label: f.date?.slice(5) || "—", value: f.activityCount || 0 }))
+    ? flow.map((f: any) => ({
+        label: f.date?.slice(5) || "—",
+        value: f.activityCount || 0,
+      }))
     : [{ label: "No data", value: 0 }];
   const max = Math.max(...items.map((d: any) => d.value), 1);
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">System activity — last 7 days</p>
+      <p className="text-sm text-muted-foreground">
+        System activity — last 7 days
+      </p>
       <div className="flex items-end gap-2 h-44">
         {items.map((d: any, i: number) => (
           <div key={i} className="flex-1 flex flex-col items-center gap-1">
             <span className="text-[10px] text-muted-foreground">{d.value}</span>
-            <div className="w-full rounded-t-md bg-primary/70 hover:bg-primary transition-all"
-              style={{ height: `${Math.max(4, (d.value / max) * 140)}px` }} />
+            <div
+              className="w-full rounded-t-md bg-primary/70 hover:bg-primary transition-all"
+              style={{ height: `${Math.max(4, (d.value / max) * 140)}px` }}
+            />
             <span className="text-[10px] text-muted-foreground">{d.label}</span>
           </div>
         ))}
       </div>
       <p className="text-xs text-muted-foreground text-center">
-        Total: {fmtNum(items.reduce((s: number, d: any) => s + d.value, 0))} actions
+        Total: {fmtNum(items.reduce((s: number, d: any) => s + d.value, 0))}{" "}
+        actions
       </p>
     </div>
   );
@@ -130,35 +158,91 @@ function LineChartWidget() {
   const { data, loading } = useWidgetsData();
   if (loading) return <Spinner />;
   const flow = data?.trends?.dailyFlow || [];
-  if (!flow.length) return <p className="text-sm text-muted-foreground text-center py-10">No trend data.</p>;
-  const items = flow.map((f: any) => ({ label: f.date?.slice(5) || "—", tasks: f.tasksCreated || 0, activity: f.activityCount || 0 }));
-  const W = 300, H = 150, pad = 20;
-  const maxVal = Math.max(...items.map((d: any) => Math.max(d.tasks, d.activity)), 1);
-  const px = (i: number) => pad + (i / Math.max(items.length - 1, 1)) * (W - pad * 2);
+  if (!flow.length)
+    return (
+      <p className="text-sm text-muted-foreground text-center py-10">
+        No trend data.
+      </p>
+    );
+  const items = flow.map((f: any) => ({
+    label: f.date?.slice(5) || "—",
+    tasks: f.tasksCreated || 0,
+    activity: f.activityCount || 0,
+  }));
+  const W = 300,
+    H = 150,
+    pad = 20;
+  const maxVal = Math.max(
+    ...items.map((d: any) => Math.max(d.tasks, d.activity)),
+    1,
+  );
+  const px = (i: number) =>
+    pad + (i / Math.max(items.length - 1, 1)) * (W - pad * 2);
   const py = (v: number) => H - pad - (v / maxVal) * (H - pad * 2);
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">Tasks vs Activity — 7 days</p>
+      <p className="text-sm text-muted-foreground">
+        Tasks vs Activity — 7 days
+      </p>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-        {[0.25, 0.5, 0.75, 1].map(r => (
-          <line key={r} x1={pad} y1={py(maxVal * r)} x2={W - pad} y2={py(maxVal * r)}
-            stroke="currentColor" strokeOpacity="0.1" strokeDasharray="4 4" />
+        {[0.25, 0.5, 0.75, 1].map((r) => (
+          <line
+            key={r}
+            x1={pad}
+            y1={py(maxVal * r)}
+            x2={W - pad}
+            y2={py(maxVal * r)}
+            stroke="currentColor"
+            strokeOpacity="0.1"
+            strokeDasharray="4 4"
+          />
         ))}
-        <polyline fill="none" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-          points={items.map((d: any, i: number) => `${px(i)},${py(d.activity)}`).join(" ")} />
-        <polyline fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-          points={items.map((d: any, i: number) => `${px(i)},${py(d.tasks)}`).join(" ")} />
+        <polyline
+          fill="none"
+          stroke="#34d399"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={items
+            .map((d: any, i: number) => `${px(i)},${py(d.activity)}`)
+            .join(" ")}
+        />
+        <polyline
+          fill="none"
+          stroke="#818cf8"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={items
+            .map((d: any, i: number) => `${px(i)},${py(d.tasks)}`)
+            .join(" ")}
+        />
         {items.map((d: any, i: number) => (
           <g key={i}>
             <circle cx={px(i)} cy={py(d.activity)} r="3" fill="#34d399" />
             <circle cx={px(i)} cy={py(d.tasks)} r="3" fill="#818cf8" />
-            <text x={px(i)} y={H - 4} textAnchor="middle" fontSize="9" fill="currentColor" opacity="0.5">{d.label}</text>
+            <text
+              x={px(i)}
+              y={H - 4}
+              textAnchor="middle"
+              fontSize="9"
+              fill="currentColor"
+              opacity="0.5"
+            >
+              {d.label}
+            </text>
           </g>
         ))}
       </svg>
       <div className="flex gap-4 justify-center text-xs">
-        <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-emerald-400 inline-block rounded" /> Activity</span>
-        <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-violet-400 inline-block rounded" /> Tasks</span>
+        <span className="flex items-center gap-1">
+          <span className="w-3 h-0.5 bg-emerald-400 inline-block rounded" />{" "}
+          Activity
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-3 h-0.5 bg-violet-400 inline-block rounded" />{" "}
+          Tasks
+        </span>
       </div>
     </div>
   );
@@ -169,18 +253,29 @@ function PieChartWidget() {
   if (loading) return <Spinner />;
   const s = data?.summary;
   const slices = [
-    { label: "Open",        value: s?.openTasks || 0,       color: "#60a5fa" },
+    { label: "Open", value: s?.openTasks || 0, color: "#60a5fa" },
     { label: "In Progress", value: s?.inProgressTasks || 0, color: "#a78bfa" },
-    { label: "Closed",      value: s?.closedTasks || 0,     color: "#34d399" },
-    { label: "Reviewed",    value: s?.reviewedTasks || 0,   color: "#2dd4bf" },
-  ].filter(sl => sl.value > 0);
+    { label: "Closed", value: s?.closedTasks || 0, color: "#34d399" },
+    { label: "Reviewed", value: s?.reviewedTasks || 0, color: "#2dd4bf" },
+  ].filter((sl) => sl.value > 0);
   const total = slices.reduce((acc, sl) => acc + sl.value, 0);
-  if (!total) return <p className="text-sm text-muted-foreground text-center py-10">No task data available.</p>;
+  if (!total)
+    return (
+      <p className="text-sm text-muted-foreground text-center py-10">
+        No task data available.
+      </p>
+    );
   let cum = 0;
-  const paths = slices.map(sl => {
-    const pct = sl.value / total, start = cum, end = cum + pct; cum = end;
-    const a1 = (start * 2 - 0.5) * Math.PI, a2 = (end * 2 - 0.5) * Math.PI;
-    const r = 70, cx = 90, cy = 90;
+  const paths = slices.map((sl) => {
+    const pct = sl.value / total,
+      start = cum,
+      end = cum + pct;
+    cum = end;
+    const a1 = (start * 2 - 0.5) * Math.PI,
+      a2 = (end * 2 - 0.5) * Math.PI;
+    const r = 70,
+      cx = 90,
+      cy = 90;
     return {
       d: `M${cx},${cy} L${cx + r * Math.cos(a1)},${cy + r * Math.sin(a1)} A${r},${r} 0 ${pct > 0.5 ? 1 : 0} 1 ${cx + r * Math.cos(a2)},${cy + r * Math.sin(a2)} Z`,
       ...sl,
@@ -189,17 +284,24 @@ function PieChartWidget() {
   return (
     <div className="flex flex-col sm:flex-row items-center gap-6">
       <svg viewBox="0 0 180 180" className="w-36 h-36 shrink-0">
-        {paths.map((p, i) => <path key={i} d={p.d} fill={p.color} opacity="0.85" />)}
+        {paths.map((p, i) => (
+          <path key={i} d={p.d} fill={p.color} opacity="0.85" />
+        ))}
       </svg>
       <div className="space-y-2">
-        {slices.map(sl => (
+        {slices.map((sl) => (
           <div key={sl.label} className="flex items-center gap-2 text-sm">
-            <span className="w-3 h-3 rounded-full shrink-0" style={{ background: sl.color }} />
+            <span
+              className="w-3 h-3 rounded-full shrink-0"
+              style={{ background: sl.color }}
+            />
             <span className="text-muted-foreground">{sl.label}</span>
             <span className="font-bold ml-auto">{sl.value}</span>
           </div>
         ))}
-        <p className="text-xs text-muted-foreground pt-1">Total: {total} tasks</p>
+        <p className="text-xs text-muted-foreground pt-1">
+          Total: {total} tasks
+        </p>
       </div>
     </div>
   );
@@ -210,14 +312,30 @@ function StatCardWidget() {
   if (loading) return <Spinner />;
   const s = data?.summary;
   const cards = [
-    { label: "Total Users",    value: fmtNum(s?.totalUsers || 0),          color: "text-blue-400" },
-    { label: "Total Activity", value: fmtNum(s?.totalActivity || 0),        color: "text-violet-400" },
-    { label: "Open Tasks",     value: fmtNum(s?.openTasks || 0),            color: "text-amber-400" },
-    { label: "Total Payments", value: fmtCur(s?.paymentAmountTotal || 0),   color: "text-emerald-400" },
+    {
+      label: "Total Users",
+      value: fmtNum(s?.totalUsers || 0),
+      color: "text-blue-400",
+    },
+    {
+      label: "Total Activity",
+      value: fmtNum(s?.totalActivity || 0),
+      color: "text-violet-400",
+    },
+    {
+      label: "Open Tasks",
+      value: fmtNum(s?.openTasks || 0),
+      color: "text-amber-400",
+    },
+    {
+      label: "Total Payments",
+      value: fmtCur(s?.paymentAmountTotal || 0),
+      color: "text-emerald-400",
+    },
   ];
   return (
     <div className="grid grid-cols-2 gap-3">
-      {cards.map(c => (
+      {cards.map((c) => (
         <div key={c.label} className="bg-muted/20 rounded-xl p-3 space-y-1">
           <p className="text-xs text-muted-foreground">{c.label}</p>
           <p className={`text-lg font-bold ${c.color}`}>{c.value}</p>
@@ -231,25 +349,43 @@ function DataTableWidget() {
   const { data, loading } = useWidgetsData();
   if (loading) return <Spinner />;
   const tasks = data?.recent?.tasks || [];
-  if (!tasks.length) return <p className="text-sm text-muted-foreground text-center py-10">No tasks found.</p>;
+  if (!tasks.length)
+    return (
+      <p className="text-sm text-muted-foreground text-center py-10">
+        No tasks found.
+      </p>
+    );
   const colors: Record<string, string> = {
-    High: "text-red-400", Medium: "text-amber-400", Low: "text-emerald-400",
+    High: "text-red-400",
+    Medium: "text-amber-400",
+    Low: "text-emerald-400",
   };
   return (
     <div className="space-y-2">
-      <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Recent Tasks</p>
+      <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+        Recent Tasks
+      </p>
       <div className="divide-y divide-border">
         {tasks.slice(0, 5).map((t: any) => (
-          <div key={t.id} className="py-2 flex items-center justify-between gap-2">
+          <div
+            key={t.id}
+            className="py-2 flex items-center justify-between gap-2"
+          >
             <div className="min-w-0">
               <p className="text-sm font-medium truncate">{t.title}</p>
-              <p className="text-xs text-muted-foreground">{t.assignedToName || "Unassigned"}</p>
+              <p className="text-xs text-muted-foreground">
+                {t.assignedToName || "Unassigned"}
+              </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <span className={`text-xs font-semibold ${colors[t.priority] || "text-muted-foreground"}`}>
+              <span
+                className={`text-xs font-semibold ${colors[t.priority] || "text-muted-foreground"}`}
+              >
                 {t.priority}
               </span>
-              <span className="text-xs text-muted-foreground bg-muted/40 px-2 py-0.5 rounded-full">{t.status}</span>
+              <span className="text-xs text-muted-foreground bg-muted/40 px-2 py-0.5 rounded-full">
+                {t.status}
+              </span>
             </div>
           </div>
         ))}
@@ -261,25 +397,56 @@ function DataTableWidget() {
 function CalendarWidget() {
   const today = new Date();
   const [cur, setCur] = useState(today);
-  const year = cur.getFullYear(), month = cur.getMonth();
+  const year = cur.getFullYear(),
+    month = cur.getMonth();
   const first = new Date(year, month, 1).getDay();
   const days = new Date(year, month + 1, 0).getDate();
-  const cells = Array.from({ length: first + days }, (_, i) => i < first ? null : i - first + 1);
+  const cells = Array.from({ length: first + days }, (_, i) =>
+    i < first ? null : i - first + 1,
+  );
   while (cells.length % 7 !== 0) cells.push(null);
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <button onClick={() => setCur(new Date(year, month - 1, 1))} className="p-1 rounded hover:bg-muted/40 text-muted-foreground">‹</button>
-        <p className="text-sm font-bold">{cur.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</p>
-        <button onClick={() => setCur(new Date(year, month + 1, 1))} className="p-1 rounded hover:bg-muted/40 text-muted-foreground">›</button>
+        <button
+          onClick={() => setCur(new Date(year, month - 1, 1))}
+          className="p-1 rounded hover:bg-muted/40 text-muted-foreground"
+        >
+          ‹
+        </button>
+        <p className="text-sm font-bold">
+          {cur.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}
+        </p>
+        <button
+          onClick={() => setCur(new Date(year, month + 1, 1))}
+          className="p-1 rounded hover:bg-muted/40 text-muted-foreground"
+        >
+          ›
+        </button>
       </div>
       <div className="grid grid-cols-7 gap-0.5 text-center">
-        {["S","M","T","W","T","F","S"].map((d, i) => <span key={i} className="text-[10px] text-muted-foreground font-medium py-1">{d}</span>)}
+        {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+          <span
+            key={i}
+            className="text-[10px] text-muted-foreground font-medium py-1"
+          >
+            {d}
+          </span>
+        ))}
         {cells.map((d, i) => (
-          <div key={i} className={`text-xs py-1 rounded-md font-medium transition-colors
-            ${d === today.getDate() && month === today.getMonth() && year === today.getFullYear()
-              ? "bg-primary text-primary-foreground"
-              : d ? "hover:bg-muted/40 text-foreground cursor-pointer" : ""}`}>
+          <div
+            key={i}
+            className={`text-xs py-1 rounded-md font-medium transition-colors
+            ${
+              d === today.getDate() &&
+              month === today.getMonth() &&
+              year === today.getFullYear()
+                ? "bg-primary text-primary-foreground"
+                : d
+                  ? "hover:bg-muted/40 text-foreground cursor-pointer"
+                  : ""
+            }`}
+          >
             {d || ""}
           </div>
         ))}
@@ -292,12 +459,24 @@ function NotificationsWidget() {
   const { data, loading } = useWidgetsData();
   if (loading) return <Spinner />;
   const alerts = data?.alerts || [];
-  if (!alerts.length) return <p className="text-sm text-muted-foreground text-center py-10">No alerts at this time.</p>;
-  const colors: Record<string, string> = { critical: "text-red-400 bg-red-400/10", warning: "text-amber-400 bg-amber-400/10", info: "text-blue-400 bg-blue-400/10" };
+  if (!alerts.length)
+    return (
+      <p className="text-sm text-muted-foreground text-center py-10">
+        No alerts at this time.
+      </p>
+    );
+  const colors: Record<string, string> = {
+    critical: "text-red-400 bg-red-400/10",
+    warning: "text-amber-400 bg-amber-400/10",
+    info: "text-blue-400 bg-blue-400/10",
+  };
   return (
     <div className="space-y-2">
       {alerts.slice(0, 4).map((a: any, i: number) => (
-        <div key={i} className={`flex gap-3 p-3 rounded-lg ${colors[a.type] || "text-muted-foreground bg-muted/20"}`}>
+        <div
+          key={i}
+          className={`flex gap-3 p-3 rounded-lg ${colors[a.type] || "text-muted-foreground bg-muted/20"}`}
+        >
           <div className="shrink-0 mt-0.5">
             {a.type === "critical" ? "🔴" : a.type === "warning" ? "⚠️" : "ℹ️"}
           </div>
@@ -315,7 +494,12 @@ function ActivityFeedWidget() {
   const { data, loading } = useWidgetsData();
   if (loading) return <Spinner />;
   const activity = data?.recent?.activity || [];
-  if (!activity.length) return <p className="text-sm text-muted-foreground text-center py-10">No recent activity.</p>;
+  if (!activity.length)
+    return (
+      <p className="text-sm text-muted-foreground text-center py-10">
+        No recent activity.
+      </p>
+    );
   return (
     <div className="space-y-2">
       {activity.slice(0, 5).map((a: any, i: number) => (
@@ -324,8 +508,13 @@ function ActivityFeedWidget() {
             {a.userName?.charAt(0)?.toUpperCase() || "?"}
           </div>
           <div className="min-w-0">
-            <p className="text-xs"><span className="font-semibold">{a.userName}</span> {a.event?.toLowerCase()}</p>
-            <p className="text-[10px] text-muted-foreground">{fmtTime(a.createdAt)}</p>
+            <p className="text-xs">
+              <span className="font-semibold">{a.userName}</span>{" "}
+              {a.event?.toLowerCase()}
+            </p>
+            <p className="text-[10px] text-muted-foreground">
+              {fmtTime(a.createdAt)}
+            </p>
           </div>
         </div>
       ))}
@@ -340,7 +529,9 @@ function MapViewWidget() {
         <div className="text-center space-y-2">
           <Map size={32} className="text-muted-foreground/40 mx-auto" />
           <p className="text-sm text-muted-foreground">Map integration</p>
-          <p className="text-xs text-muted-foreground/60">Connect a map API to display site locations</p>
+          <p className="text-xs text-muted-foreground/60">
+            Connect a map API to display site locations
+          </p>
         </div>
       </div>
     </div>
@@ -352,28 +543,53 @@ function FileUploaderWidget() {
   const [drag, setDrag] = useState(false);
   const handle = (f: FileList | null) => {
     if (!f) return;
-    setFiles(prev => [...prev, ...Array.from(f).map(x => x.name)].slice(0, 5));
+    setFiles((prev) =>
+      [...prev, ...Array.from(f).map((x) => x.name)].slice(0, 5),
+    );
   };
   return (
     <div className="space-y-3">
       <div
-        onDragOver={e => { e.preventDefault(); setDrag(true); }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDrag(true);
+        }}
         onDragLeave={() => setDrag(false)}
-        onDrop={e => { e.preventDefault(); setDrag(false); handle(e.dataTransfer.files); }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDrag(false);
+          handle(e.dataTransfer.files);
+        }}
         className={`border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer
           ${drag ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"}`}
         onClick={() => document.getElementById("fw-input")?.click()}
       >
         <Paperclip size={24} className="text-muted-foreground mx-auto mb-2" />
-        <p className="text-sm text-muted-foreground">Drop files here or click to upload</p>
-        <input id="fw-input" type="file" multiple className="hidden" onChange={e => handle(e.target.files)} />
+        <p className="text-sm text-muted-foreground">
+          Drop files here or click to upload
+        </p>
+        <input
+          id="fw-input"
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => handle(e.target.files)}
+        />
       </div>
       {files.length > 0 && (
         <div className="space-y-1">
           {files.map((f, i) => (
-            <div key={i} className="flex items-center justify-between text-xs bg-muted/20 rounded-lg px-3 py-2">
+            <div
+              key={i}
+              className="flex items-center justify-between text-xs bg-muted/20 rounded-lg px-3 py-2"
+            >
               <span className="truncate text-muted-foreground">{f}</span>
-              <button onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} className="ml-2 text-muted-foreground hover:text-foreground shrink-0">
+              <button
+                onClick={() =>
+                  setFiles((prev) => prev.filter((_, j) => j !== i))
+                }
+                className="ml-2 text-muted-foreground hover:text-foreground shrink-0"
+              >
                 <X size={12} />
               </button>
             </div>
@@ -393,19 +609,58 @@ function ProgressRingWidget() {
   const inProg = s?.inProgressTasks || 0;
   const completion = total ? Math.round((done / total) * 100) : 0;
   const inProgPct = total ? Math.round((inProg / total) * 100) : 0;
-  const userPct = s?.totalUsers ? Math.round((s.activeUsers / s.totalUsers) * 100) : 100;
-  const Ring = ({ pct, color, label }: { pct: number; color: string; label: string }) => {
-    const r = 32, circ = 2 * Math.PI * r;
+  const userPct = s?.totalUsers
+    ? Math.round((s.activeUsers / s.totalUsers) * 100)
+    : 100;
+  const Ring = ({
+    pct,
+    color,
+    label,
+  }: {
+    pct: number;
+    color: string;
+    label: string;
+  }) => {
+    const r = 32,
+      circ = 2 * Math.PI * r;
     return (
       <div className="flex flex-col items-center gap-2">
         <svg width="80" height="80" className="-rotate-90">
-          <circle cx="40" cy="40" r={r} fill="none" stroke="currentColor" strokeOpacity="0.1" strokeWidth="6" />
-          <circle cx="40" cy="40" r={r} fill="none" stroke={color} strokeWidth="6"
-            strokeDasharray={`${(pct / 100) * circ} ${circ}`} strokeLinecap="round" />
-          <text x="40" y="40" textAnchor="middle" dominantBaseline="middle" fill="currentColor"
-            fontSize="13" fontWeight="bold" transform="rotate(90, 40, 40)">{pct}%</text>
+          <circle
+            cx="40"
+            cy="40"
+            r={r}
+            fill="none"
+            stroke="currentColor"
+            strokeOpacity="0.1"
+            strokeWidth="6"
+          />
+          <circle
+            cx="40"
+            cy="40"
+            r={r}
+            fill="none"
+            stroke={color}
+            strokeWidth="6"
+            strokeDasharray={`${(pct / 100) * circ} ${circ}`}
+            strokeLinecap="round"
+          />
+          <text
+            x="40"
+            y="40"
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fill="currentColor"
+            fontSize="13"
+            fontWeight="bold"
+            transform="rotate(90, 40, 40)"
+          >
+            {pct}%
+          </text>
         </svg>
-        <span className="text-xs text-muted-foreground text-center">{label}</span>
+        <span className="text-xs text-muted-foreground text-center">
+          {label}
+        </span>
       </div>
     );
   };
@@ -413,13 +668,22 @@ function ProgressRingWidget() {
     <div className="space-y-4">
       <div className="flex justify-around">
         <Ring pct={completion} color="#34d399" label="Tasks done" />
-        <Ring pct={inProgPct}  color="#a78bfa" label="In progress" />
-        <Ring pct={userPct}    color="#60a5fa" label="Users active" />
+        <Ring pct={inProgPct} color="#a78bfa" label="In progress" />
+        <Ring pct={userPct} color="#60a5fa" label="Users active" />
       </div>
       <div className="grid grid-cols-3 gap-2 text-center text-xs">
-        <div><p className="font-bold text-emerald-400">{done}</p><p className="text-muted-foreground">Completed</p></div>
-        <div><p className="font-bold text-violet-400">{inProg}</p><p className="text-muted-foreground">In Progress</p></div>
-        <div><p className="font-bold text-blue-400">{s?.activeUsers || 0}</p><p className="text-muted-foreground">Active Users</p></div>
+        <div>
+          <p className="font-bold text-emerald-400">{done}</p>
+          <p className="text-muted-foreground">Completed</p>
+        </div>
+        <div>
+          <p className="font-bold text-violet-400">{inProg}</p>
+          <p className="text-muted-foreground">In Progress</p>
+        </div>
+        <div>
+          <p className="font-bold text-blue-400">{s?.activeUsers || 0}</p>
+          <p className="text-muted-foreground">Active Users</p>
+        </div>
       </div>
     </div>
   );
@@ -431,42 +695,105 @@ function CalculatorWidget() {
   const [op, setOp] = useState<string | null>(null);
   const [reset, setReset] = useState(false);
   const press = (val: string) => {
-    if (val === "C")  { setDisplay("0"); setPrev(null); setOp(null); setReset(false); return; }
-    if (val === "±")  { setDisplay(d => String(-parseFloat(d) || 0)); return; }
-    if (val === "%")  { setDisplay(d => String(parseFloat(d) / 100)); return; }
-    if (["+","−","×","÷"].includes(val)) { setPrev(display); setOp(val); setReset(true); return; }
+    if (val === "C") {
+      setDisplay("0");
+      setPrev(null);
+      setOp(null);
+      setReset(false);
+      return;
+    }
+    if (val === "±") {
+      setDisplay((d) => String(-parseFloat(d) || 0));
+      return;
+    }
+    if (val === "%") {
+      setDisplay((d) => String(parseFloat(d) / 100));
+      return;
+    }
+    if (["+", "−", "×", "÷"].includes(val)) {
+      setPrev(display);
+      setOp(val);
+      setReset(true);
+      return;
+    }
     if (val === "=") {
       if (!prev || !op) return;
-      const a = parseFloat(prev), b = parseFloat(display);
-      const r = op === "+" ? a+b : op === "−" ? a-b : op === "×" ? a*b : b !== 0 ? a/b : 0;
+      const a = parseFloat(prev),
+        b = parseFloat(display);
+      const r =
+        op === "+"
+          ? a + b
+          : op === "−"
+            ? a - b
+            : op === "×"
+              ? a * b
+              : b !== 0
+                ? a / b
+                : 0;
       setDisplay(String(parseFloat(r.toFixed(8))));
-      setPrev(null); setOp(null); setReset(false); return;
+      setPrev(null);
+      setOp(null);
+      setReset(false);
+      return;
     }
-    if (val === ".") { if (reset) { setDisplay("0."); setReset(false); return; } if (!display.includes(".")) setDisplay(d => d + "."); return; }
-    if (reset) { setDisplay(val); setReset(false); return; }
-    setDisplay(d => d === "0" ? val : d.length < 12 ? d + val : d);
+    if (val === ".") {
+      if (reset) {
+        setDisplay("0.");
+        setReset(false);
+        return;
+      }
+      if (!display.includes(".")) setDisplay((d) => d + ".");
+      return;
+    }
+    if (reset) {
+      setDisplay(val);
+      setReset(false);
+      return;
+    }
+    setDisplay((d) => (d === "0" ? val : d.length < 12 ? d + val : d));
   };
-  const rows = [["C","±","%","÷"],["7","8","9","×"],["4","5","6","−"],["1","2","3","+"],[" ","0",".","="]];
-  const isOp = (v: string) => ["+","−","×","÷","="].includes(v);
-  const isFn = (v: string) => ["C","±","%"].includes(v);
+  const rows = [
+    ["C", "±", "%", "÷"],
+    ["7", "8", "9", "×"],
+    ["4", "5", "6", "−"],
+    ["1", "2", "3", "+"],
+    [" ", "0", ".", "="],
+  ];
+  const isOp = (v: string) => ["+", "−", "×", "÷", "="].includes(v);
+  const isFn = (v: string) => ["C", "±", "%"].includes(v);
   return (
     <div className="max-w-[220px] mx-auto space-y-3">
       <div className="bg-muted/30 rounded-xl p-4 text-right min-h-[72px]">
-        {op && <p className="text-xs text-muted-foreground">{prev} {op}</p>}
+        {op && (
+          <p className="text-xs text-muted-foreground">
+            {prev} {op}
+          </p>
+        )}
         <p className="text-3xl font-bold tracking-tight truncate">{display}</p>
       </div>
       <div className="space-y-2">
         {rows.map((row, ri) => (
           <div key={ri} className="grid grid-cols-4 gap-2">
-            {row.map((btn, bi) => btn === " " ? <div key={bi} /> : (
-              <button key={btn} onClick={() => press(btn)}
-                className={`h-11 rounded-xl text-sm font-semibold transition-all active:scale-95
-                  ${isOp(btn) ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                    : isFn(btn) ? "bg-muted/60 hover:bg-muted"
-                    : "bg-muted/30 hover:bg-muted/50"}`}>
-                {btn}
-              </button>
-            ))}
+            {row.map((btn, bi) =>
+              btn === " " ? (
+                <div key={bi} />
+              ) : (
+                <button
+                  key={btn}
+                  onClick={() => press(btn)}
+                  className={`h-11 rounded-xl text-sm font-semibold transition-all active:scale-95
+                  ${
+                    isOp(btn)
+                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                      : isFn(btn)
+                        ? "bg-muted/60 hover:bg-muted"
+                        : "bg-muted/30 hover:bg-muted/50"
+                  }`}
+                >
+                  {btn}
+                </button>
+              ),
+            )}
           </div>
         ))}
       </div>
@@ -476,30 +803,53 @@ function CalculatorWidget() {
 
 // ─── WIDGET MAP ───────────────────────────────────────────────────────────────
 const widgetComponents: Record<string, React.ComponentType> = {
-  "Bar Chart": BarChartWidget, "Line Chart": LineChartWidget, "Pie Chart": PieChartWidget,
-  "Stat Card": StatCardWidget, "Data Table": DataTableWidget, "Calendar": CalendarWidget,
-  "Notifications": NotificationsWidget, "Activity Feed": ActivityFeedWidget, "Map View": MapViewWidget,
-  "File Uploader": FileUploaderWidget, "Progress Ring": ProgressRingWidget, "Calculator": CalculatorWidget,
+  "Bar Chart": BarChartWidget,
+  "Line Chart": LineChartWidget,
+  "Pie Chart": PieChartWidget,
+  "Stat Card": StatCardWidget,
+  "Data Table": DataTableWidget,
+  Calendar: CalendarWidget,
+  Notifications: NotificationsWidget,
+  "Activity Feed": ActivityFeedWidget,
+  "Map View": MapViewWidget,
+  "File Uploader": FileUploaderWidget,
+  "Progress Ring": ProgressRingWidget,
+  Calculator: CalculatorWidget,
 };
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 const Widgets = () => {
   const [searchParams] = useSearchParams();
-  const [selected, setSelected] = useState<string | null>(searchParams.get("w"));
+  const [selected, setSelected] = useState<string | null>(
+    searchParams.get("w"),
+  );
 
-  const { catalog, loading: catalogLoading, error: catalogError } = useWidgetCatalog();
-  const { allowedSet, loading: rightsLoading, error: rightsError } = useAllowedWidgets();
+  const {
+    catalog,
+    loading: catalogLoading,
+    error: catalogError,
+  } = useWidgetCatalog();
+  const {
+    allowedSet,
+    loading: rightsLoading,
+    error: rightsError,
+  } = useAllowedWidgets();
 
-  const visibleWidgets = allowedSet
-    ? catalog.filter(w => allowedSet.has(w.key) && widgetComponents[w.key])
-    : [];
+  // allowedSet null = still loading or rights failed → show all catalog widgets as fallback
+  const visibleWidgets = catalog.filter(
+    (w) => (!allowedSet || allowedSet.has(w.key)) && widgetComponents[w.key],
+  );
 
-  const safeSelected = selected && allowedSet?.has(selected) ? selected : null;
+  const safeSelected =
+    selected && (!allowedSet || allowedSet.has(selected)) ? selected : null;
   const ActiveWidget = safeSelected ? widgetComponents[safeSelected] : null;
-  const selectedWidget = safeSelected ? catalog.find((w) => w.key === safeSelected) : null;
-  const SelectedIcon = selectedWidget ? widgetIcons[selectedWidget.iconKey] || Puzzle : Puzzle;
+  const selectedWidget = safeSelected
+    ? catalog.find((w) => w.key === safeSelected)
+    : null;
+  const SelectedIcon = selectedWidget
+    ? widgetIcons[selectedWidget.iconKey] || Puzzle
+    : Puzzle;
   const loading = rightsLoading || catalogLoading;
-  const hasAccessError = rightsError || catalogError;
 
   return (
     <>
@@ -509,7 +859,10 @@ const Widgets = () => {
         // Skeleton while loading rights — avoid flash
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mt-4">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="h-24 rounded-lg border border-border bg-muted/20 animate-pulse" />
+            <div
+              key={i}
+              className="h-24 rounded-lg border border-border bg-muted/20 animate-pulse"
+            />
           ))}
         </div>
       ) : safeSelected ? (
@@ -520,19 +873,31 @@ const Widgets = () => {
                 {(() => {
                   return <SelectedIcon size={20} className="text-primary" />;
                 })()}
-                <h1 className="text-base font-bold">{selectedWidget?.label || safeSelected}</h1>
+                <h1 className="text-base font-bold">
+                  {selectedWidget?.label || safeSelected}
+                </h1>
               </div>
-              <button onClick={() => setSelected(null)}
-                className="p-1.5 rounded-lg hover:bg-muted/40 transition-colors text-muted-foreground hover:text-foreground">
+              <button
+                onClick={() => setSelected(null)}
+                className="p-1.5 rounded-lg hover:bg-muted/40 transition-colors text-muted-foreground hover:text-foreground"
+              >
                 <X size={16} />
               </button>
             </div>
             <div className="p-5">
-              {ActiveWidget ? <ActiveWidget /> : <p className="text-sm text-muted-foreground text-center py-8">Widget not found.</p>}
+              {ActiveWidget ? (
+                <ActiveWidget />
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  Widget not found.
+                </p>
+              )}
             </div>
           </div>
-          <button onClick={() => setSelected(null)}
-            className="mt-4 flex items-center gap-1.5 text-sm text-primary hover:underline font-heading mx-auto">
+          <button
+            onClick={() => setSelected(null)}
+            className="mt-4 flex items-center gap-1.5 text-sm text-primary hover:underline font-heading mx-auto"
+          >
             <X size={14} /> Back to all widgets
           </button>
         </div>
@@ -540,38 +905,46 @@ const Widgets = () => {
         <>
           <div className="flex items-center gap-2 mb-6">
             <Puzzle size={20} className="text-primary" />
-            <h1 className="text-xl font-heading font-bold text-foreground">Widgets</h1>
-            {allowedSet && allowedSet.size < catalog.length && (
-              <span className="ml-2 text-xs text-muted-foreground bg-muted/30 px-2 py-0.5 rounded-full">
-                {allowedSet.size} available
-              </span>
-            )}
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Widgets
+            </h1>
+            {allowedSet &&
+              allowedSet.size > 0 &&
+              allowedSet.size < catalog.length && (
+                <span className="ml-2 text-xs text-muted-foreground bg-muted/30 px-2 py-0.5 rounded-full">
+                  {allowedSet.size} available
+                </span>
+              )}
           </div>
 
-          {hasAccessError ? (
+          {visibleWidgets.length === 0 ? (
             <div className="text-center py-16 space-y-3">
               <Puzzle size={32} className="text-muted-foreground/40 mx-auto" />
-              <p className="text-sm text-muted-foreground">Widget access could not be loaded.</p>
-              <p className="text-xs text-muted-foreground/60">Please refresh or contact your administrator.</p>
-            </div>
-          ) : visibleWidgets.length === 0 ? (
-            <div className="text-center py-16 space-y-3">
-              <Puzzle size={32} className="text-muted-foreground/40 mx-auto" />
-              <p className="text-sm text-muted-foreground">No widgets are enabled for your account.</p>
-              <p className="text-xs text-muted-foreground/60">Contact your administrator to enable widget access.</p>
+              <p className="text-sm text-muted-foreground">
+                No widgets are enabled for your account.
+              </p>
+              <p className="text-xs text-muted-foreground/60">
+                Contact your administrator to enable widget access.
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
               {visibleWidgets.map(({ iconKey, key, label }) => {
                 const Icon = widgetIcons[iconKey] || Puzzle;
                 return (
-                <button key={key} onClick={() => setSelected(key)}
-                  className="flex flex-col items-center gap-2 p-5 rounded-lg border border-border bg-card
-                    transition-all hover:bg-accent/10 hover:shadow-md hover:-translate-y-0.5 hover:border-primary">
-                  <Icon size={28} className="text-primary" />
-                  <span className="text-xs text-muted-foreground font-heading">{label}</span>
-                </button>
-              );})}
+                  <button
+                    key={key}
+                    onClick={() => setSelected(key)}
+                    className="flex flex-col items-center gap-2 p-5 rounded-lg border border-border bg-card
+                    transition-all hover:bg-accent/10 hover:shadow-md hover:-translate-y-0.5 hover:border-primary"
+                  >
+                    <Icon size={28} className="text-primary" />
+                    <span className="text-xs text-muted-foreground font-heading">
+                      {label}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </>

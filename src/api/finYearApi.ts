@@ -10,8 +10,16 @@ export interface FinYearPayload {
   is_locked?: boolean;
 }
 
+// Regular fetch — only unlocked + active years (for all transaction dropdowns)
 export const getFinYears = async () => {
   const res = await fetchWithAuth(BASE_URL);
+  if (!res.ok) throw new Error(`GET failed: ${res.status}`);
+  return res.json();
+};
+
+// Admin fetch — all years including locked/inactive (for the FinYear management page)
+export const getAllFinYears = async () => {
+  const res = await fetchWithAuth(`${BASE_URL}?all=true`);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
   return res.json();
 };

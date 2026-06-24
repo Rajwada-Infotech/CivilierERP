@@ -1020,7 +1020,7 @@ export default function VehicleInOut() {
                       >
                         <option value="">Select FY…</option>
                         {finYears
-                          .filter((fy) => !fy.locked)
+                          .filter((fy) => !fy.locked && fy.status === "Active")
                           .sort((a, b) => b.year.localeCompare(a.year))
                           .map((fy) => (
                             <option key={fy.id} value={fy.year}>
@@ -1391,6 +1391,7 @@ export default function VehicleInOut() {
                     >
                       <option value="">All Years</option>
                       {finYears
+                        .filter((fy) => fy.status === "Active" && !fy.locked)
                         .sort((a, b) => b.year.localeCompare(a.year))
                         .map((fy) => (
                           <option key={fy.id} value={fy.year}>

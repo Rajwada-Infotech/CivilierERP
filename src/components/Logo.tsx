@@ -99,8 +99,8 @@ export function LogoFull({ className }: { className?: string }) {
 
   // Labels shown in the cycle: "APP v1.0 / DB v2.3"
   const targets = [
-    appLabel === "…" || dbLabel === "…" ? "…" : `APP ${appLabel}`,
-    appLabel === "…" || dbLabel === "…" ? "…" : `DB  ${dbLabel}`,
+    appLabel === "…" || dbLabel === "…" ? "…" : `app. ${appLabel}`,
+    appLabel === "…" || dbLabel === "…" ? "…" : `db. ${dbLabel}`,
   ];
 
   const { display, activeIdx } = useMatrixCycle(targets);
@@ -124,22 +124,6 @@ export function LogoFull({ className }: { className?: string }) {
           aria-label={tooltip}
         >
           {display}
-          {/* tiny dot indicator: first dot = app, second = db */}
-          <span className="ml-1 inline-flex gap-[3px] align-middle">
-            {targets.map((_, i) => (
-              <span
-                key={i}
-                className="inline-block w-[4px] h-[4px] rounded-full transition-all duration-300"
-                style={{
-                  background:
-                    i === activeIdx
-                      ? "rgba(52,211,153,0.9)"
-                      : "rgba(52,211,153,0.25)",
-                  transform: i === activeIdx ? "scale(1.4)" : "scale(1)",
-                }}
-              />
-            ))}
-          </span>
         </span>
       </div>
     </div>

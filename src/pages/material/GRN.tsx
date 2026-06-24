@@ -36,6 +36,8 @@ import {
   ArrowLeft,
   RefreshCw,
   RotateCcw,
+  BookOpen,
+  Landmark,
 } from "lucide-react";
 import {
   Dialog,
@@ -723,6 +725,9 @@ export default function GRN() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [viewingGrn, setViewingGrn] = useState<any | null>(null);
+  const [viewModalTab, setViewModalTab] = useState<"details" | "posting">(
+    "details",
+  );
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [grnStatusFilter, setGrnStatusFilter] = useState("All");
@@ -1354,7 +1359,12 @@ export default function GRN() {
         action={
           !showForm && (
             <button
-              onClick={() => { setShowForm(true); setEditingId(null); setFormData(buildEmptyForm()); setErrors({}); }}
+              onClick={() => {
+                setShowForm(true);
+                setEditingId(null);
+                setFormData(buildEmptyForm());
+                setErrors({});
+              }}
               className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
             >
               <Plus size={13} /> New GRN
@@ -1362,562 +1372,390 @@ export default function GRN() {
           )
         }
       >
-
         {/* ══════════════════════════════════════════════════════════════════ */}
         {/*  FORM                                                              */}
         {/* ══════════════════════════════════════════════════════════════════ */}
-        {showForm && <div className="rounded-2xl bg-card border border-border shadow-sm overflow-hidden">
-          {/* Form header — Finance Payment style with emerald theme */}
-          <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
-            <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
-            <div className="flex items-center gap-3 min-w-0">
-              <button type="button" onClick={resetForm} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0">
-                <ArrowLeft size={15} /><span className="hidden sm:inline">Back</span>
-              </button>
-              <span className="text-emerald-500/40">|</span>
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-emerald-500/[0.18] border border-emerald-500/30 shrink-0">
-                  <Truck size={12} className="text-emerald-400" />
+        {showForm && (
+          <div className="rounded-2xl bg-card border border-border shadow-sm overflow-hidden">
+            {/* Form header — Finance Payment style with emerald theme */}
+            <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
+              <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
+              <div className="flex items-center gap-3 min-w-0">
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                >
+                  <ArrowLeft size={15} />
+                  <span className="hidden sm:inline">Back</span>
+                </button>
+                <span className="text-emerald-500/40">|</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-emerald-500/[0.18] border border-emerald-500/30 shrink-0">
+                    <Truck size={12} className="text-emerald-400" />
+                  </div>
+                  <h2 className="text-sm font-heading font-bold text-foreground truncate">
+                    {editingId
+                      ? "Edit Goods Receipt Note"
+                      : "New Goods Receipt Note"}
+                  </h2>
                 </div>
-                <h2 className="text-sm font-heading font-bold text-foreground truncate">
-                  {editingId ? "Edit Goods Receipt Note" : "New Goods Receipt Note"}
-                </h2>
               </div>
             </div>
-          </div>
 
-          <div className="p-5 space-y-5">
-            {/* ── Section 1: Filters + PO ── */}
-            <SectionCard>
-              <SectionTitle
-                icon={Filter}
-                label="Filters & Purchase Order"
-                sub="Narrow the list, then select a PO"
-              />
+            <div className="p-5 space-y-5">
+              {/* ── Section 1: Filters + PO ── */}
+              <SectionCard>
+                <SectionTitle
+                  icon={Filter}
+                  label="Filters & Purchase Order"
+                  sub="Narrow the list, then select a PO"
+                />
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Fin Year */}
-                <div>
-                  <FieldLabel>Financial Year</FieldLabel>
-                  <div className="relative">
-                    <select
-                      value={selectedFinYear}
-                      onChange={(e) => {
-                        setSelectedFinYear(e.target.value);
-                        setPage(1);
-                        setFormData((prev) => ({
-                          ...prev,
-                          poId: "",
-                          poNumber: "",
-                          supplierId: "",
-                          supplierName: "",
-                          items: [createEmptyItem()],
-                          grnNo: "",
-                          docNo: "",
-                          parentDocNo: "",
-                          rootExBDocNo: "",
-                          finYear: e.target.value,
-                        }));
-                      }}
-                      className={inpSel}
-                    >
-                      <option value="">All Years</option>
-                      {finYears.map((fy) => (
-                        <option key={fy.id} value={fy.year}>
-                          {fy.year}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={12}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* Fin Year */}
+                  <div>
+                    <FieldLabel>Financial Year</FieldLabel>
+                    <div className="relative">
+                      <select
+                        value={selectedFinYear}
+                        onChange={(e) => {
+                          setSelectedFinYear(e.target.value);
+                          setPage(1);
+                          setFormData((prev) => ({
+                            ...prev,
+                            poId: "",
+                            poNumber: "",
+                            supplierId: "",
+                            supplierName: "",
+                            items: [createEmptyItem()],
+                            grnNo: "",
+                            docNo: "",
+                            parentDocNo: "",
+                            rootExBDocNo: "",
+                            finYear: e.target.value,
+                          }));
+                        }}
+                        className={inpSel}
+                      >
+                        <option value="">All Years</option>
+                        {finYears
+                          .filter((fy) => fy.status === "Active" && !fy.locked)
+                          .sort((a, b) => b.year.localeCompare(a.year))
+                          .map((fy) => (
+                            <option key={fy.id} value={fy.year}>
+                              {fy.year}
+                            </option>
+                          ))}
+                      </select>
+                      <ChevronDown
+                        size={12}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                    </div>
                   </div>
-                </div>
 
-                {/* Project */}
-                <div>
-                  <FieldLabel>
-                    <span className="inline-flex items-center gap-1">
-                      <FolderOpen size={9} />
-                      Project
-                    </span>
-                  </FieldLabel>
-                  <div className="relative">
-                    <select
-                      value={formData.projectId}
-                      onChange={(e) =>
-                        setFormData((prev) => ({
-                          ...prev,
-                          projectId: e.target.value,
-                          poId: "",
-                          poNumber: "",
-                          supplierId: "",
-                          supplierName: "",
-                          items: [createEmptyItem()],
-                          parentDocNo: "",
-                          rootExBDocNo: "",
-                        }))
-                      }
-                      className={inpSel}
-                    >
-                      <option value="">All Projects</option>
-                      {(projectsData as any[]).map((p: any) => (
-                        <option key={p.id} value={String(p.id)}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={12}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
-                </div>
-
-                {/* Godown */}
-                <div>
-                  <FieldLabel>
-                    <span className="inline-flex items-center gap-1">
-                      <Warehouse size={9} />
-                      Godown
-                    </span>
-                  </FieldLabel>
-                  <div className="relative">
-                    <select
-                      value={formData.godownId}
-                      onChange={(e) =>
-                        setFormData((prev) => ({
-                          ...prev,
-                          godownId: e.target.value,
-                        }))
-                      }
-                      className={inpSel}
-                    >
-                      <option value="">Main Godown</option>
-                      {godowns
-                        .filter((g: any) => !g.IsMain)
-                        .map((g: any) => (
-                          <option key={g.GodownID} value={String(g.GodownID)}>
-                            {g.GodownName}
+                  {/* Project */}
+                  <div>
+                    <FieldLabel>
+                      <span className="inline-flex items-center gap-1">
+                        <FolderOpen size={9} />
+                        Project
+                      </span>
+                    </FieldLabel>
+                    <div className="relative">
+                      <select
+                        value={formData.projectId}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            projectId: e.target.value,
+                            poId: "",
+                            poNumber: "",
+                            supplierId: "",
+                            supplierName: "",
+                            items: [createEmptyItem()],
+                            parentDocNo: "",
+                            rootExBDocNo: "",
+                          }))
+                        }
+                        className={inpSel}
+                      >
+                        <option value="">All Projects</option>
+                        {(projectsData as any[]).map((p: any) => (
+                          <option key={p.id} value={String(p.id)}>
+                            {p.name}
                           </option>
                         ))}
-                    </select>
-                    <ChevronDown
-                      size={12}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
+                      </select>
+                      <ChevronDown
+                        size={12}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                    </div>
                   </div>
-                </div>
 
-                {/* Purchase Order — spans 2 cols */}
-                <div className="sm:col-span-2">
-                  <FieldLabel required>Purchase Order</FieldLabel>
-                  <div className="relative">
-                    <select
-                      value={formData.poId}
-                      onChange={(e) => handlePOSelect(e.target.value)}
-                      disabled={!!editingId || loadingPO}
-                      className={`${inpSel} ${!!editingId || loadingPO ? "opacity-60 cursor-not-allowed" : ""}`}
-                    >
-                      <option value="">
-                        {loadingPO
-                          ? "Loading…"
-                          : pos.length === 0
-                            ? "No POs for selected filters"
-                            : "Select Purchase Order…"}
-                      </option>
-                      {pos.map((po) => (
-                        <option key={po.value} value={po.value}>
-                          {po.label}
+                  {/* Godown */}
+                  <div>
+                    <FieldLabel>
+                      <span className="inline-flex items-center gap-1">
+                        <Warehouse size={9} />
+                        Godown
+                      </span>
+                    </FieldLabel>
+                    <div className="relative">
+                      <select
+                        value={formData.godownId}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            godownId: e.target.value,
+                          }))
+                        }
+                        className={inpSel}
+                      >
+                        <option value="">Main Godown</option>
+                        {godowns
+                          .filter((g: any) => !g.IsMain)
+                          .map((g: any) => (
+                            <option key={g.GodownID} value={String(g.GodownID)}>
+                              {g.GodownName}
+                            </option>
+                          ))}
+                      </select>
+                      <ChevronDown
+                        size={12}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Purchase Order — spans 2 cols */}
+                  <div className="sm:col-span-2">
+                    <FieldLabel required>Purchase Order</FieldLabel>
+                    <div className="relative">
+                      <select
+                        value={formData.poId}
+                        onChange={(e) => handlePOSelect(e.target.value)}
+                        disabled={!!editingId || loadingPO}
+                        className={`${inpSel} ${!!editingId || loadingPO ? "opacity-60 cursor-not-allowed" : ""}`}
+                      >
+                        <option value="">
+                          {loadingPO
+                            ? "Loading…"
+                            : pos.length === 0
+                              ? "No POs for selected filters"
+                              : "Select Purchase Order…"}
                         </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={12}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
-                  {errors.poId && (
-                    <p className="text-destructive text-[11px] mt-1">
-                      {errors.poId}
-                    </p>
-                  )}
-                  {loadingPO && (
-                    <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin inline-block" />
-                      Loading PO details…
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Autofilled chips */}
-              {formData.poId && !loadingPO && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-                  <InfoPill label="Supplier" value={formData.supplierName} />
-                  <InfoPill label="PO No" value={formData.poNumber} mono />
-                  <InfoPill label="Fin Year" value={formData.finYear} />
-                  {formData.projectId && (
-                    <InfoPill
-                      label="Project"
-                      value={
-                        (projectsData as any[]).find(
-                          (p: any) => String(p.id) === formData.projectId,
-                        )?.name || ""
-                      }
-                    />
-                  )}
-                </div>
-              )}
-            </SectionCard>
-
-            {/* ── Section 2: Date + GRN Number ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <FieldLabel>GRN Date</FieldLabel>
-                <div className="relative">
-                  <Calendar
-                    size={13}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                  />
-                  <input
-                    type="date"
-                    value={formData.grnDate}
-                    onChange={(e) =>
-                      setFormData((p) => ({ ...p, grnDate: e.target.value }))
-                    }
-                    className={`${inp} pl-9 [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <FieldLabel>GRN Number</FieldLabel>
-                <div className="flex items-center gap-2 px-3 h-[38px] rounded-lg bg-muted/40 border border-dashed border-border">
-                  <Hash size={13} className="text-muted-foreground shrink-0" />
-                  {editingId && formData.grnNo ? (
-                    <span className="font-mono text-sm text-emerald-600 dark:text-emerald-400 font-semibold">
-                      {formData.grnNo}
-                    </span>
-                  ) : grnNumberPreview?.nextDocNo ? (
-                    <span className="font-mono text-sm text-emerald-600 dark:text-emerald-400 font-semibold">
-                      {grnNumberPreview.nextDocNo}
-                    </span>
-                  ) : loadingPreview ? (
-                    <span className="text-sm text-muted-foreground/60 animate-pulse">
-                      Generating…
-                    </span>
-                  ) : (
-                    <span className="text-sm text-muted-foreground/40 italic">
-                      Auto-generated on save
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* ── Section 3: Items Table ── */}
-            <SectionCard>
-              <SectionTitle
-                icon={Package}
-                label="Received Items"
-                sub={
-                  formData.poId
-                    ? `${formData.items.length} item${formData.items.length !== 1 ? "s" : ""} from PO`
-                    : "Select a PO above"
-                }
-              />
-
-              {errors.items && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs">
-                  <AlertCircle size={12} />
-                  {errors.items}
-                </div>
-              )}
-
-              {/* Mobile cards */}
-              <div className="md:hidden space-y-3">
-                {!formData.poId ? (
-                  <div className="border-2 border-dashed border-border rounded-xl py-10 text-center text-muted-foreground/40 text-sm italic">
-                    Select a Purchase Order above
-                  </div>
-                ) : (
-                  formData.items.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="border border-border rounded-xl p-4 space-y-3 bg-muted/20"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium text-sm truncate">
-                          {item.itemName || "—"}
-                        </span>
-                        <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
-                          {item.uom || "—"}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2 text-xs">
-                        {[
-                          ["Ordered", String(item.orderedQty), ""],
-                          [
-                            "Pending Qty",
-                            String(item.remainingQty),
-                            item.remainingQty > 0
-                              ? "text-amber-500"
-                              : "text-green-500",
-                          ],
-                          [
-                            "Total",
-                            item.totalAmount > 0
-                              ? `₹${fmt(item.totalAmount)}`
-                              : "—",
-                            "text-emerald-600 dark:text-emerald-400 font-bold",
-                          ],
-                        ].map(([l, v, c]) => (
-                          <div key={l}>
-                            <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
-                              {l}
-                            </p>
-                            <p className={`font-semibold ${c}`}>{v}</p>
-                          </div>
+                        {pos.map((po) => (
+                          <option key={po.value} value={po.value}>
+                            {po.label}
+                          </option>
                         ))}
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        {(["receivedQty", "rate", "quantity"] as const).map(
-                          (field) => (
-                            <div key={field}>
-                              <label className="block text-[9px] uppercase tracking-widest text-muted-foreground mb-1">
-                                {field === "receivedQty"
-                                  ? "Received"
-                                  : field === "rate"
-                                    ? "Rate ₹"
-                                    : "Qty Bill"}
-                                <span className="text-destructive ml-0.5">
-                                  *
-                                </span>
-                              </label>
-                              <input
-                                type="number"
-                                min={0}
-                                step={field !== "receivedQty" ? "0.01" : "1"}
-                                value={
-                                  field === "receivedQty"
-                                    ? item.receivedQty
-                                    : field === "rate"
-                                      ? item.rate
-                                      : item.quantity
-                                }
-                                onChange={(e) =>
-                                  updateItemField(
-                                    idx,
-                                    field,
-                                    Number(e.target.value),
-                                  )
-                                }
-                                className={`${inp} text-right text-xs`}
-                              />
-                            </div>
-                          ),
-                        )}
-                      </div>
+                      </select>
+                      <ChevronDown
+                        size={12}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
                     </div>
-                  ))
-                )}
-                {formData.poId && grnTotalWithGST > 0 && (
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between items-center px-4 py-3 rounded-xl bg-emerald-500/[0.05] border border-emerald-500/20">
-                      <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                        GRN Total (this receipt)
-                      </span>
-                      <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                        ₹{fmt(grnTotalWithGST)}
-                      </span>
-                    </div>
-                    {formData.poTotalAmount > 0 &&
-                      (() => {
-                        const diff =
-                          formData.poTotalAmount -
-                          formData.poReceivedAmount -
-                          grnTotalWithGST;
-                        return (
-                          <div className="grid grid-cols-2 gap-1.5">
-                            <div className="flex flex-col px-3 py-2.5 rounded-xl bg-muted/40 border border-border">
-                              <span className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
-                                PO Value (incl. GST)
-                              </span>
-                              <span className="text-xs font-semibold text-foreground">
-                                ₹{fmt(formData.poTotalAmount)}
-                              </span>
-                            </div>
-                            {formData.poReceivedAmount > 0 && (
-                              <div className="flex flex-col px-3 py-2.5 rounded-xl bg-muted/40 border border-border">
-                                <span className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
-                                  Already Received
-                                </span>
-                                <span className="text-xs font-semibold text-foreground">
-                                  ₹{fmt(formData.poReceivedAmount)}
-                                </span>
-                              </div>
-                            )}
-                            <div
-                              className={`flex flex-col px-3 py-2.5 rounded-xl border ${diff > 0.005 ? "bg-amber-500/10 border-amber-500/30" : "bg-green-500/10 border-green-500/30"}`}
-                            >
-                              <span className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
-                                Balance on PO
-                              </span>
-                              <span
-                                className={`text-xs font-semibold ${diff > 0.005 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}
-                              >
-                                {diff > 0.005
-                                  ? `₹${fmt(diff)}`
-                                  : "Fully received"}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })()}
+                    {errors.poId && (
+                      <p className="text-destructive text-[11px] mt-1">
+                        {errors.poId}
+                      </p>
+                    )}
+                    {loadingPO && (
+                      <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin inline-block" />
+                        Loading PO details…
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Autofilled chips */}
+                {formData.poId && !loadingPO && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                    <InfoPill label="Supplier" value={formData.supplierName} />
+                    <InfoPill label="PO No" value={formData.poNumber} mono />
+                    <InfoPill label="Fin Year" value={formData.finYear} />
+                    {formData.projectId && (
+                      <InfoPill
+                        label="Project"
+                        value={
+                          (projectsData as any[]).find(
+                            (p: any) => String(p.id) === formData.projectId,
+                          )?.name || ""
+                        }
+                      />
+                    )}
                   </div>
                 )}
+              </SectionCard>
+
+              {/* ── Section 2: Date + GRN Number ── */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <FieldLabel>GRN Date</FieldLabel>
+                  <div className="relative">
+                    <Calendar
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    <input
+                      type="date"
+                      value={formData.grnDate}
+                      onChange={(e) =>
+                        setFormData((p) => ({ ...p, grnDate: e.target.value }))
+                      }
+                      className={`${inp} pl-9 [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <FieldLabel>GRN Number</FieldLabel>
+                  <div className="flex items-center gap-2 px-3 h-[38px] rounded-lg bg-muted/40 border border-dashed border-border">
+                    <Hash
+                      size={13}
+                      className="text-muted-foreground shrink-0"
+                    />
+                    {editingId && formData.grnNo ? (
+                      <span className="font-mono text-sm text-emerald-600 dark:text-emerald-400 font-semibold">
+                        {formData.grnNo}
+                      </span>
+                    ) : grnNumberPreview?.nextDocNo ? (
+                      <span className="font-mono text-sm text-emerald-600 dark:text-emerald-400 font-semibold">
+                        {grnNumberPreview.nextDocNo}
+                      </span>
+                    ) : loadingPreview ? (
+                      <span className="text-sm text-muted-foreground/60 animate-pulse">
+                        Generating…
+                      </span>
+                    ) : (
+                      <span className="text-sm text-muted-foreground/40 italic">
+                        Auto-generated on save
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              {/* Desktop table */}
-              <div className="hidden md:block border border-border rounded-xl overflow-hidden">
-                <table className="w-full text-sm table-fixed">
-                  <colgroup>
-                    <col style={{ width: "20%" }} />
-                    <col style={{ width: "9%" }} />
-                    <col style={{ width: "10%" }} />
-                    <col style={{ width: "9%" }} />
-                    <col style={{ width: "8%" }} />
-                    <col style={{ width: "14%" }} />
-                    <col style={{ width: "14%" }} />
-                    <col style={{ width: "16%" }} />
-                  </colgroup>
-                  <thead>
-                    <tr className="bg-muted/50 border-b border-border">
-                      {[
-                        { h: "Item", align: "text-left" },
-                        { h: "Ordered", align: "text-right" },
-                        { h: "Received *", align: "text-right" },
-                        { h: "Pending Qty", align: "text-right" },
-                        { h: "UOM", align: "text-left" },
-                        { h: "Rate (₹) *", align: "text-right" },
-                        { h: "Qty Bill *", align: "text-right" },
-                        { h: "Total (₹)", align: "text-right" },
-                      ].map(({ h, align }) => (
-                        <th
-                          key={h}
-                          className={`px-3 py-2.5 ${align} text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap`}
-                        >
-                          {h.replace(" *", "")}
-                          {h.includes("*") && (
-                            <span className="text-destructive ml-0.5">*</span>
-                          )}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/60">
-                    {!formData.poId ? (
-                      <tr>
-                        <td
-                          colSpan={8}
-                          className="py-12 text-center text-muted-foreground/40 text-sm italic"
-                        >
-                          Select a Purchase Order above — items will autofill
-                          from the PO
-                        </td>
-                      </tr>
-                    ) : (
-                      formData.items.map((item, idx) => (
-                        <tr
-                          key={idx}
-                          className="hover:bg-muted/20 transition-colors"
-                        >
-                          <td className="px-3 py-2.5">
-                            <span className="text-xs font-medium text-foreground">
-                              {item.itemName || "—"}
-                            </span>
-                          </td>
-                          <td className="px-2 py-2 text-right text-xs text-muted-foreground">
-                            {item.orderedQty}
-                          </td>
-                          <td className="px-1.5 py-1.5">
-                            <input
-                              type="number"
-                              min={0}
-                              max={item.orderedQty || undefined}
-                              value={item.receivedQty}
-                              onChange={(e) =>
-                                updateReceivedQty(idx, Number(e.target.value))
-                              }
-                              className={`${inp} text-right text-xs py-1.5`}
-                            />
-                          </td>
-                          <td
-                            className={`px-2 py-2 text-right text-xs font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
-                          >
-                            {item.remainingQty}
-                          </td>
-                          <td className="px-2 py-2 text-xs text-muted-foreground">
+              {/* ── Section 3: Items Table ── */}
+              <SectionCard>
+                <SectionTitle
+                  icon={Package}
+                  label="Received Items"
+                  sub={
+                    formData.poId
+                      ? `${formData.items.length} item${formData.items.length !== 1 ? "s" : ""} from PO`
+                      : "Select a PO above"
+                  }
+                />
+
+                {errors.items && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs">
+                    <AlertCircle size={12} />
+                    {errors.items}
+                  </div>
+                )}
+
+                {/* Mobile cards */}
+                <div className="md:hidden space-y-3">
+                  {!formData.poId ? (
+                    <div className="border-2 border-dashed border-border rounded-xl py-10 text-center text-muted-foreground/40 text-sm italic">
+                      Select a Purchase Order above
+                    </div>
+                  ) : (
+                    formData.items.map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="border border-border rounded-xl p-4 space-y-3 bg-muted/20"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-sm truncate">
+                            {item.itemName || "—"}
+                          </span>
+                          <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
                             {item.uom || "—"}
-                          </td>
-                          <td className="px-1.5 py-1.5">
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              value={item.rate}
-                              onChange={(e) =>
-                                updateItemField(
-                                  idx,
-                                  "rate",
-                                  Number(e.target.value),
-                                )
-                              }
-                              className={`${inp} text-right text-xs py-1.5`}
-                              placeholder="0.00"
-                            />
-                          </td>
-                          <td className="px-1.5 py-1.5">
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              value={item.quantity}
-                              onChange={(e) =>
-                                updateItemField(
-                                  idx,
-                                  "quantity",
-                                  Number(e.target.value),
-                                )
-                              }
-                              className={`${inp} text-right text-xs py-1.5`}
-                              placeholder="0"
-                            />
-                          </td>
-                          <td className="px-2 py-2 text-right text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                            {item.totalAmount > 0
-                              ? `₹${fmt(item.totalAmount)}`
-                              : "—"}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          {[
+                            ["Ordered", String(item.orderedQty), ""],
+                            [
+                              "Pending Qty",
+                              String(item.remainingQty),
+                              item.remainingQty > 0
+                                ? "text-amber-500"
+                                : "text-green-500",
+                            ],
+                            [
+                              "Total",
+                              item.totalAmount > 0
+                                ? `₹${fmt(item.totalAmount)}`
+                                : "—",
+                              "text-emerald-600 dark:text-emerald-400 font-bold",
+                            ],
+                          ].map(([l, v, c]) => (
+                            <div key={l}>
+                              <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                {l}
+                              </p>
+                              <p className={`font-semibold ${c}`}>{v}</p>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {(["receivedQty", "rate", "quantity"] as const).map(
+                            (field) => (
+                              <div key={field}>
+                                <label className="block text-[9px] uppercase tracking-widest text-muted-foreground mb-1">
+                                  {field === "receivedQty"
+                                    ? "Received"
+                                    : field === "rate"
+                                      ? "Rate ₹"
+                                      : "Qty Bill"}
+                                  <span className="text-destructive ml-0.5">
+                                    *
+                                  </span>
+                                </label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={field !== "receivedQty" ? "0.01" : "1"}
+                                  value={
+                                    field === "receivedQty"
+                                      ? item.receivedQty
+                                      : field === "rate"
+                                        ? item.rate
+                                        : item.quantity
+                                  }
+                                  onChange={(e) =>
+                                    updateItemField(
+                                      idx,
+                                      field,
+                                      Number(e.target.value),
+                                    )
+                                  }
+                                  className={`${inp} text-right text-xs`}
+                                />
+                              </div>
+                            ),
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
                   {formData.poId && grnTotalWithGST > 0 && (
-                    <tfoot>
-                      <tr className="bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
-                        <td
-                          colSpan={7}
-                          className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
-                        >
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center px-4 py-3 rounded-xl bg-emerald-500/[0.05] border border-emerald-500/20">
+                        <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                           GRN Total (this receipt)
-                        </td>
-                        <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                        </span>
+                        <span className="font-bold text-emerald-600 dark:text-emerald-400">
                           ₹{fmt(grnTotalWithGST)}
-                        </td>
-                      </tr>
+                        </span>
+                      </div>
                       {formData.poTotalAmount > 0 &&
                         (() => {
                           const diff =
@@ -1925,194 +1763,414 @@ export default function GRN() {
                             formData.poReceivedAmount -
                             grnTotalWithGST;
                           return (
-                            <>
-                              <tr className="bg-muted/30 border-t border-border/50">
-                                <td
-                                  colSpan={7}
-                                  className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
-                                >
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <div className="flex flex-col px-3 py-2.5 rounded-xl bg-muted/40 border border-border">
+                                <span className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
                                   PO Value (incl. GST)
-                                </td>
-                                <td className="px-4 py-2 text-right text-xs font-semibold text-foreground">
+                                </span>
+                                <span className="text-xs font-semibold text-foreground">
                                   ₹{fmt(formData.poTotalAmount)}
-                                </td>
-                              </tr>
+                                </span>
+                              </div>
                               {formData.poReceivedAmount > 0 && (
-                                <tr className="bg-muted/20 border-t border-border/50">
-                                  <td
-                                    colSpan={7}
-                                    className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
-                                  >
+                                <div className="flex flex-col px-3 py-2.5 rounded-xl bg-muted/40 border border-border">
+                                  <span className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
                                     Already Received
-                                  </td>
-                                  <td className="px-4 py-2 text-right text-xs font-semibold text-foreground">
-                                    −₹{fmt(formData.poReceivedAmount)}
-                                  </td>
-                                </tr>
+                                  </span>
+                                  <span className="text-xs font-semibold text-foreground">
+                                    ₹{fmt(formData.poReceivedAmount)}
+                                  </span>
+                                </div>
                               )}
-                              <tr
-                                className={
-                                  diff > 0.005
-                                    ? "bg-amber-500/10 border-t border-amber-500/20"
-                                    : "bg-green-500/10 border-t border-green-500/20"
-                                }
+                              <div
+                                className={`flex flex-col px-3 py-2.5 rounded-xl border ${diff > 0.005 ? "bg-amber-500/10 border-amber-500/30" : "bg-green-500/10 border-green-500/30"}`}
                               >
-                                <td
-                                  colSpan={7}
-                                  className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
-                                >
+                                <span className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
                                   Balance on PO
-                                </td>
-                                <td
-                                  className={`px-4 py-2 text-right text-xs font-bold ${diff > 0.005 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}
+                                </span>
+                                <span
+                                  className={`text-xs font-semibold ${diff > 0.005 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}
                                 >
                                   {diff > 0.005
                                     ? `₹${fmt(diff)}`
                                     : "Fully received"}
-                                </td>
-                              </tr>
-                            </>
+                                </span>
+                              </div>
+                            </div>
                           );
                         })()}
-                    </tfoot>
+                    </div>
                   )}
-                </table>
-              </div>
-            </SectionCard>
-
-            {/* ── Remarks ── */}
-            <div>
-              <FieldLabel>Remarks</FieldLabel>
-              <textarea
-                value={formData.remarks}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, remarks: e.target.value }))
-                }
-                rows={3}
-                className={`${inp} resize-y`}
-                placeholder="Additional notes…"
-              />
-            </div>
-
-            {/* ── Actions ── */}
-            {(() => {
-              const isSaving = createMutation.isPending || updateMutation.isPending;
-              const canSave = !!formData.poId && !!formData.supplierId && formData.items.some((i) => i.receivedQty > 0);
-              const isDirty = formData.poId !== "" || formData.remarks !== "" || formData.godownId !== "" || formData.projectId !== "" || formData.docNo !== "" || formData.items.some((i) => i.receivedQty > 0 || i.rate > 0);
-              return (
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
-                  <p className="text-[11px] text-muted-foreground hidden sm:block">
-                    {canSave ? <span className="text-emerald-500 font-medium">Ready to save</span> : "Fill in the required fields to save"}
-                  </p>
-                  <div className="flex items-center gap-2 sm:ml-auto">
-                    <button
-                      onClick={() => { setFormData(buildEmptyForm()); setEditingId(null); setErrors({}); }}
-                      disabled={!isDirty || isSaving}
-                      className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-                    >
-                      <RotateCcw size={12} /> Reset
-                    </button>
-                    <button
-                      onClick={onSubmit}
-                      disabled={!canSave || isSaving}
-                      className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
-                    >
-                      {isSaving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />}
-                      {isSaving ? "Saving…" : editingId ? "Update GRN" : "Save GRN"}
-                    </button>
-                  </div>
                 </div>
-              );
-            })()}
+
+                {/* Desktop table */}
+                <div className="hidden md:block border border-border rounded-xl overflow-hidden">
+                  <table className="w-full text-sm table-fixed">
+                    <colgroup>
+                      <col style={{ width: "20%" }} />
+                      <col style={{ width: "9%" }} />
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: "9%" }} />
+                      <col style={{ width: "8%" }} />
+                      <col style={{ width: "14%" }} />
+                      <col style={{ width: "14%" }} />
+                      <col style={{ width: "16%" }} />
+                    </colgroup>
+                    <thead>
+                      <tr className="bg-muted/50 border-b border-border">
+                        {[
+                          { h: "Item", align: "text-left" },
+                          { h: "Ordered", align: "text-right" },
+                          { h: "Received *", align: "text-right" },
+                          { h: "Pending Qty", align: "text-right" },
+                          { h: "UOM", align: "text-left" },
+                          { h: "Rate (₹) *", align: "text-right" },
+                          { h: "Qty Bill *", align: "text-right" },
+                          { h: "Total (₹)", align: "text-right" },
+                        ].map(({ h, align }) => (
+                          <th
+                            key={h}
+                            className={`px-3 py-2.5 ${align} text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap`}
+                          >
+                            {h.replace(" *", "")}
+                            {h.includes("*") && (
+                              <span className="text-destructive ml-0.5">*</span>
+                            )}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {!formData.poId ? (
+                        <tr>
+                          <td
+                            colSpan={8}
+                            className="py-12 text-center text-muted-foreground/40 text-sm italic"
+                          >
+                            Select a Purchase Order above — items will autofill
+                            from the PO
+                          </td>
+                        </tr>
+                      ) : (
+                        formData.items.map((item, idx) => (
+                          <tr
+                            key={idx}
+                            className="hover:bg-muted/20 transition-colors"
+                          >
+                            <td className="px-3 py-2.5">
+                              <span className="text-xs font-medium text-foreground">
+                                {item.itemName || "—"}
+                              </span>
+                            </td>
+                            <td className="px-2 py-2 text-right text-xs text-muted-foreground">
+                              {item.orderedQty}
+                            </td>
+                            <td className="px-1.5 py-1.5">
+                              <input
+                                type="number"
+                                min={0}
+                                max={item.orderedQty || undefined}
+                                value={item.receivedQty}
+                                onChange={(e) =>
+                                  updateReceivedQty(idx, Number(e.target.value))
+                                }
+                                className={`${inp} text-right text-xs py-1.5`}
+                              />
+                            </td>
+                            <td
+                              className={`px-2 py-2 text-right text-xs font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                            >
+                              {item.remainingQty}
+                            </td>
+                            <td className="px-2 py-2 text-xs text-muted-foreground">
+                              {item.uom || "—"}
+                            </td>
+                            <td className="px-1.5 py-1.5">
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={item.rate}
+                                onChange={(e) =>
+                                  updateItemField(
+                                    idx,
+                                    "rate",
+                                    Number(e.target.value),
+                                  )
+                                }
+                                className={`${inp} text-right text-xs py-1.5`}
+                                placeholder="0.00"
+                              />
+                            </td>
+                            <td className="px-1.5 py-1.5">
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={item.quantity}
+                                onChange={(e) =>
+                                  updateItemField(
+                                    idx,
+                                    "quantity",
+                                    Number(e.target.value),
+                                  )
+                                }
+                                className={`${inp} text-right text-xs py-1.5`}
+                                placeholder="0"
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-right text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                              {item.totalAmount > 0
+                                ? `₹${fmt(item.totalAmount)}`
+                                : "—"}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                    {formData.poId && grnTotalWithGST > 0 && (
+                      <tfoot>
+                        <tr className="bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
+                          <td
+                            colSpan={7}
+                            className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                          >
+                            GRN Total (this receipt)
+                          </td>
+                          <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                            ₹{fmt(grnTotalWithGST)}
+                          </td>
+                        </tr>
+                        {formData.poTotalAmount > 0 &&
+                          (() => {
+                            const diff =
+                              formData.poTotalAmount -
+                              formData.poReceivedAmount -
+                              grnTotalWithGST;
+                            return (
+                              <>
+                                <tr className="bg-muted/30 border-t border-border/50">
+                                  <td
+                                    colSpan={7}
+                                    className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                  >
+                                    PO Value (incl. GST)
+                                  </td>
+                                  <td className="px-4 py-2 text-right text-xs font-semibold text-foreground">
+                                    ₹{fmt(formData.poTotalAmount)}
+                                  </td>
+                                </tr>
+                                {formData.poReceivedAmount > 0 && (
+                                  <tr className="bg-muted/20 border-t border-border/50">
+                                    <td
+                                      colSpan={7}
+                                      className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                    >
+                                      Already Received
+                                    </td>
+                                    <td className="px-4 py-2 text-right text-xs font-semibold text-foreground">
+                                      −₹{fmt(formData.poReceivedAmount)}
+                                    </td>
+                                  </tr>
+                                )}
+                                <tr
+                                  className={
+                                    diff > 0.005
+                                      ? "bg-amber-500/10 border-t border-amber-500/20"
+                                      : "bg-green-500/10 border-t border-green-500/20"
+                                  }
+                                >
+                                  <td
+                                    colSpan={7}
+                                    className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                  >
+                                    Balance on PO
+                                  </td>
+                                  <td
+                                    className={`px-4 py-2 text-right text-xs font-bold ${diff > 0.005 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}
+                                  >
+                                    {diff > 0.005
+                                      ? `₹${fmt(diff)}`
+                                      : "Fully received"}
+                                  </td>
+                                </tr>
+                              </>
+                            );
+                          })()}
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              </SectionCard>
+
+              {/* ── Remarks ── */}
+              <div>
+                <FieldLabel>Remarks</FieldLabel>
+                <textarea
+                  value={formData.remarks}
+                  onChange={(e) =>
+                    setFormData((p) => ({ ...p, remarks: e.target.value }))
+                  }
+                  rows={3}
+                  className={`${inp} resize-y`}
+                  placeholder="Additional notes…"
+                />
+              </div>
+
+              {/* ── Actions ── */}
+              {(() => {
+                const isSaving =
+                  createMutation.isPending || updateMutation.isPending;
+                const canSave =
+                  !!formData.poId &&
+                  !!formData.supplierId &&
+                  formData.items.some((i) => i.receivedQty > 0);
+                const isDirty =
+                  formData.poId !== "" ||
+                  formData.remarks !== "" ||
+                  formData.godownId !== "" ||
+                  formData.projectId !== "" ||
+                  formData.docNo !== "" ||
+                  formData.items.some((i) => i.receivedQty > 0 || i.rate > 0);
+                return (
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
+                    <p className="text-[11px] text-muted-foreground hidden sm:block">
+                      {canSave ? (
+                        <span className="text-emerald-500 font-medium">
+                          Ready to save
+                        </span>
+                      ) : (
+                        "Fill in the required fields to save"
+                      )}
+                    </p>
+                    <div className="flex items-center gap-2 sm:ml-auto">
+                      <button
+                        onClick={() => {
+                          setFormData(buildEmptyForm());
+                          setEditingId(null);
+                          setErrors({});
+                        }}
+                        disabled={!isDirty || isSaving}
+                        className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                      >
+                        <RotateCcw size={12} /> Reset
+                      </button>
+                      <button
+                        onClick={onSubmit}
+                        disabled={!canSave || isSaving}
+                        className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                      >
+                        {isSaving ? (
+                          <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        ) : (
+                          <Save size={14} />
+                        )}
+                        {isSaving
+                          ? "Saving…"
+                          : editingId
+                            ? "Update GRN"
+                            : "Save GRN"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
           </div>
-        </div>}
+        )}
 
         {/* ══════════════════════════════════════════════════════════════════ */}
         {/*  GRN HISTORY                                                       */}
         {/* ══════════════════════════════════════════════════════════════════ */}
-        {!showForm && <Card className="border-border shadow-sm">
-          <CardHeader className="pb-3 border-b border-border">
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <CardTitle className="text-base font-semibold">GRN Register</CardTitle>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {totalRecords} record{totalRecords !== 1 ? "s" : ""}
-                  </p>
+        {!showForm && (
+          <Card className="border-border shadow-sm">
+            <CardHeader className="pb-3 border-b border-border">
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-base font-semibold">
+                      GRN Register
+                    </CardTitle>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {totalRecords} record{totalRecords !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+                  <div className="relative w-full sm:w-64">
+                    <Search
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    <Input
+                      placeholder="Search GRN, PO, Supplier…"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
+                    />
+                    {search && (
+                      <button
+                        onClick={() => setSearch("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="relative w-full sm:w-64">
-                  <Search
-                    size={13}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                  />
-                  <Input
-                    placeholder="Search GRN, PO, Supplier…"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
-                  />
-                  {search && (
-                    <button
-                      onClick={() => setSearch("")}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    >
-                      <X size={12} />
-                    </button>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {["All", "Pending", "Approved", "Booked", "Rejected"].map(
+                    (s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setGrnStatusFilter(s)}
+                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${grnStatusFilter === s ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"}`}
+                      >
+                        {s}
+                      </button>
+                    ),
                   )}
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {["All", "Pending", "Approved", "Booked", "Rejected"].map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setGrnStatusFilter(s)}
-                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${grnStatusFilter === s ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"}`}
-                  >
-                    {s}
-                  </button>
-                ))}
+            </CardHeader>
+            <CardContent className="p-0">
+              <div
+                className={`overflow-x-auto transition-opacity duration-200 ${fetchingGrns ? "opacity-60 pointer-events-none" : ""}`}
+              >
+                <DataTable
+                  data={filteredGrns}
+                  columns={GRN_LIST_COLUMNS}
+                  searchable={false}
+                  paginated={true}
+                  defaultPageSize={20}
+                  emptyMessage="No GRNs found. Click 'New GRN' to create one."
+                />
               </div>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-          <div
-            className={`overflow-x-auto transition-opacity duration-200 ${fetchingGrns ? "opacity-60 pointer-events-none" : ""}`}
-          >
-            <DataTable
-              data={filteredGrns}
-              columns={GRN_LIST_COLUMNS}
-              searchable={false}
-              paginated={true}
-              defaultPageSize={20}
-              emptyMessage="No GRNs found. Click 'New GRN' to create one."
-            />
-          </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 text-xs text-muted-foreground">
-            <span>
-              Page {page} of {totalPages} · {totalRecords} record
-              {totalRecords !== 1 ? "s" : ""}
-            </span>
-            <div className="flex gap-1.5">
-              <button
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                disabled={page <= 1}
-                className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-40 transition-colors"
-              >
-                <ChevronLeft size={12} /> Prev
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-                disabled={page >= totalPages}
-                className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-40 transition-colors"
-              >
-                Next <ChevronRight size={12} />
-              </button>
-            </div>
-          </div>
-          </CardContent>
-        </Card>}
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 text-xs text-muted-foreground">
+                <span>
+                  Page {page} of {totalPages} · {totalRecords} record
+                  {totalRecords !== 1 ? "s" : ""}
+                </span>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                    disabled={page <= 1}
+                    className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-40 transition-colors"
+                  >
+                    <ChevronLeft size={12} /> Prev
+                  </button>
+                  <button
+                    onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+                    disabled={page >= totalPages}
+                    className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-40 transition-colors"
+                  >
+                    Next <ChevronRight size={12} />
+                  </button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* ══════════════════════════════════════════════════════════════════ */}
         {/*  VIEW MODAL                                                        */}
@@ -2162,398 +2220,525 @@ export default function GRN() {
                         <Printer size={18} />
                       </button>
                       <button
-                        onClick={() => setViewingGrn(null)}
+                        onClick={() => {
+                          setViewingGrn(null);
+                          setViewModalTab("details");
+                        }}
                         className="p-2 hover:bg-muted rounded-lg transition-colors print:hidden"
                       >
                         <X size={18} />
                       </button>
                     </div>
                   </div>
-
-                  <div className="p-5 sm:p-6 space-y-6">
-                    {/* Meta grid */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {[
-                        {
-                          label: "Doc No",
-                          value: viewingGrn.DocNo || viewingGrn.GRNNo || "—",
-                          mono: true,
-                        },
-                        {
-                          label: "Date",
-                          value: viewingGrn.GRNDate
-                            ? new Date(viewingGrn.GRNDate).toLocaleDateString(
-                                "en-IN",
-                              )
-                            : "—",
-                        },
-                        {
-                          label: "Supplier",
-                          value: viewingGrn.SupplierName || "—",
-                        },
-                        {
-                          label: "Purchase Order",
-                          value: viewingGrn.PONumber || "—",
-                        },
-                        ...(viewingGrn.SourceMRDocNo
-                          ? [
-                              {
-                                label: "Source MR",
-                                value: viewingGrn.SourceMRDocNo,
-                                mono: true,
-                                color: "text-emerald-600 dark:text-emerald-400",
-                              },
-                            ]
-                          : []),
-                        ...(viewingGrn.SourceWODocNo
-                          ? [
-                              {
-                                label: "Source WO",
-                                value: viewingGrn.SourceWODocNo,
-                                mono: true,
-                                color: "text-orange-600 dark:text-orange-400",
-                              },
-                            ]
-                          : []),
-                        ...(viewingGrn.SourceWDDocNo
-                          ? [
-                              {
-                                label: "Source WD",
-                                value: viewingGrn.SourceWDDocNo,
-                                mono: true,
-                                color: "text-orange-600 dark:text-orange-400",
-                              },
-                            ]
-                          : []),
-                      ].map(({ label, value, mono, color }: any) => (
-                        <div
-                          key={label}
-                          className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50"
-                        >
-                          <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
-                            {label}
-                          </p>
-                          <p
-                            className={`text-xs font-semibold ${mono ? "font-mono" : ""} ${color || "text-foreground"}`}
-                          >
-                            {value}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Items */}
-                    <div>
-                      <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
-                        Received Items
-                      </p>
-
-                      {/* Mobile */}
-                      <div className="md:hidden space-y-3">
-                        {items.length ? (
-                          items.map((item, i) => (
-                            <div
-                              key={i}
-                              className="border border-border rounded-xl p-4 space-y-2 bg-muted/20"
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="font-medium text-sm">
-                                  {item.itemName || "—"}
-                                </span>
-                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
-                                  {item.uom || "—"}
-                                </span>
-                              </div>
-                              <div className="grid grid-cols-3 gap-2 text-xs">
-                                {[
-                                  ["Ordered", String(item.orderedQty), ""],
-                                  [
-                                    "Received",
-                                    String(item.receivedQty),
-                                    "font-semibold",
-                                  ],
-                                  [
-                                    "Pending Qty",
-                                    String(item.remainingQty),
-                                    item.remainingQty > 0
-                                      ? "text-amber-500 font-semibold"
-                                      : "text-green-500 font-semibold",
-                                  ],
-                                ].map(([l, v, c]) => (
-                                  <div key={l}>
-                                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
-                                      {l}
-                                    </p>
-                                    <p className={c}>{v}</p>
-                                  </div>
-                                ))}
-                              </div>
-                              <div className="grid grid-cols-3 gap-2 text-xs pt-1 border-t border-border">
-                                <div>
-                                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
-                                    Rate
-                                  </p>
-                                  <p>
-                                    {item.rate
-                                      ? `₹${fmt(Number(item.rate))}`
-                                      : "—"}
-                                  </p>
-                                </div>
-                                <div>
-                                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
-                                    Qty Bill
-                                  </p>
-                                  <p>{item.quantity ?? "—"}</p>
-                                </div>
-                                <div className="text-right">
-                                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
-                                    Total
-                                  </p>
-                                  <p className="font-bold text-emerald-600 dark:text-emerald-400">
-                                    {item.totalAmount
-                                      ? `₹${fmt(Number(item.totalAmount))}`
-                                      : "—"}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          ))
+                  {/* ── Tab bar ─────────────────────────────────────────── */}
+                  <div className="flex items-center gap-1 px-6 pt-3 pb-0 border-b border-border bg-card print:hidden">
+                    {(["details", "posting"] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        onClick={() => setViewModalTab(tab)}
+                        className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition-colors capitalize
+                          ${
+                            viewModalTab === tab
+                              ? "border-primary text-primary bg-primary/5"
+                              : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                          }`}
+                      >
+                        {tab === "details" ? (
+                          <FileText size={12} />
                         ) : (
-                          <p className="text-center text-muted-foreground text-sm py-6">
-                            No items
-                          </p>
+                          <Landmark size={12} />
                         )}
+                        {tab === "details" ? "Details" : "Posting"}
+                      </button>
+                    ))}
+                  </div>
+                  {/* ── Details tab ─────────────────────────────────────── */}
+                  {viewModalTab === "details" && (
+                    <div className="p-5 sm:p-6 space-y-6">
+                      {/* Meta grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {[
+                          {
+                            label: "Doc No",
+                            value: viewingGrn.DocNo || viewingGrn.GRNNo || "—",
+                            mono: true,
+                          },
+                          {
+                            label: "Date",
+                            value: viewingGrn.GRNDate
+                              ? new Date(viewingGrn.GRNDate).toLocaleDateString(
+                                  "en-IN",
+                                )
+                              : "—",
+                          },
+                          {
+                            label: "Supplier",
+                            value: viewingGrn.SupplierName || "—",
+                          },
+                          {
+                            label: "Purchase Order",
+                            value: viewingGrn.PONumber || "—",
+                          },
+                          ...(viewingGrn.SourceMRDocNo
+                            ? [
+                                {
+                                  label: "Source MR",
+                                  value: viewingGrn.SourceMRDocNo,
+                                  mono: true,
+                                  color:
+                                    "text-emerald-600 dark:text-emerald-400",
+                                },
+                              ]
+                            : []),
+                          ...(viewingGrn.SourceWODocNo
+                            ? [
+                                {
+                                  label: "Source WO",
+                                  value: viewingGrn.SourceWODocNo,
+                                  mono: true,
+                                  color: "text-orange-600 dark:text-orange-400",
+                                },
+                              ]
+                            : []),
+                          ...(viewingGrn.SourceWDDocNo
+                            ? [
+                                {
+                                  label: "Source WD",
+                                  value: viewingGrn.SourceWDDocNo,
+                                  mono: true,
+                                  color: "text-orange-600 dark:text-orange-400",
+                                },
+                              ]
+                            : []),
+                        ].map(({ label, value, mono, color }: any) => (
+                          <div
+                            key={label}
+                            className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50"
+                          >
+                            <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                              {label}
+                            </p>
+                            <p
+                              className={`text-xs font-semibold ${mono ? "font-mono" : ""} ${color || "text-foreground"}`}
+                            >
+                              {value}
+                            </p>
+                          </div>
+                        ))}
                       </div>
 
-                      {/* Desktop */}
-                      <div className="hidden md:block border border-border rounded-xl overflow-x-auto">
-                        <table className="w-full text-sm min-w-[680px]">
-                          <thead>
-                            <tr className="bg-muted/50 border-b border-border">
-                              {[
-                                "Item",
-                                "UOM",
-                                "Ordered",
-                                "Received",
-                                "Pending Qty",
-                                "Rate (₹)",
-                                "Qty",
-                                "Total (₹)",
-                              ].map((h) => (
-                                <th
-                                  key={h}
-                                  className={`px-3 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ${h === "Item" || h === "UOM" ? "text-left" : "text-right"}`}
-                                >
-                                  {h}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-border/60">
-                            {items.length ? (
-                              items.map((item, i) => (
-                                <tr
-                                  key={i}
-                                  className="hover:bg-muted/20 transition-colors"
-                                >
-                                  <td className="px-3 py-2.5 font-medium text-xs">
+                      {/* Items */}
+                      <div>
+                        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
+                          Received Items
+                        </p>
+
+                        {/* Mobile */}
+                        <div className="md:hidden space-y-3">
+                          {items.length ? (
+                            items.map((item, i) => (
+                              <div
+                                key={i}
+                                className="border border-border rounded-xl p-4 space-y-2 bg-muted/20"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-medium text-sm">
                                     {item.itemName || "—"}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                                  </span>
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
                                     {item.uom || "—"}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
-                                    {item.orderedQty}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-right text-xs font-semibold">
-                                    {item.receivedQty}
-                                  </td>
-                                  <td
-                                    className={`px-3 py-2.5 text-right text-xs font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-3 gap-2 text-xs">
+                                  {[
+                                    ["Ordered", String(item.orderedQty), ""],
+                                    [
+                                      "Received",
+                                      String(item.receivedQty),
+                                      "font-semibold",
+                                    ],
+                                    [
+                                      "Pending Qty",
+                                      String(item.remainingQty),
+                                      item.remainingQty > 0
+                                        ? "text-amber-500 font-semibold"
+                                        : "text-green-500 font-semibold",
+                                    ],
+                                  ].map(([l, v, c]) => (
+                                    <div key={l}>
+                                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                        {l}
+                                      </p>
+                                      <p className={c}>{v}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="grid grid-cols-3 gap-2 text-xs pt-1 border-t border-border">
+                                  <div>
+                                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                      Rate
+                                    </p>
+                                    <p>
+                                      {item.rate
+                                        ? `₹${fmt(Number(item.rate))}`
+                                        : "—"}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                      Qty Bill
+                                    </p>
+                                    <p>{item.quantity ?? "—"}</p>
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                      Total
+                                    </p>
+                                    <p className="font-bold text-emerald-600 dark:text-emerald-400">
+                                      {item.totalAmount
+                                        ? `₹${fmt(Number(item.totalAmount))}`
+                                        : "—"}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-center text-muted-foreground text-sm py-6">
+                              No items
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Desktop */}
+                        <div className="hidden md:block border border-border rounded-xl overflow-x-auto">
+                          <table className="w-full text-sm min-w-[680px]">
+                            <thead>
+                              <tr className="bg-muted/50 border-b border-border">
+                                {[
+                                  "Item",
+                                  "UOM",
+                                  "Ordered",
+                                  "Received",
+                                  "Pending Qty",
+                                  "Rate (₹)",
+                                  "Qty",
+                                  "Total (₹)",
+                                ].map((h) => (
+                                  <th
+                                    key={h}
+                                    className={`px-3 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ${h === "Item" || h === "UOM" ? "text-left" : "text-right"}`}
                                   >
-                                    {item.remainingQty}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
-                                    {item.rate
-                                      ? `₹${fmt(Number(item.rate))}`
-                                      : "—"}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
-                                    {item.quantity ?? "—"}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-right text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                                    {item.totalAmount
-                                      ? `₹${fmt(Number(item.totalAmount))}`
-                                      : "—"}
+                                    {h}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/60">
+                              {items.length ? (
+                                items.map((item, i) => (
+                                  <tr
+                                    key={i}
+                                    className="hover:bg-muted/20 transition-colors"
+                                  >
+                                    <td className="px-3 py-2.5 font-medium text-xs">
+                                      {item.itemName || "—"}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                                      {item.uom || "—"}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
+                                      {item.orderedQty}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right text-xs font-semibold">
+                                      {item.receivedQty}
+                                    </td>
+                                    <td
+                                      className={`px-3 py-2.5 text-right text-xs font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                                    >
+                                      {item.remainingQty}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
+                                      {item.rate
+                                        ? `₹${fmt(Number(item.rate))}`
+                                        : "—"}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
+                                      {item.quantity ?? "—"}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                                      {item.totalAmount
+                                        ? `₹${fmt(Number(item.totalAmount))}`
+                                        : "—"}
+                                    </td>
+                                  </tr>
+                                ))
+                              ) : (
+                                <tr>
+                                  <td
+                                    colSpan={8}
+                                    className="px-4 py-6 text-center text-muted-foreground text-sm"
+                                  >
+                                    No items
                                   </td>
                                 </tr>
-                              ))
-                            ) : (
-                              <tr>
-                                <td
-                                  colSpan={8}
-                                  className="px-4 py-6 text-center text-muted-foreground text-sm"
-                                >
-                                  No items
-                                </td>
-                              </tr>
+                              )}
+                            </tbody>
+                            {subtotalInclGST > 0 && (
+                              <tfoot>
+                                <tr className="bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
+                                  <td
+                                    colSpan={7}
+                                    className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                  >
+                                    GRN Total (received)
+                                  </td>
+                                  <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                                    ₹{fmt(subtotalInclGST)}
+                                  </td>
+                                </tr>
+                                {Number(viewingGrn.POTotalAmount) > 0 &&
+                                  (() => {
+                                    const poTotal = Number(
+                                      viewingGrn.POTotalAmount,
+                                    );
+                                    const diff = poTotal - subtotalInclGST;
+                                    return (
+                                      <>
+                                        <tr className="bg-muted/30 border-t border-border/50">
+                                          <td
+                                            colSpan={7}
+                                            className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                          >
+                                            PO Value (incl. GST)
+                                          </td>
+                                          <td className="px-4 py-2 text-right text-xs font-semibold text-foreground">
+                                            ₹{fmt(poTotal)}
+                                          </td>
+                                        </tr>
+                                        <tr
+                                          className={
+                                            diff > 0.005
+                                              ? "bg-amber-500/10 border-t border-amber-500/20"
+                                              : "bg-green-500/10 border-t border-green-500/20"
+                                          }
+                                        >
+                                          <td
+                                            colSpan={7}
+                                            className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                          >
+                                            Balance on PO
+                                          </td>
+                                          <td
+                                            className={`px-4 py-2 text-right text-xs font-bold ${diff > 0.005 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}
+                                          >
+                                            {diff > 0.005
+                                              ? `₹${fmt(diff)}`
+                                              : "Fully received"}
+                                          </td>
+                                        </tr>
+                                      </>
+                                    );
+                                  })()}
+                              </tfoot>
                             )}
-                          </tbody>
-                          {subtotalInclGST > 0 && (
-                            <tfoot>
-                              <tr className="bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
-                                <td
-                                  colSpan={7}
-                                  className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
-                                >
-                                  GRN Total (received)
-                                </td>
-                                <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">
-                                  ₹{fmt(subtotalInclGST)}
-                                </td>
-                              </tr>
-                              {Number(viewingGrn.POTotalAmount) > 0 &&
-                                (() => {
-                                  const poTotal = Number(
-                                    viewingGrn.POTotalAmount,
-                                  );
-                                  const diff = poTotal - subtotalInclGST;
-                                  return (
-                                    <>
-                                      <tr className="bg-muted/30 border-t border-border/50">
-                                        <td
-                                          colSpan={7}
-                                          className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
-                                        >
-                                          PO Value (incl. GST)
-                                        </td>
-                                        <td className="px-4 py-2 text-right text-xs font-semibold text-foreground">
-                                          ₹{fmt(poTotal)}
-                                        </td>
-                                      </tr>
-                                      <tr
-                                        className={
-                                          diff > 0.005
-                                            ? "bg-amber-500/10 border-t border-amber-500/20"
-                                            : "bg-green-500/10 border-t border-green-500/20"
-                                        }
-                                      >
-                                        <td
-                                          colSpan={7}
-                                          className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
-                                        >
-                                          Balance on PO
-                                        </td>
-                                        <td
-                                          className={`px-4 py-2 text-right text-xs font-bold ${diff > 0.005 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}
-                                        >
-                                          {diff > 0.005
-                                            ? `₹${fmt(diff)}`
-                                            : "Fully received"}
-                                        </td>
-                                      </tr>
-                                    </>
-                                  );
-                                })()}
-                            </tfoot>
-                          )}
-                        </table>
+                          </table>
+                        </div>
                       </div>
-                    </div>
 
-                    {/* GST Breakdown */}
-                    {(() => {
-                      if (subtotal <= 0 || gstTotal <= 0) return null;
+                      {/* GST Breakdown */}
+                      {(() => {
+                        if (subtotal <= 0 || gstTotal <= 0) return null;
 
-                      // Group by gstPct so lines with same rate are merged
-                      const rateMap = new Map<number, number>();
-                      items.forEach((i) => {
-                        const pct = Number(i.gstPct || 0);
-                        const amt = Number(i.gstAmount || 0);
-                        if (pct > 0 && amt > 0)
-                          rateMap.set(pct, (rateMap.get(pct) ?? 0) + amt);
-                      });
+                        // Group by gstPct so lines with same rate are merged
+                        const rateMap = new Map<number, number>();
+                        items.forEach((i) => {
+                          const pct = Number(i.gstPct || 0);
+                          const amt = Number(i.gstAmount || 0);
+                          if (pct > 0 && amt > 0)
+                            rateMap.set(pct, (rateMap.get(pct) ?? 0) + amt);
+                        });
 
-                      if (rateMap.size === 0) return null;
+                        if (rateMap.size === 0) return null;
 
-                      return (
-                        <div>
-                          <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
-                            GST Breakdown
-                          </p>
-                          <div className="border border-border rounded-xl overflow-hidden text-sm">
-                            <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20 border-b border-border">
-                              <span className="text-xs text-muted-foreground">
-                                Subtotal (before GST)
-                              </span>
-                              <span className="font-medium">
-                                ₹{fmt(subtotal)}
-                              </span>
-                            </div>
-                            {Array.from(rateMap.entries()).map(
-                              ([rate, amount], idx) => (
-                                <div
-                                  key={idx}
-                                  className="flex items-center justify-between px-4 py-2.5 border-b border-border"
-                                >
-                                  <span className="text-xs text-muted-foreground">
-                                    GST{" "}
-                                    <span className="font-mono text-[10px] bg-muted px-1 rounded">
-                                      {rate}%
+                        return (
+                          <div>
+                            <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
+                              GST Breakdown
+                            </p>
+                            <div className="border border-border rounded-xl overflow-hidden text-sm">
+                              <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20 border-b border-border">
+                                <span className="text-xs text-muted-foreground">
+                                  Subtotal (before GST)
+                                </span>
+                                <span className="font-medium">
+                                  ₹{fmt(subtotal)}
+                                </span>
+                              </div>
+                              {Array.from(rateMap.entries()).map(
+                                ([rate, amount], idx) => (
+                                  <div
+                                    key={idx}
+                                    className="flex items-center justify-between px-4 py-2.5 border-b border-border"
+                                  >
+                                    <span className="text-xs text-muted-foreground">
+                                      GST{" "}
+                                      <span className="font-mono text-[10px] bg-muted px-1 rounded">
+                                        {rate}%
+                                      </span>
                                     </span>
-                                  </span>
-                                  <span className="font-medium text-amber-600 dark:text-amber-400">
-                                    +₹{fmt(amount)}
-                                  </span>
-                                </div>
-                              ),
-                            )}
-                            <div className="flex items-center justify-between px-4 py-3 bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
-                              <span className="text-xs font-semibold uppercase tracking-widest">
-                                Grand Total (incl. GST)
-                              </span>
-                              <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                                ₹{fmt(subtotalInclGST)}
-                              </span>
+                                    <span className="font-medium text-amber-600 dark:text-amber-400">
+                                      +₹{fmt(amount)}
+                                    </span>
+                                  </div>
+                                ),
+                              )}
+                              <div className="flex items-center justify-between px-4 py-3 bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
+                                <span className="text-xs font-semibold uppercase tracking-widest">
+                                  Grand Total (incl. GST)
+                                </span>
+                                <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                  ₹{fmt(subtotalInclGST)}
+                                </span>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })()}
+                        );
+                      })()}
 
-                    {/* Linked Expense Bookings */}
-                    <div>
-                      <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
-                        <Receipt size={10} className="text-emerald-600 dark:text-emerald-400" /> Linked
-                        Expense Bookings
-                      </p>
-                      <LinkedExpenseBookings grnId={viewingGrn.GRNID} />
-                    </div>
-
-                    {/* Remaining Items — not yet expense-booked */}
-                    <div>
-                      <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
-                        <AlertTriangle size={10} className="text-amber-500" />{" "}
-                        Remaining Items
-                      </p>
-                      <RemainingItemsPanel
-                        grnId={viewingGrn.GRNID}
-                        onCreateNewGRN={handleCreateGRNFromRemaining}
-                      />
-                    </div>
-
-                    {/* Remarks */}
-                    {viewingGrn.Remarks && (
+                      {/* Linked Expense Bookings */}
                       <div>
-                        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
-                          Remarks
+                        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+                          <Receipt
+                            size={10}
+                            className="text-emerald-600 dark:text-emerald-400"
+                          />{" "}
+                          Linked Expense Bookings
                         </p>
-                        <p className="text-sm text-foreground bg-muted/40 rounded-xl px-4 py-3 border border-border/50">
-                          {viewingGrn.Remarks}
+                        <LinkedExpenseBookings grnId={viewingGrn.GRNID} />
+                      </div>
+
+                      {/* Remaining Items — not yet expense-booked */}
+                      <div>
+                        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+                          <AlertTriangle size={10} className="text-amber-500" />{" "}
+                          Remaining Items
+                        </p>
+                        <RemainingItemsPanel
+                          grnId={viewingGrn.GRNID}
+                          onCreateNewGRN={handleCreateGRNFromRemaining}
+                        />
+                      </div>
+
+                      {/* Remarks */}
+                      {viewingGrn.Remarks && (
+                        <div>
+                          <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                            Remarks
+                          </p>
+                          <p className="text-sm text-foreground bg-muted/40 rounded-xl px-4 py-3 border border-border/50">
+                            {viewingGrn.Remarks}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}{" "}
+                  {/* end details tab */}
+                  {/* ── Posting tab ─────────────────────────────────────── */}
+                  {viewModalTab === "posting" && (
+                    <div className="p-5 sm:p-6 space-y-4">
+                      {/* Header row */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <BookOpen size={14} className="text-primary" />
+                          <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                            Journal Entry — GRN Posting
+                          </span>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 font-medium">
+                          Coming Soon
+                        </span>
+                      </div>
+
+                      {/* Debit / Credit stub table */}
+                      <div className="rounded-xl border border-border overflow-hidden">
+                        {/* Table header */}
+                        <div className="grid grid-cols-[2fr_1fr_1fr_1fr] bg-muted/40 border-b border-border px-4 py-2.5 text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
+                          <span>Account</span>
+                          <span className="text-center">Cost Centre</span>
+                          <span className="text-right">Debit (₹)</span>
+                          <span className="text-right">Credit (₹)</span>
+                        </div>
+
+                        {/* Stub rows */}
+                        {[
+                          { account: "Stock / Inventory A/c", side: "debit" },
+                          {
+                            account: "GRN Accrual / Supplier Payable A/c",
+                            side: "credit",
+                          },
+                          { account: "Input GST A/c", side: "debit" },
+                        ].map((row, i) => (
+                          <div
+                            key={i}
+                            className="grid grid-cols-[2fr_1fr_1fr_1fr] px-4 py-3 border-b border-border/50 last:border-b-0 items-center"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                                  row.side === "debit"
+                                    ? "bg-emerald-500"
+                                    : "bg-rose-500"
+                                }`}
+                              />
+                              <span className="text-xs text-foreground">
+                                {row.account}
+                              </span>
+                            </div>
+                            <span className="text-xs text-muted-foreground text-center">
+                              —
+                            </span>
+                            <span className="text-xs text-right text-muted-foreground font-mono">
+                              {row.side === "debit" ? "—" : ""}
+                            </span>
+                            <span className="text-xs text-right text-muted-foreground font-mono">
+                              {row.side === "credit" ? "—" : ""}
+                            </span>
+                          </div>
+                        ))}
+
+                        {/* Totals footer */}
+                        <div className="grid grid-cols-[2fr_1fr_1fr_1fr] px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold">
+                          <span className="uppercase tracking-widest text-muted-foreground text-[10px]">
+                            Total
+                          </span>
+                          <span />
+                          <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">
+                            —
+                          </span>
+                          <span className="text-right text-rose-600 dark:text-rose-400 font-mono">
+                            —
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Info note */}
+                      <div className="flex items-start gap-2.5 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3">
+                        <AlertCircle
+                          size={13}
+                          className="text-muted-foreground mt-0.5 flex-shrink-0"
+                        />
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          Posting entries will be auto-generated from GRN line
+                          items, GST rates, and the mapped chart of accounts
+                          once the accounting module is wired up. The debit /
+                          credit split shown above represents the expected
+                          journal structure.
                         </p>
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}{" "}
+                  {/* end posting tab */}
                 </div>
               </div>
             );
