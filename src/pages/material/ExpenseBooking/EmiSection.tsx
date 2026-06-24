@@ -434,7 +434,7 @@ export function EmiSection({
                       <span className="text-[10px] text-muted-foreground flex items-center gap-1">
                         <Hash size={9} />
                         Refs linked to{" "}
-                        <span className="font-mono font-semibold text-primary">
+                        <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
                           {baseDocNo}
                         </span>
                       </span>

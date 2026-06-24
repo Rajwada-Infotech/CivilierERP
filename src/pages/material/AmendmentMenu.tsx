@@ -163,7 +163,7 @@ const TAB_CONFIG: {
     id: "PO",
     label: "Purchase Orders",
     icon: ShoppingCart,
-    color: "text-blue-500",
+    color: "text-emerald-500",
     docType: "PurchaseOrder",
   },
   {
@@ -276,7 +276,7 @@ function StatsRow({
           label: "Purchase Orders",
           value: poCount,
           icon: ShoppingCart,
-          cls: "text-blue-500",
+          cls: "text-emerald-500",
         },
         {
           label: "GRNs",
@@ -294,7 +294,7 @@ function StatsRow({
           label: "Amendments Raised",
           value: amendmentCount,
           icon: FilePenLine,
-          cls: "text-primary",
+          cls: "text-emerald-600 dark:text-emerald-400",
         },
       ].map(({ label, value, icon: Icon, cls }) => (
         <div
@@ -376,7 +376,7 @@ function AmendFormDialog({
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <FilePenLine size={18} className="text-primary" />
+            <FilePenLine size={18} className="text-emerald-600 dark:text-emerald-400" />
             {editing ? "Edit Amendment" : "New Amendment"}
           </DialogTitle>
           <DialogDescription>
@@ -572,7 +572,7 @@ function AmendmentDetailDialog({
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <FilePenLine size={16} className="text-primary" />
+            <FilePenLine size={16} className="text-emerald-600 dark:text-emerald-400" />
             {amendment.AmendmentNo}
           </DialogTitle>
         </DialogHeader>
@@ -833,7 +833,7 @@ function AmendmentsHistoryPanel({
                     <button
                       type="button"
                       onClick={() => setViewingAmendment(a)}
-                      className="font-semibold text-primary hover:underline font-mono"
+                      className="font-semibold text-emerald-600 dark:text-emerald-400 hover:underline font-mono"
                     >
                       {a.AmendmentNo}
                     </button>
@@ -889,7 +889,7 @@ function AmendmentsHistoryPanel({
                             type="button"
                             onClick={() => submitMutation.mutate(a.Id)}
                             disabled={submitMutation.isPending}
-                            className="p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-950/30 text-blue-600 transition"
+                            className="p-1 rounded hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-emerald-600 transition"
                             title="Submit for approval"
                           >
                             <Send size={13} />
@@ -1538,7 +1538,7 @@ export default function AmendmentMenu() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="flex items-center gap-2.5 text-xl font-heading font-bold text-foreground">
-            <FilePenLine size={20} className="text-primary" />
+            <FilePenLine size={20} className="text-emerald-600 dark:text-emerald-400" />
             Amendment Centre
           </h1>
           <p className="mt-0.5 text-xs text-muted-foreground">

@@ -545,7 +545,7 @@ export const MobileNav: React.FC = () => {
               { label: "GRN", path: "/material/grn", icon: Package },
               { label: "Issues", path: "/material/issues", icon: PackageMinus },
               {
-                label: "Expense Booking",
+                label: "Invoice",
                 path: "/material/expense-booking",
                 icon: Receipt,
               },

@@ -98,6 +98,17 @@ const Dropdown = ({
 
 // ─── Module color helpers ──────────────────────────────────────────────────────
 
+// RGB triplets for dynamic glow (matches ModuleStrip ringRgb values)
+const MODULE_GLOW_RGB: Record<string, string> = {
+  finance: "99,102,241",
+  material: "16,185,129",
+  followup: "129,140,248",
+  engineering: "249,115,22",
+  ticket: "236,72,153",
+  sales: "168,85,247",
+  admin: "59,130,246",
+};
+
 // HSL values derived from MODULE_HEADER hex colors in AppSidebar for consistency
 const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
   finance: { h: 239, s: 84, l: 67 },     // #6366f1 indigo
@@ -630,6 +641,10 @@ export const TopNavbar = () => {
       ADMIN_PATHS.some((p) => location.pathname.startsWith(p)));
   const isDbaPage = isDba && location.pathname.startsWith("/dba");
 
+  const activeGlowRgb = MODULE_GLOW_RGB[
+    isAdminPage ? "admin" : (activeModule ?? "finance")
+  ] ?? MODULE_GLOW_RGB.finance;
+
   const RoleIcon = isSuperAdmin
     ? Crown
     : isDba
@@ -895,26 +910,31 @@ export const TopNavbar = () => {
             WebkitBackdropFilter: "blur(22px) saturate(180%)",
           }}
         >
-          {/* Dot grid + glow — clipped to pill */}
-          <div className="absolute inset-0 rounded-full overflow-hidden pointer-events-none z-0">
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                backgroundImage:
-                  "radial-gradient(circle, hsl(var(--foreground) / 0.10) 1px, transparent 1px)",
-                backgroundSize: "14px 14px",
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                background:
-                  "radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.22) 0%, transparent 70%)",
-              }}
-            />
-          </div>
+          {/* Dot grid + glow — clipped to pill, tracks active module color */}
+          {(() => {
+            const modKey = isAdminPage ? "admin" : (activeModule ?? "finance");
+            const glowRgb = MODULE_GLOW_RGB[modKey] ?? MODULE_GLOW_RGB.finance;
+            return (
+              <div className="absolute inset-0 rounded-full overflow-hidden pointer-events-none z-0">
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    backgroundImage:
+                      "radial-gradient(circle, hsl(var(--foreground) / 0.10) 1px, transparent 1px)",
+                    backgroundSize: "14px 14px",
+                  }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: `radial-gradient(ellipse at 50% 0%, rgba(${glowRgb},0.38) 0%, rgba(${glowRgb},0.12) 50%, transparent 80%)`,
+                  }}
+                />
+              </div>
+            );
+          })()}
 
           {/* Content — sits above glow */}
           <div className="relative z-10 flex items-center gap-0.5">
@@ -965,7 +985,7 @@ export const TopNavbar = () => {
               className="absolute -inset-[2px] rounded-full pointer-events-none opacity-70"
               style={{
                 background:
-                  "conic-gradient(from 0deg, transparent 60%, hsl(var(--primary) / 0.7) 80%, transparent 100%)",
+                  `conic-gradient(from 0deg, transparent 60%, rgba(${activeGlowRgb},0.85) 80%, transparent 100%)`,
                 animation: "spin-ring 3s linear infinite",
               }}
             />

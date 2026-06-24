@@ -369,3 +369,46 @@
         opacity: 1;
     }
 }
+
+/* ── Module-scoped accent overrides ─────────────────────────────────────────
+   Overrides --accent so shadcn SelectItem / CommandItem hover & checked states
+   match each module's color. Uses a subtle dark tint + colored text so the
+   dropdown feels clean/simple (not a solid filled pill).
+   Applied via data-module on the AppLayout root div.
+────────────────────────────────────────────────────────────────────────── */
+
+/* ── Per-module CSS variable overrides ──────────────────────────────────────
+   --ring         : module accent color (used for SelectContent border glow
+                    and SelectItem checkmark icon)
+   --accent-foreground: module color text (used for selected item label)
+   SelectItem hover uses neutral bg-muted/60; only selected text + checkmark
+   pick up the module color via these variables.
+────────────────────────────────────────────────────────────────────────── */
+
+/* Material — emerald */
+[data-module="material"]       { --ring: 160 84% 39%; --accent-foreground: 160 84% 28%; }
+.dark [data-module="material"] { --ring: 160 84% 45%; --accent-foreground: 160 84% 65%; }
+
+/* Finance — indigo */
+[data-module="finance"]       { --ring: 239 84% 67%; --accent-foreground: 239 84% 40%; }
+.dark [data-module="finance"] { --ring: 239 84% 67%; --accent-foreground: 239 84% 80%; }
+
+/* Engineering — orange */
+[data-module="engineering"]       { --ring: 25 95% 53%; --accent-foreground: 25 95% 35%; }
+.dark [data-module="engineering"] { --ring: 25 95% 53%; --accent-foreground: 25 95% 68%; }
+
+/* Follow-up — indigo-violet */
+[data-module="followup"]       { --ring: 235 90% 74%; --accent-foreground: 235 90% 40%; }
+.dark [data-module="followup"] { --ring: 235 90% 74%; --accent-foreground: 235 90% 82%; }
+
+/* Ticket — pink */
+[data-module="ticket"]       { --ring: 330 81% 60%; --accent-foreground: 330 81% 38%; }
+.dark [data-module="ticket"] { --ring: 330 81% 60%; --accent-foreground: 330 81% 76%; }
+
+/* Sales — purple */
+[data-module="sales"]       { --ring: 271 91% 65%; --accent-foreground: 271 91% 38%; }
+.dark [data-module="sales"] { --ring: 271 91% 65%; --accent-foreground: 271 91% 80%; }
+
+/* Admin — blue */
+[data-module="admin"]       { --ring: 217 91% 60%; --accent-foreground: 217 91% 38%; }
+.dark [data-module="admin"] { --ring: 217 91% 60%; --accent-foreground: 217 91% 76%; }

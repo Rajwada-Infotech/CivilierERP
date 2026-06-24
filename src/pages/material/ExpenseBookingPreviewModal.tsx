@@ -308,7 +308,7 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 1: Booking Info ── */}
           <div>
             <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-              <CalendarDays size={10} className="text-primary" /> Booking
+              <CalendarDays size={10} className="text-emerald-600 dark:text-emerald-400" /> Booking
               Information
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-4">
@@ -382,12 +382,12 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 2: Vendor / Supplier ── */}
           <div className="border-t border-border/60 pt-4">
             <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-              <Truck size={10} className="text-primary" /> Vendor / Supplier
+              <Truck size={10} className="text-emerald-600 dark:text-emerald-400" /> Vendor / Supplier
             </p>
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="flex-1 flex items-center gap-3 bg-muted/30 border border-border rounded-xl px-4 py-3">
-                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                  <User size={14} className="text-primary" />
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+                  <User size={14} className="text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
@@ -400,8 +400,8 @@ export function ExpenseBookingPreviewModal({
               </div>
               {previewRecord.materialCategory && (
                 <div className="flex-1 flex items-center gap-3 bg-muted/30 border border-border rounded-xl px-4 py-3">
-                  <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
-                    <Package size={14} className="text-blue-500" />
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+                    <Package size={14} className="text-emerald-500" />
                   </div>
                   <div className="min-w-0">
                     <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
@@ -419,16 +419,16 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 3: Amount Breakdown ── */}
           <div className="border-t border-border/60 pt-4">
             <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-              <Banknote size={10} className="text-primary" /> Amount Breakdown
+              <Banknote size={10} className="text-emerald-600 dark:text-emerald-400" /> Amount Breakdown
             </p>
 
             {/* ── GRN per-item breakdown (accurate) ── */}
             {grnBreakdown ? (
               <div className="space-y-3">
-                <div className="rounded-xl border border-blue-500/20 bg-blue-500/[0.03] overflow-hidden">
-                  <div className="flex items-center gap-2 px-3 py-2 border-b border-blue-500/15 bg-blue-500/5">
-                    <Truck size={11} className="text-blue-500 shrink-0" />
-                    <span className="text-[10px] font-heading font-semibold text-blue-700 dark:text-blue-300">
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.03] overflow-hidden">
+                  <div className="flex items-center gap-2 px-3 py-2 border-b border-emerald-500/15 bg-emerald-500/[0.05]">
+                    <Truck size={11} className="text-emerald-500 shrink-0" />
+                    <span className="text-[10px] font-heading font-semibold text-emerald-700 dark:text-emerald-300">
                       GST Breakdown by Item
                     </span>
                   </div>
@@ -442,7 +442,7 @@ export function ExpenseBookingPreviewModal({
                   >
                     <table className="w-full text-[11px]">
                       <thead>
-                        <tr className="border-b border-blue-500/10 bg-muted/10">
+                        <tr className="border-b border-emerald-500/10 bg-muted/10">
                           <th className="px-3 py-1.5 text-left text-muted-foreground font-heading uppercase tracking-wider text-[9px]">
                             Item
                           </th>
@@ -452,7 +452,7 @@ export function ExpenseBookingPreviewModal({
                           <th className="px-3 py-1.5 text-right text-foreground font-heading uppercase tracking-wider text-[9px]">
                             Incl.
                           </th>
-                          <th className="px-3 py-1.5 text-right text-blue-600 dark:text-blue-400 font-heading uppercase tracking-wider text-[9px]">
+                          <th className="px-3 py-1.5 text-right text-emerald-600 dark:text-emerald-400 font-heading uppercase tracking-wider text-[9px]">
                             Base
                           </th>
                           <th className="px-3 py-1.5 text-right text-orange-600 dark:text-orange-400 font-heading uppercase tracking-wider text-[9px]">
@@ -460,9 +460,9 @@ export function ExpenseBookingPreviewModal({
                           </th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-blue-500/8">
+                      <tbody className="divide-y divide-emerald-500/[0.08]">
                         {grnBreakdown.items.map((item, idx) => (
-                          <tr key={idx} className="hover:bg-blue-500/5">
+                          <tr key={idx} className="hover:bg-emerald-500/[0.05]">
                             <td className="px-3 py-1.5 font-medium text-foreground max-w-[120px] truncate">
                               {item.itemName || `Item ${idx + 1}`}
                             </td>
@@ -472,7 +472,7 @@ export function ExpenseBookingPreviewModal({
                             <td className="px-3 py-1.5 text-right font-mono font-semibold text-foreground">
                               ₹{fmt(item.totalAmountInclGST)}
                             </td>
-                            <td className="px-3 py-1.5 text-right font-mono font-semibold text-blue-600 dark:text-blue-400">
+                            <td className="px-3 py-1.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
                               ₹{fmt(item.baseAmount)}
                             </td>
                             <td className="px-3 py-1.5 text-right font-mono font-semibold text-orange-600 dark:text-orange-400">
@@ -481,7 +481,7 @@ export function ExpenseBookingPreviewModal({
                           </tr>
                         ))}
                       </tbody>
-                      <tfoot className="border-t-2 border-blue-500/20 bg-muted/10">
+                      <tfoot className="border-t-2 border-emerald-500/20 bg-muted/10">
                         <tr>
                           <td
                             colSpan={2}
@@ -492,7 +492,7 @@ export function ExpenseBookingPreviewModal({
                           <td className="px-3 py-1.5 text-right font-mono text-xs font-bold text-foreground">
                             ₹{fmt(grnBreakdown.totals.totalInclGST)}
                           </td>
-                          <td className="px-3 py-1.5 text-right font-mono text-xs font-bold text-blue-600 dark:text-blue-400">
+                          <td className="px-3 py-1.5 text-right font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
                             ₹{fmt(grnBreakdown.totals.totalBase)}
                           </td>
                           <td className="px-3 py-1.5 text-right font-mono text-xs font-bold text-orange-600 dark:text-orange-400">
@@ -696,11 +696,11 @@ export function ExpenseBookingPreviewModal({
                     </div>
                   );
                 })()}
-                <div className="flex items-center justify-between px-4 py-3 bg-primary/10 border border-primary/20 rounded-xl">
-                  <p className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
+                <div className="flex items-center justify-between px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+                  <p className="text-xs font-heading font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
                     Net Payable
                   </p>
-                  <p className="font-mono text-base font-bold text-primary">
+                  <p className="font-mono text-base font-bold text-emerald-600 dark:text-emerald-400">
                     ₹{fmt(displayNetAmount)}
                   </p>
                 </div>
@@ -813,11 +813,11 @@ export function ExpenseBookingPreviewModal({
                     </div>
                   )}
                 </div>
-                <div className="flex items-center justify-between px-4 py-3 bg-primary/10 border-t border-primary/20">
-                  <p className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
+                <div className="flex items-center justify-between px-4 py-3 bg-emerald-500/10 border-t border-emerald-500/20">
+                  <p className="text-xs font-heading font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
                     Net Payable
                   </p>
-                  <p className="font-mono text-base font-bold text-primary">
+                  <p className="font-mono text-base font-bold text-emerald-600 dark:text-emerald-400">
                     ₹{fmt(displayNetAmount)}
                   </p>
                 </div>
@@ -829,7 +829,7 @@ export function ExpenseBookingPreviewModal({
           {hasEmi && (
             <div className="border-t border-border/60 pt-4">
               <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                <CreditCard size={10} className="text-primary" /> EMI /
+                <CreditCard size={10} className="text-emerald-600 dark:text-emerald-400" /> EMI /
                 Installment Plan
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -879,7 +879,7 @@ export function ExpenseBookingPreviewModal({
             previewRecord.grnItems.length > 0 && (
               <div className="border-t border-border/60 pt-4">
                 <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                  <Truck size={10} className="text-primary" /> GRN Items Summary
+                  <Truck size={10} className="text-emerald-600 dark:text-emerald-400" /> GRN Items Summary
                   <span className="ml-auto font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded-full border border-border">
                     {previewRecord.grnItems.length} items
                   </span>
@@ -952,7 +952,7 @@ export function ExpenseBookingPreviewModal({
               previewRecord.additionalCharges.length > 0)) && (
             <div className="border-t border-border/60 pt-4">
               <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                <FileText size={10} className="text-primary" /> Invoice &amp;
+                <FileText size={10} className="text-emerald-600 dark:text-emerald-400" /> Invoice &amp;
                 Allocation
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
@@ -1051,7 +1051,7 @@ export function ExpenseBookingPreviewModal({
           {previewRecord.billStatus && (
             <div className="border-t border-border/60 pt-4">
               <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                <Wallet size={10} className="text-primary" /> Bill Status
+                <Wallet size={10} className="text-emerald-600 dark:text-emerald-400" /> Bill Status
               </p>
               <div className="flex flex-wrap gap-3 mb-3">
                 <div
@@ -1109,7 +1109,7 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 7b: Traceability Chain ── */}
           <div className="border-t border-border/60 pt-4">
             <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-              <ArrowRight size={10} className="text-primary" /> Document Chain
+              <ArrowRight size={10} className="text-emerald-600 dark:text-emerald-400" /> Document Chain
             </p>
             <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
               {previewRecord.workDoneRef && (
@@ -1127,7 +1127,7 @@ export function ExpenseBookingPreviewModal({
                 previewRecord.eSourceType === "PO" ||
                 previewRecord.eSourceType === "WO_PO") && (
                 <>
-                  <span className="bg-blue-500/10 border border-blue-500/20 text-blue-700 dark:text-blue-400 px-2.5 py-1.5 rounded-lg font-mono font-semibold">
+                  <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 px-2.5 py-1.5 rounded-lg font-mono font-semibold">
                     {previewRecord.eSourceType === "WO_PO" ? "WO_PO" : "PO"}
                     {previewRecord.purchaseOrderId
                       ? ` #${previewRecord.purchaseOrderId}`
@@ -1154,7 +1154,7 @@ export function ExpenseBookingPreviewModal({
                 )}
               {previewRecord.bookingReference && (
                 <>
-                  <span className="bg-primary/10 border border-primary/20 text-primary px-2.5 py-1.5 rounded-lg font-mono font-semibold">
+                  <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-2.5 py-1.5 rounded-lg font-mono font-semibold">
                     {previewRecord.bookingReference}
                   </span>
                   {previewRecord.billStatus && (
@@ -1195,7 +1195,7 @@ export function ExpenseBookingPreviewModal({
           {billingTerms.length > 0 && (
             <div className="border-t border-border/60 pt-4">
               <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                <Receipt size={10} className="text-primary" /> Billing Terms
+                <Receipt size={10} className="text-emerald-600 dark:text-emerald-400" /> Billing Terms
               </p>
               <div className="bg-muted/20 border border-border rounded-xl px-4 py-3 text-sm text-foreground">
                 {billingTerms.length > 0 ? (
@@ -1244,7 +1244,7 @@ export function ExpenseBookingPreviewModal({
           {previewRecord.remarks && (
             <div className="border-t border-border/60 pt-4">
               <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                <StickyNote size={10} className="text-primary" /> Remarks
+                <StickyNote size={10} className="text-emerald-600 dark:text-emerald-400" /> Remarks
               </p>
               <div className="bg-muted/20 border border-border rounded-xl px-4 py-3 text-sm text-foreground leading-relaxed">
                 {previewRecord.remarks}
@@ -1255,7 +1255,7 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 10: Approval Status ── */}
           <div className="border-t border-border/60 pt-4">
             <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-              <CheckCircle2 size={10} className="text-primary" /> Approval
+              <CheckCircle2 size={10} className="text-emerald-600 dark:text-emerald-400" /> Approval
               Status
             </p>
             <div className="flex flex-wrap items-center gap-3">
