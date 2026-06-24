@@ -11,6 +11,7 @@ import {
   ShelvingUnit,
   ShieldCheck,
   Wrench,
+  Archive,
 } from "lucide-react";
 import {
   useModule,
@@ -20,7 +21,6 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./layoutContexts";
 import { useTheme } from "@/contexts/ThemeContext";
-
 
 // ── Module definitions ────────────────────────────────────────────────────────
 // ringRgb: raw "r,g,b" used to build valid RGBA strings at runtime
@@ -80,6 +80,15 @@ const MODULES = [
     bg: "rgba(168,85,247,0.22)",
     ringRgb: "168,85,247",
   },
+  {
+    id: "records" as Module,
+    icon: Archive,
+    label: "Records",
+    desc: "Every attachment, in one place",
+    color: "#f59e0b",
+    bg: "rgba(245,158,11,0.22)",
+    ringRgb: "245,158,11",
+  },
 ];
 
 const ADMIN_MODULE = {
@@ -111,10 +120,32 @@ export const ModuleStrip: React.FC = () => {
   const role = currentUser?.role ?? "";
   const isAdminTier = ["super_admin", "admin", "dba"].includes(role);
 
+  const activeModuleItem =
+    [...MODULES, ADMIN_MODULE].find((m) => m.id === activeModule) ?? MODULES[0];
+  const activeRingRgb = activeModuleItem.ringRgb;
+
+  const { canAccessPage } = useAuth();
   const [tooltip, setTooltip] = useState<TooltipState>(null);
 
-  // Regular modules always shown; admin only for admin-tier users
-  const regularItems = MODULES;
+  // Map each module to a representative page key that signals access.
+  // A user with ANY view right in a module's page definitions will see that module.
+  const MODULE_SAMPLE_PAGES: Record<string, string[]> = {
+    finance:     ["finance-dashboard", "new-payment", "received-payment", "brs", "transactions", "expense-booking"],
+    material:    ["material-dashboard", "purchase-orders", "grn-master", "material-request", "material-issues", "stock-ledger"],
+    followup:    ["followup-dashboard", "followup-applications", "followup-bookings", "followup-agreements", "followup-demands"],
+    engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
+    ticket:      ["ticket-dashboard", "tickets"],
+    sales:       ["sale-order", "sale-invoice", "sales-payment"],
+  };
+
+  const userHasModuleAccess = (moduleId: string): boolean => {
+    if (isAdminTier) return true;
+    const pages = MODULE_SAMPLE_PAGES[moduleId] ?? [];
+    return pages.some((pk) => canAccessPage(pk as any));
+  };
+
+  // Filter regular modules; admin only for admin-tier
+  const regularItems = MODULES.filter((m) => userHasModuleAccess(m.id));
   const adminItems = isAdminTier ? [ADMIN_MODULE] : [];
 
   const handleSwitch = async (mod: NonNullable<Module>) => {
@@ -151,19 +182,25 @@ export const ModuleStrip: React.FC = () => {
         {/* ── Inner oval pill strip (fully rounded top + bottom) ───────────── */}
         <div
           className="relative flex-1 flex flex-col overflow-hidden rounded-[28px]"
-          style={isDark ? {
-            background: "rgba(15, 17, 26, 0.52)",
-            border: "1px solid rgba(255,255,255,0.13)",
-            boxShadow: "0 2px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.10)",
-            backdropFilter: "blur(22px) saturate(160%)",
-            WebkitBackdropFilter: "blur(22px) saturate(160%)",
-          } : {
-            background: "rgba(255,255,255,0.42)",
-            border: "1px solid rgba(255,255,255,0.65)",
-            boxShadow: "0 2px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.85)",
-            backdropFilter: "blur(22px) saturate(180%)",
-            WebkitBackdropFilter: "blur(22px) saturate(180%)",
-          }}
+          style={
+            isDark
+              ? {
+                  background: "rgba(15, 17, 26, 0.52)",
+                  border: "1px solid rgba(255,255,255,0.13)",
+                  boxShadow:
+                    "0 2px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.10)",
+                  backdropFilter: "blur(22px) saturate(160%)",
+                  WebkitBackdropFilter: "blur(22px) saturate(160%)",
+                }
+              : {
+                  background: "rgba(255,255,255,0.42)",
+                  border: "1px solid rgba(255,255,255,0.65)",
+                  boxShadow:
+                    "0 2px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.85)",
+                  backdropFilter: "blur(22px) saturate(180%)",
+                  WebkitBackdropFilter: "blur(22px) saturate(180%)",
+                }
+          }
         >
           {/* Dot-grid overlay */}
           <div
@@ -175,14 +212,20 @@ export const ModuleStrip: React.FC = () => {
             }}
           />
 
-          {/* Top radial glow */}
-          <div
-            className="absolute top-0 left-0 right-0 h-28 pointer-events-none z-0"
-            style={{
-              background:
-                "radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.22) 0%, transparent 70%)",
-            }}
-          />
+          {/* Top radial glow — tracks active module color */}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeModuleItem.id as string}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.4 }}
+              className="absolute top-0 left-0 right-0 h-36 pointer-events-none z-0"
+              style={{
+                background: `radial-gradient(ellipse at 50% 0%, rgba(${activeRingRgb},0.45) 0%, rgba(${activeRingRgb},0.15) 40%, transparent 70%)`,
+              }}
+            />
+          </AnimatePresence>
 
           {/* ── Logo / Sparkle section ─────────────────────────────────────── */}
           <div className="relative z-10 flex justify-center items-center pt-5 pb-5">
@@ -225,20 +268,23 @@ export const ModuleStrip: React.FC = () => {
               <div
                 className="w-px h-5"
                 style={{
-                  background:
-                    "linear-gradient(to bottom, transparent, rgba(129,140,248,0.6))",
+                  background: `linear-gradient(to bottom, transparent, rgba(${activeRingRgb},0.6))`,
                 }}
               />
               {/* Pulsing dot — subtle, no scale change, just opacity + soft glow */}
               <motion.div
                 className="rounded-full"
-                style={{ width: 5, height: 5, background: "#818cf8" }}
+                style={{
+                  width: 5,
+                  height: 5,
+                  background: activeModuleItem.color,
+                }}
                 animate={{
                   opacity: [0.45, 1, 0.45],
                   boxShadow: [
-                    "0 0 0px rgba(129,140,248,0)",
-                    "0 0 5px 1px rgba(129,140,248,0.70)",
-                    "0 0 0px rgba(129,140,248,0)",
+                    `0 0 0px rgba(${activeRingRgb},0)`,
+                    `0 0 5px 1px rgba(${activeRingRgb},0.70)`,
+                    `0 0 0px rgba(${activeRingRgb},0)`,
                   ],
                 }}
                 transition={{
@@ -251,8 +297,7 @@ export const ModuleStrip: React.FC = () => {
               <div
                 className="w-px h-5"
                 style={{
-                  background:
-                    "linear-gradient(to top, transparent, rgba(129,140,248,0.6))",
+                  background: `linear-gradient(to top, transparent, rgba(${activeRingRgb},0.6))`,
                 }}
               />
             </div>

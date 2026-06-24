@@ -3871,7 +3871,7 @@ const WorkOrderMaster: React.FC = () => {
     : [];
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
-  const finYearOptions = finYears.filter((fy) => fy.status === "Active");
+  const finYearOptions = finYears.filter((fy) => fy.status === "Active" && !fy.locked);
   const [selectedFinYear, setSelectedFinYear] = useState<string | undefined>(
     undefined,
   );

@@ -107,7 +107,7 @@ const PRIORITY_OPTIONS = ["Low", "Normal", "High", "Urgent"];
 
 const PRIORITY_COLOR: Record<string, string> = {
   Low: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
-  Normal: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+  Normal: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
   High: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
   Urgent: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
 };
@@ -515,7 +515,7 @@ export default function MaterialRequest() {
       accessorKey: "DocNo",
       header: "Doc No",
       cell: ({ getValue }) => (
-        <span className="font-mono font-bold text-primary text-sm">
+        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
           {String(getValue() || "—")}
         </span>
       ),
@@ -636,7 +636,7 @@ export default function MaterialRequest() {
               <button
                 type="button"
                 onClick={() => handleEdit(row.original)}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-primary/10 hover:bg-primary/20 text-primary transition-colors border border-primary/20"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-colors border border-emerald-500/20"
                 title="Edit this request"
               >
                 <Edit3 size={12} /> Update
@@ -826,7 +826,7 @@ export default function MaterialRequest() {
               Request No:
             </span>
             {editingId ? (
-              <span className="font-mono font-bold text-primary text-sm">
+              <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
                 {viewingRecord?.DocNo ?? "Immutable after creation"}
               </span>
             ) : (
@@ -964,7 +964,7 @@ export default function MaterialRequest() {
                   type="date"
                   value={header.requestDate}
                   onChange={(e) => setH("requestDate", e.target.value)}
-                  className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                 />
               </div>
             </Field>
@@ -978,7 +978,7 @@ export default function MaterialRequest() {
                   type="date"
                   value={header.requiredByDate}
                   onChange={(e) => setH("requiredByDate", e.target.value)}
-                  className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                 />
               </div>
             </Field>
@@ -1012,8 +1012,8 @@ export default function MaterialRequest() {
       <Card className="border-border shadow-sm">
         <CardHeader className="px-6 py-4 border-b border-border flex flex-row items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-              <ShoppingCart size={15} className="text-primary" />
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+              <ShoppingCart size={15} className="text-emerald-600 dark:text-emerald-400" />
             </div>
             <div>
               <CardTitle className="text-sm font-semibold">
@@ -1022,7 +1022,7 @@ export default function MaterialRequest() {
               <p className="text-xs text-muted-foreground mt-0.5">
                 {cart.length} line item{cart.length !== 1 ? "s" : ""}
                 {header.projectId && (
-                  <span className="ml-2 text-primary font-medium">
+                  <span className="ml-2 text-emerald-600 dark:text-emerald-400 font-medium">
                     · Stock from project godown
                   </span>
                 )}
@@ -1034,7 +1034,7 @@ export default function MaterialRequest() {
             variant="outline"
             size="sm"
             onClick={addCartRow}
-            className="gap-2 h-9 px-4"
+            className="gap-1.5 h-8 text-xs"
           >
             <Plus size={13} /> Add Item
           </Button>
@@ -1242,37 +1242,25 @@ export default function MaterialRequest() {
       </Card>
 
       {/* Save bar */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-1">
-        <p className="hidden sm:block text-xs text-muted-foreground">
-          All required fields must be filled before saving.
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
+        <p className="text-[11px] text-muted-foreground hidden sm:block">
+          {canSave ? <span className="text-emerald-500 font-medium">Ready to save</span> : "Fill in the required fields to save"}
         </p>
-        <div className="flex gap-2 sm:ml-auto">
+        <div className="flex items-center gap-2 sm:ml-auto">
           <button
             onClick={resetFields}
-            disabled={isSaving}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition disabled:opacity-50"
+            disabled={isSaving || (!header.companyId && !header.projectId && !header.reason.trim() && !header.remarks.trim() && cart.every((ci) => !ci.ItemId && !ci.Quantity))}
+            className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
           >
-            <RotateCcw size={14} /> Reset
+            <RotateCcw size={12} /> Reset
           </button>
           <button
             onClick={onSave}
             disabled={!canSave || isSaving || saved}
-            className="flex-1 sm:flex-none whitespace-nowrap bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center justify-center gap-1.5 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition"
+            className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
           >
-            {saved ? (
-              <Check size={14} />
-            ) : isSaving ? (
-              <RefreshCw size={14} className="animate-spin" />
-            ) : (
-              <Save size={14} />
-            )}
-            {saved
-              ? "Saved!"
-              : isSaving
-                ? "Saving…"
-                : editingId
-                  ? "Update Request"
-                  : "Save Request"}
+            {saved ? <Check size={14} /> : isSaving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />}
+            {saved ? "Saved!" : isSaving ? "Saving…" : editingId ? "Update Request" : "Save Request"}
           </button>
         </div>
       </div>
@@ -1291,7 +1279,7 @@ export default function MaterialRequest() {
         <Card className="border-border shadow-sm">
           <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
             <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <FileText size={15} className="text-primary" />
+              <FileText size={15} className="text-emerald-600 dark:text-emerald-400" />
               Request — {viewingRecord.DocNo || `#${viewingRecord.MRId}`}
             </CardTitle>
             <div className="flex items-center gap-2">
@@ -1311,7 +1299,7 @@ export default function MaterialRequest() {
                     variant="default"
                     size="sm"
                     onClick={() => handleEdit(viewingRecord)}
-                    className="gap-1.5 h-8 bg-primary hover:bg-primary/90 text-primary-foreground"
+                    className="gap-1.5 h-8 bg-emerald-500 hover:bg-emerald-500/90 text-primary-foreground"
                   >
                     <Edit3 size={13} /> Update
                   </Button>
@@ -1347,7 +1335,7 @@ export default function MaterialRequest() {
               <DetailRow
                 label="Doc No"
                 value={
-                  <span className="font-mono font-bold text-primary">
+                  <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
                     {viewingRecord.DocNo || "—"}
                   </span>
                 }
@@ -1406,7 +1394,7 @@ export default function MaterialRequest() {
         <Card className="border-border shadow-sm">
           <CardHeader className="pb-3 border-b border-border bg-muted/20">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <ShoppingCart size={14} className="text-primary" />
+              <ShoppingCart size={14} className="text-emerald-600 dark:text-emerald-400" />
               Requested Items
               <Badge variant="secondary" className="text-xs">
                 {items.length}

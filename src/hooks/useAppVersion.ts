@@ -6,7 +6,8 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 interface AppVersionData {
-  version: string;
+  dbVersion: string;
+  appVersion: string | null;
   releasedAt: string | null;
 }
 
@@ -25,8 +26,11 @@ export function useAppVersion() {
   });
 
   return {
-    version: data?.version ?? "…",
+    dbVersion: data?.dbVersion ?? "…",
+    appVersion: data?.appVersion ?? "…",
     releasedAt: data?.releasedAt ?? null,
     isLoading,
+    // backward-compat alias (was `version`)
+    version: data?.dbVersion ?? "…",
   };
 }

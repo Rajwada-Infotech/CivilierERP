@@ -83,10 +83,20 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
   const isMobile = useIsMobile();
-  const { moduleSwitching } = useModule();
+  const { moduleSwitching, activeModule } = useModule();
   const isHome = useIsHomePage();
 
   useModuleActivityLogger();
+
+  // Sync data-module to <body> so Radix UI portals (SelectContent, etc.)
+  // inherit module-scoped CSS variables even though they render outside the layout div.
+  useEffect(() => {
+    if (activeModule) {
+      document.body.setAttribute("data-module", activeModule);
+    } else {
+      document.body.removeAttribute("data-module");
+    }
+  }, [activeModule]);
 
   const sidebarValue = useMemo(
     () => ({ collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed }),
@@ -113,7 +123,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
     <SidebarContext.Provider value={sidebarValue}>
       <NavbarCollapseContext.Provider value={navbarValue}>
         <NavPanelAutoExpand>
-          <div className="min-h-screen bg-background">
+          <div className="min-h-screen bg-background" data-module={activeModule ?? undefined}>
             <TopNavbar />
 
             {!isMobile && (

@@ -164,8 +164,8 @@ function SummaryRow({
           label: "Opening Stock",
           value: opening,
           icon: Layers,
-          color: "text-blue-600",
-          bg: "bg-blue-500/10",
+          color: "text-emerald-600",
+          bg: "bg-emerald-500/10",
         },
         {
           label: "Stock In",
@@ -329,7 +329,7 @@ function StockDetailsTable({ godownId }: { godownId: number }) {
                       {row.UOMSymbol || row.UOMName ? (
                         <span
                           title={row.UOMName ?? undefined}
-                          className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-600 border border-blue-400/20"
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-400/20"
                         >
                           {row.UOMSymbol || row.UOMName}
                         </span>

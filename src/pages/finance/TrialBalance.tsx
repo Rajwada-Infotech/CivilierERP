@@ -111,7 +111,34 @@ const TYPE_LABEL: Record<string, string> = {
   GL: "GL",
 };
 
-// ─── Flatten visible ──────────────────────────────────────────────────────────
+// Does this single node (ignoring children) have any nonzero value?
+function nodeHasOwnValue(n: TBNode): boolean {
+  return (
+    n.opening.debit !== 0 ||
+    n.opening.credit !== 0 ||
+    n.transactions.debit !== 0 ||
+    n.transactions.credit !== 0 ||
+    n.closing.debit !== 0 ||
+    n.closing.credit !== 0
+  );
+}
+
+// Prune the tree to only the branches that have activity somewhere in their
+// subtree. A group is kept (with ALL of its ancestors) as long as it, or any
+// descendant, has a nonzero opening/transaction/closing value — i.e. the
+// "whole nest" stays visible whenever there's a transaction anywhere in it.
+// Groups whose entire subtree is all-zero are dropped.
+function pruneToActive(nodes: TBNode[]): TBNode[] {
+  function walk(n: TBNode): TBNode | null {
+    const keptChildren = n.children
+      .map(walk)
+      .filter((c): c is TBNode => c !== null);
+    const keep = nodeHasOwnValue(n) || keptChildren.length > 0;
+    if (!keep) return null;
+    return { ...n, children: keptChildren };
+  }
+  return nodes.map(walk).filter((n): n is TBNode => n !== null);
+}
 
 function flattenVisible(
   nodes: TBNode[],
@@ -451,6 +478,7 @@ export default function TrialBalance() {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [search, setSearch] = useState("");
+  const [hideEmpty, setHideEmpty] = useState(true);
   const abortRef = useRef<AbortController | null>(null);
 
   // ── load fin years ────────────────────────────────────────────────────────
@@ -459,10 +487,9 @@ export default function TrialBalance() {
     fetchWithAuth("/api/fin-year")
       .then((r) => (r.ok ? r.json() : []))
       .then((data: FinYearRow[]) => {
-        // Only unlocked fin years are selectable for Trial Balance reporting —
-        // locked years are closed for the period and shouldn't be queried here.
+        // Only unlocked + active fin years are selectable for Trial Balance reporting
         const unlocked = data.filter(
-          (f) => !(f.FisLocked === 1 || f.FisLocked === true),
+          (f) => !(f.FisLocked === 1 || f.FisLocked === true) && (f.FStatus === 1 || f.FStatus === true),
         );
         const sorted = [...unlocked].sort(
           (a, b) =>
@@ -629,7 +656,8 @@ export default function TrialBalance() {
   };
 
   // ── derived ───────────────────────────────────────────────────────────────
-  const visible = flattenVisible(rows, expanded, search);
+  const displayRows = hideEmpty ? pruneToActive(rows) : rows;
+  const visible = flattenVisible(displayRows, expanded, search);
   const balanced = summary
     ? Math.abs(
         summary.openingDebit +
@@ -638,10 +666,14 @@ export default function TrialBalance() {
       ) < 1
     : false;
 
-  // Export: flat list of all nodes with a depth-indent prefix so groups are legible in PDF/CSV
-  const exportData = flattenAll(rows).map((n) => ({
+  // Export: flat list of all nodes with a depth-indent prefix so groups are legible in PDF/CSV.
+  // NOTE: must be a Latin-1 character — jsPDF's built-in Helvetica font only
+  // covers Latin-1, and sanitizeForPdf() replaces anything outside that range
+  // with "?". The "▸" glyph used here previously was outside Latin-1, so every
+  // group name was getting a literal "?" prefix in the exported PDF.
+  const exportData = flattenAll(displayRows).map((n) => ({
     ...n,
-    name: `${"  ".repeat(n.level)}${n.isGroup ? "▸ " : ""}${n.name}`,
+    name: `${"  ".repeat(n.level)}${n.isGroup ? "> " : ""}${n.name}`,
   })) as unknown as Record<string, unknown>[];
 
   // Period label for chips + PDF subtitle
@@ -787,6 +819,22 @@ export default function TrialBalance() {
 
               {/* Search + Export — full-width on mobile, auto-right on sm+ */}
               <div className="w-full sm:w-auto sm:ml-auto flex items-end gap-2">
+                {/* Hide-empty toggle */}
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60">
+                    &nbsp;
+                  </span>
+                  <label className="h-8 flex items-center gap-1.5 px-2.5 rounded-lg text-xs bg-background border border-border text-muted-foreground hover:text-foreground cursor-pointer select-none whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      checked={!hideEmpty}
+                      onChange={(e) => setHideEmpty(!e.target.checked)}
+                      className="accent-primary"
+                    />
+                    Show all accounts
+                  </label>
+                </div>
+
                 {/* Search */}
                 <div className="flex flex-col gap-0.5">
                   <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60">
@@ -816,6 +864,11 @@ export default function TrialBalance() {
                   subtitle={exportSubtitle || undefined}
                   disabled={notReady || rows.length === 0}
                   stats={pdfStats}
+                  columnPadding={{
+                    0: {
+                      cellPadding: { top: 5, bottom: 5, left: 2, right: 6 },
+                    },
+                  }}
                 />
               </div>
             </div>
@@ -1050,7 +1103,9 @@ export default function TrialBalance() {
                         ? loading
                           ? "Loading Trial Balance…"
                           : "No entries found for the selected period."
-                        : "No accounts match your search."}
+                        : search
+                          ? "No accounts match your search."
+                          : "No accounts with activity for this period. Toggle \u201cShow all accounts\u201d to see zero-balance accounts."}
                     </td>
                   </tr>
                 ) : (

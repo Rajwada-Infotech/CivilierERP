@@ -61,7 +61,7 @@ function MasterTermPicker({
       <DialogContent className="w-[calc(100vw-2rem)] max-w-xl max-h-[80vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
-            <BookOpen size={16} className="text-primary" />
+            <BookOpen size={16} className="text-emerald-500" />
             Select Billing Term
           </DialogTitle>
           <DialogDescription>
@@ -164,7 +164,7 @@ function SingleTermRow({
       {/* Row header */}
       <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-muted/30">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="flex items-center justify-center w-5 h-5 rounded-full bg-primary/10 text-[10px] font-heading font-semibold text-primary shrink-0">
+          <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/10 text-[10px] font-heading font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
             {index + 1}
           </span>
           <div className="min-w-0">
@@ -198,7 +198,7 @@ function SingleTermRow({
           <button
             type="button"
             onClick={onPickMaster}
-            className="flex items-center gap-1 text-[11px] text-primary hover:underline"
+            className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline"
           >
             <BookOpen size={11} />
             {term.masterTermName ? "Change" : "From Master"}
@@ -211,8 +211,8 @@ function SingleTermRow({
           >
             {term.applicable ? (
               <>
-                <ToggleRight size={15} className="text-primary" />
-                <span className="text-primary hidden sm:inline">On</span>
+                <ToggleRight size={15} className="text-emerald-500" />
+                <span className="text-emerald-600 dark:text-emerald-400 hidden sm:inline">On</span>
               </>
             ) : (
               <>
@@ -265,7 +265,7 @@ function SingleTermRow({
                       className={
                         "rounded-lg border px-3 py-1.5 text-xs font-heading font-semibold transition-all " +
                         (term.type === t
-                          ? "border-primary bg-primary/[0.07] text-primary ring-1 ring-primary/20"
+                          ? "border-emerald-500/40 bg-emerald-500/[0.07] text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20"
                           : "border-border bg-background text-muted-foreground hover:border-emerald-500/30")
                       }
                     >
@@ -456,14 +456,14 @@ export function BillingAccordion({
         {/* ── Section Header ── */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3.5 bg-muted/40">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 shrink-0">
-              <Receipt size={14} className="text-primary" />
+            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-500/10 shrink-0">
+              <Receipt size={14} className="text-emerald-500" />
             </div>
             <div className="min-w-0">
               <p className="text-sm font-heading font-semibold text-foreground flex items-center gap-1.5">
                 Billing Terms
                 {isMulti && terms.length > 1 && (
-                  <span className="inline-flex items-center gap-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-heading px-1.5 py-0.5 border border-primary/20">
+                  <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-heading px-1.5 py-0.5 border border-emerald-500/20">
                     <Layers size={9} />
                     {terms.length}
                   </span>
@@ -471,7 +471,7 @@ export function BillingAccordion({
               </p>
               <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
                 {activeCount > 0 && hasBase ? (
-                  <span className="text-primary font-medium">
+                  <span className="text-emerald-600 dark:text-emerald-400 font-medium">
                     {activeCount} term{activeCount > 1 ? "s" : ""} applied · Net
                     ₹{fmt(bd.netAmount)}
                   </span>
@@ -489,9 +489,9 @@ export function BillingAccordion({
                 variant="outline"
                 size="sm"
                 onClick={addTerm}
-                className="h-7 gap-1.5 text-xs border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/[0.06]"
+                className="gap-1.5 h-8 text-xs"
               >
-                <Plus size={11} />
+                <Plus size={13} />
                 Add Term
               </Button>
             )}
@@ -564,7 +564,7 @@ export function BillingAccordion({
                                 className={
                                   "rounded-lg border px-3 py-2 text-xs font-heading font-semibold transition-all " +
                                   (discount.type === t
-                                    ? "border-primary bg-primary/[0.07] text-primary ring-1 ring-primary/20"
+                                    ? "border-emerald-500/40 bg-emerald-500/[0.07] text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20"
                                     : "border-border bg-background text-muted-foreground hover:border-emerald-500/30")
                                 }
                               >
@@ -819,14 +819,14 @@ export function BillingAccordion({
                         })}
 
                         {/* Net Payable */}
-                        <div className="flex justify-between items-center px-3 py-2.5 bg-primary/[0.06]">
+                        <div className="flex justify-between items-center px-3 py-2.5 bg-emerald-500/[0.06]">
                           <span className="font-heading font-semibold text-foreground">
                             Net Payable
                             <span className="ml-1 text-[10px] font-normal opacity-60">
                               Final amount due
                             </span>
                           </span>
-                          <span className="font-heading font-bold text-primary tabular-nums">
+                          <span className="font-heading font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
                             ₹{fmt(Math.round(netPayable * 100) / 100)}
                           </span>
                         </div>

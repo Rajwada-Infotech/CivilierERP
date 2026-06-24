@@ -34,6 +34,22 @@ export interface PdfExportOptions {
   logoBase64?: string;
   /** Summary stat cards rendered below the header band */
   stats?: PdfStatCard[];
+  /**
+   * Optional per-column cellPadding override, keyed by column index.
+   * Use to tighten left padding on a column with deep text indentation
+   * (e.g. a hierarchical Account/Name column) without affecting other reports.
+   */
+  columnPadding?: Record<
+    number,
+    {
+      cellPadding?: {
+        top?: number;
+        bottom?: number;
+        left?: number;
+        right?: number;
+      };
+    }
+  >;
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -454,6 +470,9 @@ export async function exportToPdf(
           )
           .filter(Boolean) as [number, { halign: "right" }][],
       ),
+      // Optional per-export override for specific column indices (e.g. tighter
+      // left padding on a name/account column with deep indentation).
+      ...(options.columnPadding ?? {}),
     },
     didDrawPage: (data: any) => {
       // Footer band

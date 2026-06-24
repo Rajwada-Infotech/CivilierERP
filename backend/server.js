@@ -165,6 +165,7 @@ const ALL_ROUTES = [
   { path: "/api/payment-plan-master", file: "./routes/paymentPlanMaster" },
   { path: "/api/business", file: "./routes/businessRoutes" },
   { path: "/api/tickets", file: "./routes/ticketRoutes" },
+  { path: "/api/records", file: "./routes/recordsRoutes" },
   { path: "/api/signatures", file: "./routes/signatures" },
   { path: "/api/communicator", file: "./routes/communicator" },
   { path: "/api/system/metrics", file: "./routes/systemMetrics" },

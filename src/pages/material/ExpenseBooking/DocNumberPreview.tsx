@@ -288,7 +288,7 @@ export function DocNumberPreview({
                 <SelectItem key={dt.TypeOfDocId} value={String(dt.TypeOfDocId)}>
                   <div className="flex items-center gap-2 w-full min-w-0">
                     {/* Prefix badge — shows the effective doc number prefix */}
-                    <span className="font-mono text-xs font-semibold text-primary shrink-0">
+                    <span className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
                       {docTypeLabel(dt)}
                     </span>
                     <span className="text-xs opacity-40 shrink-0">·</span>
@@ -330,7 +330,7 @@ export function DocNumberPreview({
             </p>
           ) : preview ? (
             <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
-              <span className="font-mono text-sm font-bold text-primary tracking-wider truncate min-w-0">
+              <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 tracking-wider truncate min-w-0">
                 {preview}
               </span>
             </div>

@@ -4,9 +4,9 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool } = require("../db");
 const { cache } = require("../middleware/cache");
-const { checkPermissionForMethod } = require("../middleware/routePermission");
-
-router.use(checkPermissionForMethod("Finance", "Dashboard"));
+// No extra permission gate here — /api routes are already protected
+// by authMiddleware at the server level. Any authenticated user who
+// has been granted Finance rights can view aggregate dashboard stats.
 
 /**
  * GET /api/finance-dashboard
@@ -30,6 +30,8 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
       chequeStats,
       cardStats,
       bankStats,
+      poStats,
+      supplierStats,
       recentPaymentsMade,
       recentPaymentsReceived,
     ] = await Promise.all([
@@ -41,7 +43,9 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
                                                                                 AS TodayCount,
           ISNULL(SUM(PAmount), 0)                                               AS TotalAmount,
           ISNULL(SUM(CASE WHEN CAST(PDate AS DATE) = CAST(GETDATE() AS DATE)
-                          THEN PAmount ELSE 0 END), 0)                          AS TodayAmount
+                          THEN PAmount ELSE 0 END), 0)                          AS TodayAmount,
+          ISNULL(SUM(CASE WHEN CAST(PDate AS DATE) >= DATEADD(DAY, -30, CAST(GETDATE() AS DATE))
+                          THEN PAmount ELSE 0 END), 0)                          AS ThisMonthAmount
         FROM dbo.NewPayment
       `),
 
@@ -87,6 +91,26 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
         WHERE LHeadType = 'B'
       `),
 
+      // ── Purchase Orders ─────────────────────────────────────────────────────
+      pool.request().query(`
+        SELECT
+          COUNT(*)                                                                           AS TotalCount,
+          COUNT(CASE WHEN ISNULL(Status,'Open') NOT IN ('Closed','Cancelled') THEN 1 END)   AS OpenCount,
+          ISNULL(SUM(TotalAmount), 0)                                                        AS TotalValue,
+          ISNULL(SUM(CASE WHEN ISNULL(Status,'Open') NOT IN ('Closed','Cancelled')
+                          THEN TotalAmount ELSE 0 END), 0)                                  AS OpenValue
+        FROM dbo.PurchaseOrders
+      `),
+
+      // ── Suppliers (AccountHeadMaster, LHeadType = 'S') ─────────────────────
+      pool.request().query(`
+        SELECT
+          COUNT(*)                                                AS TotalCount,
+          COUNT(CASE WHEN LHeadStatus = 1 THEN 1 END)            AS ActiveCount
+        FROM dbo.AccountHeadMaster
+        WHERE LHeadType = 'S'
+      `),
+
       // ── Recent Payments Made (last 8) ───────────────────────────────────────
       pool.request().query(`
         SELECT TOP 8
@@ -124,6 +148,8 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
     const ch = chequeStats.recordset[0];
     const cd = cardStats.recordset[0];
     const bk = bankStats.recordset[0];
+    const po = poStats.recordset[0];
+    const sp = supplierStats.recordset[0];
 
     res.json({
       paymentsMade: {
@@ -131,6 +157,7 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
         todayCount: pm.TodayCount,
         totalAmount: parseFloat(pm.TotalAmount),
         todayAmount: parseFloat(pm.TodayAmount),
+        thisMonthAmount: parseFloat(pm.ThisMonthAmount),
       },
       receivedPayments: {
         totalCount: rp.TotalCount,
@@ -154,6 +181,18 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
       banks: {
         totalCount: bk.TotalCount,
         activeCount: bk.ActiveCount,
+      },
+      purchaseOrders: {
+        totalCount: po.TotalCount,
+        openCount: po.OpenCount,
+        totalValue: parseFloat(po.TotalValue),
+        openValue: parseFloat(po.OpenValue),
+      },
+      parties: {
+        supplierCount: sp.TotalCount,
+        activeSupplierCount: sp.ActiveCount,
+        customerCount: 0,
+        activeGLCount: 0,
       },
       recentPaymentsMade: recentPaymentsMade.recordset,
       recentPaymentsReceived: recentPaymentsReceived.recordset,

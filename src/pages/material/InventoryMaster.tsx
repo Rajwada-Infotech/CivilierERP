@@ -475,7 +475,7 @@ function GodownStockPanel({
             <span className="text-[11px] text-muted-foreground">in stock</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <TrendingUp size={12} className="text-blue-500" />
+            <TrendingUp size={12} className="text-emerald-500" />
             <span className="text-xs font-bold text-foreground">
               {totalIn.toLocaleString()}
             </span>
@@ -687,7 +687,7 @@ function GodownCard({
             </span>
           )}
           {godown.EnterpriseName && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500/10 text-[11px] text-blue-600">
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-500/10 text-[11px] text-emerald-600">
               <Building2 size={9} /> {godown.EnterpriseName}
             </span>
           )}
@@ -845,7 +845,7 @@ export default function InventoryMaster() {
               </span>
             </div>
             <div className="flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-card text-sm">
-              <span className="w-2 h-2 rounded-full bg-blue-500" />
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
               <span className="font-heading font-bold text-foreground">
                 {godowns.filter((g) => g.IsActive).length}
               </span>
@@ -962,7 +962,7 @@ export default function InventoryMaster() {
             </p>
             <button
               onClick={() => setSearch("")}
-              className="mt-2 text-xs text-primary hover:underline"
+              className="mt-2 text-xs text-emerald-600 dark:text-emerald-400 hover:underline"
             >
               Clear search
             </button>
