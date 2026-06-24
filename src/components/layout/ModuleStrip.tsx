@@ -115,10 +115,28 @@ export const ModuleStrip: React.FC = () => {
     [...MODULES, ADMIN_MODULE].find((m) => m.id === activeModule) ?? MODULES[0];
   const activeRingRgb = activeModuleItem.ringRgb;
 
+  const { canAccessPage } = useAuth();
   const [tooltip, setTooltip] = useState<TooltipState>(null);
 
-  // Regular modules always shown; admin only for admin-tier users
-  const regularItems = MODULES;
+  // Map each module to a representative page key that signals access.
+  // A user with ANY view right in a module's page definitions will see that module.
+  const MODULE_SAMPLE_PAGES: Record<string, string[]> = {
+    finance:     ["finance-dashboard", "new-payment", "received-payment", "brs", "transactions", "expense-booking"],
+    material:    ["material-dashboard", "purchase-orders", "grn-master", "material-request", "material-issues", "stock-ledger"],
+    followup:    ["followup-dashboard", "followup-applications", "followup-bookings", "followup-agreements", "followup-demands"],
+    engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
+    ticket:      ["ticket-dashboard", "tickets"],
+    sales:       ["sale-order", "sale-invoice", "sales-payment"],
+  };
+
+  const userHasModuleAccess = (moduleId: string): boolean => {
+    if (isAdminTier) return true;
+    const pages = MODULE_SAMPLE_PAGES[moduleId] ?? [];
+    return pages.some((pk) => canAccessPage(pk as any));
+  };
+
+  // Filter regular modules; admin only for admin-tier
+  const regularItems = MODULES.filter((m) => userHasModuleAccess(m.id));
   const adminItems = isAdminTier ? [ADMIN_MODULE] : [];
 
   const handleSwitch = async (mod: NonNullable<Module>) => {

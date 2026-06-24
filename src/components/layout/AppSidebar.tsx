@@ -31,7 +31,7 @@ import { dbaNavItems } from "./sidebars/DbaSidebar";
 import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
 import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { salesNavItems } from "./sidebars/SalesSidebar";
-import { SidebarNav, NavItem } from "./sidebars/SidebarPrimitives";
+import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar ──────────────────────────────────────────────────────────────
 const userNavItems: NavItem[] = [
@@ -186,8 +186,36 @@ export const AppSidebar = () => {
   const { version } = useAppVersion();
   const pendingApprovalCount = useApprovalCount();
 
+  const { canAccessPage } = useAuth();
+
   const role = currentUser?.role ?? "";
   const isAdminTier = ["super_admin", "admin", "dba"].includes(role);
+
+  // Filter nav items by user's page rights.
+  // Privileged roles always see everything.
+  // For regular users: leaf items (path only) are hidden if no view right.
+  // Group items (children) have their children filtered — the group disappears
+  // entirely if all its children are hidden.
+  const filterByRights = (items: NavItem[]): NavItem[] => {
+    if (isAdminTier) return items;
+    return items.reduce<NavItem[]>((acc, item) => {
+      if (item.children) {
+        const visibleChildren = item.children.filter((child: SubItem) =>
+          !child.pageKey || canAccessPage(child.pageKey as any),
+        );
+        if (visibleChildren.length > 0) {
+          acc.push({ ...item, children: visibleChildren });
+        }
+      } else if (item.sections) {
+        acc.push(item); // sections don't have individual pageKeys yet
+      } else {
+        if (!item.pageKey || canAccessPage(item.pageKey as any)) {
+          acc.push(item);
+        }
+      }
+      return acc;
+    }, []);
+  };
 
   const ADMIN_SETUP_PATHS = [
     "/masters/named-entry-type",
@@ -215,24 +243,19 @@ export const AppSidebar = () => {
     if (isDbaPage) return dbaNavItems;
     if (isUserProfilePage) return userNavItems;
     if (isAdminPage) return buildAdminNavItems(pendingApprovalCount);
+
+    let raw: NavItem[] = [];
     switch (activeModule) {
-      case "engineering":
-        return engineeringNavItems;
-      case "finance":
-        return buildFinanceNavItems(overdueCount);
-      case "material":
-        return materialNavItems;
-      case "followup":
-        return followupNavItems;
-      case "ticket":
-        return buildTicketNavItems(isAdminTier);
-      case "sales":
-        return salesNavItems;
-      case "admin":
-        return buildAdminNavItems(pendingApprovalCount);
-      default:
-        return [];
+      case "engineering": raw = engineeringNavItems; break;
+      case "finance":     raw = buildFinanceNavItems(overdueCount); break;
+      case "material":    raw = materialNavItems; break;
+      case "followup":    raw = followupNavItems; break;
+      case "ticket":      raw = buildTicketNavItems(isAdminTier); break;
+      case "sales":       raw = salesNavItems; break;
+      case "admin":       raw = buildAdminNavItems(pendingApprovalCount); break;
+      default:            raw = [];
     }
+    return filterByRights(raw);
   };
 
   // Resolve which header to show

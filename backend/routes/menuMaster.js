@@ -5,6 +5,8 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const authMiddleware = require("../middleware/auth");
+const { checkPermission } = require("../middleware/permissions");
 
 // GET all menu entries
 router.get("/", cache("menu-master", 300), async (req, res) => {
@@ -40,7 +42,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST - create new menu entry
-router.post("/", async (req, res) => {
+router.post("/", authMiddleware, checkPermission("Rights", "Menu", "CanAdd"), async (req, res) => {
   const { Name, Description } = req.body;
   const createdBy = req.user?.userId || null;
 
@@ -70,7 +72,7 @@ router.post("/", async (req, res) => {
 });
 
 // PUT - update menu entry
-router.put("/:id", async (req, res) => {
+router.put("/:id", authMiddleware, checkPermission("Rights", "Menu", "CanEdit"), async (req, res) => {
   const { Name, Description } = req.body;
   const updatedBy = req.user?.userId || null;
 
@@ -104,7 +106,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // DELETE
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", authMiddleware, checkPermission("Rights", "Menu", "CanDelete"), async (req, res) => {
   try {
     const pool = getPool();
     await pool
