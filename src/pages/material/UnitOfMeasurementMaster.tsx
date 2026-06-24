@@ -1,4 +1,5 @@
 import React, { useRef, useState } from "react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import {
@@ -140,6 +141,7 @@ const columnRenderers = {
 };
 
 export default function UnitOfMeasurementMaster() {
+  const rights = usePageRights("uom-master");
   const queryClient = useQueryClient();
 
   const {
@@ -336,6 +338,7 @@ export default function UnitOfMeasurementMaster() {
         subtitle="Configure units used for items and stock"
         icon={Ruler}
         action={
+          rights.canCreate ? (
           <div className="flex items-center gap-2">
             <input
               ref={importFileInputRef}
@@ -368,6 +371,7 @@ export default function UnitOfMeasurementMaster() {
               </span>
             </button>
           </div>
+          ) : undefined
         }
       >
         <MasterPage
@@ -387,6 +391,10 @@ export default function UnitOfMeasurementMaster() {
               { header: "Status", accessor: "status" },
             ],
           }}
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
+          canExport={rights.canExport}
         />
 
         {/* Import Results Modal */}

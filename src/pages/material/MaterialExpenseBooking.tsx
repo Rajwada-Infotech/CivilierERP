@@ -13,13 +13,6 @@ import { useFinYear } from "@/contexts/FinYearContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Table,
   TableBody,
   TableCell,
@@ -60,6 +53,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Loader2,
   Hash,
   User,
@@ -97,8 +91,17 @@ import type {
   ExpenseRecord,
   PageView,
 } from "./ExpenseBooking/types";
+import { usePageRights } from "@/hooks/usePageRights";
 
 const API = "/api/expense-booking";
+
+// ─── Shared styles (matching PurchaseOrderMaster) ────────────────────────────
+
+const inputCls =
+  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer";
+
+const selectCls =
+  "w-full text-sm rounded-lg border border-border px-3 py-2.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
 
 async function apiFetch(url: string, opts?: RequestInit, timeoutMs = 25000) {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -1395,6 +1398,7 @@ const ALL_STATUSES = ["All", ...BOOKING_STATUSES] as const;
 const PAGE_SIZE = 20;
 
 export default function MaterialExpenseBooking() {
+  const rights = usePageRights("expense-booking");
   const navigate = useNavigate();
   const { finYears } = useFinYear();
   const activeFinYears = finYears
@@ -2427,7 +2431,7 @@ export default function MaterialExpenseBooking() {
         subtitle="Book expenses against purchase orders, confirmed work done, or invoice documents"
         icon={Receipt}
         action={
-          view === "list" ? (
+          view === "list" && rights.canCreate ? (
             <Button
               onClick={openNew}
               className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
@@ -2471,34 +2475,28 @@ export default function MaterialExpenseBooking() {
                 {/* Row 1: Company | Project / Site */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Company" required>
-                    <Select
-                      value={form.companyId ? String(form.companyId) : ""}
-                      onValueChange={(v) =>
-                        set("companyId", v ? parseInt(v, 10) : null)
-                      }
-                    >
-                      <SelectTrigger>
-                        <div className="flex items-center gap-2">
-                          <Building2
-                            size={13}
-                            className="text-muted-foreground shrink-0"
-                          />
-                          <SelectValue placeholder="Select company…" />
-                        </div>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {companyOptions.length === 0 && (
-                          <SelectItem value="__none__" disabled>
-                            No companies found
-                          </SelectItem>
-                        )}
+                    <div className="relative">
+                      <select
+                        value={form.companyId ? String(form.companyId) : ""}
+                        onChange={(e) =>
+                          set("companyId", e.target.value ? parseInt(e.target.value, 10) : null)
+                        }
+                        className={selectCls}
+                      >
+                        <option value="">
+                          {companyOptions.length === 0 ? "No companies found" : "Select company…"}
+                        </option>
                         {companyOptions.map((c) => (
-                          <SelectItem key={c.id} value={String(c.id)}>
+                          <option key={c.id} value={String(c.id)}>
                             {c.label}
-                          </SelectItem>
+                          </option>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </select>
+                      <ChevronDown
+                        size={13}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                    </div>
                   </Field>
                   <Field
                     label="Project / Site"
@@ -2508,44 +2506,36 @@ export default function MaterialExpenseBooking() {
                         : undefined
                     }
                   >
-                    <Select
-                      value={form.projectSite || ""}
-                      onValueChange={(v) => set("projectSite", v || "")}
-                    >
-                      <SelectTrigger>
-                        <div className="flex items-center gap-2">
-                          <FolderKanban
-                            size={13}
-                            className="text-muted-foreground shrink-0"
-                          />
-                          <SelectValue placeholder="Select project…" />
-                        </div>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {filteredProjectOptions.length === 0 &&
-                          !form.projectSite && (
-                            <SelectItem value="__none__" disabled>
-                              No projects found
-                            </SelectItem>
-                          )}
+                    <div className="relative">
+                      <select
+                        value={form.projectSite || ""}
+                        onChange={(e) => set("projectSite", e.target.value || "")}
+                        className={selectCls}
+                      >
+                        <option value="">
+                          {filteredProjectOptions.length === 0 && !form.projectSite
+                            ? "No projects found"
+                            : "Select project…"}
+                        </option>
                         {form.projectSite &&
                           !filteredProjectOptions.some(
                             (p) => String(p.id) === form.projectSite,
                           ) && (
-                            <SelectItem
-                              key="__current__"
-                              value={form.projectSite}
-                            >
+                            <option key="__current__" value={form.projectSite}>
                               {form.projectName || form.projectSite}
-                            </SelectItem>
+                            </option>
                           )}
                         {filteredProjectOptions.map((p) => (
-                          <SelectItem key={p.id} value={String(p.id)}>
+                          <option key={p.id} value={String(p.id)}>
                             {p.label}
-                          </SelectItem>
+                          </option>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </select>
+                      <ChevronDown
+                        size={13}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                    </div>
                   </Field>
                 </div>
                 {/* Row 2: Supplier / Vendor (full width) */}
@@ -2572,24 +2562,24 @@ export default function MaterialExpenseBooking() {
                         />
                       </div>
                     ) : (
-                      <Select
-                        value={form.supplier || "__none__"}
-                        onValueChange={(v) =>
-                          set("supplier", v === "__none__" ? "" : v)
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select supplier…" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">— None —</SelectItem>
+                      <div className="relative">
+                        <select
+                          value={form.supplier || ""}
+                          onChange={(e) => set("supplier", e.target.value === "__none__" ? "" : e.target.value)}
+                          className={selectCls}
+                        >
+                          <option value="__none__">— None —</option>
                           {supplierHeads.map((s) => (
-                            <SelectItem key={s.id} value={s.label}>
+                            <option key={s.id} value={s.label}>
                               {s.label}
-                            </SelectItem>
+                            </option>
                           ))}
-                        </SelectContent>
-                      </Select>
+                        </select>
+                        <ChevronDown
+                          size={13}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                      </div>
                     )}
                   </Field>
                 </div>
@@ -2604,7 +2594,7 @@ export default function MaterialExpenseBooking() {
                         type="date"
                         value={form.bookingDate}
                         onChange={(e) => set("bookingDate", e.target.value)}
-                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                        className={`${inputCls} pl-8`}
                       />
                     </div>
                   </Field>
@@ -2632,7 +2622,7 @@ export default function MaterialExpenseBooking() {
                           }
                           set("dueDate", val);
                         }}
-                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                        className={`${inputCls} pl-8`}
                       />
                     </div>
                   </Field>
@@ -2644,21 +2634,24 @@ export default function MaterialExpenseBooking() {
                         : undefined
                     }
                   >
-                    <Select
-                      value={form.financialYear}
-                      onValueChange={(v) => set("financialYear", v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select year…" />
-                      </SelectTrigger>
-                      <SelectContent>
+                    <div className="relative">
+                      <select
+                        value={form.financialYear}
+                        onChange={(e) => set("financialYear", e.target.value)}
+                        className={selectCls}
+                      >
+                        <option value="">Select year…</option>
                         {activeFinYears.map((fy) => (
-                          <SelectItem key={fy.id} value={fy.year}>
+                          <option key={fy.id} value={fy.year}>
                             {fy.year}
-                          </SelectItem>
+                          </option>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </select>
+                      <ChevronDown
+                        size={13}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                    </div>
                   </Field>
                 </div>
               </div>
@@ -3253,22 +3246,22 @@ export default function MaterialExpenseBooking() {
                   <SectionHeader label="EMI / Installment Options" />
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <Field label="Payment Type" required>
-                      <Select
-                        value={form.paymentType || "full"}
-                        onValueChange={(value) =>
-                          set("paymentType", value as "full" | "partial")
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select payment type…" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="full">Full payment</SelectItem>
-                          <SelectItem value="partial">
-                            Partial payment (EMI)
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <div className="relative">
+                        <select
+                          value={form.paymentType || "full"}
+                          onChange={(e) =>
+                            set("paymentType", e.target.value as "full" | "partial")
+                          }
+                          className={selectCls}
+                        >
+                          <option value="full">Full payment</option>
+                          <option value="partial">Partial payment (EMI)</option>
+                        </select>
+                        <ChevronDown
+                          size={13}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                      </div>
                     </Field>
                   </div>
                   <EmiSection
@@ -3302,27 +3295,30 @@ export default function MaterialExpenseBooking() {
                     label="T&C Template"
                     hint="Select a Terms & Conditions template to attach"
                   >
-                    <Select
-                      value={form.tcId ? String(form.tcId) : ""}
-                      onValueChange={(v) => {
-                        const tc = tcOptions.find((t) => String(t.Id) === v);
-                        set("tcId", tc ? tc.Id : null);
-                        set("tcName", tc?.Name ?? "");
-                        set("tcText", tc?.TermsAndCondition ?? "");
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select T&C template…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">None</SelectItem>
+                    <div className="relative">
+                      <select
+                        value={form.tcId ? String(form.tcId) : ""}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          const tc = tcOptions.find((t) => String(t.Id) === v);
+                          set("tcId", tc ? tc.Id : null);
+                          set("tcName", tc?.Name ?? "");
+                          set("tcText", tc?.TermsAndCondition ?? "");
+                        }}
+                        className={selectCls}
+                      >
+                        <option value="">None</option>
                         {tcOptions.map((t) => (
-                          <SelectItem key={t.Id} value={String(t.Id)}>
+                          <option key={t.Id} value={String(t.Id)}>
                             {t.Name}
-                          </SelectItem>
+                          </option>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </select>
+                      <ChevronDown
+                        size={13}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                    </div>
                   </Field>
                 </div>
                 {form.tcText && (
@@ -3458,11 +3454,6 @@ export default function MaterialExpenseBooking() {
                             className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === s ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"}`}
                           >
                             {s}
-                            {s !== "All" && (
-                              <span className="ml-1.5 text-[10px] opacity-70">
-                                ({statusCounts[s] ?? 0})
-                              </span>
-                            )}
                           </button>
                         ))}
                       </div>
@@ -3491,6 +3482,8 @@ export default function MaterialExpenseBooking() {
                       onPreview={() => setPreviewRecord(rec)}
                       onDelete={() => requestDelete(rec.id)}
                       onApprovalSuccess={fetchRecords}
+                      canEdit={rights.canEdit}
+                      canDelete={rights.canDelete}
                     />
                   ))}
                 </div>
@@ -3687,6 +3680,7 @@ export default function MaterialExpenseBooking() {
                                     >
                                       <Eye size={12} />
                                     </Button>
+                                    {rights.canDelete && (
                                     <Button
                                       variant="destructive"
                                       size="sm"
@@ -3695,6 +3689,7 @@ export default function MaterialExpenseBooking() {
                                     >
                                       <Trash2 size={12} />
                                     </Button>
+                                    )}
                                   </div>
                                 </TableCell>
                               </TableRow>

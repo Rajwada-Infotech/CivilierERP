@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { usePageRights } from "@/hooks/usePageRights";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -1005,6 +1006,7 @@ function WorkDoneForm({
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function WorkDone() {
+  const rights = usePageRights("work-done");
   const { finYears } = useFinYear();
   const [view, setView] = useState<"list" | "form">("list");
   const [editRecord, setEditRecord] = useState<WorkDoneEntry | null>(null);
@@ -1310,20 +1312,24 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
           >
             <Eye size={13} />
           </button>
-          <button
-            onClick={() => handlePrint(row.original)}
-            title="Print"
-            className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-violet-600"
-          >
-            <Printer size={13} />
-          </button>
+          {rights.canPrint && (
+            <button
+              onClick={() => handlePrint(row.original)}
+              title="Print"
+              className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-violet-600"
+            >
+              <Printer size={13} />
+            </button>
+          )}
 
-          <button
-            onClick={() => openEdit(row.original)}
-            className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
-          >
-            <PenSquare size={11} /> Edit
-          </button>
+          {rights.canEdit && (
+            <button
+              onClick={() => openEdit(row.original)}
+              className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
+            >
+              <PenSquare size={11} /> Edit
+            </button>
+          )}
           <ApprovalActions
             status={row.original.Status}
             recordId={row.original.ID}
@@ -1399,13 +1405,15 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                 />
                 Refresh
               </button>
-              <Button
-                size="sm"
-                onClick={openNew}
-                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-              >
-                <Plus size={14} /> New Entry
-              </Button>
+              {rights.canCreate && (
+                <Button
+                  size="sm"
+                  onClick={openNew}
+                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                >
+                  <Plus size={14} /> New Entry
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -1505,13 +1513,15 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handlePrint(viewRecord)}
-                    title="Print"
-                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-violet-600 hover:border-violet-300 hover:bg-violet-500/5 transition-colors"
-                  >
-                    <Printer size={12} /> Print
-                  </button>
+                  {rights.canPrint && (
+                    <button
+                      onClick={() => handlePrint(viewRecord)}
+                      title="Print"
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-violet-600 hover:border-violet-300 hover:bg-violet-500/5 transition-colors"
+                    >
+                      <Printer size={12} /> Print
+                    </button>
+                  )}
 
                   <button
                     onClick={() => setViewRecord(null)}

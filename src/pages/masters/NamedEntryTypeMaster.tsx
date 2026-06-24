@@ -17,6 +17,7 @@ import {
 import { getMenuMasters } from "@/api/menuMasterApi";
 import { toast } from "sonner";
 import { Tag } from "lucide-react";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface DbEntryType {
@@ -166,6 +167,7 @@ function makePrefixRenderer(
 // ── Main Component ────────────────────────────────────────────────────────────
 const NamedEntryTypeMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const rights = usePageRights("named-entry-type");
 
   const projectNameRef = useRef<string>("");
   const entryTypeRef = useRef<string>("");
@@ -435,7 +437,7 @@ const NamedEntryTypeMaster: React.FC = () => {
         onDataEvent={handleDataEvent}
         onFormChange={handleFormChange}
         onCustomSave={handleCustomSave}
-        exportConfig={{
+        exportConfig={rights.canExport ? {
           title: "Named Entry Type Master",
           filename: "named-entry-type-master",
           columns: [
@@ -444,7 +446,7 @@ const NamedEntryTypeMaster: React.FC = () => {
             { header: "Prefix", accessor: "prefix" },
             { header: "Status", accessor: "status" },
           ],
-        }}
+        } : undefined}
       />
     </>
   );

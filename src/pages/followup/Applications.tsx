@@ -32,6 +32,7 @@ import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { usePageRights } from "@/hooks/usePageRights";
 
 const API = "/api/followup-applications";
 
@@ -895,6 +896,7 @@ function BentoCard({
 export default function ApplicationsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const rights = usePageRights("followup-applicants");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -1107,12 +1109,14 @@ export default function ApplicationsPage() {
               <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
               Refresh
             </button>
-            <Button
-              onClick={resetAndOpen}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-            >
-              <Plus size={14} /> New Application
-            </Button>
+            {rights.canCreate && (
+              <Button
+                onClick={resetAndOpen}
+                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+              >
+                <Plus size={14} /> New Application
+              </Button>
+            )}
           </div>
         </div>
 
@@ -1416,24 +1420,28 @@ export default function ApplicationsPage() {
                             >
                               <Eye size={13} />
                             </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground"
-                              onClick={() => editApplication(app)}
-                              title="Edit"
-                            >
-                              <Edit2 size={13} />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 rounded-lg text-destructive hover:text-destructive hover:bg-destructive/10"
-                              onClick={() => deleteApplication(app)}
-                              title="Delete"
-                            >
-                              <Trash2 size={13} />
-                            </Button>
+                            {rights.canEdit && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground"
+                                onClick={() => editApplication(app)}
+                                title="Edit"
+                              >
+                                <Edit2 size={13} />
+                              </Button>
+                            )}
+                            {rights.canDelete && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 rounded-lg text-destructive hover:text-destructive hover:bg-destructive/10"
+                                onClick={() => deleteApplication(app)}
+                                title="Delete"
+                              >
+                                <Trash2 size={13} />
+                              </Button>
+                            )}
                           </div>
                         </td>
                       </tr>

@@ -1,5 +1,6 @@
 ﻿import { useEffect, useState, useMemo } from "react";
 import { useUserMap } from "@/hooks/useUserMap";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -150,6 +151,7 @@ function buildColumns(
 }
 
 export default function Transactions() {
+  const rights = usePageRights("transactions");
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);

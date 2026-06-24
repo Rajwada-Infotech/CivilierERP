@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import TaskFormModal from "./tasks/TaskFormModal";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -210,13 +211,11 @@ const TaskCard = ({ task, onClick }: { task: Task; onClick: () => void }) => {
 export default function Tasks() {
   const { tasks, loading, error, refetch } = useTask();
   const { currentUser } = useAuth();
+  const rights = usePageRights("tasks");
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
   const [showForm, setShowForm] = useState(false);
-
-  const canCreate =
-    currentUser?.role === "super_admin" || currentUser?.role === "admin";
 
   const filtered = useMemo(
     () =>
@@ -264,7 +263,7 @@ export default function Tasks() {
               <RefreshCw size={15} />
             )}
           </button>
-          {canCreate && (
+          {rights.canCreate && (
             <button
               onClick={() => setShowForm(true)}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-primary-foreground hover:-translate-y-0.5 transition-all shrink-0"

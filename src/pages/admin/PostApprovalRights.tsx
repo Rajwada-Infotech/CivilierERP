@@ -28,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { usePageRights } from "@/hooks/usePageRights";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -295,6 +296,7 @@ function buildPostApprovalColumns(
   ];
 }
 export default function PostApprovalRights() {
+  const rights = usePageRights("post-approval-rights");
   const { allUsers, updateUserPagePermissions, toggleUserStatus, deleteUser } =
     useAuth();
 
@@ -535,13 +537,15 @@ export default function PostApprovalRights() {
             completion
           </p>
         </div>
-        <Button
-          onClick={openAssign}
-          className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-        >
-          <Plus size={14} />
-          Assign Rights
-        </Button>
+        {rights.canCreate && (
+          <Button
+            onClick={openAssign}
+            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+          >
+            <Plus size={14} />
+            Assign Rights
+          </Button>
+        )}
       </div>
 
       {/* ── Stat pills ────────────────────────────────────────────────── */}

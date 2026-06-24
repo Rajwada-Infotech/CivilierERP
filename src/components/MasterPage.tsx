@@ -147,6 +147,11 @@ interface MasterPageProps {
    * so the page can open a print layout or window.print().
    */
   onPrint?: (row: RecordWithId) => void;
+  /** Permission flags — when omitted everything is visible (default-open) */
+  canCreate?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  canExport?: boolean;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -184,6 +189,10 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   hideTable,
   viewConfig,
   onPrint,
+  canCreate = true,
+  canEdit = true,
+  canDelete = true,
+  canExport = true,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -420,7 +429,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   return (
     <div className="space-y-5">
       {/* ── FORM CARD ── */}
-      <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
+      {(canCreate || canEdit) && <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
         {/* Header — title only */}
         <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20 rounded-t-xl">
           <div>
@@ -623,7 +632,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             </button>
             <button
               onClick={handleSave}
-              disabled={!canSave}
+              disabled={!canSave || (editingId === null ? !canCreate : !canEdit)}
               className="flex-1 sm:flex-none px-4 sm:px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-opacity whitespace-nowrap"
             >
               {editingId !== null ? <Check size={14} /> : <Plus size={14} />}
@@ -631,7 +640,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             </button>
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* ── TABLE CARD ── */}
       {!hideTable && (
@@ -646,7 +655,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               </p>
             </div>
             <div className="flex items-center gap-2 w-full sm:w-auto">
-              {exportConfig && (
+              {exportConfig && canExport && (
                 <ExportMenu
                   data={filtered as Record<string, unknown>[]}
                   columns={exportConfig.columns}
@@ -776,6 +785,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                                   <Printer size={13} />
                                 </button>
                               )}
+                              {canEdit && (
                               <button
                                 onClick={() => handleEdit(row._id)}
                                 className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10 transition-colors"
@@ -783,6 +793,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                               >
                                 <Edit2 size={13} />
                               </button>
+                              )}
+                              {canDelete && (
                               <button
                                 onClick={() => setDeleteConfirmId(row._id)}
                                 className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
@@ -790,6 +802,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                               >
                                 <Trash2 size={13} />
                               </button>
+                              )}
                             </>
                           )}
                         </div>

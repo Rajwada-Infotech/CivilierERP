@@ -1,5 +1,6 @@
 // src/pages/masters/TypeOfDocMaster.tsx
 import { useState, useMemo } from "react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -156,6 +157,8 @@ function buildDocColumns(
   openEdit: (item: DocTypeRecord) => void,
   handleDelete: (id: number) => void,
   onView: (item: DocTypeRecord) => void,
+  canEdit: boolean,
+  canDelete: boolean,
 ): ColumnDef<DocTypeRecord, unknown>[] {
   return [
     {
@@ -289,18 +292,22 @@ function buildDocColumns(
           >
             <Eye size={13} />
           </button>
-          <button
-            onClick={() => openEdit(row.original)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
-          >
-            <Edit size={13} />
-          </button>
-          <button
-            onClick={() => handleDelete(row.original.TypeOfDocId)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-          >
-            <Trash2 size={13} />
-          </button>
+          {canEdit && (
+            <button
+              onClick={() => openEdit(row.original)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+            >
+              <Edit size={13} />
+            </button>
+          )}
+          {canDelete && (
+            <button
+              onClick={() => handleDelete(row.original.TypeOfDocId)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
         </div>
       ),
     },
@@ -311,6 +318,7 @@ function buildDocColumns(
 
 const TypeOfDocMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const rights = usePageRights("document-type");
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -461,9 +469,11 @@ const TypeOfDocMaster: React.FC = () => {
         openEdit,
         deleteMutation.mutate,
         setViewRecord,
+        rights.canEdit,
+        rights.canDelete,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editingId, deleteMutation.mutate],
+    [editingId, deleteMutation.mutate, rights.canEdit, rights.canDelete],
   );
 
   const isBusy = createMutation.isPending || updateMutation.isPending;
@@ -485,12 +495,14 @@ const TypeOfDocMaster: React.FC = () => {
               Type of Document Master
             </h1>
           </div>
-          <button
-            onClick={() => setDrawerOpen(true)}
-            className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-heading hover:bg-primary/90 transition"
-          >
-            <Plus size={16} /> Add New Type
-          </button>
+          {rights.canCreate && (
+            <button
+              onClick={() => setDrawerOpen(true)}
+              className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-heading hover:bg-primary/90 transition"
+            >
+              <Plus size={16} /> Add New Type
+            </button>
+          )}
         </div>
         <p className="text-sm text-muted-foreground mt-1 ml-9">
           Define document number formats tied to entry types, modules, companies

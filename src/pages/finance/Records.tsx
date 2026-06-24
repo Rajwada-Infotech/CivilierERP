@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from "react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import {
@@ -265,6 +266,7 @@ function buildColumns(
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Records() {
+  const rights = usePageRights("finance-records");
   const { records, loading, error, attachFile, refreshRecords } = useRecords();
 
   const columns = useMemo(() => buildColumns(attachFile), [attachFile]);

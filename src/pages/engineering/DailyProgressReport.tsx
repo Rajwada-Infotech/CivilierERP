@@ -11,6 +11,7 @@
 
 import React, { useState, useRef, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
@@ -1275,6 +1276,7 @@ function PrintView({ data }: { data: DPRResponse }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function DailyProgressReport() {
+  const rights = usePageRights("daily-progress-report");
   const [date, setDate] = useState(todayStr());
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -1345,23 +1347,27 @@ export default function DailyProgressReport() {
               Refresh
             </button>
 
-            <button
-              onClick={handleCSV}
-              disabled={!data}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-muted transition-colors disabled:opacity-40"
-            >
-              <FileSpreadsheet size={13} className="text-emerald-600" />
-              CSV
-            </button>
+            {rights.canExport && (
+              <button
+                onClick={handleCSV}
+                disabled={!data}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+              >
+                <FileSpreadsheet size={13} className="text-emerald-600" />
+                CSV
+              </button>
+            )}
 
-            <button
-              onClick={handlePDF}
-              disabled={!data}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40 font-medium shadow-sm"
-            >
-              <Printer size={13} />
-              Print / PDF
-            </button>
+            {rights.canPrint && (
+              <button
+                onClick={handlePDF}
+                disabled={!data}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40 font-medium shadow-sm"
+              >
+                <Printer size={13} />
+                Print / PDF
+              </button>
+            )}
           </div>
         </div>
       </div>

@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import * as vehApi from "@/api/vehicleInOutApi";
 import type { VehicleInOutPayload } from "@/api/vehicleInOutApi";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ── Design tokens (match GRN.tsx) ─────────────────────────────────────────────
 const inp =
@@ -137,11 +138,15 @@ function VehicleCard({
   onView,
   onEdit,
   onDelete,
+  canEdit = true,
+  canDelete = true,
 }: {
   rec: any;
   onView: (r: any) => void;
   onEdit: (r: any) => void;
   onDelete: (id: number) => void;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }) {
   const statusCls =
     rec.Status === "Approved"
@@ -228,6 +233,7 @@ function VehicleCard({
         >
           <Eye size={15} />
         </button>
+        {canEdit && (
         <button
           onClick={() => onEdit(rec)}
           className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
@@ -235,6 +241,8 @@ function VehicleCard({
         >
           <RefreshCw size={15} />
         </button>
+        )}
+        {canDelete && (
         <button
           onClick={() => onDelete(rec.VehicleInOutID)}
           className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
@@ -242,6 +250,7 @@ function VehicleCard({
         >
           <Trash2 size={15} />
         </button>
+        )}
       </div>
     </div>
   );
@@ -283,6 +292,8 @@ const buildEmpty = (activeFinYear?: string) => ({
 let _onView: (r: any) => void = () => {};
 let _onEdit: (r: any) => void = () => {};
 let _onDelete: (id: number) => void = () => {};
+let _canEdit = true;
+let _canDelete = true;
 
 // ── List columns ──────────────────────────────────────────────────────────────
 const COLUMNS: ColumnDef<any, unknown>[] = [
@@ -390,6 +401,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
           >
             <Eye size={15} />
           </button>
+          {_canEdit && (
           <button
             onClick={() => _onEdit(rec)}
             className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
@@ -397,6 +409,8 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
           >
             <RefreshCw size={15} />
           </button>
+          )}
+          {_canDelete && (
           <button
             onClick={() => _onDelete(rec.VehicleInOutID)}
             className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
@@ -404,6 +418,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
           >
             <Trash2 size={15} />
           </button>
+          )}
         </div>
       );
     },
@@ -412,6 +427,9 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function VehicleInOut() {
+  const rights = usePageRights("vehicle-in-out");
+  _canEdit = rights.canEdit;
+  _canDelete = rights.canDelete;
   const qc = useQueryClient();
   const { finYears } = useFinYear();
 
@@ -688,7 +706,7 @@ export default function VehicleInOut() {
         subtitle="Track vehicle entry and exit against purchase orders"
         icon={Truck}
         action={
-          !showForm && (
+          !showForm && rights.canCreate ? (
             <button
               onClick={() => {
                 setShowForm(true);
@@ -700,7 +718,7 @@ export default function VehicleInOut() {
             >
               <Plus size={13} /> New Entry
             </button>
-          )
+          ) : undefined
         }
       >
         {/* ═══════════════════════════════════════════════════════════════════ */}
@@ -1282,6 +1300,8 @@ export default function VehicleInOut() {
                     onView={_onView}
                     onEdit={_onEdit}
                     onDelete={_onDelete}
+                    canEdit={rights.canEdit}
+                    canDelete={rights.canDelete}
                   />
                 ))
               )}
@@ -1457,6 +1477,7 @@ export default function VehicleInOut() {
 
                 {/* Edit button */}
                 <div className="flex justify-end pt-2 border-t border-border">
+                  {rights.canEdit && (
                   <button
                     onClick={() => {
                       setViewingRec(null);
@@ -1466,6 +1487,7 @@ export default function VehicleInOut() {
                   >
                     <RefreshCw size={13} /> Edit
                   </button>
+                  )}
                 </div>
               </div>
             </div>

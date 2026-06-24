@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaterialShell } from "@/components/material/MaterialShell";
+import { usePageRights } from "@/hooks/usePageRights";
 import {
   Truck,
   Package,
@@ -457,6 +458,7 @@ let onView: (grn: any) => void;
 let deleteMutation: { mutate: (id: string) => void };
 let handleDeleteGrn: (id: string) => void;
 let goToGRNAmend: (grn: any) => void;
+let _canDelete = true;
 
 // ─── List Columns ─────────────────────────────────────────────────────────────
 // isTransferGRN: doc number starts with "TRF-GRN" — these rows came from a
@@ -622,6 +624,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
           >
             <Eye size={15} />
           </button>
+          {_canDelete && (
           <button
             onClick={() => handleDeleteGrn(String(grn.GRNID))}
             className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
@@ -629,6 +632,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
           >
             <Trash2 size={15} />
           </button>
+          )}
         </div>
       );
     },
@@ -718,6 +722,8 @@ function InfoPill({
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function GRN() {
   queryClient = useQueryClient();
+  const rights = usePageRights("grn-master");
+  _canDelete = rights.canDelete;
   const navigate = useNavigate();
   const { finYears } = useFinYear();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1352,14 +1358,14 @@ export default function GRN() {
         subtitle="Record goods received against purchase orders"
         icon={Truck}
         action={
-          !showForm && (
+          !showForm && rights.canCreate ? (
             <button
               onClick={() => { setShowForm(true); setEditingId(null); setFormData(buildEmptyForm()); setErrors({}); }}
               className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
             >
               <Plus size={13} /> New GRN
             </button>
-          )
+          ) : undefined
         }
       >
 
@@ -2154,6 +2160,7 @@ export default function GRN() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
+                      {rights.canPrint && (
                       <button
                         onClick={() => window.print()}
                         title="Print GRN"
@@ -2161,6 +2168,7 @@ export default function GRN() {
                       >
                         <Printer size={18} />
                       </button>
+                      )}
                       <button
                         onClick={() => setViewingGrn(null)}
                         className="p-2 hover:bg-muted rounded-lg transition-colors print:hidden"

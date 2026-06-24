@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 
 import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -425,13 +426,9 @@ export default function FollowupTasks() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { currentUser, allUsers } = useAuth();
+  const rights = usePageRights("followup-tasks");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [form, setForm] = useState<TaskFormState>(EMPTY_FORM);
-
-  const canCreate =
-    currentUser?.role === "admin" ||
-    currentUser?.role === "super_admin" ||
-    currentUser?.role === "dba";
 
   const {
     data: tasks = [],
@@ -507,7 +504,7 @@ export default function FollowupTasks() {
               />
               Refresh
             </button>
-            {canCreate && (
+            {rights.canCreate && (
               <Button
                 onClick={() => setIsDialogOpen(true)}
                 className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
