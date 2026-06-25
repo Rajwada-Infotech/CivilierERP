@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { Plus, Pencil, Trash2, Search, RefreshCw, Tag } from "lucide-react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -60,6 +61,7 @@ const EMPTY_FORM: FormState = { code: "", name: "", isActive: true };
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function ContractorCategoryAdmin() {
   const qc = useQueryClient();
+  const rights = usePageRights("contractor-category");
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [search, setSearch] = useState("");
@@ -204,10 +206,12 @@ export default function ContractorCategoryAdmin() {
             </p>
           </div>
         </div>
-        <button onClick={openAdd} className="gradient-accent inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition">
-          <Plus className="h-4 w-4" />
-          Add Category
-        </button>
+        {rights.canCreate && (
+          <button onClick={openAdd} className="gradient-accent inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition">
+            <Plus className="h-4 w-4" />
+            Add Category
+          </button>
+        )}
       </div>
 
       {/* Stats strip */}
@@ -302,24 +306,28 @@ export default function ContractorCategoryAdmin() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => openEdit(cat)}
-                          title="Edit"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(cat)}
-                          title="Deactivate"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {rights.canEdit && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => openEdit(cat)}
+                            title="Edit"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {rights.canDelete && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => setDeleteTarget(cat)}
+                            title="Deactivate"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

@@ -23,7 +23,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -435,8 +435,7 @@ function Combobox({
 export function SalesDeedPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { currentUser } = useAuth();
-  const canDeleteRecords = currentUser?.role !== "engineer";
+  const rights = usePageRights("followup-sales-deed");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<DeedStatus | "">("");
@@ -1284,7 +1283,7 @@ export function SalesDeedPage() {
                                   >
                                     <Clock size={13} /> History
                                   </button>
-                                  {canDeleteRecords && (
+                                  {rights.canDelete && (
                                     <button
                                       className="sd-menu-item danger"
                                       onClick={() => {

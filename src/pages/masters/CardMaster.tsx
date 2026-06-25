@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef } from "react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -318,6 +319,8 @@ function buildCardColumns(
   calculateReminderDate: (expiry: string, days: number) => string,
   daysFromNow: (iso: string) => number,
   onView: (card: CardRecord) => void,
+  canEdit: boolean,
+  canDelete: boolean,
 ): ColumnDef<CardRecord, unknown>[] {
   return [
     {
@@ -429,18 +432,22 @@ function buildCardColumns(
             >
               <Eye size={13} />
             </button>
-            <button
-              onClick={() => handleEdit(id)}
-              className={`p-1.5 rounded-lg transition-colors ${isEditing ? "text-blue-400 bg-blue-400/10" : "text-blue-400 hover:bg-blue-400/10"}`}
-            >
-              <Edit2 size={13} />
-            </button>
-            <button
-              onClick={() => setDeleteId(id)}
-              className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
-            >
-              <Trash2 size={13} />
-            </button>
+            {canEdit && (
+              <button
+                onClick={() => handleEdit(id)}
+                className={`p-1.5 rounded-lg transition-colors ${isEditing ? "text-blue-400 bg-blue-400/10" : "text-blue-400 hover:bg-blue-400/10"}`}
+              >
+                <Edit2 size={13} />
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={() => setDeleteId(id)}
+                className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
           </div>
         );
       },
@@ -451,6 +458,7 @@ function buildCardColumns(
 // ─── Component ────────────────────────────────────────────────────────────────
 const CardMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const rights = usePageRights("card-master");
   const { theme } = useTheme();
   const isDark = theme !== "light";
   const { data: dbData, isLoading: loadingCards } = useQuery({
@@ -694,8 +702,10 @@ const CardMaster: React.FC = () => {
         calculateReminderDate,
         daysFromNow,
         setViewRecord,
+        rights.canEdit,
+        rights.canDelete,
       ),
-    [editingId, deleteId, revealedRows, dismissed],
+    [editingId, deleteId, revealedRows, dismissed, rights.canEdit, rights.canDelete],
   );
 
   const handleReset = () => {
@@ -1017,6 +1027,7 @@ const CardMaster: React.FC = () => {
           )}
 
           {/* Form */}
+          {rights.canCreate && (
           <div
             className="rounded-xl overflow-hidden"
             style={{
@@ -1546,6 +1557,7 @@ const CardMaster: React.FC = () => {
               </div>
             </div>
           </div>
+          )}
 
           {/* Table */}
           <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">

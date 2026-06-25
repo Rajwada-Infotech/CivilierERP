@@ -1,6 +1,7 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import {
@@ -184,6 +185,7 @@ function normalise(raw: any): FinanceDashboardData {
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 const FinanceDashboard = () => {
+  const rights = usePageRights("finance-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
   const isDark = theme !== "light";

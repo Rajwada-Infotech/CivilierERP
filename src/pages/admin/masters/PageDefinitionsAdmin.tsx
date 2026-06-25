@@ -27,6 +27,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -161,6 +162,7 @@ async function deleteDef(id: number) {
 
 export default function PageDefinitionsAdmin() {
   const qc = useQueryClient();
+  const rights = usePageRights("page-definitions");
 
   // Real-time fetch: this admin screen must always reflect the live DB —
   // other admins/sessions can add or change page definitions at any time,
@@ -367,12 +369,14 @@ export default function PageDefinitionsAdmin() {
               </p>
             </div>
           </div>
-          <button
-            onClick={openAdd}
-            className="gradient-accent inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition"
-          >
-            <Plus size={13} /> Add Page
-          </button>
+          {rights.canCreate && (
+            <button
+              onClick={openAdd}
+              className="gradient-accent inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition"
+            >
+              <Plus size={13} /> Add Page
+            </button>
+          )}
         </div>
 
         {/* ── Stats ── */}
@@ -528,21 +532,25 @@ export default function PageDefinitionsAdmin() {
                       </td>
                       <td className="px-4 py-2.5">
                         <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            onClick={() => openEdit(row)}
-                            className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition"
-                            title="Edit"
-                          >
-                            <Edit size={12} />
-                          </button>
-                          <button
-                            onClick={() => setDeleteTarget(row)}
-                            disabled={!row.isActive}
-                            className="p-1.5 rounded-lg text-muted-foreground hover:bg-red-500/10 hover:text-red-500 transition disabled:opacity-30 disabled:cursor-not-allowed"
-                            title="Deactivate"
-                          >
-                            <Trash2 size={12} />
-                          </button>
+                          {rights.canEdit && (
+                            <button
+                              onClick={() => openEdit(row)}
+                              className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition"
+                              title="Edit"
+                            >
+                              <Edit size={12} />
+                            </button>
+                          )}
+                          {rights.canDelete && (
+                            <button
+                              onClick={() => setDeleteTarget(row)}
+                              disabled={!row.isActive}
+                              className="p-1.5 rounded-lg text-muted-foreground hover:bg-red-500/10 hover:text-red-500 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                              title="Deactivate"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

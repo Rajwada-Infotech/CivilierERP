@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -107,6 +108,8 @@ function TreeRow({
   activeEditId,
   allGroups,
   onView,
+  canEdit,
+  canDelete,
 }: {
   node: TreeNode;
   depth: number;
@@ -119,6 +122,8 @@ function TreeRow({
   activeEditId: string | null;
   allGroups: AccountGroup[];
   onView: (g: AccountGroup) => void;
+  canEdit: boolean;
+  canDelete: boolean;
 }) {
   const hasChildren = node.children.length > 0;
   const isExpanded = expanded.has(node._id);
@@ -209,12 +214,14 @@ function TreeRow({
             >
               <Eye size={13} />
             </button>
-            <button
-              onClick={() => onEdit(node)}
-              className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-            >
-              <Pencil size={13} />
-            </button>
+            {canEdit && (
+              <button
+                onClick={() => onEdit(node)}
+                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              >
+                <Pencil size={13} />
+              </button>
+            )}
             {deleteConfirm === node._id ? (
               <>
                 <button
@@ -230,14 +237,14 @@ function TreeRow({
                   <X size={13} />
                 </button>
               </>
-            ) : (
+            ) : canDelete ? (
               <button
                 onClick={() => setDeleteConfirm(node._id)}
                 className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
               >
                 <Trash2 size={13} />
               </button>
-            )}
+            ) : null}
           </div>
         </td>
       </tr>
@@ -257,6 +264,8 @@ function TreeRow({
             activeEditId={activeEditId}
             allGroups={allGroups}
             onView={onView}
+            canEdit={canEdit}
+            canDelete={canDelete}
           />
         ))}
     </>
@@ -266,6 +275,7 @@ function TreeRow({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 const AccountGroupMaster: React.FC = () => {
+  const rights = usePageRights("account-head");
   const queryClient = useQueryClient();
   const { theme } = useTheme();
   const isDark = theme !== "light";
@@ -475,7 +485,7 @@ const AccountGroupMaster: React.FC = () => {
       >
 
         {/* ── Form card ── */}
-        <div
+        {(rights.canCreate || rights.canEdit) && <div
           className="rounded-xl overflow-visible relative"
           style={{
             background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.82)",
@@ -629,7 +639,7 @@ const AccountGroupMaster: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>}
 
         {/* ── Table ── */}
         <div>
@@ -753,12 +763,14 @@ const AccountGroupMaster: React.FC = () => {
                                 >
                                   <Eye size={13} />
                                 </button>
-                                <button
-                                  onClick={() => startEdit(g)}
-                                  className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-                                >
-                                  <Pencil size={13} />
-                                </button>
+                                {rights.canEdit && (
+                                  <button
+                                    onClick={() => startEdit(g)}
+                                    className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                                  >
+                                    <Pencil size={13} />
+                                  </button>
+                                )}
                                 {deleteConfirm === g._id ? (
                                   <>
                                     <button
@@ -774,14 +786,14 @@ const AccountGroupMaster: React.FC = () => {
                                       <X size={13} />
                                     </button>
                                   </>
-                                ) : (
+                                ) : rights.canDelete ? (
                                   <button
                                     onClick={() => setDeleteConfirm(g._id)}
                                     className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
                                   >
                                     <Trash2 size={13} />
                                   </button>
-                                )}
+                                ) : null}
                               </div>
                             </td>
                           </tr>

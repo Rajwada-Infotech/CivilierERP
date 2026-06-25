@@ -1,6 +1,7 @@
 import React from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaterialShell } from "@/components/material/MaterialShell";
+import { usePageRights } from "@/hooks/usePageRights";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -74,6 +75,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
 ];
 
 const AccessCardMaster = () => {
+  const rights = usePageRights("access-card");
   const queryClient = useQueryClient();
 
   const {
@@ -223,6 +225,10 @@ const AccessCardMaster = () => {
           columns: EXPORT_COLUMNS,
           filename: "access-card-master",
         }}
+        canCreate={rights.canCreate}
+        canEdit={rights.canEdit}
+        canDelete={rights.canDelete}
+        canExport={rights.canExport}
       />
       </MaterialShell>
     </>

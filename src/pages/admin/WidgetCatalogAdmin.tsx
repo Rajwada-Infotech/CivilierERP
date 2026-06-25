@@ -43,6 +43,7 @@ import {
   Search,
 } from "lucide-react";
 import { toast } from "sonner";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface CatalogWidget {
@@ -181,6 +182,7 @@ function WidgetForm({
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function WidgetCatalogAdmin() {
   const qc = useQueryClient();
+  const rights = usePageRights("widget-catalog");
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [editWidget, setEditWidget] = useState<CatalogWidget | null>(null);
@@ -259,9 +261,11 @@ export default function WidgetCatalogAdmin() {
           >
             <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} /> Refresh
           </Button>
-          <Button size="sm" className="h-8 text-xs gap-1" onClick={() => setAddOpen(true)}>
-            <Plus size={12} /> Add widget
-          </Button>
+          {rights.canCreate && (
+            <Button size="sm" className="h-8 text-xs gap-1" onClick={() => setAddOpen(true)}>
+              <Plus size={12} /> Add widget
+            </Button>
+          )}
         </div>
       </div>
 
@@ -359,24 +363,28 @@ export default function WidgetCatalogAdmin() {
                               ? <ToggleRight size={13} className="text-green-600" />
                               : <ToggleLeft size={13} className="text-muted-foreground" />}
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6"
-                            title="Edit"
-                            onClick={() => setEditWidget(w)}
-                          >
-                            <Edit2 size={12} />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-destructive hover:text-destructive"
-                            title="Delete"
-                            onClick={() => setDeleteKey(w.key)}
-                          >
-                            <Trash2 size={12} />
-                          </Button>
+                          {rights.canEdit && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              title="Edit"
+                              onClick={() => setEditWidget(w)}
+                            >
+                              <Edit2 size={12} />
+                            </Button>
+                          )}
+                          {rights.canDelete && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-destructive hover:text-destructive"
+                              title="Delete"
+                              onClick={() => setDeleteKey(w.key)}
+                            >
+                              <Trash2 size={12} />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>

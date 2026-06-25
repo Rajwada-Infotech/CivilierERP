@@ -53,6 +53,7 @@ import {
 } from "@/api/bankMasterApi";
 
 import { getAccountGroups } from "@/api/accountApi";
+import { usePageRights } from "@/hooks/usePageRights";
 
 import {
   DataTable,
@@ -229,6 +230,9 @@ function buildColumns(
   onDeleteCancel: () => void,
   onView: (bank: BankRecord) => void,
   onPrint: (bank: BankRecord) => void,
+  canEdit: boolean,
+  canDelete: boolean,
+  canPrint: boolean,
 ): ColumnDef<BankRecord, unknown>[] {
   return [
     {
@@ -366,27 +370,33 @@ function buildColumns(
                 >
                   <Eye size={15} />
                 </button>
-                <button
-                  onClick={() => onPrint(bank)}
-                  className="p-1 rounded text-amber-500 hover:bg-amber-500/10 transition-colors"
-                  title="Print"
-                >
-                  <Printer size={15} />
-                </button>
-                <button
-                  onClick={() => onEdit(bank)}
-                  className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
-                  title="Edit"
-                >
-                  <Edit2 size={15} />
-                </button>
-                <button
-                  onClick={() => onDeleteRequest(id)}
-                  className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
-                  title="Delete"
-                >
-                  <Trash2 size={15} />
-                </button>
+                {canPrint && (
+                  <button
+                    onClick={() => onPrint(bank)}
+                    className="p-1 rounded text-amber-500 hover:bg-amber-500/10 transition-colors"
+                    title="Print"
+                  >
+                    <Printer size={15} />
+                  </button>
+                )}
+                {canEdit && (
+                  <button
+                    onClick={() => onEdit(bank)}
+                    className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
+                    title="Edit"
+                  >
+                    <Edit2 size={15} />
+                  </button>
+                )}
+                {canDelete && (
+                  <button
+                    onClick={() => onDeleteRequest(id)}
+                    className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                    title="Delete"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -401,6 +411,7 @@ const BankMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const { theme } = useTheme();
   const isDark = theme !== "light";
+  const rights = usePageRights("bank-master");
 
   const {
     data: dbData,
@@ -798,8 +809,11 @@ const BankMaster: React.FC = () => {
         () => setDeleteId(null),
         setViewRow,
         handlePrint,
+        rights.canEdit,
+        rights.canDelete,
+        rights.canPrint,
       ),
-    [editingId, deleteId],
+    [editingId, deleteId, rights.canEdit, rights.canDelete, rights.canPrint],
   );
 
   if (error)
@@ -831,34 +845,38 @@ const BankMaster: React.FC = () => {
               onChange={handleImportFileChange}
               className="hidden"
             />
-            <button
-              onClick={handleDownloadTemplate}
-              title="Download a blank CSV with all bank fields"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-            >
-              <Download size={13} />
-              <span className="hidden sm:inline">Download Template</span>
-            </button>
-            <button
-              onClick={handleImportClick}
-              disabled={importing}
-              title="Import banks from a filled-in CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {importing ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : (
-                <Upload size={13} />
-              )}
-              <span className="hidden sm:inline">
-                {importing ? "Importing..." : "Import CSV"}
-              </span>
-            </button>
+            {rights.canCreate && (
+              <button
+                onClick={handleDownloadTemplate}
+                title="Download a blank CSV with all bank fields"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              >
+                <Download size={13} />
+                <span className="hidden sm:inline">Download Template</span>
+              </button>
+            )}
+            {rights.canCreate && (
+              <button
+                onClick={handleImportClick}
+                disabled={importing}
+                title="Import banks from a filled-in CSV"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {importing ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Upload size={13} />
+                )}
+                <span className="hidden sm:inline">
+                  {importing ? "Importing..." : "Import CSV"}
+                </span>
+              </button>
+            )}
           </div>
         }
       >
         {/* ── Form Card ── */}
-        <div
+        {(rights.canCreate || rights.canEdit) && <div
           className="rounded-xl overflow-hidden"
           style={{
             background: isDark
@@ -1220,7 +1238,7 @@ const BankMaster: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>}
 
         {/* ── Table Section ── */}
         <div>
@@ -1281,11 +1299,11 @@ const BankMaster: React.FC = () => {
               loading={isLoading}
               searchable={false}
               emptyMessage="No banks yet. Add one above."
-              exportConfig={{
+              exportConfig={rights.canExport ? {
                 title: "Bank Master",
                 filename: "bank-master",
                 columns: EXPORT_COLUMNS,
-              }}
+              } : undefined}
               rowClassName={(row) =>
                 editingId === String(row.original.BId) ? "bg-primary/5" : ""
               }

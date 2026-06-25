@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   Receipt,
@@ -410,6 +411,7 @@ function CollectPaymentModal({
 // ─── Generate Invoice Tab ───────────────────────────────────────────────────────
 
 function GenerateInvoiceTab() {
+  const rights = usePageRights("sale-invoice");
   const qc = useQueryClient();
   const [selectedOrder, setSelectedOrder] = useState<SaleOrder | null>(null);
   const [successMsg, setSuccessMsg] = useState("");
@@ -559,22 +561,24 @@ function GenerateInvoiceTab() {
                 as Pending Payment.
               </p>
               <div className="pt-3">
-                <button
-                  onClick={handleSubmit}
-                  disabled={!selectedOrder || createMut.isPending}
-                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors shadow-sm"
-                >
-                  {createMut.isPending ? (
-                    <>
-                      <RefreshCw size={14} className="animate-spin" />{" "}
-                      Generating…
-                    </>
-                  ) : (
-                    <>
-                      <Send size={14} /> Generate Sale Invoice
-                    </>
-                  )}
-                </button>
+                {rights.canCreate && (
+                  <button
+                    onClick={handleSubmit}
+                    disabled={!selectedOrder || createMut.isPending}
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors shadow-sm"
+                  >
+                    {createMut.isPending ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin" />{" "}
+                        Generating…
+                      </>
+                    ) : (
+                      <>
+                        <Send size={14} /> Generate Sale Invoice
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           </>
@@ -587,6 +591,7 @@ function GenerateInvoiceTab() {
 // ─── Sale Invoice History ───────────────────────────────────────────────────────
 
 function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
+  const rights = usePageRights("sale-invoice");
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["sale-invoices"],
     queryFn: () => getSaleInvoices({ limit: 100 }),
@@ -765,13 +770,15 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => window.print()}
-                  title="Print Invoice"
-                  className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
-                >
-                  <Printer size={18} />
-                </button>
+                {rights.canPrint && (
+                  <button
+                    onClick={() => window.print()}
+                    title="Print Invoice"
+                    className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
+                  >
+                    <Printer size={18} />
+                  </button>
+                )}
                 <button
                   onClick={() => setViewingInvoice(null)}
                   className="p-2 hover:bg-muted rounded-lg transition-colors print:hidden"
@@ -874,6 +881,7 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function SaleInvoice() {
+  const rights = usePageRights("sale-invoice");
   const [activeTab, setActiveTab] = useState<"generate" | "history">(
     "generate",
   );
@@ -905,16 +913,18 @@ export default function SaleInvoice() {
             </p>
           </div>
           <div className="flex items-center gap-1 p-1 rounded-xl bg-muted border border-border">
-            <button
-              onClick={() => setActiveTab("generate")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                activeTab === "generate"
-                  ? "bg-violet-600 text-white shadow-sm"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              <FileText size={14} /> Generate
-            </button>
+            {rights.canCreate && (
+              <button
+                onClick={() => setActiveTab("generate")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  activeTab === "generate"
+                    ? "bg-violet-600 text-white shadow-sm"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
+              >
+                <FileText size={14} /> Generate
+              </button>
+            )}
             <button
               onClick={() => setActiveTab("history")}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
@@ -322,6 +323,7 @@ function makeBillRenderer(
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 const DebitNoteMaster: React.FC = () => {
+  const rights = usePageRights("debit-note");
   const queryClient = useQueryClient();
   const { finYears } = useFinYear();
   const activeFinYear =
@@ -767,7 +769,7 @@ const DebitNoteMaster: React.FC = () => {
         onDataEvent={handleDataEvent}
         externalFormPatch={autoFillPatch}
         externalFormPatchKey={autoFillPatchKey}
-        exportConfig={{
+        exportConfig={rights.canExport ? {
           title: "Debit Note Master",
           filename: "debit-note-master",
           columns: [
@@ -779,7 +781,7 @@ const DebitNoteMaster: React.FC = () => {
             { header: "Created By", accessor: "createdBy" },
             { header: "Status", accessor: "status" },
           ],
-        }}
+        } : undefined}
         viewConfig={{
           title: "Debit Note Details",
           fields: [

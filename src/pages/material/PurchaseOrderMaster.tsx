@@ -21,9 +21,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  DocNumberPreview,
   fetchNextDocNumber,
   fetchDocTypes,
+  type DocType,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import {
   getPurchaseOrders,
@@ -53,6 +53,7 @@ import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { getTCRecords } from "@/api/tcMasterApi";
 import { getEnterprises } from "@/api/enterpriseApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { usePageRights } from "@/hooks/usePageRights";
 import {
   Plus,
   Trash2,
@@ -320,6 +321,7 @@ const StatusChip: React.FC<{ status: string }> = ({ status }) => {
 type ViewMode = "list" | "create" | "edit" | "view";
 
 const PurchaseOrderMaster: React.FC = () => {
+  const rights = usePageRights("purchase-orders");
   const queryClient = useQueryClient();
   const location = useLocation();
   const navigate = useNavigate();
@@ -350,6 +352,31 @@ const PurchaseOrderMaster: React.FC = () => {
   const [, setPoFormPatch] = useState<Record<string, unknown> | null>(null);
   const [, setPoFormPatchKey] = useState(0);
   const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
+
+  // ── PO doc types (for the plain Document Type & Number select) ───────────
+  const [poDocTypes, setPoDocTypes] = useState<DocType[]>([]);
+  const [poDocTypesLoading, setPoDocTypesLoading] = useState(true);
+
+  useEffect(() => {
+    setPoDocTypesLoading(true);
+    fetchDocTypes("PO")
+      .then((types) => {
+        // Mirror the ExB-PO exclusion that DocNumberPreview applied internally
+        const filtered = types.filter((dt) => {
+          const label = dt.DocNoPrefix ?? dt.FullPrefix ?? dt.Prefix;
+          return !label.startsWith("ExB-PO");
+        });
+        setPoDocTypes(filtered);
+        // Auto-select first type in create mode when none is set yet
+        if (!poDocTypeId && filtered.length > 0) {
+          const first = filtered[0];
+          fetchNextDocNumber(first.TypeOfDocId, selectedFinYear || undefined).then(
+            (docNo) => applyPoDocNumber(first.TypeOfDocId, docNo),
+          );
+        }
+      })
+      .finally(() => setPoDocTypesLoading(false));
+  }, []);
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
   const finYearOptions = finYears.filter((fy) => fy.status === "Active" && !fy.locked);
@@ -1693,6 +1720,7 @@ const PurchaseOrderMaster: React.FC = () => {
           subtitle="Create and manage purchase orders"
           icon={ShoppingCart}
           action={
+            rights.canCreate ? (
             <button
               onClick={goToCreate}
               className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
@@ -1700,6 +1728,7 @@ const PurchaseOrderMaster: React.FC = () => {
               <Plus size={13} />
               New Purchase Order
             </button>
+            ) : undefined
           }
         >
 
@@ -1866,6 +1895,7 @@ const PurchaseOrderMaster: React.FC = () => {
                           >
                             <Eye size={14} />
                           </button>
+                          {rights.canDelete && (
                           <button
                             onClick={() => handleDelete(item._id)}
                             className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 text-muted-foreground hover:text-red-500 transition"
@@ -1873,6 +1903,7 @@ const PurchaseOrderMaster: React.FC = () => {
                           >
                             <Trash2 size={14} />
                           </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -2175,18 +2206,22 @@ const PurchaseOrderMaster: React.FC = () => {
             {isReadOnly && (
               <>
                 <StatusChip status={listData.find((r) => r._id === editingId)?.status ?? "Draft"} />
+                {rights.canPrint && (
                 <button
                   onClick={handlePrint}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-sm font-semibold text-foreground hover:bg-muted transition"
                 >
                   <Printer size={14} /> Print
                 </button>
+                )}
+                {rights.canEdit && (
                 <button
                   onClick={() => { const item = listData.find((r) => r._id === editingId); if (item) goToAmend(item); }}
                   className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-sm font-semibold transition shadow-sm"
                 >
                   <FilePenLine size={14} /> Amend
                 </button>
+                )}
               </>
             )}
           </div>
@@ -2416,15 +2451,55 @@ const PurchaseOrderMaster: React.FC = () => {
                     )}
                   </div>
                 ) : (
-                  <DocNumberPreview
-                    module="PO"
-                    finYear={selectedFinYear || undefined}
-                    selectedDocTypeId={poDocTypeId}
-                    preview={poDocNo}
-                    refreshTrigger={docRefreshTrigger}
-                    onSelect={applyPoDocNumber}
-                    readOnly={viewMode === "edit"}
-                  />
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <select
+                        value={poDocTypeId ? String(poDocTypeId) : ""}
+                        onChange={async (e) => {
+                          const id = e.target.value ? parseInt(e.target.value, 10) : null;
+                          if (!id) { applyPoDocNumber(null, ""); return; }
+                          const docNo = await fetchNextDocNumber(id, selectedFinYear || undefined);
+                          applyPoDocNumber(id, docNo);
+                        }}
+                        disabled={poDocTypesLoading || viewMode === "edit"}
+                        className={selectCls}
+                      >
+                        {poDocTypesLoading ? (
+                          <option value="">Loading…</option>
+                        ) : poDocTypes.length === 0 ? (
+                          <option value="">No document types found</option>
+                        ) : (
+                          poDocTypes.map((dt) => {
+                            const label =
+                              dt.ProjectCode && dt.ModuleCode
+                                ? `${dt.ProjectCode}-${dt.ModuleCode}`
+                                : dt.DocNoPrefix ?? dt.FullPrefix ?? dt.Prefix;
+                            return (
+                              <option key={dt.TypeOfDocId} value={String(dt.TypeOfDocId)}>
+                                {label} — {dt.Description}
+                              </option>
+                            );
+                          })
+                        )}
+                      </select>
+                      <ChevronDown
+                        size={13}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                    </div>
+                    {poDocNo && (
+                      <div className="flex items-center gap-2 px-1">
+                        <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 tracking-wider">
+                          {poDocNo}
+                        </span>
+                        {selectedFinYear && (
+                          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading">
+                            FY {selectedFinYear}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
