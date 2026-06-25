@@ -11,6 +11,7 @@ import {
 } from "@/api/accountHeadApi";
 import { getAccountGroups } from "@/api/accountApi";
 import { getContractorCategoryOptions } from "@/api/contractorCategoryApi";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   DataTable,
@@ -201,6 +202,9 @@ function buildContractorColumns(
   deleteMut: { mutate: (id: number) => void },
   onView: (c: Contractor) => void,
   onPrint: (c: Contractor) => void,
+  canEdit: boolean,
+  canDelete: boolean,
+  canPrint: boolean,
 ): ColumnDef<Contractor, unknown>[] {
   return [
     {
@@ -299,27 +303,33 @@ function buildContractorColumns(
             >
               <Eye size={15} />
             </button>
-            <button
-              onClick={() => onPrint(row.original)}
-              className="p-1 rounded text-amber-500 hover:bg-amber-500/10 transition-colors"
-              title="Print"
-            >
-              <Printer size={15} />
-            </button>
-            <button
-              onClick={() => startEdit(row.original)}
-              className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
-              title="Edit"
-            >
-              <Pencil size={15} />
-            </button>
-            <button
-              onClick={() => setDeleteConfirm(id)}
-              className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
-              title="Delete"
-            >
-              <Trash2 size={15} />
-            </button>
+            {canPrint && (
+              <button
+                onClick={() => onPrint(row.original)}
+                className="p-1 rounded text-amber-500 hover:bg-amber-500/10 transition-colors"
+                title="Print"
+              >
+                <Printer size={15} />
+              </button>
+            )}
+            {canEdit && (
+              <button
+                onClick={() => startEdit(row.original)}
+                className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
+                title="Edit"
+              >
+                <Pencil size={15} />
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={() => setDeleteConfirm(id)}
+                className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                title="Delete"
+              >
+                <Trash2 size={15} />
+              </button>
+            )}
           </div>
         );
       },
@@ -332,6 +342,7 @@ const ContractorMaster: React.FC = () => {
   const qc = useQueryClient();
   const { theme } = useTheme();
   const isDark = theme !== "light";
+  const rights = usePageRights("contractor-master");
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<ContractorForm>(EMPTY_FORM);
@@ -721,9 +732,12 @@ const ContractorMaster: React.FC = () => {
         deleteMut,
         setViewRecord,
         handlePrint,
+        rights.canEdit,
+        rights.canDelete,
+        rights.canPrint,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editingId, deleteConfirm],
+    [editingId, deleteConfirm, rights.canEdit, rights.canDelete, rights.canPrint],
   );
 
   // ── Filtered + sorted list ─────────────────────────────────────────────────
@@ -793,34 +807,38 @@ const ContractorMaster: React.FC = () => {
               onChange={handleImportFileChange}
               className="hidden"
             />
-            <button
-              onClick={handleDownloadTemplate}
-              title="Download a blank CSV with all contractor fields"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-            >
-              <Download size={13} />
-              <span className="hidden sm:inline">Download Template</span>
-            </button>
-            <button
-              onClick={handleImportClick}
-              disabled={importing}
-              title="Import contractors from a filled-in CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {importing ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : (
-                <Upload size={13} />
-              )}
-              <span className="hidden sm:inline">
-                {importing ? "Importing..." : "Import CSV"}
-              </span>
-            </button>
+            {rights.canCreate && (
+              <button
+                onClick={handleDownloadTemplate}
+                title="Download a blank CSV with all contractor fields"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              >
+                <Download size={13} />
+                <span className="hidden sm:inline">Download Template</span>
+              </button>
+            )}
+            {rights.canCreate && (
+              <button
+                onClick={handleImportClick}
+                disabled={importing}
+                title="Import contractors from a filled-in CSV"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {importing ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Upload size={13} />
+                )}
+                <span className="hidden sm:inline">
+                  {importing ? "Importing..." : "Import CSV"}
+                </span>
+              </button>
+            )}
           </div>
         }
       >
         {/* ── Form Card ── */}
-        <div
+        {(rights.canCreate || rights.canEdit) && <div
           className="rounded-xl overflow-hidden"
           style={{
             background: isDark
@@ -1183,7 +1201,7 @@ const ContractorMaster: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>}
 
         {/* ── Table Section ── */}
         <div>
@@ -1254,11 +1272,11 @@ const ContractorMaster: React.FC = () => {
                     ? "No contractors yet."
                     : "No results match your search."
               }
-              exportConfig={{
+              exportConfig={rights.canExport ? {
                 title: "Contractor Master",
                 filename: "contractor-master",
                 columns: EXPORT_COLUMNS,
-              }}
+              } : undefined}
               rowClassName={(row) =>
                 row.original.LHeadId === editingId ? "bg-primary/5" : ""
               }

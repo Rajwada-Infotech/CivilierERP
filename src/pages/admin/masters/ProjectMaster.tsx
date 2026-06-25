@@ -32,6 +32,7 @@ import {
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
 import { useLookup } from "@/hooks/useLookup";
+import { usePageRights } from "@/hooks/usePageRights";
 
 interface Project {
   Id?: number;
@@ -411,6 +412,7 @@ function buildProjectColumns(
   openView: (row: any) => void,
   openEdit: (row: any) => void,
   setDeleteConfirm: (id: number) => void,
+  rights: { canEdit: boolean; canDelete: boolean },
 ): ColumnDef<any, unknown>[] {
   return [
     {
@@ -512,20 +514,24 @@ function buildProjectColumns(
           >
             <Eye size={13} />
           </button>
-          <button
-            onClick={() => openEdit(row.original)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
-            title="Edit"
-          >
-            <Pencil size={13} />
-          </button>
-          <button
-            onClick={() => setDeleteConfirm(row.original.Id)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-            title="Delete"
-          >
-            <Trash2 size={13} />
-          </button>
+          {rights.canEdit && (
+            <button
+              onClick={() => openEdit(row.original)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+              title="Edit"
+            >
+              <Pencil size={13} />
+            </button>
+          )}
+          {rights.canDelete && (
+            <button
+              onClick={() => setDeleteConfirm(row.original.Id)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              title="Delete"
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
         </div>
       ),
     },
@@ -535,6 +541,7 @@ function buildProjectColumns(
 // ── Main Component ─────────────────────────────────────────────────────────────
 export default function ProjectMaster() {
   const qc = useQueryClient();
+  const rights = usePageRights("project-master");
   const [form, setForm] = useState<Project>(emptyProject);
   const [editId, setEditId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -773,9 +780,9 @@ export default function ProjectMaster() {
   const openView = (row: any) => setViewTarget(rowToForm(row));
 
   const columns = useMemo(
-    () => buildProjectColumns(openView, openEdit, setDeleteConfirm),
+    () => buildProjectColumns(openView, openEdit, setDeleteConfirm, rights),
 
-    [],
+    [rights],
   );
 
   // Reusable text input
@@ -875,7 +882,7 @@ export default function ProjectMaster() {
               </p>
             </div>
           </div>
-          {!showForm && (
+          {!showForm && rights.canCreate && (
             <button
               onClick={openNew}
               className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"

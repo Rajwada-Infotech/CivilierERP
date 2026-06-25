@@ -1,5 +1,6 @@
 import React from "react";
 import { useState, useCallback, useEffect } from "react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -2004,6 +2005,7 @@ function CardPanel({ bankId, form, set }: CardPanelProps) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 const Payment: React.FC = () => {
+  const rights = usePageRights("new-payment");
   const { theme } = useTheme();
   const isDark = theme !== "light";
   const queryClient = useQueryClient();
@@ -2865,13 +2867,15 @@ const Payment: React.FC = () => {
         action={
           view === "list" ? (
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-              <Button
-                onClick={openNew}
-                className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-3 sm:px-4 py-1.5 text-xs h-auto"
-              >
-                <Plus size={13} className="sm:mr-1" />
-                <span className="hidden sm:inline">New Payment</span>
-              </Button>
+              {rights.canCreate && (
+                <Button
+                  onClick={openNew}
+                  className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-3 sm:px-4 py-1.5 text-xs h-auto"
+                >
+                  <Plus size={13} className="sm:mr-1" />
+                  <span className="hidden sm:inline">New Payment</span>
+                </Button>
+              )}
               <ExportMenu
                 data={records as unknown as Record<string, unknown>[]}
                 columns={EXPORT_COLUMNS}
@@ -2888,7 +2892,7 @@ const Payment: React.FC = () => {
                   undefined
                 }
                 logoBase64={selectedCompanyDetail?.logo || undefined}
-                disabled={isLoading || records.length === 0}
+                disabled={!rights.canExport || isLoading || records.length === 0}
               />
               <button
                 onClick={() => refetchPayments()}
@@ -4520,18 +4524,22 @@ const Payment: React.FC = () => {
                           >
                             <Eye size={12} />
                           </button>
-                          <button
-                            onClick={() => openEdit(rec)}
-                            className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                          >
-                            <Edit size={12} />
-                          </button>
-                          <button
-                            onClick={() => setDeleteId(rec.id)}
-                            className="p-1.5 rounded-md border border-destructive/30 text-destructive/70 hover:text-destructive hover:bg-destructive/10 transition-colors"
-                          >
-                            <Trash2 size={12} />
-                          </button>
+                          {rights.canEdit && (
+                            <button
+                              onClick={() => openEdit(rec)}
+                              className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                            >
+                              <Edit size={12} />
+                            </button>
+                          )}
+                          {rights.canDelete && (
+                            <button
+                              onClick={() => setDeleteId(rec.id)}
+                              className="p-1.5 rounded-md border border-destructive/30 text-destructive/70 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -4702,18 +4710,22 @@ const Payment: React.FC = () => {
                               >
                                 <Eye size={12} />
                               </button>
-                              <button
-                                onClick={() => openEdit(rec)}
-                                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                              >
-                                <Edit size={12} />
-                              </button>
-                              <button
-                                onClick={() => setDeleteId(rec.id)}
-                                className="p-1.5 rounded-md border border-destructive/30 text-destructive/70 hover:text-destructive hover:bg-destructive/10 transition-colors"
-                              >
-                                <Trash2 size={12} />
-                              </button>
+                              {rights.canEdit && (
+                                <button
+                                  onClick={() => openEdit(rec)}
+                                  className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                >
+                                  <Edit size={12} />
+                                </button>
+                              )}
+                              {rights.canDelete && (
+                                <button
+                                  onClick={() => setDeleteId(rec.id)}
+                                  className="p-1.5 rounded-md border border-destructive/30 text-destructive/70 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -5031,24 +5043,28 @@ const Payment: React.FC = () => {
 
             {/* Footer */}
             <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/20">
-              <button
-                onClick={() =>
-                  handlePrintPayment(viewingRec, viewingCompanyDetail)
-                }
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
-              >
-                <Printer size={12} /> Print / PDF
-              </button>
-              <button
-                onClick={() => {
-                  setViewingRec(null);
-                  setViewingChain(null);
-                  openEdit(viewingRec);
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
-              >
-                <Edit size={12} /> Edit
-              </button>
+              {rights.canPrint && (
+                <button
+                  onClick={() =>
+                    handlePrintPayment(viewingRec, viewingCompanyDetail)
+                  }
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                >
+                  <Printer size={12} /> Print / PDF
+                </button>
+              )}
+              {rights.canEdit && (
+                <button
+                  onClick={() => {
+                    setViewingRec(null);
+                    setViewingChain(null);
+                    openEdit(viewingRec);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                >
+                  <Edit size={12} /> Edit
+                </button>
+              )}
               <button
                 onClick={() => {
                   setViewingRec(null);

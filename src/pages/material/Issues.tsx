@@ -18,8 +18,6 @@ import {
   Edit3,
   Building2,
   FolderOpen,
-  Box,
-  Ruler,
   Hash,
   AlertTriangle,
   TrendingDown,
@@ -27,7 +25,6 @@ import {
   ShoppingCart,
   Package,
   CheckCircle2,
-  Calendar,
   Warehouse,
   ArrowDownToLine,
   User,
@@ -35,16 +32,10 @@ import {
   ArrowLeft,
   RotateCcw,
   Check,
+  ChevronDown,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -56,6 +47,15 @@ import {
 import { useFinYear } from "@/contexts/FinYearContext";
 import { Badge } from "@/components/ui/badge";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { usePageRights } from "@/hooks/usePageRights";
+
+// ─── Shared styles (matching PurchaseOrderMaster) ────────────────────────────
+
+const inputCls =
+  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer";
+
+const selectCls =
+  "w-full text-sm rounded-lg border border-border px-3 py-2.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -175,6 +175,7 @@ function GodownBadge({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function Issues() {
+  const rights = usePageRights("material-issues");
   const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<"list" | "form" | "view">("list");
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -686,6 +687,7 @@ export default function Issues() {
           >
             <Eye size={14} />
           </button>
+          {rights.canEdit && (
           <button
             type="button"
             onClick={() => handleEdit(row.original)}
@@ -694,6 +696,8 @@ export default function Issues() {
           >
             <Edit3 size={14} />
           </button>
+          )}
+          {rights.canDelete && (
           <button
             type="button"
             onClick={() => {
@@ -709,6 +713,7 @@ export default function Issues() {
           >
             <Trash2 size={14} />
           </button>
+          )}
         </div>
       ),
     },
@@ -908,39 +913,28 @@ export default function Issues() {
 
               <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
                 <div className="flex-1 min-w-0">
-                  <Select
-                    value={header.godownId}
-                    onValueChange={handleGodownChange}
-                  >
-                    <SelectTrigger className="h-10 bg-background border-emerald-500/30 focus:ring-emerald-500/30 gap-2 text-sm font-medium">
-                      <Warehouse size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
-                      <SelectValue
-                        placeholder={
-                          loadingGodowns ? "Loading godowns…" : "Select godown"
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
+                  <div className="relative">
+                    <select
+                      value={header.godownId}
+                      onChange={(e) => handleGodownChange(e.target.value)}
+                      className={`${selectCls} border-emerald-500/30 focus:ring-emerald-500/30`}
+                    >
+                      <option value="">
+                        {loadingGodowns ? "Loading godowns…" : "Select godown"}
+                      </option>
                       {(godowns as any[]).map((g) => (
-                        <SelectItem key={g.id} value={String(g.id)}>
-                          <div className="flex items-center gap-2">
-                            <Warehouse size={12} className="text-emerald-600/70 dark:text-emerald-400/70" />
-                            <span className="font-medium">{g.name}</span>
-                            {g.code && (
-                              <span className="font-mono text-xs text-muted-foreground">
-                                ({g.code})
-                              </span>
-                            )}
-                            {g.isMain && (
-                              <span className="px-1.5 py-0 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
-                                Main
-                              </span>
-                            )}
-                          </div>
-                        </SelectItem>
+                        <option key={g.id} value={String(g.id)}>
+                          {g.name}
+                          {g.code ? ` (${g.code})` : ""}
+                          {g.isMain ? " · Main" : ""}
+                        </option>
                       ))}
-                    </SelectContent>
-                  </Select>
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
                 </div>
 
                 {/* Stock summary for selected godown */}
@@ -980,90 +974,75 @@ export default function Issues() {
             {/* Row 1: Company | Project | Fin Year | Date */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
               <Field label="Company" required>
-                <Select
-                  value={header.companyId}
-                  onValueChange={handleCompanyChange}
-                >
-                  <SelectTrigger className="h-9 gap-2">
-                    <Building2
-                      size={13}
-                      className="text-muted-foreground shrink-0"
-                    />
-                    <SelectValue
-                      placeholder={
-                        loadingCompanies ? "Loading…" : "Select company"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
+                <div className="relative">
+                  <select
+                    value={header.companyId}
+                    onChange={(e) => handleCompanyChange(e.target.value)}
+                    className={selectCls}
+                  >
+                    <option value="">
+                      {loadingCompanies ? "Loading…" : "Select company"}
+                    </option>
                     {(companies as any[]).map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>
+                      <option key={c.id} value={String(c.id)}>
                         {c.label ?? c.name}
-                      </SelectItem>
+                      </option>
                     ))}
-                  </SelectContent>
-                </Select>
+                  </select>
+                  <ChevronDown
+                    size={13}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                </div>
               </Field>
 
               <Field label="Project" required>
-                <Select
-                  value={header.projectId}
-                  onValueChange={(v) => setH("projectId", v)}
-                >
-                  <SelectTrigger className="h-9 gap-2">
-                    <FolderOpen
-                      size={13}
-                      className="text-muted-foreground shrink-0"
-                    />
-                    <SelectValue
-                      placeholder={
-                        loadingProjects
-                          ? "Loading…"
-                          : header.companyId
-                            ? "Select project"
-                            : "Select company first"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
+                <div className="relative">
+                  <select
+                    value={header.projectId}
+                    onChange={(e) => setH("projectId", e.target.value)}
+                    className={selectCls}
+                  >
+                    <option value="">
+                      {loadingProjects
+                        ? "Loading…"
+                        : header.companyId
+                          ? "Select project"
+                          : "Select company first"}
+                    </option>
                     {filteredProjects.map((p: any) => (
-                      <SelectItem key={p.id} value={String(p.id)}>
+                      <option key={p.id} value={String(p.id)}>
                         {p.name}
-                      </SelectItem>
+                      </option>
                     ))}
-                  </SelectContent>
-                </Select>
+                  </select>
+                  <ChevronDown
+                    size={13}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                </div>
               </Field>
 
               <Field label="Financial Year" required>
-                <Select
-                  value={header.finYearId}
-                  onValueChange={(v) => setH("finYearId", v)}
-                >
-                  <SelectTrigger className="h-9 gap-2">
-                    <Calendar
-                      size={13}
-                      className="text-muted-foreground shrink-0"
-                    />
-                    <SelectValue placeholder={"Select fin year"} />
-                  </SelectTrigger>
-                  <SelectContent>
+                <div className="relative">
+                  <select
+                    value={header.finYearId}
+                    onChange={(e) => setH("finYearId", e.target.value)}
+                    className={selectCls}
+                  >
+                    <option value="">Select fin year</option>
                     {(finYears as any[]).map((fy) => (
-                      <SelectItem
-                        key={fy.id}
-                        value={String(fy.id)}
-                        disabled={fy.locked}
-                      >
+                      <option key={fy.id} value={String(fy.id)} disabled={fy.locked}>
                         {fy.year}
-                        {fy.locked && (
-                          <span className="ml-1 text-xs text-muted-foreground">
-                            (locked)
-                          </span>
-                        )}
-                      </SelectItem>
+                        {fy.locked ? " (locked)" : ""}
+                      </option>
                     ))}
-                  </SelectContent>
-                </Select>
+                  </select>
+                  <ChevronDown
+                    size={13}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                </div>
               </Field>
 
               <Field label="Issue Date" required>
@@ -1076,7 +1055,7 @@ export default function Issues() {
                     type="date"
                     value={header.date}
                     onChange={(e) => setH("date", e.target.value)}
-                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                    className={`${inputCls} pl-8`}
                   />
                 </div>
               </Field>
@@ -1215,56 +1194,33 @@ export default function Issues() {
                       </span>
 
                       <div className="flex-1 min-w-0">
-                        <Select
-                          value={ci.ItemId}
-                          onValueChange={(v) => pickItem(ci._key, v)}
-                        >
-                          <SelectTrigger
-                            className={`h-9 ${isOver ? "border-destructive" : ""}`}
+                        <div className="relative">
+                          <select
+                            value={ci.ItemId}
+                            onChange={(e) => pickItem(ci._key, e.target.value)}
+                            className={`${selectCls} ${isOver ? "border-destructive" : ""}`}
                           >
-                            <div className="flex items-center gap-2 min-w-0 text-sm">
-                              <Box
-                                size={12}
-                                className="text-muted-foreground shrink-0"
-                              />
-                              <SelectValue
-                                placeholder={
-                                  loadingItems ? "Loading…" : "Select item"
-                                }
-                              />
-                            </div>
-                          </SelectTrigger>
-                          <SelectContent className="max-h-64">
+                            <option value="">
+                              {loadingItems ? "Loading…" : "Select item"}
+                            </option>
                             {(itemOptions as any[]).length === 0 ? (
-                              <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                                No items found in{" "}
-                                {selectedGodown?.name ?? "this godown"}
-                              </div>
+                              <option disabled value="">
+                                No items found in {selectedGodown?.name ?? "this godown"}
+                              </option>
                             ) : (
                               (itemOptions as any[]).map((item) => (
-                                <SelectItem
-                                  key={item.M_Id}
-                                  value={String(item.M_Id)}
-                                >
-                                  <div className="flex flex-col">
-                                    <span>{item.M_Name}</span>
-                                    <span
-                                      className={`text-xs ${
-                                        Number(item.AvailableStock) <= 0
-                                          ? "text-destructive"
-                                          : "text-muted-foreground"
-                                      }`}
-                                    >
-                                      Stock:{" "}
-                                      {Number(item.AvailableStock).toFixed(2)}
-                                      {item.M_Group && ` · ${item.M_Group}`}
-                                    </span>
-                                  </div>
-                                </SelectItem>
+                                <option key={item.M_Id} value={String(item.M_Id)}>
+                                  {item.M_Name} — Stock: {Number(item.AvailableStock).toFixed(2)}
+                                  {item.M_Group ? ` · ${item.M_Group}` : ""}
+                                </option>
                               ))
                             )}
-                          </SelectContent>
-                        </Select>
+                          </select>
+                          <ChevronDown
+                            size={13}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                          />
+                        </div>
                       </div>
 
                       <button
@@ -1284,38 +1240,29 @@ export default function Issues() {
                         <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                           Unit (UOM) *
                         </label>
-                        <Select
-                          value={ci.UOMCode}
-                          onValueChange={(v) =>
-                            updateCartItem(ci._key, "UOMCode", v)
-                          }
-                        >
-                          <SelectTrigger className="h-9">
-                            <div className="flex items-center gap-2 min-w-0 text-sm">
-                              <Ruler
-                                size={12}
-                                className="text-muted-foreground shrink-0"
-                              />
-                              <SelectValue
-                                placeholder={
-                                  loadingUoms ? "Loading…" : "Select UOM"
-                                }
-                              />
-                            </div>
-                          </SelectTrigger>
-                          <SelectContent>
+                        <div className="relative">
+                          <select
+                            value={ci.UOMCode}
+                            onChange={(e) =>
+                              updateCartItem(ci._key, "UOMCode", e.target.value)
+                            }
+                            className={selectCls}
+                          >
+                            <option value="">
+                              {loadingUoms ? "Loading…" : "Select UOM"}
+                            </option>
                             {(uoms as any[]).map((u) => (
-                              <SelectItem key={u.UOMCode} value={u.UOMCode}>
+                              <option key={u.UOMCode} value={u.UOMCode}>
                                 {u.UOMName}
-                                {u.Symbol && (
-                                  <span className="text-muted-foreground ml-1">
-                                    ({u.Symbol})
-                                  </span>
-                                )}
-                              </SelectItem>
+                                {u.Symbol ? ` (${u.Symbol})` : ""}
+                              </option>
                             ))}
-                          </SelectContent>
-                        </Select>
+                          </select>
+                          <ChevronDown
+                            size={13}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                          />
+                        </div>
                       </div>
 
                       <div className="space-y-1">
@@ -1490,6 +1437,7 @@ export default function Issues() {
                 `#${viewingRecord.IssueId}`}
             </CardTitle>
             <div className="flex items-center gap-2">
+              {rights.canEdit && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1498,6 +1446,7 @@ export default function Issues() {
               >
                 <Edit3 size={13} /> Edit
               </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -1681,7 +1630,7 @@ export default function Issues() {
         subtitle="Issue materials from godown to projects"
         icon={ArrowDownToLine}
         action={
-          viewMode === "list" ? (
+          viewMode === "list" && rights.canCreate ? (
             <Button
               onClick={() => {
                 setHeader(defaultHeader);

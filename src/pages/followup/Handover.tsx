@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -463,8 +463,7 @@ function ChecklistToggle({
 export function HandoverPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { currentUser } = useAuth();
-  const canDeleteRecords = currentUser?.role !== "engineer";
+  const rights = usePageRights("followup-handover");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<HandoverStatus | "">("");
@@ -1316,7 +1315,7 @@ export function HandoverPage() {
                                   >
                                     <Pencil size={14} /> Edit
                                   </button>
-                                  {canDeleteRecords && (
+                                  {rights.canDelete && (
                                     <button
                                       className="ho-menu-item danger"
                                       onClick={() => {

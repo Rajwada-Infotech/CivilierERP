@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { usePageRights } from "@/hooks/usePageRights";
 import {
   Plus,
   Pencil,
@@ -118,6 +119,7 @@ const TYPE_FILTERS: { key: TypeFilter; label: string }[] = [
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function GodownAdmin() {
   const qc = useQueryClient();
+  const rights = usePageRights("godown-master");
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [search, setSearch] = useState("");
@@ -379,13 +381,15 @@ export default function GodownAdmin() {
               </p>
             </div>
           </div>
-          <button
-            onClick={openAdd}
-            className="gradient-accent inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition"
-          >
-            <Plus className="h-4 w-4" />
-            Add Godown
-          </button>
+          {rights.canCreate && (
+            <button
+              onClick={openAdd}
+              className="gradient-accent inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition"
+            >
+              <Plus className="h-4 w-4" />
+              Add Godown
+            </button>
+          )}
         </div>
 
         {/* Stats strip */}
@@ -553,16 +557,18 @@ export default function GodownAdmin() {
                           </span>
                         </div>
                         <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => openEdit(g)}
-                            title="Edit"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          {!g.IsProjectDefault && (
+                          {rights.canEdit && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => openEdit(g)}
+                              title="Edit"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                          {rights.canDelete && !g.IsProjectDefault && (
                             <Button
                               variant="ghost"
                               size="icon"

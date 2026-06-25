@@ -77,6 +77,7 @@ import {
 import { getPurchaseOrders } from "@/api/purchaseOrdersApi";
 import { getGRNs } from "@/api/grnApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -711,6 +712,8 @@ function AmendmentsHistoryPanel({
   canApprove,
   onEdit,
   queryClient,
+  canEdit,
+  canDelete,
 }: {
   docType: string;
   docNo: string;
@@ -718,6 +721,8 @@ function AmendmentsHistoryPanel({
   canApprove: boolean;
   onEdit: (a: Amendment) => void;
   queryClient: ReturnType<typeof useQueryClient>;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }) {
   const [viewingAmendment, setViewingAmendment] = useState<Amendment | null>(
     null,
@@ -877,14 +882,16 @@ function AmendmentsHistoryPanel({
                       </button>
                       {a.Status === "Draft" && (
                         <>
-                          <button
-                            type="button"
-                            onClick={() => onEdit(a)}
-                            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition"
-                            title="Edit"
-                          >
-                            <Pencil size={13} />
-                          </button>
+                          {canEdit !== false && (
+                            <button
+                              type="button"
+                              onClick={() => onEdit(a)}
+                              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition"
+                              title="Edit"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => submitMutation.mutate(a.Id)}
@@ -894,14 +901,16 @@ function AmendmentsHistoryPanel({
                           >
                             <Send size={13} />
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => setDeleteTarget(a)}
-                            className="p-1 rounded hover:bg-rose-50 dark:hover:bg-rose-950/30 text-rose-500 transition"
-                            title="Delete"
-                          >
-                            <Trash2 size={13} />
-                          </button>
+                          {canDelete !== false && (
+                            <button
+                              type="button"
+                              onClick={() => setDeleteTarget(a)}
+                              className="p-1 rounded hover:bg-rose-50 dark:hover:bg-rose-950/30 text-rose-500 transition"
+                              title="Delete"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
                         </>
                       )}
                       {a.Status === "Pending" && canApprove && (
@@ -1110,6 +1119,9 @@ function DocTable({
   onAmend,
   queryClient,
   canApprove,
+  canCreate,
+  canEdit,
+  canDelete,
 }: {
   tab: DocTab;
   search: string;
@@ -1118,6 +1130,9 @@ function DocTable({
   onAmend: (row: DocRow) => void;
   queryClient: ReturnType<typeof useQueryClient>;
   canApprove: boolean;
+  canCreate?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }) {
   const [expandedId, setExpandedId] = useState<string | number | null>(null);
 
@@ -1303,14 +1318,16 @@ function DocTable({
                         <History size={12} />
                         {expandedId === row.id ? "Hide" : "History"}
                       </Button>
-                      <Button
-                        size="sm"
-                        className="h-7 text-xs gap-1.5"
-                        onClick={() => onAmend(row)}
-                      >
-                        <FilePenLine size={12} />
-                        Amend
-                      </Button>
+                      {canCreate !== false && (
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs gap-1.5"
+                          onClick={() => onAmend(row)}
+                        >
+                          <FilePenLine size={12} />
+                          Amend
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -1328,6 +1345,8 @@ function DocTable({
                           /* bubble up handled by parent via state */
                         }}
                         queryClient={queryClient}
+                        canEdit={canEdit}
+                        canDelete={canDelete}
                       />
                     </TableCell>
                   </TableRow>
@@ -1375,6 +1394,7 @@ export default function AmendmentMenu() {
   const location = useLocation();
   const navigate = useNavigate();
   const canApprove = APPROVER_ROLES.includes(getCurrentRole() ?? "");
+  const rights = usePageRights("amendments");
 
   const prefill =
     (location.state as { prefill?: PrefillState } | null)?.prefill ?? null;
@@ -1622,6 +1642,9 @@ export default function AmendmentMenu() {
         onAmend={openAmendFromDoc}
         queryClient={queryClient}
         canApprove={canApprove}
+        canCreate={rights.canCreate}
+        canEdit={rights.canEdit}
+        canDelete={rights.canDelete}
       />
 
       </div>

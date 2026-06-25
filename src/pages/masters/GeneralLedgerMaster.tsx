@@ -4,6 +4,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import TreeDropdown from "@/components/common/TreeDropdown";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccountGroups } from "@/api/accountApi";
+import { usePageRights } from "@/hooks/usePageRights";
 import {
   getLedgers,
   addLedger,
@@ -93,6 +94,8 @@ function buildGLColumns(
   startEdit: (l: LedgerHead) => void,
   deleteMut: { mutate: (id: number) => void },
   onView: (l: LedgerHead) => void,
+  canEdit: boolean,
+  canDelete: boolean,
 ): ColumnDef<LedgerHead, unknown>[] {
   return [
     {
@@ -172,18 +175,22 @@ function buildGLColumns(
             >
               <Eye size={13} />
             </button>
-            <button
-              onClick={() => startEdit(row.original)}
-              className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10"
-            >
-              <Pencil size={13} />
-            </button>
-            <button
-              onClick={() => setDeleteConfirm(id)}
-              className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10"
-            >
-              <Trash2 size={13} />
-            </button>
+            {canEdit && (
+              <button
+                onClick={() => startEdit(row.original)}
+                className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10"
+              >
+                <Pencil size={13} />
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={() => setDeleteConfirm(id)}
+                className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
           </div>
         );
       },
@@ -194,6 +201,7 @@ function buildGLColumns(
 // ─── Component ────────────────────────────────────────────────────────────────
 const GeneralLedgerMaster: React.FC = () => {
   const qc = useQueryClient();
+  const rights = usePageRights("general-ledger");
   const { theme } = useTheme();
   const isDark = theme !== "light";
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -366,9 +374,11 @@ const GeneralLedgerMaster: React.FC = () => {
         startEdit,
         deleteMut,
         setViewRecord,
+        rights.canEdit,
+        rights.canDelete,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editingId, deleteConfirm],
+    [editingId, deleteConfirm, rights.canEdit, rights.canDelete],
   );
 
   const isDirty = Object.keys(form).some((k) => String((form as Record<string,unknown>)[k] ?? "") !== String((EMPTY_FORM as Record<string,unknown>)[k] ?? ""));
@@ -458,6 +468,7 @@ const GeneralLedgerMaster: React.FC = () => {
       >
 
         {/* ── Form Card ── */}
+        {rights.canCreate && (
         <div
           className="rounded-xl overflow-hidden"
           style={{
@@ -618,6 +629,7 @@ const GeneralLedgerMaster: React.FC = () => {
             </div>
           </div>
         </div>
+        )}
 
         {/* ── Table Section ── */}
         <div>

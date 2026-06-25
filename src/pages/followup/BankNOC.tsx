@@ -21,7 +21,7 @@ import {
   Banknote,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
@@ -385,8 +385,7 @@ function Combobox({
 
 export function BankNOCPage() {
   const qc = useQueryClient();
-  const { currentUser } = useAuth();
-  const canDelete = currentUser?.role !== "engineer";
+  const rights = usePageRights("followup-bank-noc");
 
   const [search, setSearch] = useState("");
   const [bankNocFilter, setBankNocFilter] = useState<BankNOCStatus | "">("");

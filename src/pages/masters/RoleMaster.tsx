@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -54,6 +55,8 @@ function buildRoleColumns(
   handleEdit: (item: RoleRecord) => void,
   handleDelete: (id: number) => void,
   onView: (item: RoleRecord) => void,
+  canEdit: boolean,
+  canDelete: boolean,
 ): ColumnDef<RoleRecord, unknown>[] {
   return [
     {
@@ -119,18 +122,22 @@ function buildRoleColumns(
             >
               <Eye size={13} />
             </button>
-            <button
-              onClick={() => handleEdit(row.original)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
-            >
-              <Edit2 size={13} />
-            </button>
-            <button
-              onClick={() => setDeleteId(id)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-            >
-              <Trash2 size={13} />
-            </button>
+            {canEdit && (
+              <button
+                onClick={() => handleEdit(row.original)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+              >
+                <Edit2 size={13} />
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={() => setDeleteId(id)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
           </div>
         );
       },
@@ -158,6 +165,7 @@ function generateRoleCode(rName: string): string {
 // ─── Component ───────────────────────────────────────────────────────────────
 const RoleMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const rights = usePageRights("roles");
 
   const {
     data: dbData,
@@ -247,9 +255,11 @@ const RoleMaster: React.FC = () => {
         handleEdit,
         handleDelete,
         setViewRecord,
+        rights.canEdit,
+        rights.canDelete,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editingId, deleteId],
+    [editingId, deleteId, rights.canEdit, rights.canDelete],
   );
 
   const handleSave = async () => {
@@ -303,6 +313,7 @@ const RoleMaster: React.FC = () => {
 
       <div className="space-y-5">
         {/* ── Form ── */}
+        {rights.canCreate && (
         <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
             <div>
@@ -412,6 +423,7 @@ const RoleMaster: React.FC = () => {
             </div>
           </div>
         </div>
+        )}
 
         {/* ── Table ── */}
         <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">

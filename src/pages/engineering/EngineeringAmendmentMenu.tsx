@@ -75,6 +75,7 @@ import {
 } from "@/api/amendmentsApi";
 import { getWorkOrders } from "@/api/workOrderApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -374,12 +375,16 @@ function AmendmentSubRows({
   onEdit,
   canApprove,
   queryClient,
+  canEdit,
+  canDelete,
 }: {
   docType: string;
   docId: string | number;
   onEdit: (a: Amendment) => void;
   canApprove: boolean;
   queryClient: ReturnType<typeof useQueryClient>;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }) {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [rejectTarget, setRejectTarget] = useState<Amendment | null>(null);
@@ -505,14 +510,16 @@ function AmendmentSubRows({
             <div className="flex justify-end gap-1">
               {a.Status === "Draft" && (
                 <>
-                  <button
-                    type="button"
-                    onClick={() => onEdit(a)}
-                    className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition"
-                    title="Edit"
-                  >
-                    <Pencil size={12} />
-                  </button>
+                  {canEdit !== false && (
+                    <button
+                      type="button"
+                      onClick={() => onEdit(a)}
+                      className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition"
+                      title="Edit"
+                    >
+                      <Pencil size={12} />
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => submitMut.mutate(a.Id)}
@@ -521,6 +528,7 @@ function AmendmentSubRows({
                   >
                     <Send size={12} />
                   </button>
+                  {canDelete !== false && (
                   <button
                     type="button"
                     onClick={() => setDeleteId(a.Id)}
@@ -529,6 +537,7 @@ function AmendmentSubRows({
                   >
                     <Trash2 size={12} />
                   </button>
+                  )}
                 </>
               )}
               {a.Status === "Pending" && canApprove && (
@@ -663,6 +672,9 @@ function DocTable({
   onAmend,
   queryClient,
   canApprove,
+  canCreate,
+  canEdit,
+  canDelete,
 }: {
   tab: DocTab;
   search: string;
@@ -671,6 +683,9 @@ function DocTable({
   onAmend: (row: DocRow) => void;
   queryClient: ReturnType<typeof useQueryClient>;
   canApprove: boolean;
+  canCreate?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }) {
   const [expandedId, setExpandedId] = useState<string | number | null>(null);
   const PAGE_SIZE = 15;
@@ -850,14 +865,16 @@ function DocTable({
                       >
                         <History size={14} />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => onAmend(row)}
-                        className="p-1.5 rounded-lg hover:bg-orange-50 dark:hover:bg-orange-950/30 text-orange-500 hover:text-orange-600 transition"
-                        title="Amend"
-                      >
-                        <FilePenLine size={14} />
-                      </button>
+                      {canCreate !== false && (
+                        <button
+                          type="button"
+                          onClick={() => onAmend(row)}
+                          className="p-1.5 rounded-lg hover:bg-orange-50 dark:hover:bg-orange-950/30 text-orange-500 hover:text-orange-600 transition"
+                          title="Amend"
+                        >
+                          <FilePenLine size={14} />
+                        </button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -885,6 +902,8 @@ function DocTable({
                       }}
                       canApprove={canApprove}
                       queryClient={queryClient}
+                      canEdit={canEdit}
+                      canDelete={canDelete}
                     />
                     <TableRow>
                       <TableCell colSpan={8} className="bg-muted/10 pb-2" />
@@ -1082,6 +1101,7 @@ function AmendFormDialog({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function EngineeringAmendmentMenu() {
+  const rights = usePageRights("engineering-amendments");
   const queryClient = useQueryClient();
   const location = useLocation();
   const navigate = useNavigate();
@@ -1335,6 +1355,9 @@ export default function EngineeringAmendmentMenu() {
         onAmend={openAmendFromDoc}
         queryClient={queryClient}
         canApprove={canApprove}
+        canCreate={rights.canCreate}
+        canEdit={rights.canEdit}
+        canDelete={rights.canDelete}
       />
 
       {/* ── Amendment Form Dialog ────────────────────────────────────────────── */}

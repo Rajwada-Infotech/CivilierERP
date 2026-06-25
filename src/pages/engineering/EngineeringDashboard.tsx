@@ -1,6 +1,7 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -358,6 +359,7 @@ const WORKDONE_DASH_COLS: ColumnDef<any>[] = [
 
 // ─── Dashboard component ──────────────────────────────────────────────────────
 export default function EngineeringDashboard() {
+  const rights = usePageRights("engineering-dashboard");
   const navigate = useNavigate();
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({

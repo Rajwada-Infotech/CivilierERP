@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccountGroups } from "@/api/accountApi";
 import {
@@ -67,6 +68,8 @@ function buildExpenseColumns(
   startEdit: (l: LedgerHead) => void,
   deleteMut: { mutate: (id: number) => void },
   onView: (l: LedgerHead) => void,
+  canEdit: boolean,
+  canDelete: boolean,
 ): ColumnDef<LedgerHead, unknown>[] {
   return [
     {
@@ -146,18 +149,22 @@ function buildExpenseColumns(
             >
               <Eye size={13} />
             </button>
-            <button
-              onClick={() => startEdit(row.original)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
-            >
-              <Pencil size={13} />
-            </button>
-            <button
-              onClick={() => setDeleteConfirm(id)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-            >
-              <Trash2 size={13} />
-            </button>
+            {canEdit && (
+              <button
+                onClick={() => startEdit(row.original)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+              >
+                <Pencil size={13} />
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={() => setDeleteConfirm(id)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
           </div>
         );
       },
@@ -180,6 +187,7 @@ function buildExpenseColumns(
 // ─── Component ───────────────────────────────────────────────────────────────
 
 const ExpensesMaster: React.FC = () => {
+  const rights = usePageRights("expense-master");
   const qc = useQueryClient();
 
   // ── Remote data ────────────────────────────────────────────────────────────
@@ -309,9 +317,11 @@ const ExpensesMaster: React.FC = () => {
         startEdit,
         deleteMut,
         setViewRecord,
+        rights.canEdit,
+        rights.canDelete,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editingId, deleteConfirm],
+    [editingId, deleteConfirm, rights.canEdit, rights.canDelete],
   );
 
   const resetForm = () => {
@@ -413,7 +423,7 @@ const ExpensesMaster: React.FC = () => {
       </div>
 
       {/* ── Form card ── */}
-      <div className="rounded-xl border border-border bg-card mb-6">
+      {(rights.canCreate || rights.canEdit) && <div className="rounded-xl border border-border bg-card mb-6">
         <div className="px-5 py-4 border-b border-border flex items-center justify-between">
           <h2 className="text-sm font-semibold text-foreground">
             {editingId ? "Edit Ledger Account" : "Add Ledger Account"}
@@ -553,7 +563,7 @@ const ExpensesMaster: React.FC = () => {
             )}
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* ── Table ── */}
       <div>

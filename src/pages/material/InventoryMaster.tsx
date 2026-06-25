@@ -37,6 +37,7 @@ import {
 } from "@/api/inventoryMasterApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { MaterialShell } from "@/components/material/MaterialShell";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ─── Field ────────────────────────────────────────────────────────────────────
 function Field({
@@ -589,11 +590,15 @@ function GodownCard({
   onEdit,
   onDelete,
   onView,
+  canEdit = true,
+  canDelete = true,
 }: {
   godown: Godown;
   onEdit: (g: Godown) => void;
   onDelete: (g: Godown) => void;
   onView: (g: Godown) => void;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -653,6 +658,7 @@ function GodownCard({
                   onClick={() => setMenuOpen(false)}
                 />
                 <div className="absolute right-0 top-full mt-1 z-20 bg-card border border-border rounded-xl shadow-xl py-1 min-w-[140px]">
+                  {canEdit && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -663,6 +669,8 @@ function GodownCard({
                   >
                     <Pencil size={11} /> Edit
                   </button>
+                  )}
+                  {canDelete && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -673,6 +681,7 @@ function GodownCard({
                   >
                     <Trash2 size={11} /> Delete
                   </button>
+                  )}
                 </div>
               </>
             )}
@@ -745,6 +754,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function InventoryMaster() {
+  const rights = usePageRights("inventory-master");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingGodown, setEditingGodown] = useState<Godown | null>(null);
   const [deletingGodown, setDeletingGodown] = useState<Godown | null>(null);
@@ -822,6 +832,7 @@ export default function InventoryMaster() {
                 className={isLoading ? "animate-spin" : ""}
               />
             </button>
+            {rights.canCreate && (
             <button
               onClick={handleAdd}
               className="flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-500/30 hover:bg-emerald-500/10 text-sm font-semibold transition-colors"
@@ -829,6 +840,7 @@ export default function InventoryMaster() {
             >
               <Plus size={14} /> New Godown
             </button>
+            )}
           </div>
         }
       >
@@ -941,6 +953,8 @@ export default function InventoryMaster() {
                       prev?.GodownID === clicked.GodownID ? null : clicked,
                     )
                   }
+                  canEdit={rights.canEdit}
+                  canDelete={rights.canDelete}
                 />
                 {stockGodown?.GodownID === g.GodownID && (
                   <GodownStockPanel

@@ -36,6 +36,7 @@ import {
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { usePageRights } from "@/hooks/usePageRights";
 import { toast } from "sonner";
 
 const fmtNum = (n: number) =>
@@ -617,6 +618,7 @@ function MakeGRNModal({
 
 // ─── Transfer History ─────────────────────────────────────────────────────────
 function TransferHistory() {
+  const rights = usePageRights("stock-transfers");
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["stock-transfers"],
     queryFn: () => getStockTransfers({ limit: 50, page: 1 }),
@@ -794,12 +796,14 @@ function TransferHistory() {
                             ))}
                           </div>
                         ) : (
+                          rights.canCreate && (
                           <button
                             onClick={() => setGrnModalTransfer(t)}
                             className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium border border-emerald-400/40 text-emerald-700 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/15 transition-colors whitespace-nowrap"
                           >
                             <FileText size={9} /> Make GRN
                           </button>
+                          )
                         )}
                       </td>
                     </tr>
@@ -816,6 +820,7 @@ function TransferHistory() {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function StockTransfer() {
+  const rights = usePageRights("stock-transfers");
   const qc = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<"transfer" | "history">(
@@ -1001,7 +1006,7 @@ export default function StockTransfer() {
             onClick={() => setActiveTab("transfer")}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeTab === "transfer"
-                ? "bg-emerald-600 text-white shadow-sm"
+                ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white shadow-sm"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
             }`}
           >
@@ -1011,7 +1016,7 @@ export default function StockTransfer() {
             onClick={() => setActiveTab("history")}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeTab === "history"
-                ? "bg-emerald-600 text-white shadow-sm"
+                ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white shadow-sm"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
             }`}
           >
@@ -1215,12 +1220,14 @@ export default function StockTransfer() {
                         {availableItems.length} items in stock
                       </span>
                     ) : null}
+                    {rights.canCreate && (
                     <button
                       onClick={addItem}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-colors"
                     >
                       <Plus size={12} /> Add Item
                     </button>
+                    )}
                   </div>
                 </div>
 
@@ -1285,6 +1292,7 @@ export default function StockTransfer() {
                       >
                         Reset
                       </button>
+                      {rights.canCreate && (
                       <button
                         onClick={handleTransfer}
                         disabled={!canTransfer}
@@ -1301,6 +1309,7 @@ export default function StockTransfer() {
                           </>
                         )}
                       </button>
+                      )}
                     </div>
                   </div>
                 </div>
