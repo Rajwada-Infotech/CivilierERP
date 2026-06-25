@@ -3408,7 +3408,7 @@ export default function MaterialExpenseBooking() {
                   form.bookingReference.trim()
                 );
                 return (
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
                     <p className="text-[11px] text-muted-foreground hidden sm:block">
                       {saved ? (
                         <span className="text-emerald-500 font-medium">
@@ -3764,24 +3764,23 @@ export default function MaterialExpenseBooking() {
                                         submitOnly
                                         onSuccess={() => fetchRecords(page)}
                                       />
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-7 w-7 p-0"
+                                      <button
+                                        type="button"
+                                        className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
                                         onClick={() => setPreviewRecord(rec)}
                                         title="Preview"
                                       >
-                                        <Eye size={12} />
-                                      </Button>
+                                        <Eye size={15} />
+                                      </button>
                                       {rights.canDelete && (
-                                        <Button
-                                          variant="destructive"
-                                          size="sm"
-                                          className="h-7 w-7 p-0"
+                                        <button
+                                          type="button"
+                                          className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
                                           onClick={() => requestDelete(rec.id)}
+                                          title="Delete"
                                         >
-                                          <Trash2 size={12} />
-                                        </Button>
+                                          <Trash2 size={15} />
+                                        </button>
                                       )}
                                     </div>
                                   </TableCell>

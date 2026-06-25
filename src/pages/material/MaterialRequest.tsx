@@ -563,8 +563,9 @@ export default function MaterialRequest() {
       id: "CompanyName",
       accessorKey: "CompanyName",
       header: "Company",
+      size: 160,
       cell: ({ getValue }) => (
-        <div className="flex items-center gap-1.5 text-sm">
+        <div className="flex items-center gap-1.5 text-sm whitespace-nowrap">
           <Building2 size={12} className="text-muted-foreground shrink-0" />
           {String(getValue() || "—")}
         </div>
@@ -574,8 +575,9 @@ export default function MaterialRequest() {
       id: "ProjectName",
       accessorKey: "ProjectName",
       header: "Project",
+      size: 160,
       cell: ({ getValue }) => (
-        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-sm text-muted-foreground whitespace-nowrap">
           <FolderOpen size={12} className="shrink-0" />
           {String(getValue() || "—")}
         </div>
@@ -585,8 +587,9 @@ export default function MaterialRequest() {
       id: "ItemCount",
       accessorKey: "ItemCount",
       header: "Items",
+      size: 140,
       cell: ({ row }) => (
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 whitespace-nowrap">
           <ShoppingCart size={12} className="text-muted-foreground" />
           <span className="font-semibold text-sm">
             {row.original.ItemCount || 0}
@@ -644,15 +647,15 @@ export default function MaterialRequest() {
         const status = row.original.Status as string;
         const isDeleting = deleteMutation.isPending;
         return (
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             {/* View — always visible */}
             <button
               type="button"
               onClick={() => handleView(row.original)}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 text-foreground transition-colors border border-border"
+              className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
               title="View details"
             >
-              <Eye size={12} /> View
+              <Eye size={15} />
             </button>
 
             {/* Update — Draft only */}
@@ -660,14 +663,14 @@ export default function MaterialRequest() {
               <button
                 type="button"
                 onClick={() => handleEdit(row.original)}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-colors border border-emerald-500/20"
+                className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
                 title="Edit this request"
               >
-                <Edit3 size={12} /> Update
+                <Edit3 size={15} />
               </button>
             )}
 
-            {/* Delete — always visible */}
+            {/* Delete */}
             {rights.canDelete && (
               <button
                 type="button"
@@ -676,10 +679,10 @@ export default function MaterialRequest() {
                   if (confirm("Delete this material request?"))
                     deleteMutation.mutate(row.original.MRId);
                 }}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-destructive/10 hover:bg-destructive/20 text-destructive transition-colors border border-destructive/20 disabled:opacity-50"
+                className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
                 title="Delete this request"
               >
-                <Trash2 size={12} /> Delete
+                <Trash2 size={15} />
               </button>
             )}
           </div>
@@ -1278,7 +1281,7 @@ export default function MaterialRequest() {
       </Card>
 
       {/* Save bar */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
         <p className="text-[11px] text-muted-foreground hidden sm:block">
           {canSave ? (
             <span className="text-emerald-500 font-medium">Ready to save</span>

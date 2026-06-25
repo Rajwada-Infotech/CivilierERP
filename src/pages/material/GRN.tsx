@@ -623,24 +623,24 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   // ── Actions ──────────────────────────────────────────────────────────────
   {
     id: "actions",
-    header: "",
+    header: () => <div className="text-right">ACTIONS</div>,
     enableSorting: false,
     cell: ({ row }) => {
       const grn = row.original;
       return (
-        <div className="flex items-center justify-end gap-1.5">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => onView(grn)}
-            className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
-            title="View"
+            className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+            title="View details"
           >
             <Eye size={15} />
           </button>
           {_canDelete && (
             <button
               onClick={() => handleDeleteGrn(String(grn.GRNID))}
-              className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
-              title="Delete"
+              className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+              title="Delete this GRN"
             >
               <Trash2 size={15} />
             </button>
@@ -2052,7 +2052,7 @@ export default function GRN() {
                   formData.docNo !== "" ||
                   formData.items.some((i) => i.receivedQty > 0 || i.rate > 0);
                 return (
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
                     <p className="text-[11px] text-muted-foreground hidden sm:block">
                       {canSave ? (
                         <span className="text-emerald-500 font-medium">
