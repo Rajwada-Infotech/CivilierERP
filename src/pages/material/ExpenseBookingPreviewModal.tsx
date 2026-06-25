@@ -31,7 +31,11 @@ import {
 } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { parseJsonArray } from "@/utils/parseJsonArray";
-import { computeBreakdown, fmt } from "@/pages/material/ExpenseBooking/helpers";
+import {
+  computeBreakdown,
+  fmt,
+  fmtQty,
+} from "@/pages/material/ExpenseBooking/helpers";
 import type { ExpenseRecord } from "@/pages/material/ExpenseBooking/types";
 
 interface GRNItemLine {
@@ -110,14 +114,21 @@ export function ExpenseBookingPreviewModal({
         const cgstRate = previewRecord.cgstRate ?? 0;
         const sgstRate = previewRecord.sgstRate ?? 0;
         const totalGstRate = cgstRate + sgstRate;
-        const base = totalGstRate > 0
-          ? Math.round((inclGST / (1 + totalGstRate / 100)) * 100) / 100
-          : inclGST;
-        const cgst = Math.round((base * cgstRate / 100) * 100) / 100;
-        const sgst = Math.round((base * sgstRate / 100) * 100) / 100;
+        const base =
+          totalGstRate > 0
+            ? Math.round((inclGST / (1 + totalGstRate / 100)) * 100) / 100
+            : inclGST;
+        const cgst = Math.round(((base * cgstRate) / 100) * 100) / 100;
+        const sgst = Math.round(((base * sgstRate) / 100) * 100) / 100;
         setGrnBreakdown({
           items: [],
-          totals: { totalBase: base, totalCGST: cgst, totalSGST: sgst, totalGST: cgst + sgst, totalInclGST: inclGST },
+          totals: {
+            totalBase: base,
+            totalCGST: cgst,
+            totalSGST: sgst,
+            totalGST: cgst + sgst,
+            totalInclGST: inclGST,
+          },
         });
       }
     };
@@ -127,10 +138,7 @@ export function ExpenseBookingPreviewModal({
     if (eSourceType === "GRN" && eSourceId) {
       // Direct GRN link — load its breakdown immediately.
       loadGrnBreakdown(eSourceId);
-    } else if (
-      (eSourceType === "PO" || eSourceType === "WO_PO") &&
-      eSourceId
-    ) {
+    } else if ((eSourceType === "PO" || eSourceType === "WO_PO") && eSourceId) {
       // PO-linked booking: find the GRN(s) created against this PO,
       // then load the most recent one's GST breakdown.
       // This is the authoritative source for GST because the PO itself
@@ -248,7 +256,6 @@ export function ExpenseBookingPreviewModal({
     }
 
     return Math.round(running);
-
   }, [grnBreakdown, billingTerms]);
 
   // ── Guard: nothing to render ───────────────────────────────────────────────
@@ -308,8 +315,11 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 1: Booking Info ── */}
           <div>
             <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-              <CalendarDays size={10} className="text-emerald-600 dark:text-emerald-400" /> Booking
-              Information
+              <CalendarDays
+                size={10}
+                className="text-emerald-600 dark:text-emerald-400"
+              />{" "}
+              Booking Information
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-4">
               <div className="space-y-0.5">
@@ -382,12 +392,19 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 2: Vendor / Supplier ── */}
           <div className="border-t border-border/60 pt-4">
             <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-              <Truck size={10} className="text-emerald-600 dark:text-emerald-400" /> Vendor / Supplier
+              <Truck
+                size={10}
+                className="text-emerald-600 dark:text-emerald-400"
+              />{" "}
+              Vendor / Supplier
             </p>
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="flex-1 flex items-center gap-3 bg-muted/30 border border-border rounded-xl px-4 py-3">
                 <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
-                  <User size={14} className="text-emerald-600 dark:text-emerald-400" />
+                  <User
+                    size={14}
+                    className="text-emerald-600 dark:text-emerald-400"
+                  />
                 </div>
                 <div className="min-w-0">
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
@@ -419,7 +436,11 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 3: Amount Breakdown ── */}
           <div className="border-t border-border/60 pt-4">
             <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-              <Banknote size={10} className="text-emerald-600 dark:text-emerald-400" /> Amount Breakdown
+              <Banknote
+                size={10}
+                className="text-emerald-600 dark:text-emerald-400"
+              />{" "}
+              Amount Breakdown
             </p>
 
             {/* ── GRN per-item breakdown (accurate) ── */}
@@ -467,7 +488,7 @@ export function ExpenseBookingPreviewModal({
                               {item.itemName || `Item ${idx + 1}`}
                             </td>
                             <td className="px-3 py-1.5 text-right font-mono text-foreground">
-                              {item.receivedQty}
+                              {fmtQty(item.receivedQty)}
                             </td>
                             <td className="px-3 py-1.5 text-right font-mono font-semibold text-foreground">
                               ₹{fmt(item.totalAmountInclGST)}
@@ -522,7 +543,6 @@ export function ExpenseBookingPreviewModal({
                   let taxableBase = origBase;
                   for (const t of preTerms) {
                     const a =
-
                       t.type === "percentage"
                         ? (taxableBase * (t.value ?? 0)) / 100
                         : (t.value ?? 0);
@@ -829,8 +849,11 @@ export function ExpenseBookingPreviewModal({
           {hasEmi && (
             <div className="border-t border-border/60 pt-4">
               <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                <CreditCard size={10} className="text-emerald-600 dark:text-emerald-400" /> EMI /
-                Installment Plan
+                <CreditCard
+                  size={10}
+                  className="text-emerald-600 dark:text-emerald-400"
+                />{" "}
+                EMI / Installment Plan
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-3 text-center">
@@ -879,7 +902,11 @@ export function ExpenseBookingPreviewModal({
             previewRecord.grnItems.length > 0 && (
               <div className="border-t border-border/60 pt-4">
                 <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                  <Truck size={10} className="text-emerald-600 dark:text-emerald-400" /> GRN Items Summary
+                  <Truck
+                    size={10}
+                    className="text-emerald-600 dark:text-emerald-400"
+                  />{" "}
+                  GRN Items Summary
                   <span className="ml-auto font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded-full border border-border">
                     {previewRecord.grnItems.length} items
                   </span>
@@ -917,7 +944,7 @@ export function ExpenseBookingPreviewModal({
                                 {item.orderedQty}
                               </td>
                               <td className="px-3 py-2.5 text-right font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
-                                {item.receivedQty}
+                                {fmtQty(item.receivedQty)}
                               </td>
                               <td className="px-3 py-2.5 text-right font-mono hidden sm:table-cell">
                                 <span
@@ -927,7 +954,7 @@ export function ExpenseBookingPreviewModal({
                                       : "text-muted-foreground"
                                   }
                                 >
-                                  {item.remainingQty}
+                                  {fmtQty(item.remainingQty)}
                                 </span>
                               </td>
                               <td className="px-3 py-2.5 text-muted-foreground hidden sm:table-cell">
@@ -952,8 +979,11 @@ export function ExpenseBookingPreviewModal({
               previewRecord.additionalCharges.length > 0)) && (
             <div className="border-t border-border/60 pt-4">
               <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                <FileText size={10} className="text-emerald-600 dark:text-emerald-400" /> Invoice &amp;
-                Allocation
+                <FileText
+                  size={10}
+                  className="text-emerald-600 dark:text-emerald-400"
+                />{" "}
+                Invoice &amp; Allocation
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
                 {previewRecord.vendorInvoiceNo && (
@@ -1051,7 +1081,11 @@ export function ExpenseBookingPreviewModal({
           {previewRecord.billStatus && (
             <div className="border-t border-border/60 pt-4">
               <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                <Wallet size={10} className="text-emerald-600 dark:text-emerald-400" /> Bill Status
+                <Wallet
+                  size={10}
+                  className="text-emerald-600 dark:text-emerald-400"
+                />{" "}
+                Bill Status
               </p>
               <div className="flex flex-wrap gap-3 mb-3">
                 <div
@@ -1109,7 +1143,11 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 7b: Traceability Chain ── */}
           <div className="border-t border-border/60 pt-4">
             <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-              <ArrowRight size={10} className="text-emerald-600 dark:text-emerald-400" /> Document Chain
+              <ArrowRight
+                size={10}
+                className="text-emerald-600 dark:text-emerald-400"
+              />{" "}
+              Document Chain
             </p>
             <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
               {previewRecord.workDoneRef && (
@@ -1195,7 +1233,11 @@ export function ExpenseBookingPreviewModal({
           {billingTerms.length > 0 && (
             <div className="border-t border-border/60 pt-4">
               <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                <Receipt size={10} className="text-emerald-600 dark:text-emerald-400" /> Billing Terms
+                <Receipt
+                  size={10}
+                  className="text-emerald-600 dark:text-emerald-400"
+                />{" "}
+                Billing Terms
               </p>
               <div className="bg-muted/20 border border-border rounded-xl px-4 py-3 text-sm text-foreground">
                 {billingTerms.length > 0 ? (
@@ -1244,7 +1286,11 @@ export function ExpenseBookingPreviewModal({
           {previewRecord.remarks && (
             <div className="border-t border-border/60 pt-4">
               <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                <StickyNote size={10} className="text-emerald-600 dark:text-emerald-400" /> Remarks
+                <StickyNote
+                  size={10}
+                  className="text-emerald-600 dark:text-emerald-400"
+                />{" "}
+                Remarks
               </p>
               <div className="bg-muted/20 border border-border rounded-xl px-4 py-3 text-sm text-foreground leading-relaxed">
                 {previewRecord.remarks}
@@ -1255,8 +1301,11 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 10: Approval Status ── */}
           <div className="border-t border-border/60 pt-4">
             <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-              <CheckCircle2 size={10} className="text-emerald-600 dark:text-emerald-400" /> Approval
-              Status
+              <CheckCircle2
+                size={10}
+                className="text-emerald-600 dark:text-emerald-400"
+              />{" "}
+              Approval Status
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-2 bg-muted/30 border border-border rounded-xl px-4 py-2.5">

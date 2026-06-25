@@ -2892,7 +2892,9 @@ const Payment: React.FC = () => {
                   undefined
                 }
                 logoBase64={selectedCompanyDetail?.logo || undefined}
-                disabled={!rights.canExport || isLoading || records.length === 0}
+                disabled={
+                  !rights.canExport || isLoading || records.length === 0
+                }
               />
               <button
                 onClick={() => refetchPayments()}
@@ -4515,6 +4517,9 @@ const Payment: React.FC = () => {
                                 exact: false,
                               });
                               refetchPayments();
+                              window.dispatchEvent(
+                                new CustomEvent("approval-action"),
+                              );
                             }}
                           />
                           <button
@@ -4701,6 +4706,9 @@ const Payment: React.FC = () => {
                                     exact: false,
                                   });
                                   refetchPayments();
+                                  window.dispatchEvent(
+                                    new CustomEvent("approval-action"),
+                                  );
                                 }}
                               />
                               <button

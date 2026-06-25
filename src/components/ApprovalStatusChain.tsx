@@ -26,7 +26,8 @@ export type ApprovalTable =
   | "StockTransfers"
   | "BOQ"
   | "WorkDone"
-  | "SaleOrders";
+  | "SaleOrders"
+  | "VehicleInOut";
 
 interface Approver {
   email: string | null;
