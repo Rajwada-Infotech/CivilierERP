@@ -41,8 +41,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
-  DocNumberPreview,
   fetchNextDocNumber,
+  fetchDocTypes,
+  type DocType,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { Badge } from "@/components/ui/badge";
@@ -240,6 +241,30 @@ export default function Issues() {
     },
     staleTime: 5 * 60_000,
   });
+
+  // ── ISS doc types (for the Issue No select) ──────────────────────────────
+  const [issDocTypes, setIssDocTypes] = useState<DocType[]>([]);
+  const [issDocTypesLoading, setIssDocTypesLoading] = useState(true);
+
+  // Load ISS doc types once on mount
+  useEffect(() => {
+    setIssDocTypesLoading(true);
+    fetchDocTypes("ISS")
+      .then((types) => setIssDocTypes(types))
+      .finally(() => setIssDocTypesLoading(false));
+  }, []);
+
+  // Auto-select the first ISS doc type & fetch preview once finYearStr is ready
+  // Also re-runs when docTypeId is cleared (e.g. after form reset)
+  useEffect(() => {
+    if (!finYearStr || issDocTypesLoading || issDocTypes.length === 0) return;
+    if (header.docTypeId) return; // already selected — don't overwrite
+    if (viewMode !== "form") return; // only run when form is open
+    const first = issDocTypes[0];
+    fetchNextDocNumber(first.TypeOfDocId, finYearStr).then((next) => {
+      setHeader((p) => ({ ...p, docTypeId: first.TypeOfDocId, docNoPreview: next }));
+    });
+  }, [finYearStr, issDocTypes, issDocTypesLoading, header.docTypeId, viewMode]);
 
   const { data: issuesData, isLoading: loadingIssues } = useQuery({
     queryKey: ["issues-list", page, search, issueStatusFilter],
@@ -678,23 +703,23 @@ export default function Issues() {
       id: "actions",
       header: "Actions",
       cell: ({ row }) => (
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => handleView(row.original)}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            title="View"
+            className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+            title="View details"
           >
-            <Eye size={14} />
+            <Eye size={15} />
           </button>
           {rights.canEdit && (
           <button
             type="button"
             onClick={() => handleEdit(row.original)}
-            className="p-1.5 rounded hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 transition-colors"
-            title="Edit"
+            className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
+            title="Edit this issue"
           >
-            <Edit3 size={14} />
+            <Edit3 size={15} />
           </button>
           )}
           {rights.canDelete && (
@@ -708,10 +733,10 @@ export default function Issues() {
               )
                 deleteMutation.mutate(row.original.IssueId);
             }}
-            className="p-1.5 rounded hover:bg-destructive/10 text-destructive transition-colors"
-            title="Delete"
+            className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+            title="Delete this issue"
           >
-            <Trash2 size={14} />
+            <Trash2 size={15} />
           </button>
           )}
         </div>
@@ -880,20 +905,47 @@ export default function Issues() {
                   {viewingRecord?.DocNo ?? "Immutable after creation"}
                 </span>
               ) : (
-                <div className="flex-1">
-                  <DocNumberPreview
-                    module="ISS"
-                    finYear={finYearStr}
-                    selectedDocTypeId={header.docTypeId}
-                    preview={header.docNoPreview}
-                    onSelect={(id, preview) =>
-                      setHeader((p) => ({
-                        ...p,
-                        docTypeId: id,
-                        docNoPreview: preview,
-                      }))
-                    }
-                  />
+                <div className="flex-1 flex items-center gap-3 min-w-0">
+                  <div className="relative flex-1">
+                    <select
+                      value={header.docTypeId ? String(header.docTypeId) : ""}
+                      onChange={async (e) => {
+                        const id = e.target.value ? parseInt(e.target.value, 10) : null;
+                        if (!id) { setH("docTypeId", null); setH("docNoPreview", ""); return; }
+                        const preview = await fetchNextDocNumber(id, finYearStr);
+                        setHeader((p) => ({ ...p, docTypeId: id, docNoPreview: preview }));
+                      }}
+                      disabled={issDocTypesLoading}
+                      className={selectCls}
+                    >
+                      {issDocTypesLoading ? (
+                        <option value="">Loading…</option>
+                      ) : issDocTypes.length === 0 ? (
+                        <option value="">No doc types found</option>
+                      ) : (
+                        issDocTypes.map((dt) => {
+                          const label =
+                            dt.ProjectCode && dt.ModuleCode
+                              ? `${dt.ProjectCode}-${dt.ModuleCode}`
+                              : (dt.DocNoPrefix ?? dt.FullPrefix ?? dt.Prefix);
+                          return (
+                            <option key={dt.TypeOfDocId} value={String(dt.TypeOfDocId)}>
+                              {label} — {dt.Description}
+                            </option>
+                          );
+                        })
+                      )}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                  {header.docNoPreview && (
+                    <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 tracking-wider whitespace-nowrap">
+                      {header.docNoPreview}
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -1393,7 +1445,7 @@ export default function Issues() {
         </Card>
 
         {/* ── Save bar ── */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
           <p className="text-[11px] text-muted-foreground hidden sm:block">
             {canSave ? <span className="text-emerald-500 font-medium">Ready to save</span> : !headerIsValid ? !header.godownId ? "Select a source godown" : "Fill in the required fields to save" : "Fix cart errors above"}
           </p>

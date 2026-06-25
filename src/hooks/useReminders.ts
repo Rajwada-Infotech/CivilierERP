@@ -138,27 +138,70 @@ export async function fetchCustomerReminders(): Promise<ReminderItem[]> {
   return [];
 }
 
+// Roles that bypass page-level gating entirely (mirrors backend
+// SUPERUSER_ROLES in middleware/permissions.js).
+const PRIVILEGED_REMINDER_ROLES = new Set(["super_admin", "admin", "dba"]);
+
+// Page keys (as stored in pagePermissions / RoleRights-derived rights) that
+// gate each reminder source. Kept in sync with the candidate page keys
+// middleware/permissions.js's getCandidatePageKeys() maps each module to.
+const REMINDER_PAGE_KEYS: Record<string, string[]> = {
+  purchase_order: ["purchase-orders"],
+  grn: ["grn-master", "grns"],
+  cheque: ["cheque-master"],
+  tds: ["tds-master"],
+  work_order: ["work-order", "engineering-work-order"],
+};
+
+function hasReminderAccess(
+  role: string | undefined,
+  pagePermissions: { page: string; actions: string[] }[] | undefined,
+  reminderType: keyof typeof REMINDER_PAGE_KEYS,
+): boolean {
+  if (role && PRIVILEGED_REMINDER_ROLES.has(role)) return true;
+  if (!Array.isArray(pagePermissions)) return false;
+  const candidates = REMINDER_PAGE_KEYS[reminderType];
+  return pagePermissions.some(
+    (p) =>
+      candidates.includes(String(p.page).toLowerCase()) &&
+      Array.isArray(p.actions) &&
+      p.actions.map((a) => String(a).toLowerCase()).includes("view"),
+  );
+}
+
 export async function fetchAllReminders(
   role?: string,
+  pagePermissions?: { page: string; actions: string[] }[],
 ): Promise<ReminderItem[]> {
   if (role === "customer") return fetchCustomerReminders();
+
+  // Only fetch the sources this user/role actually has view rights to —
+  // previously this called all five endpoints unconditionally for every
+  // role, which always 403'd (and logged console errors) for anyone whose
+  // role lacked, e.g., Work Order or GRN access, even though the bell is
+  // just a best-effort notification widget.
+  const maybeFetch = (url: string, type: keyof typeof REMINDER_PAGE_KEYS) =>
+    hasReminderAccess(role, pagePermissions, type)
+      ? fetchWithAuth(url)
+      : Promise.resolve(null);
+
   const [poRes, grnRes, chequeRes, tdsRes, woRes] = await Promise.allSettled([
-    fetchWithAuth("/api/purchase-orders"),
-    fetchWithAuth("/api/grns"),
-    fetchWithAuth("/api/cheque-master"),
-    fetchWithAuth("/api/tds-master"),
-    fetchWithAuth("/api/work-orders"),
+    maybeFetch("/api/purchase-orders", "purchase_order"),
+    maybeFetch("/api/grns", "grn"),
+    maybeFetch("/api/cheque-master", "cheque"),
+    maybeFetch("/api/tds-master", "tds"),
+    maybeFetch("/api/work-orders", "work_order"),
   ]);
 
   const items: ReminderItem[] = [];
   const process = async (
-    res: PromiseSettledResult<Response>,
+    res: PromiseSettledResult<Response | null>,
     type: ReminderType,
     idKey: string,
     titlePre: string,
     route: string,
   ) => {
-    if (res.status === "fulfilled" && res.value.ok) {
+    if (res.status === "fulfilled" && res.value && res.value.ok) {
       const raw = await res.value.json();
       const list = Array.isArray(raw) ? raw : (raw.data ?? []);
       list.forEach((obj: any) => {
@@ -267,7 +310,10 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
       if (isManual) setLoading(true);
 
       try {
-        const items = await fetchAllReminders(role);
+        const items = await fetchAllReminders(
+          role,
+          currentUser?.pagePermissions,
+        );
         setReminders([...items]);
         failCount.current = 0;
       } catch {
@@ -279,7 +325,7 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
         }, 600);
       }
     },
-    [isLocked, role],
+    [isLocked, role, currentUser?.pagePermissions],
   );
 
   useEffect(() => {

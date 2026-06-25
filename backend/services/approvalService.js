@@ -42,6 +42,11 @@ const MODULE_MAP = {
     pk: "SaleOrderID",
     status: "Status",
   },
+  "vehicle-in-out": {
+    table: "dbo.VehicleInOut",
+    pk: "VehicleInOutID",
+    status: "Status",
+  },
 };
 
 const MODULE_DOC_LINKS = {
@@ -113,6 +118,7 @@ const WORKFLOW_ID_MAP = {
   "material-requests": "MaterialRequests",
   "material-issues": "MaterialIssues",
   "sale-orders": "SaleOrder",
+  "vehicle-in-out": "VehicleInOut",
 };
 
 /**
