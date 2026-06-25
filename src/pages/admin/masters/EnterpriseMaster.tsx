@@ -26,6 +26,7 @@ import {
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
+import { usePageRights } from "@/hooks/usePageRights";
 
 const ENTITY_TYPES = ["Enterprise", "Company", "Business Unit"];
 const GST_TYPES = [
@@ -334,6 +335,7 @@ function buildEnterpriseColumns(
   openView: (r: Enterprise) => void,
   openEdit: (r: Enterprise) => void,
   setDeleteTarget: (id: number) => void,
+  rights: { canEdit: boolean; canDelete: boolean },
 ): ColumnDef<Enterprise, unknown>[] {
   return [
     {
@@ -431,20 +433,24 @@ function buildEnterpriseColumns(
           >
             <Eye size={13} />
           </button>
-          <button
-            onClick={() => openEdit(row.original)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
-            title="Edit"
-          >
-            <Pencil size={13} />
-          </button>
-          <button
-            onClick={() => setDeleteTarget(row.original.id)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-            title="Delete"
-          >
-            <Trash2 size={13} />
-          </button>
+          {rights.canEdit && (
+            <button
+              onClick={() => openEdit(row.original)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+              title="Edit"
+            >
+              <Pencil size={13} />
+            </button>
+          )}
+          {rights.canDelete && (
+            <button
+              onClick={() => setDeleteTarget(row.original.id)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              title="Delete"
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
         </div>
       ),
     },
@@ -453,6 +459,7 @@ function buildEnterpriseColumns(
 
 export default function EnterpriseMaster() {
   const queryClient = useQueryClient();
+  const rights = usePageRights("enterprise-master");
   const {
     data: rows = [],
     isLoading,
@@ -512,9 +519,10 @@ export default function EnterpriseMaster() {
         (r) => setViewTarget(r),
         openEdit,
         setDeleteTarget,
+        rights,
       ),
 
-    [],
+    [rights],
   );
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -662,7 +670,7 @@ export default function EnterpriseMaster() {
               </p>
             </div>
           </div>
-          {!showForm && (
+          {!showForm && rights.canCreate && (
             <button
               onClick={openNew}
               className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"

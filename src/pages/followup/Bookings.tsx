@@ -45,6 +45,7 @@ import {
   Check,
 } from "lucide-react";
 import { useLookup } from "@/hooks/useLookup";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface PaymentTerm {
@@ -1667,6 +1668,7 @@ const PAGE_SIZE = 20;
 
 export default function BookingsPage() {
   const queryClient = useQueryClient();
+  const rights = usePageRights("followup-bookings");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | undefined>(
     undefined,
@@ -1882,7 +1884,7 @@ export default function BookingsPage() {
             : "Get started by creating your first booking"}
         </p>
       </div>
-      {!hasFilters && (
+      {!hasFilters && rights.canCreate && (
         <button
           onClick={openNew}
           className="flex items-center gap-1.5 text-xs bg-primary text-primary-foreground rounded-xl px-4 py-2 hover:bg-primary/90 transition-colors font-semibold"
@@ -1925,13 +1927,15 @@ export default function BookingsPage() {
               />
               Refresh
             </button>
-            <Button
-              onClick={openNew}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-            >
-              <Plus size={13} />
-              New Booking
-            </Button>
+            {rights.canCreate && (
+              <Button
+                onClick={openNew}
+                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+              >
+                <Plus size={13} />
+                New Booking
+              </Button>
+            )}
           </div>
         </div>
 

@@ -32,6 +32,7 @@ import {
 import { toast } from "sonner";
 import { Plug, Plus, Pencil, PowerOff, Search, Radio } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ const EMPTY_FORM = {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function IntegrationChannelsAdmin() {
+  const rights = usePageRights("integration-channels");
   const [channels, setChannels] = useState<IntegrationChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -229,10 +231,12 @@ export default function IntegrationChannelsAdmin() {
             </p>
           </div>
         </div>
-        <Button onClick={openAdd} className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto">
-          <Plus className="h-4 w-4" />
-          Add Channel
-        </Button>
+        {rights.canCreate && (
+          <Button onClick={openAdd} className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto">
+            <Plus className="h-4 w-4" />
+            Add Channel
+          </Button>
+        )}
       </div>
 
       {/* Stats strip */}
@@ -307,15 +311,17 @@ export default function IntegrationChannelsAdmin() {
                     </td>
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => openEdit(ch)}
-                          className="gap-1.5"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                          Edit
-                        </Button>
+                        {rights.canEdit && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => openEdit(ch)}
+                            className="gap-1.5"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Edit
+                          </Button>
+                        )}
                         <Switch
                           checked={ch.IsActive}
                           onCheckedChange={() => handleToggle(ch)}

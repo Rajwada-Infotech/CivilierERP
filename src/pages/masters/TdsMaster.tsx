@@ -1,5 +1,6 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import React from "react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { FileText } from "lucide-react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -54,6 +55,7 @@ const toPayload = (r: Record<string, unknown>) => ({
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const TdsMaster: React.FC = () => {
+  const rights = usePageRights("tds-master");
   const queryClient = useQueryClient();
   const { theme } = useTheme();
   const isDark = theme !== "light";
@@ -186,7 +188,7 @@ const TdsMaster: React.FC = () => {
           columnRenderers={columnRenderers}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
-          exportConfig={{
+          exportConfig={rights.canExport ? {
             title: "TDS Master",
             filename: "tds-master",
             columns: [
@@ -195,7 +197,7 @@ const TdsMaster: React.FC = () => {
               { header: "Rate (%)", accessor: "percentage" },
               { header: "Status",   accessor: "status" },
             ],
-          }}
+          } : undefined}
         />
       </FinanceShell>
     </>

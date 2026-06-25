@@ -10,6 +10,7 @@ import {
   deleteRecord,
 } from "@/api/accountHeadApi";
 import { getAccountGroups } from "@/api/accountApi";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   DataTable,
@@ -240,6 +241,9 @@ function buildSupplierColumns(
   deleteMut: { mutate: (id: number) => void },
   onView: (s: Supplier) => void,
   onPrint: (s: Supplier) => void,
+  canEdit: boolean,
+  canDelete: boolean,
+  canPrint: boolean,
 ): ColumnDef<Supplier, unknown>[] {
   return [
     {
@@ -329,27 +333,33 @@ function buildSupplierColumns(
             >
               <Eye size={15} />
             </button>
-            <button
-              onClick={() => onPrint(row.original)}
-              className="p-1 rounded text-amber-500 hover:bg-amber-500/10 transition-colors"
-              title="Print"
-            >
-              <Printer size={15} />
-            </button>
-            <button
-              onClick={() => startEdit(row.original)}
-              className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
-              title="Edit"
-            >
-              <Pencil size={15} />
-            </button>
-            <button
-              onClick={() => setDeleteConfirm(id)}
-              className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
-              title="Delete"
-            >
-              <Trash2 size={15} />
-            </button>
+            {canPrint && (
+              <button
+                onClick={() => onPrint(row.original)}
+                className="p-1 rounded text-amber-500 hover:bg-amber-500/10 transition-colors"
+                title="Print"
+              >
+                <Printer size={15} />
+              </button>
+            )}
+            {canEdit && (
+              <button
+                onClick={() => startEdit(row.original)}
+                className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
+                title="Edit"
+              >
+                <Pencil size={15} />
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={() => setDeleteConfirm(id)}
+                className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                title="Delete"
+              >
+                <Trash2 size={15} />
+              </button>
+            )}
           </div>
         );
       },
@@ -362,6 +372,7 @@ const SupplierMaster: React.FC = () => {
   const qc = useQueryClient();
   const { theme } = useTheme();
   const isDark = theme !== "light";
+  const rights = usePageRights("supplier-master");
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<SupplierForm>(EMPTY_FORM);

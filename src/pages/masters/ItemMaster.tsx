@@ -29,6 +29,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { getItemGroups } from "@/api/itemGroupApi";
 import { getUomList } from "@/api/uomApi";
 import { getHsn } from "@/api/hsnApi";
+import { usePageRights } from "@/hooks/usePageRights";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import {
   Dialog,
@@ -308,6 +309,7 @@ const inputCls = (err?: boolean) =>
 // ── Main Component ────────────────────────────────────────────────────────────
 const ItemMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const rights = usePageRights("item-master");
 
   // ── Queries ──────────────────────────────────────────────────────────────
   const {
@@ -859,27 +861,33 @@ const ItemMaster: React.FC = () => {
                 >
                   <Eye size={15} />
                 </button>
-                <button
-                  title="Print"
-                  onClick={() => handleItemPrint(row.original)}
-                  className="p-1 rounded hover:bg-amber-500/10 text-amber-500 transition-colors"
-                >
-                  <Printer size={15} />
-                </button>
-                <button
-                  title="Edit"
-                  onClick={() => handleEdit(id)}
-                  className="p-1 rounded hover:bg-primary/10 text-primary transition-colors"
-                >
-                  <Edit2 size={15} />
-                </button>
-                <button
-                  title="Delete"
-                  onClick={() => setDeleteConfirmId(id)}
-                  className="p-1 rounded hover:bg-destructive/10 text-destructive transition-colors"
-                >
-                  <Trash2 size={15} />
-                </button>
+                {rights.canPrint && (
+                  <button
+                    title="Print"
+                    onClick={() => handleItemPrint(row.original)}
+                    className="p-1 rounded hover:bg-amber-500/10 text-amber-500 transition-colors"
+                  >
+                    <Printer size={15} />
+                  </button>
+                )}
+                {rights.canEdit && (
+                  <button
+                    title="Edit"
+                    onClick={() => handleEdit(id)}
+                    className="p-1 rounded hover:bg-primary/10 text-primary transition-colors"
+                  >
+                    <Edit2 size={15} />
+                  </button>
+                )}
+                {rights.canDelete && (
+                  <button
+                    title="Delete"
+                    onClick={() => setDeleteConfirmId(id)}
+                    className="p-1 rounded hover:bg-destructive/10 text-destructive transition-colors"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -945,6 +953,7 @@ const ItemMaster: React.FC = () => {
         }
       >
         {/* ── Form ── */}
+        {rights.canCreate && (
         <div className="rounded-xl border border-border bg-card p-6 mb-6">
           <h2 className="text-base font-heading font-semibold mb-4">
             {editingId ? "Edit Item" : "Add Item"}
@@ -1146,6 +1155,7 @@ const ItemMaster: React.FC = () => {
             </div>
           </div>
         </div>
+        )}
 
         {/* ── Table ── */}
         <div className="rounded-xl border border-border bg-card p-4">

@@ -48,6 +48,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { useFinYear } from "@/contexts/FinYearContext";
 import {
   createWorkOrder,
@@ -1577,8 +1578,7 @@ const WorkOrderDetailPanel: React.FC<{
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [creatingMaterialPO, setCreatingMaterialPO] = useState(false);
-  const { currentUser } = useAuth();
-  const canDeleteRecords = currentUser?.role !== "engineer";
+  const rights = usePageRights("work-order");
 
   const { status: chainStatus } = useWOChainStatus(workOrderId ?? null);
 
@@ -1712,7 +1712,7 @@ const WorkOrderDetailPanel: React.FC<{
           <span>All Work Orders</span>
         </button>
         <div className="flex items-center gap-2">
-          {confirmDelete && canDeleteRecords ? (
+          {confirmDelete && rights.canDelete ? (
             <>
               <span className="text-xs text-red-500 font-medium">
                 Delete this work order?
@@ -1770,7 +1770,7 @@ const WorkOrderDetailPanel: React.FC<{
                   Create Material PO
                 </button>
               )}
-              {canDeleteRecords && (
+              {rights.canDelete && (
                 <button
                   onClick={() => setConfirmDelete(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-800 text-red-500 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
@@ -3852,6 +3852,7 @@ type ViewMode = "create" | "list" | "detail" | "edit";
 
 const WorkOrderMaster: React.FC = () => {
   const { currentUser } = useAuth();
+  const woRights = usePageRights("work-order");
   const { finYears } = useFinYear();
   const { data: hsnData } = useQuery({
     queryKey: ["hsn"],
@@ -4296,17 +4297,19 @@ const WorkOrderMaster: React.FC = () => {
           <div className="flex items-center gap-2 shrink-0">
             {/* Tab toggle */}
             <div className="flex items-center rounded-lg border border-border bg-muted/30 p-0.5">
-              <button
-                onClick={() => setViewMode("create")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                  viewMode === "create"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <PenSquare size={13} />
-                <span className="hidden sm:inline">Create</span>
-              </button>
+              {woRights.canCreate && (
+                <button
+                  onClick={() => setViewMode("create")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                    viewMode === "create"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <PenSquare size={13} />
+                  <span className="hidden sm:inline">Create</span>
+                </button>
+              )}
               <button
                 onClick={() => setViewMode("list")}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
@@ -4397,7 +4400,7 @@ const WorkOrderMaster: React.FC = () => {
         )}
 
         {/* ── CREATE FORM ── */}
-        {viewMode === "create" && (
+        {viewMode === "create" && woRights.canCreate && (
           <>
             {dropdownError && (
               <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 px-4 py-3">

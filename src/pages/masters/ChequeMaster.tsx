@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -120,6 +121,9 @@ function buildChequeColumns(
   handleDelete: (id: string) => void,
   onView: (item: DbCheque) => void,
   onPrint: (item: DbCheque) => void,
+  canEdit: boolean,
+  canDelete: boolean,
+  canPrint: boolean,
 ): ColumnDef<DbCheque, unknown>[] {
   return [
     {
@@ -218,25 +222,31 @@ function buildChequeColumns(
             >
               <Eye size={13} />
             </button>
-            <button
-              onClick={() => onPrint(row.original)}
-              className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
-              title="Print"
-            >
-              <Printer size={13} />
-            </button>
-            <button
-              onClick={() => handleEdit(row.original)}
-              className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10"
-            >
-              <Edit2 size={13} />
-            </button>
-            <button
-              onClick={() => setDeleteId(id)}
-              className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10"
-            >
-              <Trash2 size={13} />
-            </button>
+            {canPrint && (
+              <button
+                onClick={() => onPrint(row.original)}
+                className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
+                title="Print"
+              >
+                <Printer size={13} />
+              </button>
+            )}
+            {canEdit && (
+              <button
+                onClick={() => handleEdit(row.original)}
+                className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10"
+              >
+                <Edit2 size={13} />
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={() => setDeleteId(id)}
+                className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
           </div>
         );
       },
@@ -247,6 +257,7 @@ function buildChequeColumns(
 // ─── Component ────────────────────────────────────────────────────────────────
 const ChequeMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const rights = usePageRights("cheque-master");
   const { theme } = useTheme();
   const isDark = theme !== "light";
 
@@ -576,9 +587,12 @@ const ChequeMaster: React.FC = () => {
         handleDelete,
         setViewRow,
         handlePrint,
+        rights.canEdit,
+        rights.canDelete,
+        rights.canPrint,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editingId, deleteId, dbBanks],
+    [editingId, deleteId, dbBanks, rights.canEdit, rights.canDelete, rights.canPrint],
   );
 
   // Auto-recalculate total
@@ -665,6 +679,7 @@ const ChequeMaster: React.FC = () => {
         }
       >
         {/* Form */}
+        {rights.canCreate && (
         <div
           className="rounded-xl overflow-hidden"
           style={{
@@ -1070,6 +1085,7 @@ const ChequeMaster: React.FC = () => {
             </div>
           </div>
         </div>
+        )}
 
         {/* Table */}
         <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">

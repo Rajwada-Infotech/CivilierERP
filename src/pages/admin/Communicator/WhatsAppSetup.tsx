@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { MessageCircle, Save, Loader2 } from "lucide-react";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ─── Config shape stored in dbo.CommunicatorConfig.ConfigJson ─────────────────
 interface WhatsAppConfig {
@@ -34,6 +35,7 @@ const EMPTY: WhatsAppConfig = {
 
 export default function WhatsAppSetup() {
   const qc = useQueryClient();
+  const rights = usePageRights("whatsapp-setup");
   const [form, setForm] = useState<WhatsAppConfig>(EMPTY);
 
   const { data, isLoading } = useQuery<WhatsAppConfig>({
@@ -153,20 +155,22 @@ export default function WhatsAppSetup() {
                 />
               </div>
 
-              <div className="flex justify-end">
-                <Button
-                  onClick={() => saveMutation.mutate()}
-                  disabled={saveMutation.isPending}
-                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-                >
-                  {saveMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="h-4 w-4" />
-                  )}
-                  Save Configuration
-                </Button>
-              </div>
+              {rights.canEdit && (
+                <div className="flex justify-end">
+                  <Button
+                    onClick={() => saveMutation.mutate()}
+                    disabled={saveMutation.isPending}
+                    className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                  >
+                    {saveMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
+                    Save Configuration
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </CardContent>

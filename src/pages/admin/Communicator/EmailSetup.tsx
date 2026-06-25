@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Mail, Save, Loader2 } from "lucide-react";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ─── Config shape stored in dbo.CommunicatorConfig.ConfigJson ─────────────────
 interface EmailConfig {
@@ -40,6 +41,7 @@ const EMPTY: EmailConfig = {
 
 export default function EmailSetup() {
   const qc = useQueryClient();
+  const rights = usePageRights("email-setup");
   const [form, setForm] = useState<EmailConfig>(EMPTY);
 
   const { data, isLoading } = useQuery<EmailConfig>({
@@ -188,20 +190,22 @@ export default function EmailSetup() {
                 />
               </div>
 
-              <div className="flex justify-end">
-                <Button
-                  onClick={() => saveMutation.mutate()}
-                  disabled={saveMutation.isPending}
-                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-                >
-                  {saveMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="h-4 w-4" />
-                  )}
-                  Save Configuration
-                </Button>
-              </div>
+              {rights.canEdit && (
+                <div className="flex justify-end">
+                  <Button
+                    onClick={() => saveMutation.mutate()}
+                    disabled={saveMutation.isPending}
+                    className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                  >
+                    {saveMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
+                    Save Configuration
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </CardContent>

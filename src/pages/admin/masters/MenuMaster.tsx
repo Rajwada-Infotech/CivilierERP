@@ -39,10 +39,12 @@ import {
   deleteMenuMaster,
   type MenuMaster,
 } from "@/api/menuMasterApi";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const MenuMasterPage: React.FC = () => {
+  const rights = usePageRights("menu-master");
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
@@ -180,10 +182,12 @@ const MenuMasterPage: React.FC = () => {
             className="pl-8 h-8 text-sm"
           />
         </div>
-        <Button onClick={openCreate} size="sm" className="gap-1.5">
-          <Plus size={15} />
-          New Menu Entry
-        </Button>
+        {rights.canCreate && (
+          <Button onClick={openCreate} size="sm" className="gap-1.5">
+            <Plus size={15} />
+            New Menu Entry
+          </Button>
+        )}
       </div>
 
       {/* Table */}
@@ -224,22 +228,26 @@ const MenuMasterPage: React.FC = () => {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => openEdit(row)}
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                      >
-                        <Pencil size={13} />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => setDeleteId(row.Id)}
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 size={13} />
-                      </Button>
+                      {rights.canEdit && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => openEdit(row)}
+                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        >
+                          <Pencil size={13} />
+                        </Button>
+                      )}
+                      {rights.canDelete && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setDeleteId(row.Id)}
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        >
+                          <Trash2 size={13} />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -250,7 +258,7 @@ const MenuMasterPage: React.FC = () => {
       </div>
 
       {/* Create / Edit Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={(v) => !v && closeDialog()}>
+      {(rights.canCreate || rights.canEdit) && <Dialog open={dialogOpen} onOpenChange={(v) => !v && closeDialog()}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center gap-2">
@@ -299,7 +307,7 @@ const MenuMasterPage: React.FC = () => {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog>}
 
       {/* Delete Confirm */}
       <AlertDialog open={deleteId !== null} onOpenChange={(v) => !v && setDeleteId(null)}>

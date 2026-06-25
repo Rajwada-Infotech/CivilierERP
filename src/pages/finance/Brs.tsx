@@ -33,6 +33,7 @@ import {
   type BrsEntry,
   type BrsFilterOption,
 } from "@/api/brsApi";
+import { usePageRights } from "@/hooks/usePageRights";
 import {
   CheckCircle2,
   Landmark,
@@ -217,6 +218,7 @@ function PassbookCheck({
 const PAGE_SIZE = 25;
 
 export default function Brs() {
+  const rights = usePageRights("brs");
   // ── Filter state ──────────────────────────────────────────────────────────
   const [allBanks, setAllBanks] = useState<BrsFilterOption[]>([]);
   const [bankId, setBankId] = useState<string | undefined>(undefined);
@@ -414,7 +416,7 @@ export default function Brs() {
                   .filter(Boolean)
                   .join(" · ") || undefined
               }
-              disabled={loading || entries.length === 0}
+              disabled={loading || entries.length === 0 || !rights.canExport}
             />
             <button
               onClick={fetchData}
