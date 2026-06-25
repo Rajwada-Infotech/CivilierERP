@@ -82,6 +82,7 @@ interface IssueHeader {
   docNoPreview: string;
   issuedTo: string;
   costCenter: string;
+  purpose: string;
 }
 
 const defaultHeader: IssueHeader = {
@@ -96,6 +97,7 @@ const defaultHeader: IssueHeader = {
   docNoPreview: "",
   issuedTo: "",
   costCenter: "",
+  purpose: "",
 };
 
 const blankCartItem = (): CartItem => ({
@@ -515,6 +517,7 @@ export default function Issues() {
       docNoPreview: "",
       issuedTo: record.IssuedTo ?? "",
       costCenter: record.CostCenter ?? "",
+      purpose: record.Purpose ?? "",
     });
     const items: CartItem[] = (record.items || []).map((it: any) => ({
       _key: generateUUID(),
@@ -561,6 +564,7 @@ export default function Issues() {
       DocTypeId: header.docTypeId || null,
       IssuedTo: header.issuedTo || null,
       CostCenter: header.costCenter || null,
+      Purpose: header.purpose || null,
       items: cart
         .filter((ci) => ci.ItemId && ci.ItemId.trim() !== "")
         .map((ci) => ({
@@ -1084,6 +1088,15 @@ export default function Issues() {
                   onChange={(e) => setH("costCenter", e.target.value)}
                   className="h-9 text-sm"
                   placeholder="Cost centre or GL code…"
+                />
+              </Field>
+
+              <Field label="Purpose">
+                <Input
+                  value={header.purpose}
+                  onChange={(e) => setH("purpose", e.target.value)}
+                  className="h-9 text-sm"
+                  placeholder="Purpose of this material issue…"
                 />
               </Field>
             </div>
