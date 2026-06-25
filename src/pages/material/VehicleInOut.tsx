@@ -1492,6 +1492,8 @@ export default function VehicleInOut() {
           </CardContent>
         </Card>
 
+      </MaterialShell>
+
         {/* ═══════════════════════════════════════════════════════════════════ */}
         {/* VIEW MODAL                                                          */}
         {/* ═══════════════════════════════════════════════════════════════════ */}
@@ -1691,7 +1693,6 @@ export default function VehicleInOut() {
             </div>
           </div>
         )}
-      </MaterialShell>
 
       {/* ── Camera capture modal ── */}
       {showCamera && (

@@ -684,8 +684,8 @@ const SupplierMaster: React.FC = () => {
 
   const isDirty = Object.keys(form).some(
     (k) =>
-      String((form as Record<string, unknown>)[k] ?? "") !==
-      String((EMPTY_FORM as Record<string, unknown>)[k] ?? ""),
+      String((form as any)[k] ?? "") !==
+      String((EMPTY_FORM as any)[k] ?? ""),
   );
   const canSave =
     form.LHeadName.trim() !== "" &&
@@ -781,9 +781,12 @@ const SupplierMaster: React.FC = () => {
         deleteMut,
         setViewRecord,
         handlePrint,
+        rights.canEdit,
+        rights.canDelete,
+        rights.canPrint,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editingId, deleteConfirm],
+    [editingId, deleteConfirm, rights.canEdit, rights.canDelete, rights.canPrint],
   );
 
   // ── Filtered + sorted list ─────────────────────────────────────────────────
@@ -879,7 +882,7 @@ const SupplierMaster: React.FC = () => {
       >
         {/* ── Form Card ── */}
         <div
-          className="rounded-xl overflow-hidden"
+          className="rounded-xl overflow-visible"
           style={{
             background: isDark
               ? "rgba(12,14,22,0.55)"
@@ -896,7 +899,7 @@ const SupplierMaster: React.FC = () => {
         >
           {/* Card header — title only */}
           <div
-            className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
+            className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden rounded-t-xl"
             style={{
               background: isDark
                 ? "rgba(99,102,241,0.09)"
@@ -1110,7 +1113,7 @@ const SupplierMaster: React.FC = () => {
                 {/* PAN */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    PAN Number <span className="text-destructive">*</span>
+                    PAN <span className="text-destructive">*</span>
                   </label>
                   <input
                     value={form.LHeadPan}
@@ -1223,7 +1226,7 @@ const SupplierMaster: React.FC = () => {
           </div>
 
           {/* Card footer — actions */}
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl">
             <p className="text-[11px] text-muted-foreground hidden sm:block">
               {canSave ? (
                 <span className="text-emerald-500 font-medium">
