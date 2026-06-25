@@ -17,7 +17,7 @@ export interface ReceivedPaymentRecord {
   RPMode: string;
   RPAmount: number;
   RPBankName: string | null;
-  RPTransactionId: string | null;
+  RPTransactionID: string | null;
   RPCheckNumber: string | null;
   RPRemarks: string | null;
   RPIsEmi: boolean;

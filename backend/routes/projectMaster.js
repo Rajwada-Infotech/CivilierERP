@@ -41,10 +41,10 @@ router.get("/", async (req, res) => {
         -- company FK
         p.company_id            AS CompanyId,
         c.name                  AS CompanyName,
-        c.b_sub_identity_type   AS CompanyGST,
-        c.gst_issue_date        AS CompanyGSTDate,
-        c.pan                   AS CompanyPAN,
-        c.tan                   AS CompanyTAN,
+        c.gst_no                  AS CompanyGST,
+        c.gst_issue_date          AS CompanyGSTDate,
+        c.pan_no                  AS CompanyPAN,
+        c.tan                     AS CompanyTAN,
         c.trade_license         AS CompanyTradeLicenseNo,
         -- jv
         ISNULL(p.jv_enabled, 0) AS JvEnabled,
@@ -72,9 +72,9 @@ router.get("/company/:id", async (req, res) => {
         SELECT
           id                  AS Id,
           name                AS Name,
-          b_sub_identity_type AS GST,
+          gst_no              AS GST,
           gst_issue_date      AS GSTDate,
-          pan                 AS PAN,
+          pan_no              AS PAN,
           tan                 AS TAN,
           trade_license       AS TradeLicenseNo
         FROM dbo.enterprise

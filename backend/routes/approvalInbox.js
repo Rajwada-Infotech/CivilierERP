@@ -309,6 +309,30 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "vehicle-in-out") {
+      queries.push(`
+        SELECT
+          'vehicle-in-out'                       AS Module,
+          'Vehicle In/Out'                       AS ModuleLabel,
+          CAST(v.VehicleInOutID AS NVARCHAR)     AS RecordId,
+          ISNULL(v.DocNo, CONCAT('VEH#', CAST(v.VehicleInOutID AS NVARCHAR))) AS Reference,
+          v.DocDate                              AS RecordDate,
+          v.Status,
+          CAST(NULL AS NVARCHAR)                 AS ContractorName,
+          ISNULL(v.SupplierName, v.VehicleNo)    AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))            AS Amount,
+          ${NULL_EXTRA}
+          CAST(v.CreatedBy AS NVARCHAR(255))     AS CreatedBy,
+          ''                                     AS ApprovedBy,
+          ''                                     AS ApprovedAt,
+          ''                                     AS RejectedBy,
+          ''                                     AS RejectionNote,
+          v.UpdatedAt                            AS LastModified
+        FROM dbo.VehicleInOut v
+        WHERE v.Status = 'Pending'
+      `);
+    }
+
     if (!module || module === "material-issues") {
       queries.push(`
         SELECT
@@ -429,7 +453,8 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.BOQ                WHERE ISNULL(Status,'Draft') = 'Pending') +
         (SELECT COUNT(*) FROM dbo.MaterialRequests   WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.MaterialIssues     WHERE ISNULL(Status,'Pending') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.SaleOrders         WHERE Status = 'Pending')
+        (SELECT COUNT(*) FROM dbo.SaleOrders         WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.VehicleInOut       WHERE Status = 'Pending')
       AS TotalPending
     `);
     res.json({ count: result.recordset[0].TotalPending ?? 0 });

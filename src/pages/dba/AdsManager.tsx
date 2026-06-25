@@ -217,6 +217,7 @@ export default function AdsManager() {
     contactName: "",
     contactEmail: "",
     contactPhone: "",
+    creativeType: "Banner",
   });
 
   const totalRevenue = ads.reduce((s, a) => s + Math.round(a.spent * 0.4), 0);
@@ -270,6 +271,8 @@ export default function AdsManager() {
         start_date: form.startDate,
         end_date: form.endDate,
         category: form.category,
+        contact_email: form.contactEmail || null,
+        creative_type: form.creativeType || null,
       },
       {
         onSuccess: () =>
@@ -291,6 +294,7 @@ export default function AdsManager() {
       contactName: "",
       contactEmail: "",
       contactPhone: "",
+      creativeType: "Banner",
     });
   };
 
@@ -1182,6 +1186,30 @@ export default function AdsManager() {
                     setForm((f) => ({ ...f, endDate: e.target.value }))
                   }
                 />
+              </div>
+            </div>
+
+            <div className="border-t pt-2 space-y-2">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+                Creative
+              </p>
+              <div className="space-y-1">
+                <Label className="text-xs">Creative Type *</Label>
+                <select
+                  className="w-full text-xs h-8 rounded-md border border-input bg-background px-3"
+                  value={form.creativeType}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, creativeType: e.target.value }))
+                  }
+                >
+                  {["Banner", "Video", "Carousel", "Text", "Native"].map(
+                    (t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ),
+                  )}
+                </select>
               </div>
             </div>
 

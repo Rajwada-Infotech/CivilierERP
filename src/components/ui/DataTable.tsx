@@ -176,7 +176,7 @@ export function DataTable<TData extends RowData>({
 
       {/* ── Table ── */}
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full min-w-max text-sm">
           <thead>
             <tr className="border-b border-border bg-muted/30">
               {table.getHeaderGroups().map((hg) =>
@@ -257,7 +257,7 @@ export function DataTable<TData extends RowData>({
                   {row.getVisibleCells().map((cell) => (
                     <td
                       key={cell.id}
-                      className="px-4 py-3 text-foreground text-sm"
+                      className="px-4 py-3 text-foreground text-sm whitespace-nowrap"
                     >
                       {flexRender(
                         cell.column.columnDef.cell,

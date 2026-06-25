@@ -25,7 +25,6 @@ import {
   Send,
   ShoppingCart,
   Package,
-  ExternalLink,
   ArrowLeft,
   RotateCcw,
   Check,
@@ -107,7 +106,8 @@ const PRIORITY_OPTIONS = ["Low", "Normal", "High", "Urgent"];
 
 const PRIORITY_COLOR: Record<string, string> = {
   Low: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
-  Normal: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+  Normal:
+    "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
   High: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
   Urgent: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
 };
@@ -500,15 +500,6 @@ export default function MaterialRequest() {
     setViewMode("view");
   };
 
-  const handleCreatePO = async (record: any) => {
-    try {
-      const prefill = await mrApi.getMRPOPrefill(record.MRId);
-      navigate("/material/purchase-order", { state: { mrPrefill: prefill } });
-    } catch (err: any) {
-      toast.error(err.message || "Failed to load MR data for PO creation");
-    }
-  };
-
   const onSave = () => {
     if (!canSave) {
       if (!headerIsValid) toast.error("Fill all required header fields");
@@ -572,8 +563,9 @@ export default function MaterialRequest() {
       id: "CompanyName",
       accessorKey: "CompanyName",
       header: "Company",
+      size: 160,
       cell: ({ getValue }) => (
-        <div className="flex items-center gap-1.5 text-sm">
+        <div className="flex items-center gap-1.5 text-sm whitespace-nowrap">
           <Building2 size={12} className="text-muted-foreground shrink-0" />
           {String(getValue() || "—")}
         </div>
@@ -583,8 +575,9 @@ export default function MaterialRequest() {
       id: "ProjectName",
       accessorKey: "ProjectName",
       header: "Project",
+      size: 160,
       cell: ({ getValue }) => (
-        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-sm text-muted-foreground whitespace-nowrap">
           <FolderOpen size={12} className="shrink-0" />
           {String(getValue() || "—")}
         </div>
@@ -594,8 +587,9 @@ export default function MaterialRequest() {
       id: "ItemCount",
       accessorKey: "ItemCount",
       header: "Items",
+      size: 140,
       cell: ({ row }) => (
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 whitespace-nowrap">
           <ShoppingCart size={12} className="text-muted-foreground" />
           <span className="font-semibold text-sm">
             {row.original.ItemCount || 0}
@@ -653,15 +647,15 @@ export default function MaterialRequest() {
         const status = row.original.Status as string;
         const isDeleting = deleteMutation.isPending;
         return (
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             {/* View — always visible */}
             <button
               type="button"
               onClick={() => handleView(row.original)}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 text-foreground transition-colors border border-border"
+              className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
               title="View details"
             >
-              <Eye size={12} /> View
+              <Eye size={15} />
             </button>
 
             {/* Update — Draft only */}
@@ -669,38 +663,26 @@ export default function MaterialRequest() {
               <button
                 type="button"
                 onClick={() => handleEdit(row.original)}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-colors border border-emerald-500/20"
+                className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
                 title="Edit this request"
               >
-                <Edit3 size={12} /> Update
+                <Edit3 size={15} />
               </button>
             )}
 
-            {/* Delete — always visible */}
+            {/* Delete */}
             {rights.canDelete && (
-            <button
-              type="button"
-              disabled={isDeleting}
-              onClick={() => {
-                if (confirm("Delete this material request?"))
-                  deleteMutation.mutate(row.original.MRId);
-              }}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-destructive/10 hover:bg-destructive/20 text-destructive transition-colors border border-destructive/20 disabled:opacity-50"
-              title="Delete this request"
-            >
-              <Trash2 size={12} /> Delete
-            </button>
-            )}
-
-            {/* Create PO — Approved only */}
-            {rights.canCreate && status === "Approved" && (
               <button
                 type="button"
-                onClick={() => handleCreatePO(row.original)}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-colors border border-emerald-500/20"
-                title="Create PO from this MR"
+                disabled={isDeleting}
+                onClick={() => {
+                  if (confirm("Delete this material request?"))
+                    deleteMutation.mutate(row.original.MRId);
+                }}
+                className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+                title="Delete this request"
               >
-                <ExternalLink size={12} /> Create PO
+                <Trash2 size={15} />
               </button>
             )}
           </div>
@@ -870,31 +852,52 @@ export default function MaterialRequest() {
                   <select
                     value={header.docTypeId ? String(header.docTypeId) : ""}
                     onChange={async (e) => {
-                      const id = e.target.value ? parseInt(e.target.value, 10) : null;
-                      if (!id) { setHeader((p) => ({ ...p, docTypeId: null, docNoPreview: "" })); return; }
+                      const id = e.target.value
+                        ? parseInt(e.target.value, 10)
+                        : null;
+                      if (!id) {
+                        setHeader((p) => ({
+                          ...p,
+                          docTypeId: null,
+                          docNoPreview: "",
+                        }));
+                        return;
+                      }
                       const preview = await fetchNextDocNumber(id, finYearStr);
-                      setHeader((p) => ({ ...p, docTypeId: id, docNoPreview: preview }));
+                      setHeader((p) => ({
+                        ...p,
+                        docTypeId: id,
+                        docNoPreview: preview,
+                      }));
                     }}
                     disabled={mrDocTypesLoading}
                     className={selectCls}
                   >
-                    {mrDocTypesLoading
-                      ? <option value="">Loading…</option>
-                      : mrDocTypes.length === 0
-                        ? <option value="">No doc types found</option>
-                        : mrDocTypes.map((dt) => {
-                            const label = (dt.ProjectCode && dt.ModuleCode)
-                              ? `${dt.ProjectCode}-${dt.ModuleCode}`
-                              : dt.DocNoPrefix ?? dt.FullPrefix ?? dt.Prefix;
-                            return (
-                              <option key={dt.TypeOfDocId} value={String(dt.TypeOfDocId)}>
-                                {label} — {dt.Description}
-                              </option>
-                            );
-                          })
-                    }
+                    {mrDocTypesLoading ? (
+                      <option value="">Loading…</option>
+                    ) : mrDocTypes.length === 0 ? (
+                      <option value="">No doc types found</option>
+                    ) : (
+                      mrDocTypes.map((dt) => {
+                        const label =
+                          dt.ProjectCode && dt.ModuleCode
+                            ? `${dt.ProjectCode}-${dt.ModuleCode}`
+                            : (dt.DocNoPrefix ?? dt.FullPrefix ?? dt.Prefix);
+                        return (
+                          <option
+                            key={dt.TypeOfDocId}
+                            value={String(dt.TypeOfDocId)}
+                          >
+                            {label} — {dt.Description}
+                          </option>
+                        );
+                      })
+                    )}
                   </select>
-                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <ChevronDown
+                    size={13}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
                 </div>
                 {header.docNoPreview && (
                   <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 tracking-wider whitespace-nowrap">
@@ -965,7 +968,11 @@ export default function MaterialRequest() {
                 >
                   <option value="">Select fin year</option>
                   {(finYears as any[]).map((fy) => (
-                    <option key={fy.id} value={String(fy.id)} disabled={fy.isLocked}>
+                    <option
+                      key={fy.id}
+                      value={String(fy.id)}
+                      disabled={fy.isLocked}
+                    >
                       {fy.name}
                       {fy.isLocked ? " (locked)" : ""}
                     </option>
@@ -1060,7 +1067,10 @@ export default function MaterialRequest() {
         <CardHeader className="px-6 py-4 border-b border-border flex flex-row items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-              <ShoppingCart size={15} className="text-emerald-600 dark:text-emerald-400" />
+              <ShoppingCart
+                size={15}
+                className="text-emerald-600 dark:text-emerald-400"
+              />
             </div>
             <div>
               <CardTitle className="text-sm font-semibold">
@@ -1129,7 +1139,9 @@ export default function MaterialRequest() {
                         <option value="">Select item…</option>
                         {(itemOptions as any[]).map((item) => (
                           <option key={item.M_Id} value={String(item.M_Id)}>
-                            {item.M_Name} — Stock: {Number(item.AvailableStock).toFixed(2)}{item.M_Group ? ` · ${item.M_Group}` : ""}
+                            {item.M_Name} — Stock:{" "}
+                            {Number(item.AvailableStock).toFixed(2)}
+                            {item.M_Group ? ` · ${item.M_Group}` : ""}
                           </option>
                         ))}
                       </select>
@@ -1155,15 +1167,22 @@ export default function MaterialRequest() {
                       >
                         <option value="">UOM…</option>
                         {ci.DefaultUOM && uomMap[ci.DefaultUOM] && (
-                          <option key={"default-" + ci.DefaultUOM} value={ci.DefaultUOM}>
-                            {uomMap[ci.DefaultUOM].UOMName}{uomMap[ci.DefaultUOM].Symbol ? ` (${uomMap[ci.DefaultUOM].Symbol}) · default` : " · default"}
+                          <option
+                            key={"default-" + ci.DefaultUOM}
+                            value={ci.DefaultUOM}
+                          >
+                            {uomMap[ci.DefaultUOM].UOMName}
+                            {uomMap[ci.DefaultUOM].Symbol
+                              ? ` (${uomMap[ci.DefaultUOM].Symbol}) · default`
+                              : " · default"}
                           </option>
                         )}
                         {(uoms as any[])
                           .filter((u) => u.UOMCode !== ci.DefaultUOM)
                           .map((u) => (
                             <option key={u.UOMCode} value={u.UOMCode}>
-                              {u.UOMName}{u.Symbol ? ` (${u.Symbol})` : ""}
+                              {u.UOMName}
+                              {u.Symbol ? ` (${u.Symbol})` : ""}
                             </option>
                           ))}
                       </select>
@@ -1262,14 +1281,25 @@ export default function MaterialRequest() {
       </Card>
 
       {/* Save bar */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
         <p className="text-[11px] text-muted-foreground hidden sm:block">
-          {canSave ? <span className="text-emerald-500 font-medium">Ready to save</span> : "Fill in the required fields to save"}
+          {canSave ? (
+            <span className="text-emerald-500 font-medium">Ready to save</span>
+          ) : (
+            "Fill in the required fields to save"
+          )}
         </p>
         <div className="flex items-center gap-2 sm:ml-auto">
           <button
             onClick={resetFields}
-            disabled={isSaving || (!header.companyId && !header.projectId && !header.reason.trim() && !header.remarks.trim() && cart.every((ci) => !ci.ItemId && !ci.Quantity))}
+            disabled={
+              isSaving ||
+              (!header.companyId &&
+                !header.projectId &&
+                !header.reason.trim() &&
+                !header.remarks.trim() &&
+                cart.every((ci) => !ci.ItemId && !ci.Quantity))
+            }
             className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
           >
             <RotateCcw size={12} /> Reset
@@ -1279,8 +1309,20 @@ export default function MaterialRequest() {
             disabled={!canSave || isSaving || saved}
             className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
           >
-            {saved ? <Check size={14} /> : isSaving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />}
-            {saved ? "Saved!" : isSaving ? "Saving…" : editingId ? "Update Request" : "Save Request"}
+            {saved ? (
+              <Check size={14} />
+            ) : isSaving ? (
+              <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <Save size={14} />
+            )}
+            {saved
+              ? "Saved!"
+              : isSaving
+                ? "Saving…"
+                : editingId
+                  ? "Update Request"
+                  : "Save Request"}
           </button>
         </div>
       </div>
@@ -1299,20 +1341,13 @@ export default function MaterialRequest() {
         <Card className="border-border shadow-sm">
           <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
             <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <FileText size={15} className="text-emerald-600 dark:text-emerald-400" />
+              <FileText
+                size={15}
+                className="text-emerald-600 dark:text-emerald-400"
+              />
               Request — {viewingRecord.DocNo || `#${viewingRecord.MRId}`}
             </CardTitle>
             <div className="flex items-center gap-2">
-              {rights.canCreate && viewingRecord.Status === "Approved" && (
-                <Button
-                  size="sm"
-                  onClick={() => handleCreatePO(viewingRecord)}
-                  className="gap-1.5 h-8 bg-emerald-600 hover:bg-emerald-700 text-white"
-                >
-                  <ExternalLink size={13} />
-                  Create Normal PO
-                </Button>
-              )}
               {rights.canEdit && viewingRecord.Status === "Draft" && (
                 <>
                   <Button
@@ -1326,21 +1361,21 @@ export default function MaterialRequest() {
                 </>
               )}
               {rights.canDelete && (
-              <Button
-                variant="destructive"
-                size="sm"
-                disabled={deleteMutation.isPending}
-                onClick={() => {
-                  if (confirm("Delete this material request?")) {
-                    deleteMutation.mutate(viewingRecord.MRId);
-                    goToList();
-                  }
-                }}
-                className="gap-1.5 h-8"
-              >
-                <Trash2 size={13} />{" "}
-                {deleteMutation.isPending ? "Deleting…" : "Delete"}
-              </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={deleteMutation.isPending}
+                  onClick={() => {
+                    if (confirm("Delete this material request?")) {
+                      deleteMutation.mutate(viewingRecord.MRId);
+                      goToList();
+                    }
+                  }}
+                  className="gap-1.5 h-8"
+                >
+                  <Trash2 size={13} />{" "}
+                  {deleteMutation.isPending ? "Deleting…" : "Delete"}
+                </Button>
               )}
               <Button
                 variant="ghost"
@@ -1416,7 +1451,10 @@ export default function MaterialRequest() {
         <Card className="border-border shadow-sm">
           <CardHeader className="pb-3 border-b border-border bg-muted/20">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <ShoppingCart size={14} className="text-emerald-600 dark:text-emerald-400" />
+              <ShoppingCart
+                size={14}
+                className="text-emerald-600 dark:text-emerald-400"
+              />
               Requested Items
               <Badge variant="secondary" className="text-xs">
                 {items.length}

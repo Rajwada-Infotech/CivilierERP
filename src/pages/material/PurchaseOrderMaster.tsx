@@ -443,6 +443,13 @@ const PurchaseOrderMaster: React.FC = () => {
     docNo: string;
   } | null>(null);
 
+  // Source Sale Invoice reference — manually linked by user on the PO form
+  const [sourceSaleInvoice, setSourceSaleInvoice] = useState<{
+    id: number;
+    docNo: string;
+  } | null>(null);
+  const [saleInvoiceInput, setSaleInvoiceInput] = useState("");
+
   // ── Supplier & Company detail state (auto-fetched on selection) ────────────────────
   const [supplierDetails, setSupplierDetails] =
     useState<SupplierDetails | null>(null);
@@ -1347,6 +1354,10 @@ const PurchaseOrderMaster: React.FC = () => {
       SourceWDDocNo: sourceWD?.docNo ?? null,
       SourceWOId: sourceWO?.id ?? null,
       SourceWODocNo: sourceWO?.docNo ?? null,
+      SourceSaleOrderId: null,
+      SourceSaleOrderDocNo: null,
+      SourceSaleInvoiceId: sourceSaleInvoice?.id ?? null,
+      SourceSaleInvoiceDocNo: sourceSaleInvoice?.docNo ?? null,
       POType: (sourceMR
         ? "Normal"
         : sourceWD
@@ -1497,6 +1508,8 @@ const PurchaseOrderMaster: React.FC = () => {
     setSourceMR(null);
     setSourceWD(null);
     setSourceWO(null);
+    setSourceSaleInvoice(null);
+    setSaleInvoiceInput("");
     setSupplierDetails(null);
     setCompanyDetails(null);
     setMrDropdownValue("");
@@ -1511,6 +1524,8 @@ const PurchaseOrderMaster: React.FC = () => {
     setSourceMR(null);
     setSourceWD(null);
     setSourceWO(null);
+    setSourceSaleInvoice(null);
+    setSaleInvoiceInput("");
     setSupplierDetails(null);
     setCompanyDetails(null);
     setMrDropdownValue("");
@@ -1890,18 +1905,18 @@ const PurchaseOrderMaster: React.FC = () => {
                           />
                           <button
                             onClick={() => goToView(item)}
-                            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition"
-                            title="View"
+                            className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+                            title="View details"
                           >
-                            <Eye size={14} />
+                            <Eye size={15} />
                           </button>
                           {rights.canDelete && (
                           <button
                             onClick={() => handleDelete(item._id)}
-                            className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 text-muted-foreground hover:text-red-500 transition"
-                            title="Delete"
+                            className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                            title="Delete this order"
                           >
-                            <Trash2 size={14} />
+                            <Trash2 size={15} />
                           </button>
                           )}
                         </div>
@@ -2341,6 +2356,88 @@ const PurchaseOrderMaster: React.FC = () => {
             </div>
           )}
 
+        {viewMode === "create" &&
+          !sourceMR &&
+          !sourceWD &&
+          !sourceWO &&
+          !isReadOnly && (
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                <Receipt size={11} className="text-blue-500" />
+                Link to Sale Invoice (optional)
+              </h3>
+              <p className="text-xs text-muted-foreground mb-3">
+                Enter a paid Sale Invoice doc number to link this PO to a
+                Sale Invoice. The backend will validate that the invoice is
+                fully paid before saving.
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  value={saleInvoiceInput}
+                  onChange={(e) => setSaleInvoiceInput(e.target.value)}
+                  placeholder="Sale Invoice ID (numeric)"
+                  className={`${inputCls} flex-1`}
+                  disabled={!!sourceSaleInvoice}
+                  min={1}
+                />
+                {!sourceSaleInvoice ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = parseInt(saleInvoiceInput.trim(), 10);
+                      if (!id || id <= 0) return;
+                      setSourceSaleInvoice({ id, docNo: `SI-${id}` });
+                    }}
+                    disabled={!saleInvoiceInput.trim()}
+                    className="px-3 py-2 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
+                  >
+                    Link
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSourceSaleInvoice(null);
+                      setSaleInvoiceInput("");
+                    }}
+                    className="px-3 py-2 rounded-lg text-xs font-semibold border border-border text-muted-foreground hover:bg-muted transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+        {sourceSaleInvoice && !isReadOnly && (
+          <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-4 py-3 flex items-center gap-3 text-sm">
+            <Receipt
+              size={15}
+              className="text-blue-600 dark:text-blue-400 shrink-0"
+            />
+            <span className="text-blue-700 dark:text-blue-300 flex-1">
+              Linked to Sale Invoice{" "}
+              <span className="font-mono font-bold">
+                {sourceSaleInvoice.docNo}
+              </span>
+              . The backend will validate that this invoice is fully paid
+              before saving.
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setSourceSaleInvoice(null);
+                setSaleInvoiceInput("");
+              }}
+              className="text-blue-400 hover:text-blue-600 transition-colors"
+              title="Remove link"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {sourceMR && !isReadOnly && (
           <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 flex items-center gap-3 text-sm">
             <ClipboardList
@@ -2767,16 +2864,6 @@ const PurchaseOrderMaster: React.FC = () => {
                       </dd>
                     </div>
                   )}
-                  {companyDetails.gst_no && (
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        GSTIN
-                      </dt>
-                      <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
-                        {companyDetails.gst_no}
-                      </dd>
-                    </div>
-                  )}
                   {companyDetails.phone_number && (
                     <div>
                       <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -2796,6 +2883,16 @@ const PurchaseOrderMaster: React.FC = () => {
                       <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
                         <Mail size={12} className="text-muted-foreground" />
                         {companyDetails.email}
+                      </dd>
+                    </div>
+                  )}
+                  {companyDetails.gst_no && (
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        GSTIN
+                      </dt>
+                      <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
+                        {companyDetails.gst_no}
                       </dd>
                     </div>
                   )}
@@ -3424,7 +3521,7 @@ const PurchaseOrderMaster: React.FC = () => {
           const poCanSave = !!(form.supplierId && form.companyId && form.projectId && lineItems.some((li) => li.itemName || li.rate > 0));
           const poIsDirty = !!(form.supplierId || form.companyId || form.projectId || form.remarks || form.expectedDate || lineItems.some((li) => li.itemName || li.rate > 0));
           return (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border pb-6">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
               <p className="text-[11px] text-muted-foreground hidden sm:block">
                 {saved ? <span className="text-emerald-500 font-medium">Saved!</span> : poCanSave ? <span className="text-emerald-500 font-medium">Ready to save</span> : "Fill in the required fields to save"}
               </p>
