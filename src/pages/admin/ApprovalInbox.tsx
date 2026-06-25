@@ -26,6 +26,7 @@ import {
   Warehouse,
   ShoppingCart,
   Building2,
+  Car,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -143,6 +144,13 @@ const MODULE_CONFIG: Record<
     navPath: "/sales/sale-order",
     apiEndpoint: "/api/sale-orders",
     label: "Sale Orders",
+  },
+  "vehicle-in-out": {
+    icon: Car,
+    color: "text-sky-500 bg-sky-500/10",
+    navPath: "/material/vehicle-in-out",
+    apiEndpoint: "/api/vehicle-in-out",
+    label: "Vehicle In/Out",
   },
 };
 
@@ -561,6 +569,8 @@ const ApprovalInbox: React.FC = () => {
     queryClient.invalidateQueries({ queryKey: ["approval-inbox"] });
     queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
     queryClient.invalidateQueries({ queryKey: ["boqs"], exact: false });
+    // Signal sidebar to immediately re-poll the pending-count badge.
+    window.dispatchEvent(new CustomEvent("approval-action"));
   };
 
   const countFor = (mod: string) =>
