@@ -866,7 +866,7 @@ const SupplierMaster: React.FC = () => {
               onClick={handleImportClick}
               disabled={importing}
               title="Import suppliers from a filled-in CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {importing ? (
                 <Loader2 size={13} className="animate-spin" />
@@ -1248,7 +1248,7 @@ const SupplierMaster: React.FC = () => {
               <button
                 onClick={handleSave}
                 disabled={saving || !canSave}
-                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
               >
                 {saving ? (
                   <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1522,7 +1522,7 @@ const SupplierMaster: React.FC = () => {
                   startEdit(viewRecord);
                   setViewRecord(null);
                 }}
-                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm flex items-center gap-1.5"
+                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white shadow-sm flex items-center gap-1.5"
               >
                 <Pencil size={13} /> Edit Supplier
               </button>
