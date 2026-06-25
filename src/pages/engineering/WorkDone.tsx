@@ -1016,7 +1016,7 @@ export default function WorkDone() {
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year ?? "";
 
-  const finYearOptions = finYears.map((fy) => ({
+  const finYearOptions = finYears.filter((fy) => fy.status === "Active" && !fy.locked).map((fy) => ({
     id: String(fy.id),
     year: fy.year,
   }));

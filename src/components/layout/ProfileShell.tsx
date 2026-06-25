@@ -35,7 +35,6 @@ export function ProfileShell({
   avatarGradient,
   avatarUrl,
   onAvatarClick,
-  heroMesh,
   accentColor,
   stats,
   tabs,
@@ -49,29 +48,14 @@ export function ProfileShell({
         <Breadcrumbs items={breadcrumbs} />
       </div>
 
-      {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <div className="relative rounded-2xl overflow-hidden border border-border shadow-2xl">
-        {/* Mesh gradient background */}
-        <div className="absolute inset-0" style={{ background: heroMesh }} />
-        {/* Noise overlay */}
-        <div
-          className="absolute inset-0 opacity-[0.035]"
-          style={{
-            backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E")`,
-          }}
-        />
-
-        {/* Content */}
-        <div className="relative z-10 px-6 pt-8 pb-6 flex flex-col sm:flex-row sm:items-end gap-5">
+      {/* ── Header card ──────────────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-border bg-card shadow-sm">
+        <div className="px-6 pt-6 pb-5 flex flex-col sm:flex-row sm:items-center gap-5">
           {/* Avatar */}
           <div className="relative shrink-0 group">
             <div
-              className={`w-20 h-20 rounded-2xl flex items-center justify-center text-white text-2xl font-heading font-black shadow-2xl select-none overflow-hidden ${onAvatarClick ? "cursor-pointer" : ""}`}
-              style={{
-                background: avatarUrl ? "transparent" : avatarGradient,
-                boxShadow:
-                  "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.15)",
-              }}
+              className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-lg font-heading font-bold select-none overflow-hidden ring-1 ring-border ${onAvatarClick ? "cursor-pointer" : ""}`}
+              style={{ background: avatarUrl ? "transparent" : avatarGradient }}
               onClick={onAvatarClick}
               title={onAvatarClick ? "Click to change avatar" : undefined}
             >
@@ -79,51 +63,50 @@ export function ProfileShell({
                 <img
                   src={avatarUrl}
                   alt={name}
-                  className="w-full h-full object-cover rounded-2xl"
+                  className="w-full h-full object-cover rounded-full"
                 />
               ) : (
                 initials
               )}
-              {/* Hover overlay shown only when click handler present */}
               {onAvatarClick && (
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl flex items-center justify-center">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-full flex items-center justify-center">
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="white"
+                    strokeWidth="2"
+                  >
                     <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                     <circle cx="12" cy="13" r="4" />
                   </svg>
                 </div>
               )}
             </div>
-            {/* Online dot */}
-            <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-500 border-2 border-background shadow-sm" />
+            <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-card" />
           </div>
 
-          {/* Name / role */}
+          {/* Name / role / meta */}
           <div className="flex-1 min-w-0">
-            <h1 className="text-2xl font-heading font-black text-white leading-none tracking-tight drop-shadow-sm">
-              {name}
-            </h1>
-            <div className="flex flex-wrap items-center gap-2 mt-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-lg font-heading font-bold text-foreground leading-none">
+                {name}
+              </h1>
               {roleBadge}
-              {email && (
-                <span className="text-xs text-white/50 font-mono">{email}</span>
-              )}
             </div>
+            <p className="text-xs text-muted-foreground mt-1.5">{email}</p>
           </div>
 
-          {/* Stats pills */}
+          {/* Stats — quiet inline values, no boxed glass pills */}
           {stats.length > 0 && (
-            <div className="flex items-center gap-2 flex-wrap pb-1 shrink-0">
+            <div className="flex items-center gap-5 sm:gap-6 shrink-0 pl-0 sm:pl-2">
               {stats.map((s) => (
-                <div
-                  key={s.label}
-                  className="flex flex-col items-center px-4 py-2 rounded-xl border border-white/10 backdrop-blur-md"
-                  style={{ background: "rgba(255,255,255,0.06)" }}
-                >
-                  <span className="text-lg font-heading font-black text-white leading-none">
+                <div key={s.label} className="flex flex-col">
+                  <span className="text-sm font-heading font-bold text-foreground leading-none">
                     {s.value}
                   </span>
-                  <span className="text-[9px] uppercase tracking-widest text-white/40 mt-0.5">
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground mt-1">
                     {s.label}
                   </span>
                 </div>
@@ -132,25 +115,19 @@ export function ProfileShell({
           )}
         </div>
 
-        {/* Tab bar — sits on bottom edge of hero */}
-        <div
-          className="relative z-10 flex gap-0 px-6 border-t border-white/10"
-          style={{
-            background: "rgba(0,0,0,0.25)",
-            backdropFilter: "blur(8px)",
-          }}
-        >
+        {/* Tab bar */}
+        <div className="flex gap-1 px-6 border-t border-border">
           {tabs.map((tab) => (
             <button
               key={tab.key}
               onClick={() => onTabChange(tab.key)}
-              className={`flex items-center gap-1.5 px-4 py-3 text-xs font-heading font-semibold uppercase tracking-wider border-b-2 transition-all -mb-px ${
+              className={`flex items-center gap-1.5 px-3 py-3 text-xs font-heading font-semibold border-b-2 transition-colors -mb-px ${
                 activeTab === tab.key
-                  ? "border-white text-white"
-                  : "border-transparent text-white/40 hover:text-white/70 hover:border-white/30"
+                  ? "border-foreground text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground/80"
               }`}
             >
-              <tab.icon size={12} />
+              <tab.icon size={13} />
               {tab.label}
             </button>
           ))}

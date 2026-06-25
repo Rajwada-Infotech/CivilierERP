@@ -14,7 +14,13 @@ const {
 router.get("/", cache("fin-year", 300), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query("SELECT * FROM dbo.FinYear");
+    // ?all=true → return every row (used by the admin FinYear management page)
+    // default   → only unlocked + active rows (used by all transaction dropdowns)
+    const showAll = req.query.all === "true";
+    const query = showAll
+      ? "SELECT * FROM dbo.FinYear ORDER BY FStartDate DESC"
+      : "SELECT * FROM dbo.FinYear WHERE FStatus = 1 AND FisLocked = 0 ORDER BY FStartDate DESC";
+    const result = await pool.request().query(query);
     res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });

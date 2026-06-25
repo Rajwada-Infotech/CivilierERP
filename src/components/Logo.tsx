@@ -6,13 +6,13 @@ const CHARS =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&";
 const rand = () => CHARS[Math.floor(Math.random() * CHARS.length)];
 
-function useMatrixVersion(target: string) {
-  const [display, setDisplay] = useState(target);
+function useMatrixCycle(targets: string[]) {
+  const [display, setDisplay] = useState(targets[0] ?? "");
+  const [activeIdx, setActiveIdx] = useState(0);
   const frameRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cycleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cycleRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const scramble = () => {
-    // How many steps to reveal each char
+  const scrambleTo = (target: string, onDone?: () => void) => {
     const steps = 8;
     let step = 0;
 
@@ -22,11 +22,8 @@ function useMatrixVersion(target: string) {
         target
           .split("")
           .map((char, i) => {
-            // Already resolved chars (left-to-right reveal)
             if (i < Math.floor((step / steps) * target.length)) return char;
-            // Dot stays dot
-            if (char === ".") return char;
-            // Scramble
+            if (char === "." || char === " " || char === "/") return char;
             return rand();
           })
           .join(""),
@@ -36,6 +33,7 @@ function useMatrixVersion(target: string) {
         frameRef.current = setTimeout(tick, 45);
       } else {
         setDisplay(target);
+        onDone?.();
       }
     };
 
@@ -43,24 +41,34 @@ function useMatrixVersion(target: string) {
   };
 
   useEffect(() => {
-    if (!target || target === "…") return;
+    const allReady = targets.every((t) => t && t !== "…");
+    if (!allReady) return;
 
-    // Initial scramble on mount after a short delay
-    const init = setTimeout(scramble, 800);
+    // Set initial display
+    setDisplay(targets[0]);
+    setActiveIdx(0);
 
-    // Periodic re-scramble every 8 seconds
-    cycleRef.current = setInterval(scramble, 8000);
+    // Initial scramble
+    const init = setTimeout(() => scrambleTo(targets[0]), 800);
+
+    // Cycle: every 5 s switch to next target with a scramble
+    let currentIdx = 0;
+    cycleRef.current = setInterval(() => {
+      const nextIdx = (currentIdx + 1) % targets.length;
+      currentIdx = nextIdx;
+      setActiveIdx(nextIdx);
+      scrambleTo(targets[nextIdx]);
+    }, 5000);
 
     return () => {
       clearTimeout(init);
       if (frameRef.current) clearTimeout(frameRef.current);
       if (cycleRef.current) clearInterval(cycleRef.current);
     };
-    // Re-run when the version string changes (e.g. after API loads)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target]);
+  }, [targets.join("|")]);
 
-  return display;
+  return { display, activeIdx };
 }
 
 // ─── Components ───────────────────────────────────────────────────────────────
@@ -80,13 +88,28 @@ export function LogoIcon({ size = 32 }: { size?: number }) {
 }
 
 export function LogoFull({ className }: { className?: string }) {
-  const { version } = useAppVersion();
+  const { dbVersion, appVersion } = useAppVersion();
 
-  // Prefix "v" if the DB value doesn't already start with it
-  const versionLabel =
-    version === "…" ? "…" : version.startsWith("v") ? version : `v${version}`;
+  // Normalise labels — prefix "v" if not present
+  const normalise = (v: string) =>
+    v === "…" || v === "—" ? v : v.startsWith("v") ? v : `v${v}`;
 
-  const matrixVersion = useMatrixVersion(versionLabel);
+  const dbLabel = normalise(dbVersion);
+  const appLabel = normalise(appVersion ?? "…");
+
+  // Labels shown in the cycle: "APP v1.0 / DB v2.3"
+  const targets = [
+    appLabel === "…" || dbLabel === "…" ? "…" : `app. ${appLabel}`,
+    appLabel === "…" || dbLabel === "…" ? "…" : `db. ${dbLabel}`,
+  ];
+
+  const { display, activeIdx } = useMatrixCycle(targets);
+
+  // Tooltip shows both
+  const tooltip =
+    appLabel !== "…" && dbLabel !== "…"
+      ? `App: ${appLabel}  |  DB: ${dbLabel}`
+      : "Loading version…";
 
   return (
     <div className={`flex items-center gap-2 ${className || ""}`}>
@@ -97,9 +120,10 @@ export function LogoFull({ className }: { className?: string }) {
         </span>
         <span
           className="text-[10px] text-emerald-500/80 font-mono tracking-wider select-none tabular-nums"
-          aria-label={versionLabel}
+          title={tooltip}
+          aria-label={tooltip}
         >
-          {matrixVersion}
+          {display}
         </span>
       </div>
     </div>

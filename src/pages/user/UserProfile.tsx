@@ -219,14 +219,16 @@ export default function UserProfile() {
         heroMesh="radial-gradient(ellipse at 20% 50%, #1f2937 0%, transparent 55%), radial-gradient(ellipse at 80% 20%, #111827 0%, transparent 50%), radial-gradient(ellipse at 55% 80%, #0f172a 0%, transparent 50%), linear-gradient(135deg, #0a0e16 0%, #111827 50%, #0a0e16 100%)"
         accentColor="slate"
         roleBadge={
-          <span className="inline-flex items-center gap-1.5 text-[10px] font-heading font-bold px-2.5 py-1 rounded-full border border-white/20 bg-white/10 text-white/70">
-            <User size={9} />
-            USER
+          <span className="inline-flex items-center gap-1 text-[10px] font-heading font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25">
+            {profile?.roleName ?? currentUser?.role ?? "user"}
           </span>
         }
         stats={[
           { label: "Pages", value: accessiblePages.length },
-          { label: "Role", value: currentUser?.role ?? "user" },
+          {
+            label: "Role",
+            value: profile?.roleName ?? currentUser?.role ?? "user",
+          },
           {
             label: "Status",
             value: profile?.discontinue ? "Inactive" : "Active",
@@ -285,7 +287,9 @@ export default function UserProfile() {
                     </p>
                     <div className="pt-1">
                       <span className="text-[10px] font-heading px-2 py-0.5 rounded-full border bg-muted border-border text-muted-foreground">
-                        Standard User
+                        {profile?.roleName ??
+                          currentUser?.role ??
+                          "Standard User"}
                       </span>
                     </div>
                   </div>
@@ -353,7 +357,7 @@ export default function UserProfile() {
                     />
                     <ProfileField
                       label="User Role"
-                      value={currentUser?.role ?? "user"}
+                      value={profile?.roleName ?? currentUser?.role ?? "user"}
                     />
                     <ProfileField label="Member Since" value={memberSince} />
                     <ProfileField label="Phone Number" value="—" />

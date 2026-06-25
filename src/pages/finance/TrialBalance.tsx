@@ -489,10 +489,9 @@ export default function TrialBalance() {
     fetchWithAuth("/api/fin-year")
       .then((r) => (r.ok ? r.json() : []))
       .then((data: FinYearRow[]) => {
-        // Only unlocked fin years are selectable for Trial Balance reporting —
-        // locked years are closed for the period and shouldn't be queried here.
+        // Only unlocked + active fin years are selectable for Trial Balance reporting
         const unlocked = data.filter(
-          (f) => !(f.FisLocked === 1 || f.FisLocked === true),
+          (f) => !(f.FisLocked === 1 || f.FisLocked === true) && (f.FStatus === 1 || f.FStatus === true),
         );
         const sorted = [...unlocked].sort(
           (a, b) =>

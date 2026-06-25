@@ -1478,13 +1478,15 @@ const FormModal: React.FC<FormModalProps> = ({
                     <SelectValue placeholder="Select financial year" />
                   </SelectTrigger>
                   <SelectContent className="z-[300]">
-                    {finYears.map((fy) => (
+                    {finYears
+                      .filter((fy) => fy.status === "Active" && !fy.locked)
+                      .sort((a, b) => b.year.localeCompare(a.year))
+                      .map((fy) => (
                       <SelectItem
                         key={String(fy.id ?? fy.year)}
                         value={fy.year}
                       >
                         {fy.year}
-                        {fy.status === "Active" ? " - Active" : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
