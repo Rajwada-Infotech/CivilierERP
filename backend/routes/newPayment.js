@@ -257,7 +257,11 @@ router.get("/cheque-lots", async (req, res) => {
     const bankId = req.query.bankId ? parseInt(req.query.bankId) : null;
 
     const request = pool.request();
-    let whereClause = "WHERE cm.Status = 1 AND cm.TotalCheques > 0"; // TotalCheques is computed (ChequeEndNumber - ChequeStartNumber + 1), read-only OK
+    // ChequeMaster.Status is nvarchar — existing rows store 'Draft' (active)
+    // or '0'/'Inactive' (inactive). Migration 121 converts this to BIT, after
+    // which active rows become 1. Until then, exclude only explicit inactive values.
+    let whereClause =
+      "WHERE cm.Status = 1 AND (cm.ChequeEndNumber - cm.ChequeStartNumber + 1) > 0";
     if (bankId) {
       request.input("BankId", sql.Int, bankId);
       whereClause += " AND cm.BankId = @BankId";
@@ -271,14 +275,14 @@ router.get("/cheque-lots", async (req, res) => {
         cm.IFSCCode,
         cm.ChequeStartNumber,
         cm.ChequeEndNumber,
-        cm.TotalCheques,
+        (cm.ChequeEndNumber - cm.ChequeStartNumber + 1) AS TotalCheques,
         cm.BankId,
         bm.BName        AS BankName,
         bm.BBranch      AS BankBranch,
         bm.BAccountType AS BankAccountType,
         cm.Remarks,
-        -- Compute actually remaining based on NewPayment usage
-        cm.TotalCheques - ISNULL((
+        -- Remaining: explicit arithmetic avoids computed-column resolution issues
+        (cm.ChequeEndNumber - cm.ChequeStartNumber + 1) - ISNULL((
           SELECT COUNT(*) FROM dbo.NewPayment np
           WHERE np.PChequeLotId = cm.CId AND np.PChequeNo IS NOT NULL
         ), 0) AS RemainingCheques
@@ -463,7 +467,9 @@ router.post("/", validateBody(paymentBodySchema), async (req, res) => {
       }
     }
 
-    const prefix = rootExBDocNo ? "ExB-PAY" : "PAY";
+    // Always use 'PAY' prefix — TypeOfDoc only has a 'PAY' row.
+    // rootExBDocNo is stored on the record for traceability only.
+    const prefix = "PAY";
     const docTypeId = await resolveDocTypeId(pool, sql, prefix);
     const finalDocNo = await lockNextDocNumber(pool, sql, {
       docTypeId,
@@ -875,3 +881,4 @@ router.put("/:id/reject", async (req, res) => {
 });
 
 module.exports = router;
+

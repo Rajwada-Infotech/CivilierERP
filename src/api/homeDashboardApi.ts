@@ -263,25 +263,49 @@ export async function fetchHomeDashboard(
 ): Promise<HomeDashboardData> {
   const hasFinanceAccess = moduleAccess?.finance ?? false;
   const hasMaterialAccess = moduleAccess?.material ?? false;
+  const hasEngineeringAccess = moduleAccess?.engineering ?? false;
+  const hasFollowupAccess = moduleAccess?.followup ?? false;
+  const hasTicketAccess = moduleAccess?.ticket ?? false;
+  const hasSalesAccess = moduleAccess?.sales ?? false;
+  const skip = Promise.resolve({ data: null, error: null });
+
   const baseRequests = [
     hasFinanceAccess
       ? safeFetch<FinanceDashboardApiData>("/api/finance-dashboard")
-      : Promise.resolve({ data: null, error: null }),
+      : skip,
     hasMaterialAccess
       ? safeFetch<MaterialDashboardData>("/api/material-dashboard")
-      : Promise.resolve({ data: null, error: null }),
+      : skip,
     safeFetch<ApprovalInboxItem[]>("/api/approval-inbox"),
     safeFetch<{ data: TaskSummary[] }>(
       "/api/tasks?limit=5&sort=dueDate&order=asc",
     ),
-    safeFetch<{ counts: Record<string, number | null> }>("/api/tickets/stats"),
-    safeFetch<EngineeringSummaryData>("/api/engineering/dashboard"),
-    safeFetch<unknown>("/api/followup-applications?pageSize=500"),
-    safeFetch<unknown>("/api/followup-bookings?pageSize=500"),
-    safeFetch<unknown>("/api/followup-agreements?pageSize=500"),
-    safeFetch<unknown>("/api/followup-noc?pageSize=500"),
-    safeFetch<unknown>("/api/followup-handover?pageSize=500"),
-    safeFetch<{ data: any[]; total: number }>("/api/sale-orders?limit=500"),
+    hasTicketAccess
+      ? safeFetch<{ counts: Record<string, number | null> }>(
+          "/api/tickets/stats",
+        )
+      : skip,
+    hasEngineeringAccess
+      ? safeFetch<EngineeringSummaryData>("/api/engineering/dashboard")
+      : skip,
+    hasFollowupAccess
+      ? safeFetch<unknown>("/api/followup-applications?pageSize=500")
+      : skip,
+    hasFollowupAccess
+      ? safeFetch<unknown>("/api/followup-bookings?pageSize=500")
+      : skip,
+    hasFollowupAccess
+      ? safeFetch<unknown>("/api/followup-agreements?pageSize=500")
+      : skip,
+    hasFollowupAccess
+      ? safeFetch<unknown>("/api/followup-noc?pageSize=500")
+      : skip,
+    hasFollowupAccess
+      ? safeFetch<unknown>("/api/followup-handover?pageSize=500")
+      : skip,
+    hasSalesAccess
+      ? safeFetch<{ data: any[]; total: number }>("/api/sale-orders?limit=500")
+      : skip,
     // Fetch active project count independently — engineering/dashboard is
     // permission-gated so non-engineering users would always see 0 otherwise.
     safeFetch<unknown>("/api/project-master"),

@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import {
   Truck,
   Plus,
@@ -46,6 +47,7 @@ import {
   Filter,
   SwitchCamera,
   Image as ImageIcon,
+  Edit3,
 } from "lucide-react";
 import * as vehApi from "@/api/vehicleInOutApi";
 import type { VehicleInOutPayload } from "@/api/vehicleInOutApi";
@@ -258,13 +260,6 @@ function VehicleCard({
   canEdit?: boolean;
   canDelete?: boolean;
 }) {
-  const statusCls =
-    rec.Status === "Approved"
-      ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-      : rec.Status === "Rejected"
-        ? "bg-red-500/10 text-red-600 border-red-500/20"
-        : "bg-amber-500/10 text-amber-600 border-amber-500/20";
-
   return (
     <div className="rounded-xl border border-border bg-card p-4 space-y-3">
       {/* Top row: Doc No + Status */}
@@ -279,16 +274,12 @@ function VehicleCard({
               : "—"}
           </p>
         </div>
-        <span
-          className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${statusCls}`}
-        >
-          {rec.Status === "Approved" ? (
-            <CheckCircle2 size={9} />
-          ) : (
-            <Clock size={9} />
-          )}
-          {rec.Status}
-        </span>
+        <div className="shrink-0">
+          <ApprovalStatusChain
+            table="VehicleInOut"
+            recordId={rec.VehicleInOutID}
+          />
+        </div>
       </div>
 
       {/* Attachment count */}
@@ -352,22 +343,22 @@ function VehicleCard({
           <Eye size={15} />
         </button>
         {canEdit && (
-        <button
-          onClick={() => onEdit(rec)}
-          className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
-          title="Edit"
-        >
-          <RefreshCw size={15} />
-        </button>
+          <button
+            onClick={() => onEdit(rec)}
+            className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
+            title="Edit"
+          >
+            <Edit3 size={15} />
+          </button>
         )}
         {canDelete && (
-        <button
-          onClick={() => onDelete(rec.VehicleInOutID)}
-          className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
-          title="Delete"
-        >
-          <Trash2 size={15} />
-        </button>
+          <button
+            onClick={() => onDelete(rec.VehicleInOutID)}
+            className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
+            title="Delete"
+          >
+            <Trash2 size={15} />
+          </button>
         )}
       </div>
     </div>
@@ -389,6 +380,7 @@ const toLocalDateTimeInput = (d: Date) =>
 
 // ── Form default ───────────────────────────────────────────────────────────────
 const buildEmpty = (activeFinYear?: string) => ({
+  docNo: "",
   docDate: toLocalDateInput(new Date()),
   companyId: null as number | null,
   projectId: null as number | null,
@@ -486,23 +478,12 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "Status",
     header: "Status",
-    cell: ({ getValue }) => {
-      const s = getValue() as string;
-      const cls =
-        s === "Approved"
-          ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-          : s === "Rejected"
-            ? "bg-red-500/10 text-red-600 border-red-500/20"
-            : "bg-amber-500/10 text-amber-600 border-amber-500/20";
-      return (
-        <span
-          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${cls}`}
-        >
-          {s === "Approved" ? <CheckCircle2 size={9} /> : <Clock size={9} />}
-          {s}
-        </span>
-      );
-    },
+    cell: ({ row }) => (
+      <ApprovalStatusChain
+        table="VehicleInOut"
+        recordId={row.original.VehicleInOutID}
+      />
+    ),
   },
   {
     id: "actions",
@@ -520,22 +501,22 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
             <Eye size={15} />
           </button>
           {_canEdit && (
-          <button
-            onClick={() => _onEdit(rec)}
-            className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
-            title="Edit"
-          >
-            <RefreshCw size={15} />
-          </button>
+            <button
+              onClick={() => _onEdit(rec)}
+              className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
+              title="Edit"
+            >
+              <Edit3 size={15} />
+            </button>
           )}
           {_canDelete && (
-          <button
-            onClick={() => _onDelete(rec.VehicleInOutID)}
-            className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
-            title="Delete"
-          >
-            <Trash2 size={15} />
-          </button>
+            <button
+              onClick={() => _onDelete(rec.VehicleInOutID)}
+              className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
+              title="Delete"
+            >
+              <Trash2 size={15} />
+            </button>
           )}
         </div>
       );
@@ -769,6 +750,7 @@ export default function VehicleInOut() {
       }
     }
     setForm({
+      docNo: full.DocNo ?? "",
       docDate: full.DocDate ? String(full.DocDate).slice(0, 10) : "",
       companyId: full.CompanyID ?? null,
       projectId: full.ProjectID ?? null,
@@ -1063,7 +1045,7 @@ export default function VehicleInOut() {
                       />
                       {editingId ? (
                         <span className="font-mono text-sm text-primary font-semibold">
-                          —
+                          {form.docNo || "—"}
                         </span>
                       ) : docNoPreview?.nextDocNo ? (
                         <span className="font-mono text-sm text-primary font-semibold">
@@ -1694,15 +1676,15 @@ export default function VehicleInOut() {
                 {/* Edit button */}
                 <div className="flex justify-end pt-2 border-t border-border">
                   {rights.canEdit && (
-                  <button
-                    onClick={() => {
-                      setViewingRec(null);
-                      _onEdit(viewingRec);
-                    }}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-muted border border-border text-sm font-medium hover:bg-muted/80 transition-colors"
-                  >
-                    <RefreshCw size={13} /> Edit
-                  </button>
+                    <button
+                      onClick={() => {
+                        setViewingRec(null);
+                        _onEdit(viewingRec);
+                      }}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-muted border border-border text-sm font-medium hover:bg-muted/80 transition-colors"
+                    >
+                      <Edit3 size={13} /> Edit
+                    </button>
                   )}
                 </div>
               </div>

@@ -174,7 +174,7 @@ function RemainingItemsPanel({
                   {item.receivedQty}
                 </td>
                 <td className="px-3 py-2 text-right font-mono font-bold text-amber-600 dark:text-amber-400">
-                  {item.remainingQty}
+                  {fmtQty(item.remainingQty)}
                 </td>
                 <td className="px-3 py-2 text-muted-foreground">
                   {item.uom || "—"}
@@ -263,6 +263,16 @@ const fmt = (n: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+
+// Round a quantity to 3 decimal places, clearing JS floating-point drift
+// (e.g. 499.99 - 400 = 99.99000000000001 → 99.99).
+const round3 = (n: number) => Math.round((Number(n) || 0) * 1000) / 1000;
+
+// Display a quantity with at most 3 decimal places (no trailing zero padding).
+const fmtQty = (n: number) => {
+  const rounded = round3(n);
+  return rounded.toLocaleString("en-IN", { maximumFractionDigits: 3 });
+};
 
 // Derive a "YYYY-YYYY" financial-year label (Apr–Mar) from a date string.
 // Used as a fallback for older POs that have no fy_id / FinYearName set.
@@ -627,13 +637,13 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
             <Eye size={15} />
           </button>
           {_canDelete && (
-          <button
-            onClick={() => handleDeleteGrn(String(grn.GRNID))}
-            className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
-            title="Delete"
-          >
-            <Trash2 size={15} />
-          </button>
+            <button
+              onClick={() => handleDeleteGrn(String(grn.GRNID))}
+              className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
+              title="Delete"
+            >
+              <Trash2 size={15} />
+            </button>
           )}
         </div>
       );
@@ -1240,7 +1250,7 @@ export default function GRN() {
       const nextItems = [...prev.items];
       const current = { ...nextItems[index], [field]: value };
       if (field === "receivedQty") {
-        current.remainingQty = current.orderedQty - value;
+        current.remainingQty = round3(current.orderedQty - value);
         if (nextItems[index].quantity === nextItems[index].receivedQty)
           current.quantity = value;
       }
@@ -1690,7 +1700,7 @@ export default function GRN() {
                             ["Ordered", String(item.orderedQty), ""],
                             [
                               "Pending Qty",
-                              String(item.remainingQty),
+                              fmtQty(item.remainingQty),
                               item.remainingQty > 0
                                 ? "text-amber-500"
                                 : "text-green-500",
@@ -1728,7 +1738,9 @@ export default function GRN() {
                                 <input
                                   type="number"
                                   min={0}
-                                  step={field !== "receivedQty" ? "0.01" : "1"}
+                                  step={
+                                    field !== "receivedQty" ? "0.01" : "0.001"
+                                  }
                                   value={
                                     field === "receivedQty"
                                       ? item.receivedQty
@@ -1876,6 +1888,7 @@ export default function GRN() {
                                 type="number"
                                 min={0}
                                 max={item.orderedQty || undefined}
+                                step="0.001"
                                 value={item.receivedQty}
                                 onChange={(e) =>
                                   updateReceivedQty(idx, Number(e.target.value))
@@ -1886,7 +1899,7 @@ export default function GRN() {
                             <td
                               className={`px-2 py-2 text-right text-xs font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
                             >
-                              {item.remainingQty}
+                              {fmtQty(item.remainingQty)}
                             </td>
                             <td className="px-2 py-2 text-xs text-muted-foreground">
                               {item.uom || "—"}
@@ -2219,13 +2232,13 @@ export default function GRN() {
                     </div>
                     <div className="flex items-center gap-2">
                       {rights.canPrint && (
-                      <button
-                        onClick={() => window.print()}
-                        title="Print GRN"
-                        className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
-                      >
-                        <Printer size={18} />
-                      </button>
+                        <button
+                          onClick={() => window.print()}
+                          title="Print GRN"
+                          className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
+                        >
+                          <Printer size={18} />
+                        </button>
                       )}
                       <button
                         onClick={() => {
@@ -2367,7 +2380,7 @@ export default function GRN() {
                                     ],
                                     [
                                       "Pending Qty",
-                                      String(item.remainingQty),
+                                      fmtQty(item.remainingQty),
                                       item.remainingQty > 0
                                         ? "text-amber-500 font-semibold"
                                         : "text-green-500 font-semibold",
@@ -2464,7 +2477,7 @@ export default function GRN() {
                                     <td
                                       className={`px-3 py-2.5 text-right text-xs font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
                                     >
-                                      {item.remainingQty}
+                                      {fmtQty(item.remainingQty)}
                                     </td>
                                     <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
                                       {item.rate

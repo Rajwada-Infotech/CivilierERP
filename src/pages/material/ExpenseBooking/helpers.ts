@@ -14,6 +14,19 @@ export function fmt(n: number) {
   });
 }
 
+// Round a quantity to 3 decimal places, clearing JS floating-point drift
+// (e.g. 499.99 - 400 = 99.99000000000001 → 99.99). Quantities coming from
+// GRN line items (receivedQty/remainingQty) can carry this drift, so any
+// sum or direct display of them should pass through here first.
+export function round3(n: number) {
+  return Math.round((Number(n) || 0) * 1000) / 1000;
+}
+
+// Display a quantity with at most 3 decimal places (no trailing zero padding).
+export function fmtQty(n: number) {
+  return round3(n).toLocaleString("en-IN", { maximumFractionDigits: 3 });
+}
+
 export function defaultDiscount(): DiscountConfig {
   return {
     applicable: false,
@@ -368,12 +381,11 @@ export function dbToRecord(row: any): ExpenseRecord {
     // For GRN-linked bookings, prefer the stored ENetAmount (net after billing terms).
     // Fall back to EGrnTotalAmount (incl-GST, before terms) if ENetAmount not set,
     // then fall back to EAmount for non-GRN / very old records.
-    netAmount:
-      row.ENetAmount
-        ? parseFloat(row.ENetAmount)
-        : row.EGrnTotalAmount != null
-          ? parseFloat(row.EGrnTotalAmount)
-          : parseFloat(row.EAmount) || 0,
+    netAmount: row.ENetAmount
+      ? parseFloat(row.ENetAmount)
+      : row.EGrnTotalAmount != null
+        ? parseFloat(row.EGrnTotalAmount)
+        : parseFloat(row.EAmount) || 0,
     grnTotalAmount:
       row.EGrnTotalAmount != null ? parseFloat(row.EGrnTotalAmount) : null,
     status: (row.EStatus ?? row.Status ?? "Draft") as any,
