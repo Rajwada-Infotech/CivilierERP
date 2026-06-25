@@ -80,6 +80,7 @@ function GodownDrawer({
     ShortDesc: "",
     Description: "",
     Remarks: "",
+    Location: "",
     EnterpriseID: null,
     ProjectID: null,
   });
@@ -116,6 +117,7 @@ function GodownDrawer({
         ShortDesc: editing.ShortDesc || "",
         Description: editing.Description || "",
         Remarks: editing.Remarks || "",
+        Location: editing.Location || "",
         EnterpriseID: editing.EnterpriseID ?? null,
         ProjectID: editing.ProjectID ?? null,
       });
@@ -126,6 +128,7 @@ function GodownDrawer({
         ShortDesc: "",
         Description: "",
         Remarks: "",
+        Location: "",
         EnterpriseID: null,
         ProjectID: null,
       });
@@ -287,6 +290,18 @@ function GodownDrawer({
               </select>
             </Field>
           </div>
+
+          <Field label="Location">
+            <input
+              type="text"
+              value={form.Location || ""}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, Location: e.target.value }))
+              }
+              placeholder="Physical location of this godown"
+              className={inputCls}
+            />
+          </Field>
 
           <Field label="Description">
             <textarea
