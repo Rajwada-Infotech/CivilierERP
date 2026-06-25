@@ -19,6 +19,7 @@ import { toast } from "sonner";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -688,7 +689,7 @@ export function UnitSelectionPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { currentUser } = useAuth();
-  const canDeleteRecords = currentUser?.role !== "engineer";
+  const rights = usePageRights("followup-unit-selections");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -916,7 +917,7 @@ export function UnitSelectionPage() {
                 record={r}
                 onEdit={() => openEdit(r)}
                 onDelete={() => setDeleteTarget(r)}
-                canDelete={canDeleteRecords}
+                canDelete={rights.canDelete}
               />
             ))}
           </div>

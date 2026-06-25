@@ -19,42 +19,42 @@ import {
   Edit3,
   Building2,
   FolderOpen,
-  Box,
-  Ruler,
   Hash,
   AlertTriangle,
   CheckCircle2,
-  Calendar,
   Send,
-  Flag,
   ShoppingCart,
   Package,
   ExternalLink,
   ArrowLeft,
   RotateCcw,
   Check,
+  ChevronDown,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
-  DocNumberPreview,
   fetchNextDocNumber,
+  fetchDocTypes,
+  type DocType,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { Badge } from "@/components/ui/badge";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { MaterialShell } from "@/components/material/MaterialShell";
+import { usePageRights } from "@/hooks/usePageRights";
+
+// ─── Shared styles (matching PurchaseOrderMaster) ────────────────────────────
+
+const inputCls =
+  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer";
+
+const selectCls =
+  "w-full text-sm rounded-lg border border-border px-3 py-2.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -161,6 +161,7 @@ const fmtDate = (d?: string | null) =>
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export default function MaterialRequest() {
+  const rights = usePageRights("material-request");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<"list" | "form" | "view">("list");
@@ -245,6 +246,38 @@ export default function MaterialRequest() {
     },
     staleTime: 5 * 60_000,
   });
+
+  // ── MR doc types (for the plain Request No select) ──────────────────────────
+
+  const [mrDocTypes, setMrDocTypes] = useState<DocType[]>([]);
+  const [mrDocTypesLoading, setMrDocTypesLoading] = useState(true);
+
+  useEffect(() => {
+    setMrDocTypesLoading(true);
+    fetchDocTypes("MR")
+      .then(setMrDocTypes)
+      .finally(() => setMrDocTypesLoading(false));
+  }, []);
+
+  // Auto-select first doc type and fetch preview when list loads or finYear changes
+  useEffect(() => {
+    if (mrDocTypesLoading || editingId) return;
+    if (mrDocTypes.length === 0) return;
+    const firstId = mrDocTypes[0].TypeOfDocId;
+    if (!header.docTypeId) {
+      fetchNextDocNumber(firstId, finYearStr).then((preview) =>
+        setHeader((p) => ({ ...p, docTypeId: firstId, docNoPreview: preview })),
+      );
+    }
+  }, [mrDocTypes, mrDocTypesLoading]);
+
+  // Refresh preview whenever finYear or selected doc type changes (create mode only)
+  useEffect(() => {
+    if (!header.docTypeId || editingId) return;
+    fetchNextDocNumber(header.docTypeId, finYearStr).then((preview) =>
+      setHeader((p) => ({ ...p, docNoPreview: preview })),
+    );
+  }, [header.docTypeId, finYearStr]);
 
   const { data: listData, isLoading: loadingList } = useQuery({
     queryKey: ["mr-list", page, search, statusFilter],
@@ -632,7 +665,7 @@ export default function MaterialRequest() {
             </button>
 
             {/* Update — Draft only */}
-            {status === "Draft" && (
+            {rights.canEdit && status === "Draft" && (
               <button
                 type="button"
                 onClick={() => handleEdit(row.original)}
@@ -644,6 +677,7 @@ export default function MaterialRequest() {
             )}
 
             {/* Delete — always visible */}
+            {rights.canDelete && (
             <button
               type="button"
               disabled={isDeleting}
@@ -656,9 +690,10 @@ export default function MaterialRequest() {
             >
               <Trash2 size={12} /> Delete
             </button>
+            )}
 
             {/* Create PO — Approved only */}
-            {status === "Approved" && (
+            {rights.canCreate && status === "Approved" && (
               <button
                 type="button"
                 onClick={() => handleCreatePO(row.original)}
@@ -830,20 +865,42 @@ export default function MaterialRequest() {
                 {viewingRecord?.DocNo ?? "Immutable after creation"}
               </span>
             ) : (
-              <div className="flex-1">
-                <DocNumberPreview
-                  module="MR"
-                  finYear={finYearStr}
-                  selectedDocTypeId={header.docTypeId}
-                  preview={header.docNoPreview}
-                  onSelect={(id, preview) =>
-                    setHeader((p) => ({
-                      ...p,
-                      docTypeId: id,
-                      docNoPreview: preview,
-                    }))
-                  }
-                />
+              <div className="flex-1 flex items-center gap-3 min-w-0">
+                <div className="relative">
+                  <select
+                    value={header.docTypeId ? String(header.docTypeId) : ""}
+                    onChange={async (e) => {
+                      const id = e.target.value ? parseInt(e.target.value, 10) : null;
+                      if (!id) { setHeader((p) => ({ ...p, docTypeId: null, docNoPreview: "" })); return; }
+                      const preview = await fetchNextDocNumber(id, finYearStr);
+                      setHeader((p) => ({ ...p, docTypeId: id, docNoPreview: preview }));
+                    }}
+                    disabled={mrDocTypesLoading}
+                    className={selectCls}
+                  >
+                    {mrDocTypesLoading
+                      ? <option value="">Loading…</option>
+                      : mrDocTypes.length === 0
+                        ? <option value="">No doc types found</option>
+                        : mrDocTypes.map((dt) => {
+                            const label = (dt.ProjectCode && dt.ModuleCode)
+                              ? `${dt.ProjectCode}-${dt.ModuleCode}`
+                              : dt.DocNoPrefix ?? dt.FullPrefix ?? dt.Prefix;
+                            return (
+                              <option key={dt.TypeOfDocId} value={String(dt.TypeOfDocId)}>
+                                {label} — {dt.Description}
+                              </option>
+                            );
+                          })
+                    }
+                  </select>
+                  <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                </div>
+                {header.docNoPreview && (
+                  <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 tracking-wider whitespace-nowrap">
+                    {header.docNoPreview}
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -851,104 +908,94 @@ export default function MaterialRequest() {
           {/* Row 1: Company | Project | Fin Year | Priority */}
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             <Field label="Company" required>
-              <Select
-                value={header.companyId}
-                onValueChange={(v) => {
-                  setH("companyId", v);
-                  setH("projectId", "");
-                  setCart([blankCartItem()]);
-                }}
-              >
-                <SelectTrigger className="h-9 gap-2">
-                  <Building2
-                    size={13}
-                    className="text-muted-foreground shrink-0"
-                  />
-                  <SelectValue placeholder="Select company" />
-                </SelectTrigger>
-                <SelectContent>
+              <div className="relative">
+                <select
+                  value={header.companyId}
+                  onChange={(e) => {
+                    setH("companyId", e.target.value);
+                    setH("projectId", "");
+                    setCart([blankCartItem()]);
+                  }}
+                  className={selectCls}
+                >
+                  <option value="">Select company</option>
                   {(companies as any[]).map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>
+                    <option key={c.id} value={String(c.id)}>
                       {c.label ?? c.name}
-                    </SelectItem>
+                    </option>
                   ))}
-                </SelectContent>
-              </Select>
+                </select>
+                <ChevronDown
+                  size={13}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+              </div>
             </Field>
 
             <Field label="Project" required>
-              <Select
-                value={header.projectId}
-                onValueChange={(v) => {
-                  setH("projectId", v);
-                  setCart([blankCartItem()]);
-                }}
-              >
-                <SelectTrigger className="h-9 gap-2">
-                  <FolderOpen
-                    size={13}
-                    className="text-muted-foreground shrink-0"
-                  />
-                  <SelectValue placeholder="Select project" />
-                </SelectTrigger>
-                <SelectContent>
+              <div className="relative">
+                <select
+                  value={header.projectId}
+                  onChange={(e) => {
+                    setH("projectId", e.target.value);
+                    setCart([blankCartItem()]);
+                  }}
+                  className={selectCls}
+                >
+                  <option value="">Select project</option>
                   {filteredProjects.map((p) => (
-                    <SelectItem key={p.id} value={String(p.id)}>
+                    <option key={p.id} value={String(p.id)}>
                       {p.name}
-                    </SelectItem>
+                    </option>
                   ))}
-                </SelectContent>
-              </Select>
+                </select>
+                <ChevronDown
+                  size={13}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+              </div>
             </Field>
 
             <Field label="Financial Year">
-              <Select
-                value={header.finYearId}
-                onValueChange={(v) => setH("finYearId", v)}
-              >
-                <SelectTrigger className="h-9 gap-2">
-                  <Calendar
-                    size={13}
-                    className="text-muted-foreground shrink-0"
-                  />
-                  <SelectValue placeholder="Select fin year" />
-                </SelectTrigger>
-                <SelectContent>
+              <div className="relative">
+                <select
+                  value={header.finYearId}
+                  onChange={(e) => setH("finYearId", e.target.value)}
+                  className={selectCls}
+                >
+                  <option value="">Select fin year</option>
                   {(finYears as any[]).map((fy) => (
-                    <SelectItem
-                      key={fy.id}
-                      value={String(fy.id)}
-                      disabled={fy.isLocked}
-                    >
+                    <option key={fy.id} value={String(fy.id)} disabled={fy.isLocked}>
                       {fy.name}
-                      {fy.isLocked && (
-                        <span className="ml-1 text-xs text-muted-foreground">
-                          (locked)
-                        </span>
-                      )}
-                    </SelectItem>
+                      {fy.isLocked ? " (locked)" : ""}
+                    </option>
                   ))}
-                </SelectContent>
-              </Select>
+                </select>
+                <ChevronDown
+                  size={13}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+              </div>
             </Field>
 
             <Field label="Priority">
-              <Select
-                value={header.priority}
-                onValueChange={(v) => setH("priority", v)}
-              >
-                <SelectTrigger className="h-9 gap-2">
-                  <Flag size={13} className="text-muted-foreground shrink-0" />
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
+              <div className="relative">
+                <select
+                  value={header.priority}
+                  onChange={(e) => setH("priority", e.target.value)}
+                  className={selectCls}
+                >
                   {PRIORITY_OPTIONS.map((p) => (
-                    <SelectItem key={p} value={p}>
+                    <option key={p} value={p}>
                       {p}
-                    </SelectItem>
+                    </option>
                   ))}
-                </SelectContent>
-              </Select>
+                </select>
+                <ChevronDown
+                  size={13}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+              </div>
             </Field>
           </div>
 
@@ -964,7 +1011,7 @@ export default function MaterialRequest() {
                   type="date"
                   value={header.requestDate}
                   onChange={(e) => setH("requestDate", e.target.value)}
-                  className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  className={`${inputCls} pl-8`}
                 />
               </div>
             </Field>
@@ -978,7 +1025,7 @@ export default function MaterialRequest() {
                   type="date"
                   value={header.requiredByDate}
                   onChange={(e) => setH("requiredByDate", e.target.value)}
-                  className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  className={`${inputCls} pl-8`}
                 />
               </div>
             </Field>
@@ -1073,33 +1120,24 @@ export default function MaterialRequest() {
                     <label className="md:hidden text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                       Item *
                     </label>
-                    <Select
-                      value={ci.ItemId}
-                      onValueChange={(v) => pickItem(ci._key, v)}
-                    >
-                      <SelectTrigger className="h-10">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Box
-                            size={13}
-                            className="text-muted-foreground shrink-0"
-                          />
-                          <SelectValue placeholder="Select item…" />
-                        </div>
-                      </SelectTrigger>
-                      <SelectContent className="max-h-72">
+                    <div className="relative">
+                      <select
+                        value={ci.ItemId}
+                        onChange={(e) => pickItem(ci._key, e.target.value)}
+                        className={selectCls}
+                      >
+                        <option value="">Select item…</option>
                         {(itemOptions as any[]).map((item) => (
-                          <SelectItem key={item.M_Id} value={String(item.M_Id)}>
-                            <div className="flex flex-col py-0.5">
-                              <span className="font-medium">{item.M_Name}</span>
-                              <span className="text-xs text-muted-foreground">
-                                Stock: {Number(item.AvailableStock).toFixed(2)}
-                                {item.M_Group && ` · ${item.M_Group}`}
-                              </span>
-                            </div>
-                          </SelectItem>
+                          <option key={item.M_Id} value={String(item.M_Id)}>
+                            {item.M_Name} — Stock: {Number(item.AvailableStock).toFixed(2)}{item.M_Group ? ` · ${item.M_Group}` : ""}
+                          </option>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </select>
+                      <ChevronDown
+                        size={13}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                    </div>
                   </div>
 
                   {/* UOM selector */}
@@ -1107,51 +1145,33 @@ export default function MaterialRequest() {
                     <label className="md:hidden text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                       Unit (UOM) *
                     </label>
-                    <Select
-                      value={ci.UOMCode}
-                      onValueChange={(v) =>
-                        updateCartItem(ci._key, "UOMCode", v)
-                      }
-                    >
-                      <SelectTrigger className="h-10">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Ruler
-                            size={12}
-                            className="text-muted-foreground shrink-0"
-                          />
-                          <SelectValue placeholder="UOM…" />
-                        </div>
-                      </SelectTrigger>
-                      <SelectContent>
+                    <div className="relative">
+                      <select
+                        value={ci.UOMCode}
+                        onChange={(e) =>
+                          updateCartItem(ci._key, "UOMCode", e.target.value)
+                        }
+                        className={selectCls}
+                      >
+                        <option value="">UOM…</option>
                         {ci.DefaultUOM && uomMap[ci.DefaultUOM] && (
-                          <SelectItem
-                            key={"default-" + ci.DefaultUOM}
-                            value={ci.DefaultUOM}
-                          >
-                            <span className="font-medium">
-                              {uomMap[ci.DefaultUOM].UOMName}
-                            </span>
-                            {uomMap[ci.DefaultUOM].Symbol && (
-                              <span className="text-muted-foreground ml-1.5 text-xs">
-                                {uomMap[ci.DefaultUOM].Symbol} · default
-                              </span>
-                            )}
-                          </SelectItem>
+                          <option key={"default-" + ci.DefaultUOM} value={ci.DefaultUOM}>
+                            {uomMap[ci.DefaultUOM].UOMName}{uomMap[ci.DefaultUOM].Symbol ? ` (${uomMap[ci.DefaultUOM].Symbol}) · default` : " · default"}
+                          </option>
                         )}
                         {(uoms as any[])
                           .filter((u) => u.UOMCode !== ci.DefaultUOM)
                           .map((u) => (
-                            <SelectItem key={u.UOMCode} value={u.UOMCode}>
-                              {u.UOMName}
-                              {u.Symbol && (
-                                <span className="text-muted-foreground ml-1.5 text-xs">
-                                  {u.Symbol}
-                                </span>
-                              )}
-                            </SelectItem>
+                            <option key={u.UOMCode} value={u.UOMCode}>
+                              {u.UOMName}{u.Symbol ? ` (${u.Symbol})` : ""}
+                            </option>
                           ))}
-                      </SelectContent>
-                    </Select>
+                      </select>
+                      <ChevronDown
+                        size={13}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                    </div>
                   </div>
 
                   {/* Quantity */}
@@ -1283,7 +1303,7 @@ export default function MaterialRequest() {
               Request — {viewingRecord.DocNo || `#${viewingRecord.MRId}`}
             </CardTitle>
             <div className="flex items-center gap-2">
-              {viewingRecord.Status === "Approved" && (
+              {rights.canCreate && viewingRecord.Status === "Approved" && (
                 <Button
                   size="sm"
                   onClick={() => handleCreatePO(viewingRecord)}
@@ -1293,7 +1313,7 @@ export default function MaterialRequest() {
                   Create Normal PO
                 </Button>
               )}
-              {viewingRecord.Status === "Draft" && (
+              {rights.canEdit && viewingRecord.Status === "Draft" && (
                 <>
                   <Button
                     variant="default"
@@ -1305,6 +1325,7 @@ export default function MaterialRequest() {
                   </Button>
                 </>
               )}
+              {rights.canDelete && (
               <Button
                 variant="destructive"
                 size="sm"
@@ -1320,6 +1341,7 @@ export default function MaterialRequest() {
                 <Trash2 size={13} />{" "}
                 {deleteMutation.isPending ? "Deleting…" : "Delete"}
               </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -1462,7 +1484,7 @@ export default function MaterialRequest() {
         subtitle="Request materials for projects"
         icon={Send}
         action={
-          viewMode === "list" ? (
+          viewMode === "list" && rights.canCreate ? (
             <Button
               onClick={() => setViewMode("form")}
               className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"

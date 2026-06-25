@@ -60,6 +60,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { usePageRights } from "@/hooks/usePageRights";
 
 const EMPTY_FORM: FinYearForm = {
   year: "",
@@ -70,6 +71,7 @@ const EMPTY_FORM: FinYearForm = {
 };
 
 export default function FinYearRights() {
+  const rights = usePageRights("fin-year-rights");
   const {
     finYears,
     isLoading,
@@ -225,14 +227,16 @@ export default function FinYearRights() {
           </p>
         </div>
 
-        <button
-          onClick={openAddDialog}
-          disabled={isLoading}
-          className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-50"
-        >
-          <Plus size={15} />
-          New Financial Year
-        </button>
+        {rights.canCreate && (
+          <button
+            onClick={openAddDialog}
+            disabled={isLoading}
+            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-50"
+          >
+            <Plus size={15} />
+            New Financial Year
+          </button>
+        )}
       </div>
 
       <Dialog
@@ -447,41 +451,47 @@ export default function FinYearRights() {
                         </Badge>
                       </TableCell>
                       <TableCell className="space-x-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8"
-                          onClick={() => openEditDialog(fy)}
-                        >
-                          <Edit3 className="mr-1 h-4 w-4" />
-                          Edit
-                        </Button>
+                        {rights.canEdit && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8"
+                            onClick={() => openEditDialog(fy)}
+                          >
+                            <Edit3 className="mr-1 h-4 w-4" />
+                            Edit
+                          </Button>
+                        )}
 
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8"
-                          onClick={() => handleToggleLock(fy.id, fy.locked)}
-                          disabled={lockPending}
-                        >
-                          {lockPending ? (
-                            <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                          ) : fy.locked ? (
-                            <Unlock className="mr-1 h-4 w-4" />
-                          ) : (
-                            <Lock className="mr-1 h-4 w-4" />
-                          )}
-                          {fy.locked ? "Unlock" : "Lock"}
-                        </Button>
+                        {rights.canEdit && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8"
+                            onClick={() => handleToggleLock(fy.id, fy.locked)}
+                            disabled={lockPending}
+                          >
+                            {lockPending ? (
+                              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                            ) : fy.locked ? (
+                              <Unlock className="mr-1 h-4 w-4" />
+                            ) : (
+                              <Lock className="mr-1 h-4 w-4" />
+                            )}
+                            {fy.locked ? "Unlock" : "Lock"}
+                          </Button>
+                        )}
 
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 text-destructive hover:bg-destructive/5"
-                          onClick={() => setDeletingId(fy.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {rights.canDelete && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 text-destructive hover:bg-destructive/5"
+                            onClick={() => setDeletingId(fy.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

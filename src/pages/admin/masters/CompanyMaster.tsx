@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
 import { useLookup } from "@/hooks/useLookup";
+import { usePageRights } from "@/hooks/usePageRights";
 
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
@@ -392,6 +393,8 @@ function buildCompanyColumns(
   openView: (row: any) => void,
   openEdit: (row: any) => void,
   setDeleteConfirm: (id: number) => void,
+  canEdit: boolean,
+  canDelete: boolean,
 ): ColumnDef<any, unknown>[] {
   return [
     {
@@ -495,20 +498,24 @@ function buildCompanyColumns(
           >
             <Eye size={13} />
           </button>
-          <button
-            onClick={() => openEdit(row.original)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
-            title="Edit"
-          >
-            <Pencil size={13} />
-          </button>
-          <button
-            onClick={() => setDeleteConfirm(row.original.Id)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-            title="Delete"
-          >
-            <Trash2 size={13} />
-          </button>
+          {canEdit && (
+            <button
+              onClick={() => openEdit(row.original)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+              title="Edit"
+            >
+              <Pencil size={13} />
+            </button>
+          )}
+          {canDelete && (
+            <button
+              onClick={() => setDeleteConfirm(row.original.Id)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              title="Delete"
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
         </div>
       ),
     },
@@ -516,6 +523,7 @@ function buildCompanyColumns(
 }
 
 export default function CompanyMaster() {
+  const rights = usePageRights("company-master");
   const qc = useQueryClient();
   const [form, setForm] = useState<Company>(empty);
   const [editId, setEditId] = useState<number | null>(null);
@@ -676,9 +684,11 @@ export default function CompanyMaster() {
         (row) => setViewTarget(row),
         openEdit,
         setDeleteConfirm,
+        rights.canEdit,
+        rights.canDelete,
       ),
 
-    [],
+    [rights.canEdit, rights.canDelete],
   );
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -826,12 +836,14 @@ export default function CompanyMaster() {
               </p>
             </div>
           </div>
-          <button
-            onClick={openNew}
-            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
-          >
-            <Plus size={16} /> Add Company
-          </button>
+          {rights.canCreate && (
+            <button
+              onClick={openNew}
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
+            >
+              <Plus size={16} /> Add Company
+            </button>
+          )}
         </div>
 
         {/* Table */}
@@ -877,7 +889,7 @@ export default function CompanyMaster() {
         )}
 
         {/* Form */}
-        {showForm && (
+        {(rights.canCreate || rights.canEdit) && showForm && (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
               <div className="flex items-center gap-3">

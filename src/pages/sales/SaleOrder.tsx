@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   ShoppingCart,
@@ -534,6 +535,7 @@ function SOItemRow({
 
 // ─── Sale Order History ──────────────────────────────────────────────────────
 function SaleOrderHistory() {
+  const rights = usePageRights("sale-order");
   const queryClient = useQueryClient();
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["sale-orders"],
@@ -676,14 +678,16 @@ function SaleOrderHistory() {
                       >
                         <Eye size={15} />
                       </button>
-                      <button
-                        onClick={() => handleDelete(o)}
-                        disabled={deleteMutation.isPending}
-                        className="text-muted-foreground hover:bg-red-500/10 hover:text-red-500 p-2 rounded-lg transition-colors disabled:opacity-50"
-                        title="Delete"
-                      >
-                        <Trash2 size={15} />
-                      </button>
+                      {rights.canDelete && (
+                        <button
+                          onClick={() => handleDelete(o)}
+                          disabled={deleteMutation.isPending}
+                          className="text-muted-foreground hover:bg-red-500/10 hover:text-red-500 p-2 rounded-lg transition-colors disabled:opacity-50"
+                          title="Delete"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -730,13 +734,15 @@ function SaleOrderHistory() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => window.print()}
-                  title="Print Sale Order"
-                  className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
-                >
-                  <Printer size={18} />
-                </button>
+                {rights.canPrint && (
+                  <button
+                    onClick={() => window.print()}
+                    title="Print Sale Order"
+                    className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
+                  >
+                    <Printer size={18} />
+                  </button>
+                )}
                 <button
                   onClick={() => setViewingOrder(null)}
                   className="p-2 hover:bg-muted rounded-lg transition-colors print:hidden"
@@ -876,6 +882,7 @@ function SaleOrderHistory() {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function SaleOrder() {
+  const rights = usePageRights("sale-order");
   const qc = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<"create" | "history">("create");
@@ -1110,16 +1117,18 @@ export default function SaleOrder() {
             </p>
           </div>
           <div className="flex items-center gap-1 p-1 rounded-xl bg-muted border border-border">
-            <button
-              onClick={() => setActiveTab("create")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                activeTab === "create"
-                  ? "bg-violet-600 text-white shadow-sm"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              <Send size={14} /> New Sale Order
-            </button>
+            {rights.canCreate && (
+              <button
+                onClick={() => setActiveTab("create")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  activeTab === "create"
+                    ? "bg-violet-600 text-white shadow-sm"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
+              >
+                <Send size={14} /> New Sale Order
+              </button>
+            )}
             <button
               onClick={() => setActiveTab("history")}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${

@@ -70,6 +70,7 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
+import { usePageRights } from "@/hooks/usePageRights";
 
 const STATUS_OPTIONS = ["all", "Draft", "Pending", "Approved", "Rejected"] as const;
 const REF_DOC_TYPES = [
@@ -198,6 +199,7 @@ function toFormState(amendment: Amendment): FormState {
 
 export default function Amendments() {
   const queryClient = useQueryClient();
+  const rights = usePageRights("amendments");
   const currentRole = useMemo(() => getCurrentRole(), []);
   const canApprove = APPROVER_ROLES.includes(currentRole || "");
 
@@ -355,13 +357,15 @@ export default function Amendments() {
         subtitle="Track change requests for purchase orders, work orders, contracts, and more"
         icon={FilePenLine}
         action={
-          <Button
-            onClick={openCreate}
-            className="gradient-accent text-white text-xs px-3 py-1.5 h-auto"
-          >
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            New Amendment
-          </Button>
+          rights.canCreate ? (
+            <Button
+              onClick={openCreate}
+              className="gradient-accent text-white text-xs px-3 py-1.5 h-auto"
+            >
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              New Amendment
+            </Button>
+          ) : undefined
         }
       >
 
@@ -490,32 +494,38 @@ export default function Amendments() {
                       <div className="flex flex-wrap justify-end gap-2">
                         {amendment.Status === "Draft" ? (
                           <>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openEdit(amendment)}
-                            >
-                              <Pencil className="mr-1 h-3.5 w-3.5" />
-                              Edit
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={submitMutation.isPending}
-                              onClick={() => submitMutation.mutate(amendment.Id)}
-                            >
-                              <Send className="mr-1 h-3.5 w-3.5" />
-                              Submit
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="border-rose-200 text-rose-700 hover:bg-rose-50"
-                              onClick={() => setDeleteTarget(amendment)}
-                            >
-                              <Trash2 className="mr-1 h-3.5 w-3.5" />
-                              Delete
-                            </Button>
+                            {rights.canEdit && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openEdit(amendment)}
+                              >
+                                <Pencil className="mr-1 h-3.5 w-3.5" />
+                                Edit
+                              </Button>
+                            )}
+                            {rights.canCreate && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={submitMutation.isPending}
+                                onClick={() => submitMutation.mutate(amendment.Id)}
+                              >
+                                <Send className="mr-1 h-3.5 w-3.5" />
+                                Submit
+                              </Button>
+                            )}
+                            {rights.canDelete && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                                onClick={() => setDeleteTarget(amendment)}
+                              >
+                                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                Delete
+                              </Button>
+                            )}
                           </>
                         ) : null}
 

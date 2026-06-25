@@ -28,6 +28,7 @@ import {
   deleteBillingTerm,
   type BillingTermRow,
 } from "@/api/billingTermsMasterApi";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ─── CSV template / import column mapping ─────────────────────────────────────
 // Single source of truth for both the downloadable template and the importer,
@@ -118,6 +119,7 @@ function DeductionToggler({
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const BillingTermsMaster: React.FC = () => {
+  const rights = usePageRights("billing-terms");
   const { billingTerms, setBillingTerms } = useBillingTerms();
   const [loading, setLoading] = useState(true);
 
@@ -467,7 +469,7 @@ const BillingTermsMaster: React.FC = () => {
             columnRenderers={columnRenderers}
             initialData={billingTerms as unknown as Record<string, unknown>[]}
             onDataEvent={handleDataEvent}
-            exportConfig={{
+            exportConfig={rights.canExport ? {
               title: "Billing Terms Master",
               filename: "billing-terms-master",
               columns: [
@@ -480,7 +482,7 @@ const BillingTermsMaster: React.FC = () => {
                   accessor: (r) => (r.IsActive ? "Active" : "Inactive"),
                 },
               ],
-            }}
+            } : undefined}
           />
         )}
 

@@ -11,6 +11,7 @@ import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Hash, Download, Upload, Loader2, Check, X } from "lucide-react";
+import { usePageRights } from "@/hooks/usePageRights";
 import {
   Dialog,
   DialogContent,
@@ -92,6 +93,7 @@ interface ImportRowResult {
 // ─── Component ────────────────────────────────────────────────────────────────
 const HsnMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const rights = usePageRights("hsn-master");
 
   const {
     data: dbData,
@@ -412,7 +414,7 @@ const HsnMaster: React.FC = () => {
           columnRenderers={columnRenderers}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
-          exportConfig={{
+          exportConfig={rights.canExport ? {
             title: "HSN Master",
             filename: "hsn-master",
             columns: [
@@ -423,7 +425,7 @@ const HsnMaster: React.FC = () => {
               { header: "SGST %", accessor: "sgstRate" },
               { header: "Status", accessor: "status" },
             ],
-          }}
+          } : undefined}
         />
 
         {/* Import Results Modal */}

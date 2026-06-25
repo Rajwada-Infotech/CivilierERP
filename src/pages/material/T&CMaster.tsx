@@ -1,4 +1,5 @@
 import React from "react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
@@ -121,6 +122,7 @@ const columnRenderers = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function TCMaster() {
+  const rights = usePageRights("tc-master");
   const queryClient = useQueryClient();
 
   const {
@@ -220,6 +222,10 @@ export default function TCMaster() {
             { header: "Status", accessor: "status" },
           ],
         }}
+        canCreate={rights.canCreate}
+        canEdit={rights.canEdit}
+        canDelete={rights.canDelete}
+        canExport={rights.canExport}
       />
       </MaterialShell>
     </>

@@ -28,6 +28,7 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import {
@@ -414,7 +415,7 @@ export function AgreementsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { currentUser } = useAuth();
-  const canDeleteRecords = currentUser?.role !== "engineer";
+  const rights = usePageRights("followup-agreements");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<AgreementStatus | "">("");
@@ -971,13 +972,15 @@ export function AgreementsPage() {
               />
               Refresh
             </button>
-            <Button
-              size="sm"
-              onClick={openCreate}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-            >
-              <Plus size={14} /> New Agreement
-            </Button>
+            {rights.canCreate && (
+              <Button
+                size="sm"
+                onClick={openCreate}
+                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+              >
+                <Plus size={14} /> New Agreement
+              </Button>
+            )}
           </div>
         </div>
 
@@ -1135,7 +1138,7 @@ export function AgreementsPage() {
                   ? "Try adjusting your filters"
                   : "Create the first agreement to get started"}
               </p>
-              {!search && !statusFilter && (
+              {!search && !statusFilter && rights.canCreate && (
                 <Button
                   onClick={openCreate}
                   className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto mt-1"
@@ -1243,7 +1246,7 @@ export function AgreementsPage() {
                               onClick={(e) => {
                                 if (openMenuId === ag.Id) { setOpenMenuId(null); return; }
                                 const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                const menuH = canDeleteRecords ? 82 : 42;
+                                const menuH = rights.canDelete ? 82 : 42;
                                 const top = window.innerHeight - rect.bottom < menuH + 8
                                   ? rect.top - menuH - 4
                                   : rect.bottom + 4;
@@ -1255,16 +1258,18 @@ export function AgreementsPage() {
                             </button>
                             {openMenuId === ag.Id && (
                               <div className="ag-menu" style={{ position: "fixed", top: menuPos.top, right: menuPos.right, zIndex: 200 }}>
-                                <button
-                                  className="ag-menu-item"
-                                  onClick={() => {
-                                    openEdit(ag);
-                                    setOpenMenuId(null);
-                                  }}
-                                >
-                                  <Pencil size={13} /> Edit
-                                </button>
-                                {canDeleteRecords && (
+                                {rights.canEdit && (
+                                  <button
+                                    className="ag-menu-item"
+                                    onClick={() => {
+                                      openEdit(ag);
+                                      setOpenMenuId(null);
+                                    }}
+                                  >
+                                    <Pencil size={13} /> Edit
+                                  </button>
+                                )}
+                                {rights.canDelete && (
                                   <button
                                     className="ag-menu-item danger"
                                     onClick={() => {
