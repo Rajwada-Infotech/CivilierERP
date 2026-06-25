@@ -173,12 +173,23 @@ function useApprovalCount() {
       });
   };
 
+  // Immediately re-poll when any page fires the "approval-action" custom
+  // event (after an approve or reject). Without this the badge can take up
+  // to 60 s to drop even though the approval already happened.
+  const onApprovalAction = () => {
+    if (!mountedRef.current) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    poll();
+  };
+
   useEffect(() => {
     mountedRef.current = true;
     poll();
+    window.addEventListener("approval-action", onApprovalAction);
     return () => {
       mountedRef.current = false;
       if (timerRef.current) clearTimeout(timerRef.current);
+      window.removeEventListener("approval-action", onApprovalAction);
     };
   }, []);
 

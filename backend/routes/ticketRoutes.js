@@ -97,16 +97,17 @@ function sendTicketAccessError(res, access) {
   return null;
 }
 
-async function addCommentToTicket(pool, ticketId, comment, actor) {
+async function addCommentToTicket(pool, ticketId, comment, actor, isInternal = false) {
   await pool
     .request()
     .input("ticket_id", sql.Int, ticketId)
     .input("comment", sql.NVarChar(sql.MAX), comment)
     .input("author_name", sql.NVarChar(255), actor.name)
     .input("author_id", sql.Int, actor.id)
-    .input("author_role", sql.NVarChar(50), actor.role).query(`
-      INSERT INTO dbo.ticket_comments (ticket_id, comment, author_name, author_id, author_role)
-      VALUES (@ticket_id, @comment, @author_name, @author_id, @author_role)
+    .input("author_role", sql.NVarChar(50), actor.role)
+    .input("is_internal", sql.Bit, isInternal ? 1 : 0).query(`
+      INSERT INTO dbo.ticket_comments (ticket_id, comment, author_name, author_id, author_role, is_internal)
+      VALUES (@ticket_id, @comment, @author_name, @author_id, @author_role, @is_internal)
     `);
 }
 
@@ -911,7 +912,7 @@ router.post("/comment/:id", async (req, res) => {
     const pool = getPool();
     const id = parseTicketId(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid ticket id" });
-    const { comment, attachmentIds } = req.body;
+    const { comment, attachmentIds, is_internal } = req.body;
 
     if (
       !comment?.trim() &&
@@ -923,8 +924,13 @@ router.post("/comment/:id", async (req, res) => {
     const accessError = sendTicketAccessError(res, access);
     if (accessError) return accessError;
 
+    // Only staff roles can post internal notes; silently downgrade if a
+    // customer somehow sends is_internal: true.
+    const internalFlag =
+      !!is_internal && !["customer"].includes(actor.role);
+
     const commentText = comment?.trim() || "";
-    await addCommentToTicket(pool, id, commentText, actor);
+    await addCommentToTicket(pool, id, commentText, actor, internalFlag);
 
     // Get the new comment's ID so we can link attachments to it
     const commentResult = await pool

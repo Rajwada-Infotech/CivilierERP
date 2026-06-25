@@ -181,9 +181,14 @@ export default function UserProfile() {
     avatarUploadMutation.mutate(avatarPreview);
   };
 
+  // Count from the raw pagePermissions array (populated by backend at login)
+  // so that it accurately reflects what the server granted, not just what
+  // PAGE_DEFINITIONS happens to enumerate on the frontend.
   const accessiblePages = PAGE_DEFINITIONS.filter((p) =>
     canAccessPage(p.key as any),
   );
+  const pageCount =
+    currentUser?.pagePermissions?.length ?? accessiblePages.length;
   const displayName = profile?.name ?? currentUser?.name ?? "User";
   const initials = displayName
     .split(" ")
@@ -224,7 +229,7 @@ export default function UserProfile() {
           </span>
         }
         stats={[
-          { label: "Pages", value: accessiblePages.length },
+          { label: "Pages", value: pageCount },
           {
             label: "Role",
             value: profile?.roleName ?? currentUser?.role ?? "user",
@@ -325,7 +330,7 @@ export default function UserProfile() {
                       Accessible Pages
                     </span>
                     <span className="text-foreground font-bold">
-                      {accessiblePages.length}
+                      {pageCount}
                     </span>
                   </div>
                 </div>
@@ -458,9 +463,9 @@ export default function UserProfile() {
           <ProfileSection
             title="My Page Access"
             icon={LayoutGrid}
-            subtitle={`${accessiblePages.length} pages available`}
+            subtitle={`${pageCount} pages available`}
           >
-            {accessiblePages.length === 0 ? (
+            {pageCount === 0 ? (
               <div className="py-16 text-center">
                 <Shield
                   size={32}
@@ -473,7 +478,7 @@ export default function UserProfile() {
                   Contact your administrator to request access
                 </p>
               </div>
-            ) : (
+            ) : accessiblePages.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {accessiblePages.map((page) => {
                   const actions = (
@@ -510,6 +515,35 @@ export default function UserProfile() {
                     </div>
                   );
                 })}
+              </div>
+            ) : (
+              /* pageCount > 0 but none are in PAGE_DEFINITIONS — show raw permission list */
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {(currentUser?.pagePermissions ?? []).map((perm) => (
+                  <div
+                    key={perm.page}
+                    className="p-4 rounded-xl border border-border bg-muted/20 hover:bg-muted/40 hover:border-primary/20 transition-all"
+                  >
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
+                        <CheckCircle2 size={11} className="text-primary" />
+                      </div>
+                      <span className="text-xs font-heading font-semibold text-foreground capitalize">
+                        {perm.page.replace(/-/g, " ")}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {(perm.actions ?? []).map((a: string) => (
+                        <span
+                          key={a}
+                          className={`text-[9px] font-heading uppercase tracking-wider px-2 py-0.5 rounded-full border ${ACTION_COLORS[a] ?? "bg-muted text-muted-foreground border-border"}`}
+                        >
+                          {a}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </ProfileSection>

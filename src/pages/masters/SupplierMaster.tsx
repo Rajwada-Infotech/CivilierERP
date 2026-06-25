@@ -684,8 +684,8 @@ const SupplierMaster: React.FC = () => {
 
   const isDirty = Object.keys(form).some(
     (k) =>
-      String((form as Record<string, unknown>)[k] ?? "") !==
-      String((EMPTY_FORM as Record<string, unknown>)[k] ?? ""),
+      String((form as any)[k] ?? "") !==
+      String((EMPTY_FORM as any)[k] ?? ""),
   );
   const canSave =
     form.LHeadName.trim() !== "" &&
@@ -781,9 +781,12 @@ const SupplierMaster: React.FC = () => {
         deleteMut,
         setViewRecord,
         handlePrint,
+        rights.canEdit,
+        rights.canDelete,
+        rights.canPrint,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editingId, deleteConfirm],
+    [editingId, deleteConfirm, rights.canEdit, rights.canDelete, rights.canPrint],
   );
 
   // ── Filtered + sorted list ─────────────────────────────────────────────────
@@ -863,7 +866,7 @@ const SupplierMaster: React.FC = () => {
               onClick={handleImportClick}
               disabled={importing}
               title="Import suppliers from a filled-in CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {importing ? (
                 <Loader2 size={13} className="animate-spin" />
@@ -879,7 +882,7 @@ const SupplierMaster: React.FC = () => {
       >
         {/* ── Form Card ── */}
         <div
-          className="rounded-xl overflow-hidden"
+          className="rounded-xl overflow-visible"
           style={{
             background: isDark
               ? "rgba(12,14,22,0.55)"
@@ -896,7 +899,7 @@ const SupplierMaster: React.FC = () => {
         >
           {/* Card header — title only */}
           <div
-            className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
+            className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden rounded-t-xl"
             style={{
               background: isDark
                 ? "rgba(99,102,241,0.09)"
@@ -1110,7 +1113,7 @@ const SupplierMaster: React.FC = () => {
                 {/* PAN */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    PAN Number <span className="text-destructive">*</span>
+                    PAN <span className="text-destructive">*</span>
                   </label>
                   <input
                     value={form.LHeadPan}
@@ -1223,7 +1226,7 @@ const SupplierMaster: React.FC = () => {
           </div>
 
           {/* Card footer — actions */}
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl">
             <p className="text-[11px] text-muted-foreground hidden sm:block">
               {canSave ? (
                 <span className="text-emerald-500 font-medium">
@@ -1245,7 +1248,7 @@ const SupplierMaster: React.FC = () => {
               <button
                 onClick={handleSave}
                 disabled={saving || !canSave}
-                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
               >
                 {saving ? (
                   <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1519,7 +1522,7 @@ const SupplierMaster: React.FC = () => {
                   startEdit(viewRecord);
                   setViewRecord(null);
                 }}
-                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm flex items-center gap-1.5"
+                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white shadow-sm flex items-center gap-1.5"
               >
                 <Pencil size={13} /> Edit Supplier
               </button>
