@@ -34,6 +34,7 @@ const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
+const { transition } = require("../services/approvalService");
 const {
   resolveDocTypeId,
   lockNextDocNumber,
@@ -295,7 +296,9 @@ router.post("/", async (req, res) => {
     const finalDocNo = await lockNextDocNumber(pool, sql, {
       docTypeId,
       finYear: finYear || null,
-      projectId: projectId || null,
+      tableName: "VehicleInOut",
+      docNoColumn: "DocNo",
+      issuedBy: email,
       parentDocNo: null,
     });
 
@@ -344,12 +347,30 @@ router.post("/", async (req, res) => {
     recordId = insert.recordset[0].VehicleInOutID;
 
     // ── 4. Back-patch DocNumberSequence with the real PK ────────────────────
-    await backPatchRecordId(pool, sql, docTypeId, finalDocNo, recordId);
+    await backPatchRecordId(pool, sql, finalDocNo, "VehicleInOut", recordId);
 
     // ── 5. Link any attachments uploaded while filling out the form ─────────
     await linkAttachments(pool, recordId, parseIdList(attachmentIds));
 
     await bumpCacheVersion(CACHE_KEY);
+
+    // Auto-submit: transition Draft → Pending immediately so no manual
+    // "Submit" step is required after creation (same pattern as Material
+    // Requests). Non-fatal — record is saved either way.
+    try {
+      await transition(
+        "vehicle-in-out",
+        recordId,
+        "Pending",
+        req.user?.email || email,
+        req.user?.role,
+      );
+    } catch (submitErr) {
+      console.warn(
+        "Vehicle In/Out auto-submit failed (non-fatal):",
+        submitErr.message,
+      );
+    }
 
     res.status(201).json({ vehicleInOutId: recordId, docNo: finalDocNo });
   } catch (err) {
@@ -428,6 +449,85 @@ router.put("/:id", async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/submit — Draft/Rejected → Pending ────────────────────────────────
+// Records are auto-submitted on creation; this is only needed to re-submit
+// after a rejection (or as a fallback if auto-submit failed).
+router.put("/:id/submit", async (req, res) => {
+  const email = userEmail(req, res);
+  if (!email) return;
+
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  try {
+    const result = await transition(
+      "vehicle-in-out",
+      id,
+      "Pending",
+      req.user?.email || email,
+      req.user?.role,
+    );
+    await bumpCacheVersion(CACHE_KEY);
+    res.json({ message: "Submitted for approval", ...result });
+  } catch (err) {
+    res
+      .status(err.message.includes("not authorized") ? 403 : 400)
+      .json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/approve ──────────────────────────────────────────────────────────
+router.put("/:id/approve", async (req, res) => {
+  const email = userEmail(req, res);
+  if (!email) return;
+
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  try {
+    const result = await transition(
+      "vehicle-in-out",
+      id,
+      "Approved",
+      req.user?.email || email,
+      req.user?.role,
+    );
+    await bumpCacheVersion(CACHE_KEY);
+    res.json({ message: "Vehicle In/Out approved", ...result });
+  } catch (err) {
+    res
+      .status(err.message.includes("not authorized") ? 403 : 400)
+      .json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/reject ───────────────────────────────────────────────────────────
+router.put("/:id/reject", async (req, res) => {
+  const email = userEmail(req, res);
+  if (!email) return;
+
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  try {
+    const { note } = req.body;
+    const result = await transition(
+      "vehicle-in-out",
+      id,
+      "Rejected",
+      req.user?.email || email,
+      req.user?.role,
+      note || null,
+    );
+    await bumpCacheVersion(CACHE_KEY);
+    res.json({ message: "Vehicle In/Out rejected", ...result });
+  } catch (err) {
+    res
+      .status(err.message.includes("not authorized") ? 403 : 400)
+      .json({ error: err.message });
   }
 });
 
