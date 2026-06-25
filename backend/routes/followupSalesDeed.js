@@ -156,6 +156,7 @@ function getPayload(body) {
     WitnessNames: normalizeText(body?.WitnessNames),
     Status: status,
     Notes: normalizeText(body?.Notes),
+    SignatureId: normalizeNumber(body?.SignatureId) || null,
   };
 }
 
@@ -387,6 +388,7 @@ router.post("/", async (req, res) => {
       .input("WitnessNames", sql.NVarChar(500), payload.WitnessNames)
       .input("Status", sql.NVarChar(30), payload.Status)
       .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
+      .input("SignatureId", sql.Int, payload.SignatureId)
       .input("CreatedBy", sql.NVarChar(100), userName).query(`
         INSERT INTO dbo.FollowupSalesDeeds (
           DeedNo, ApplicantId, UnitSelectionId, AgreementId,
@@ -395,7 +397,7 @@ router.post("/", async (req, res) => {
           SubRegistrarOffice, RegistrationNo, BookNo, PartNo,
           DeedDate, RegistrationDate, PossessionDate,
           ExecutedBy, WitnessNames,
-          Status, Notes,
+          Status, Notes, SignatureId,
           CreatedBy, CreatedAt
         )
         OUTPUT INSERTED.Id
@@ -406,7 +408,7 @@ router.post("/", async (req, res) => {
           @SubRegistrarOffice, @RegistrationNo, @BookNo, @PartNo,
           @DeedDate, @RegistrationDate, @PossessionDate,
           @ExecutedBy, @WitnessNames,
-          @Status, @Notes,
+          @Status, @Notes, @SignatureId,
           @CreatedBy, SYSDATETIME()
         )
       `);
@@ -499,6 +501,7 @@ router.put("/:id", async (req, res) => {
       .input("WitnessNames", sql.NVarChar(500), payload.WitnessNames)
       .input("Status", sql.NVarChar(30), payload.Status)
       .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
+      .input("SignatureId", sql.Int, payload.SignatureId)
       .input("UpdatedBy", sql.NVarChar(100), userName).query(`
         UPDATE dbo.FollowupSalesDeeds SET
           ApplicantId        = @ApplicantId,
@@ -520,6 +523,7 @@ router.put("/:id", async (req, res) => {
           WitnessNames       = @WitnessNames,
           Status             = @Status,
           Notes              = @Notes,
+          SignatureId        = @SignatureId,
           UpdatedBy          = @UpdatedBy,
           UpdatedAt          = SYSDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
