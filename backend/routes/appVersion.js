@@ -1,6 +1,6 @@
 // backend/routes/appVersion.js
 // Serves the current application version from dbo.Version.
-// GET /api/app-version — returns the latest version_name for the tenant.
+// GET /api/app-version — returns the latest db_version and application_version for the tenant.
 //
 // tenant_id is read from req.user if present (auth middleware sets it),
 // falling back to tenant_id = 1 so unauthenticated / single-tenant setups
@@ -22,8 +22,9 @@ router.get("/", async (req, res) => {
     const result = await pool.request().input("tenantId", sql.Int, tenantId)
       .query(`
         SELECT TOP 1
-          version_name   AS version,
-          created_date   AS releasedAt
+          db_version          AS dbVersion,
+          application_version AS appVersion,
+          created_date        AS releasedAt
         FROM dbo.Version
         WHERE tenant_id = @tenantId
         ORDER BY created_date DESC, version_id DESC
@@ -31,7 +32,7 @@ router.get("/", async (req, res) => {
 
     if (!result.recordset.length) {
       // No row yet for this tenant — return a safe fallback
-      return res.json({ version: "—", releasedAt: null });
+      return res.json({ dbVersion: "—", appVersion: "—", releasedAt: null });
     }
 
     res.json(result.recordset[0]);
@@ -41,7 +42,3 @@ router.get("/", async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-

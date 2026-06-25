@@ -98,7 +98,7 @@ router.put("/:id", validateBody(menuTypeUpdateSchema), async (req, res) => {
           UpdatedBy = @UpdatedBy,
           UpdatedAt = @UpdatedAt,
           ApprovedBy = @ApprovedBy,
-          ApprovedAt = @ApprovedAt
+          ApprovedAt = COALESCE(@ApprovedAt, ApprovedAt)
         WHERE Id = @Id
       `);
     res.json({ message: "Menu type updated successfully" });

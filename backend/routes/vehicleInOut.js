@@ -8,21 +8,26 @@
  * Table   : dbo.VehicleInOut
  * Perms   : Module="Material", SubModule="VehicleInOut"
  *
+ * Attachments (camera captures + file picks) are stored as binary in
+ * dbo.VehicleInOutAttachments — same pattern as dbo.ticket_attachments.
+ * No disk dependency: any app instance can serve any attachment, and
+ * attachments are included in normal DB backups automatically.
+ *
  * Routes
- *   GET    /                 — paginated list
- *   GET    /next-number      — preview next VEH-YYYY-NNNNN
- *   GET    /:id              — single record
- *   POST   /                 — create
- *   PUT    /:id              — update
- *   DELETE /:id              — delete
- *   POST   /upload           — multer attachment upload
+ *   GET    /                     — paginated list
+ *   GET    /next-number          — preview next VEH-YYYY-NNNNN
+ *   GET    /:id                  — single record (includes attachments[])
+ *   POST   /                     — create (links pending attachmentIds)
+ *   PUT    /:id                  — update (links/unlinks attachmentIds)
+ *   DELETE /:id                  — delete (attachments cascade-delete)
+ *   POST   /upload                — upload one or more files to DB, returns attachment ids/urls
+ *   GET    /attachment/:attachId — stream a single attachment's binary
+ *   DELETE /attachment/:attachId — remove a single attachment (e.g. user removes it before saving)
  */
 
 "use strict";
 
 const express = require("express");
-const path = require("path");
-const fs = require("fs");
 const multer = require("multer");
 const rateLimit = require("express-rate-limit");
 
@@ -44,25 +49,22 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false }));
 // ── Permission guard ─────────────────────────────────────────────────────────
 router.use(checkPermissionForMethod("Material", "VehicleInOut"));
 
-// ── Multer (attachment / camera photo) ───────────────────────────────────────
-const UPLOAD_DIR = path.join(__dirname, "../uploads/vehicle-in-out");
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const base = path.basename(file.originalname, ext).replace(/\s+/g, "-");
-    cb(null, `${Date.now()}-${base}${ext}`);
-  },
-});
-
+// ── Multer — memory storage (files go to DB, not disk) ───────────────────────
 const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
   fileFilter: (_req, file, cb) => {
-    const allowed = /jpeg|jpg|png|gif|pdf|heic/i;
-    cb(null, allowed.test(path.extname(file.originalname)));
+    const allowed = /jpeg|jpg|png|gif|webp|pdf|heic/i;
+    const okExt = allowed.test(file.originalname);
+    const okMime =
+      allowed.test(file.mimetype) || file.mimetype === "application/pdf";
+    if (okExt || okMime) cb(null, true);
+    else
+      cb(
+        new Error(
+          "Only images (jpg, png, gif, webp, heic) and PDFs are allowed",
+        ),
+      );
   },
 });
 
@@ -76,6 +78,60 @@ function userEmail(req, res) {
     return null;
   }
   return email;
+}
+
+function parseIdList(raw) {
+  // Accepts a real array (JSON body) or a JSON-string-encoded array.
+  if (Array.isArray(raw))
+    return raw.map((n) => parseInt(n, 10)).filter((n) => !isNaN(n));
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed))
+        return parsed.map((n) => parseInt(n, 10)).filter((n) => !isNaN(n));
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function attachmentRowToDto(a) {
+  return {
+    id: a.AttachmentId,
+    filename: a.FileName,
+    mimeType: a.MimeType,
+    size: a.FileSize,
+    url: `/api/vehicle-in-out/attachment/${a.AttachmentId}`,
+  };
+}
+
+/** Link a set of previously-uploaded (unlinked) attachment ids to a VehicleInOutID. */
+async function linkAttachments(pool, vehicleInOutId, attachmentIds) {
+  if (!attachmentIds.length) return;
+  for (const attachId of attachmentIds) {
+    await pool
+      .request()
+      .input("AttachmentId", sql.Int, attachId)
+      .input("VehicleInOutID", sql.Int, vehicleInOutId).query(`
+        UPDATE dbo.VehicleInOutAttachments
+        SET VehicleInOutID = @VehicleInOutID
+        WHERE AttachmentId = @AttachmentId AND VehicleInOutID IS NULL
+      `);
+  }
+}
+
+/** Fetch attachment metadata (no binary) for a given VehicleInOutID. */
+async function getAttachmentsFor(pool, vehicleInOutId) {
+  const result = await pool
+    .request()
+    .input("VehicleInOutID", sql.Int, vehicleInOutId).query(`
+      SELECT AttachmentId, FileName, MimeType, FileSize
+      FROM dbo.VehicleInOutAttachments
+      WHERE VehicleInOutID = @VehicleInOutID
+      ORDER BY UploadedAt ASC
+    `);
+  return result.recordset.map(attachmentRowToDto);
 }
 
 // ── GET /next-number ─────────────────────────────────────────────────────────
@@ -124,13 +180,14 @@ router.get("/", async (req, res) => {
         v.EntryTime,
         v.ExitTime,
         v.ChallanNo,
-        v.AttachmentPath,
         v.Remarks,
         v.Status,
         v.CreatedAt,
         -- Joined names
         ec.Name   AS CompanyName,
-        ep.Name   AS ProjectName
+        ep.Name   AS ProjectName,
+        -- Attachment count (binary itself is fetched separately/lazily)
+        (SELECT COUNT(*) FROM dbo.VehicleInOutAttachments a WHERE a.VehicleInOutID = v.VehicleInOutID) AS AttachmentCount
       FROM dbo.VehicleInOut v
       LEFT JOIN dbo.enterprise ec ON ec.id = v.CompanyID
       LEFT JOIN dbo.enterprise ep ON ep.id = v.ProjectID
@@ -178,9 +235,8 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const pool = await getPool();
-    const result = await pool
-      .request()
-      .input("ID", sql.Int, parseInt(req.params.id, 10)).query(`
+    const id = parseInt(req.params.id, 10);
+    const result = await pool.request().input("ID", sql.Int, id).query(`
         SELECT
           v.*,
           ec.Name AS CompanyName,
@@ -193,7 +249,11 @@ router.get("/:id", async (req, res) => {
 
     if (!result.recordset[0])
       return res.status(404).json({ error: "Not found" });
-    res.json(result.recordset[0]);
+
+    const record = result.recordset[0];
+    record.Attachments = await getAttachmentsFor(pool, id);
+
+    res.json(record);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -217,7 +277,7 @@ router.post("/", async (req, res) => {
     entryTime,
     exitTime,
     challanNo,
-    attachmentPath,
+    attachmentIds, // array of ids returned by POST /upload, still unlinked
     remarks,
   } = req.body;
 
@@ -260,7 +320,6 @@ router.post("/", async (req, res) => {
       )
       .input("ExitTime", sql.DateTime, exitTime ? new Date(exitTime) : null)
       .input("ChallanNo", sql.NVarChar(100), challanNo || null)
-      .input("AttachmentPath", sql.NVarChar(500), attachmentPath || null)
       .input("Remarks", sql.NVarChar(1000), remarks || null)
       .input("Status", sql.NVarChar(30), "Draft")
       .input("CreatedBy", sql.NVarChar(150), email)
@@ -270,7 +329,7 @@ router.post("/", async (req, res) => {
            CompanyID, ProjectID, FinYear,
            SupplierID, SupplierName, POID, PONumber,
            VehicleNo, EntryTime, ExitTime,
-           ChallanNo, AttachmentPath, Remarks,
+           ChallanNo, Remarks,
            Status, CreatedBy, UpdatedBy)
         OUTPUT INSERTED.VehicleInOutID
         VALUES
@@ -278,7 +337,7 @@ router.post("/", async (req, res) => {
            @CompanyID, @ProjectID, @FinYear,
            @SupplierID, @SupplierName, @POID, @PONumber,
            @VehicleNo, @EntryTime, @ExitTime,
-           @ChallanNo, @AttachmentPath, @Remarks,
+           @ChallanNo, @Remarks,
            @Status, @CreatedBy, @UpdatedBy)
       `);
 
@@ -286,6 +345,9 @@ router.post("/", async (req, res) => {
 
     // ── 4. Back-patch DocNumberSequence with the real PK ────────────────────
     await backPatchRecordId(pool, sql, docTypeId, finalDocNo, recordId);
+
+    // ── 5. Link any attachments uploaded while filling out the form ─────────
+    await linkAttachments(pool, recordId, parseIdList(attachmentIds));
 
     await bumpCacheVersion(CACHE_KEY);
 
@@ -314,7 +376,7 @@ router.put("/:id", async (req, res) => {
     entryTime,
     exitTime,
     challanNo,
-    attachmentPath,
+    attachmentIds, // any newly-uploaded (still-unlinked) attachment ids to attach
     remarks,
   } = req.body;
 
@@ -338,7 +400,6 @@ router.put("/:id", async (req, res) => {
       .input("EntryTime", sql.DateTime, entryTime ? new Date(entryTime) : null)
       .input("ExitTime", sql.DateTime, exitTime ? new Date(exitTime) : null)
       .input("ChallanNo", sql.NVarChar(100), challanNo || null)
-      .input("AttachmentPath", sql.NVarChar(500), attachmentPath || null)
       .input("Remarks", sql.NVarChar(1000), remarks || null)
       .input("UpdatedBy", sql.NVarChar(150), email).query(`
         UPDATE dbo.VehicleInOut SET
@@ -354,12 +415,14 @@ router.put("/:id", async (req, res) => {
           EntryTime      = @EntryTime,
           ExitTime       = @ExitTime,
           ChallanNo      = @ChallanNo,
-          AttachmentPath = @AttachmentPath,
           Remarks        = @Remarks,
           UpdatedAt      = GETDATE(),
           UpdatedBy      = @UpdatedBy
         WHERE VehicleInOutID = @ID
       `);
+
+    // Link any newly-uploaded attachments added during this edit.
+    await linkAttachments(pool, id, parseIdList(attachmentIds));
 
     await bumpCacheVersion(CACHE_KEY);
     res.json({ success: true });
@@ -369,6 +432,8 @@ router.put("/:id", async (req, res) => {
 });
 
 // ── DELETE /:id ───────────────────────────────────────────────────────────────
+// Attachments cascade-delete automatically via FK_VehicleInOutAttachments_Parent
+// (ON DELETE CASCADE) — no manual cleanup needed since everything lives in SQL.
 router.delete("/:id", async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
@@ -380,22 +445,11 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("ID", sql.Int, id)
       .query(
-        `SELECT AttachmentPath FROM dbo.VehicleInOut WHERE VehicleInOutID = @ID`,
+        `SELECT VehicleInOutID FROM dbo.VehicleInOut WHERE VehicleInOutID = @ID`,
       );
 
     if (!check.recordset[0])
       return res.status(404).json({ error: "Not found" });
-
-    // Clean up uploaded file if present
-    const attachPath = check.recordset[0].AttachmentPath;
-    if (attachPath) {
-      const full = path.join(
-        __dirname,
-        "../uploads",
-        attachPath.replace(/^\/uploads\//, ""),
-      );
-      if (fs.existsSync(full)) fs.unlinkSync(full);
-    }
 
     await pool
       .request()
@@ -409,15 +463,117 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// ── POST /upload — attachment / camera photo ──────────────────────────────────
-router.post("/upload", upload.single("file"), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-  // Return a relative URL the frontend can store and serve via /uploads/...
-  res.json({
-    path: `/uploads/vehicle-in-out/${req.file.filename}`,
-    originalName: req.file.originalname,
-    size: req.file.size,
-  });
+// ── POST /upload — attachment / camera photo (stored in DB, not disk) ────────
+// Files are uploaded while the user is still filling out the form, before a
+// VehicleInOutID exists — same flow as ticket attachments. Each row starts
+// with VehicleInOutID = NULL and gets linked once the parent record is
+// actually saved (see linkAttachments() in POST / and PUT /:id above).
+router.post("/upload", upload.array("file", 20), async (req, res) => {
+  const email = userEmail(req, res);
+  if (!email) return;
+
+  const files = req.files;
+  if (!files || files.length === 0)
+    return res.status(400).json({ error: "No file uploaded" });
+
+  try {
+    const pool = await getPool();
+    const results = [];
+
+    for (const file of files) {
+      const insertResult = await pool
+        .request()
+        .input("FileName", sql.NVarChar(255), file.originalname)
+        .input("MimeType", sql.NVarChar(100), file.mimetype)
+        .input("FileSize", sql.Int, file.size)
+        .input("FileData", sql.VarBinary(sql.MAX), file.buffer)
+        .input("UploadedBy", sql.NVarChar(150), email).query(`
+          INSERT INTO dbo.VehicleInOutAttachments
+            (VehicleInOutID, FileName, MimeType, FileSize, FileData, UploadedBy)
+          OUTPUT INSERTED.AttachmentId
+          VALUES
+            (NULL, @FileName, @MimeType, @FileSize, @FileData, @UploadedBy)
+        `);
+
+      const attachId = insertResult.recordset[0].AttachmentId;
+      results.push({
+        id: attachId,
+        filename: file.originalname,
+        mimeType: file.mimetype,
+        size: file.size,
+        url: `/api/vehicle-in-out/attachment/${attachId}`,
+      });
+    }
+
+    res.json({
+      success: true,
+      attachments: results,
+      ids: results.map((r) => r.id),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /attachment/:attachId — stream binary from DB ─────────────────────────
+router.get("/attachment/:attachId", async (req, res) => {
+  try {
+    const attachId = parseInt(req.params.attachId, 10);
+    if (isNaN(attachId))
+      return res.status(400).json({ error: "Invalid attachment id" });
+
+    const pool = await getPool();
+    const result = await pool.request().input("AttachmentId", sql.Int, attachId)
+      .query(`
+        SELECT AttachmentId, FileName, MimeType, FileData
+        FROM dbo.VehicleInOutAttachments
+        WHERE AttachmentId = @AttachmentId
+      `);
+
+    if (!result.recordset.length)
+      return res.status(404).json({ error: "Attachment not found" });
+
+    const attachment = result.recordset[0];
+    res.setHeader("Content-Type", attachment.MimeType);
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${encodeURIComponent(attachment.FileName)}"`,
+    );
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.send(attachment.FileData);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DELETE /attachment/:attachId — remove a single attachment ─────────────────
+// Used when the user removes a captured photo / file before saving the form,
+// or removes one from an existing record while editing.
+router.delete("/attachment/:attachId", async (req, res) => {
+  const email = userEmail(req, res);
+  if (!email) return;
+
+  try {
+    const attachId = parseInt(req.params.attachId, 10);
+    if (isNaN(attachId))
+      return res.status(400).json({ error: "Invalid attachment id" });
+
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input("AttachmentId", sql.Int, attachId)
+      .query(
+        `DELETE FROM dbo.VehicleInOutAttachments WHERE AttachmentId = @AttachmentId`,
+      );
+
+    if (result.rowsAffected[0] === 0)
+      return res.status(404).json({ error: "Attachment not found" });
+
+    await bumpCacheVersion(CACHE_KEY);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

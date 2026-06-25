@@ -328,7 +328,7 @@ const DebitNoteMaster: React.FC = () => {
   const { finYears } = useFinYear();
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
-  const finYearOptions = finYears.filter((fy) => fy.status === "Active");
+  const finYearOptions = finYears.filter((fy) => fy.status === "Active" && !fy.locked);
   const [selectedFinYear, setSelectedFinYear] = useState<string | null>(null);
   const [autoFillPatch, setAutoFillPatch] = useState<Record<
     string,
@@ -731,10 +731,12 @@ const DebitNoteMaster: React.FC = () => {
             className="w-full appearance-none rounded-lg border border-border bg-muted px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           >
             <option value="">— All Years —</option>
-            {finYears.map((fy) => (
+            {finYears
+              .filter((fy) => fy.status === "Active" && !fy.locked)
+              .sort((a, b) => b.year.localeCompare(a.year))
+              .map((fy) => (
               <option key={fy.id} value={fy.year}>
                 {fy.year}
-                {fy.status === "Active" ? " (Active)" : ""}
               </option>
             ))}
           </select>

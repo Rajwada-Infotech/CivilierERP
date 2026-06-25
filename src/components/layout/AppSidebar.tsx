@@ -17,6 +17,7 @@ import {
   Package,
   ShieldCheck,
   ShelvingUnit,
+  Archive,
   User,
   Wrench,
 } from "lucide-react";
@@ -31,6 +32,7 @@ import { dbaNavItems } from "./sidebars/DbaSidebar";
 import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
 import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { salesNavItems } from "./sidebars/SalesSidebar";
+import { recordsNavItems } from "./sidebars/RecordsSidebar";
 import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar ──────────────────────────────────────────────────────────────
@@ -91,6 +93,13 @@ const MODULE_HEADER: Record<
     color: "#a855f7",
     from: "from-purple-500/30",
     to: "to-purple-500/0",
+  },
+  records: {
+    label: "Records",
+    icon: Archive,
+    color: "#f59e0b",
+    from: "from-amber-500/30",
+    to: "to-amber-500/0",
   },
   admin: {
     label: "Admin",
@@ -200,8 +209,9 @@ export const AppSidebar = () => {
     if (isAdminTier) return items;
     return items.reduce<NavItem[]>((acc, item) => {
       if (item.children) {
-        const visibleChildren = item.children.filter((child: SubItem) =>
-          !child.pageKey || canAccessPage(child.pageKey as any),
+        const visibleChildren = item.children.filter(
+          (child: SubItem) =>
+            !child.pageKey || canAccessPage(child.pageKey as any),
         );
         if (visibleChildren.length > 0) {
           acc.push({ ...item, children: visibleChildren });
@@ -246,14 +256,32 @@ export const AppSidebar = () => {
 
     let raw: NavItem[] = [];
     switch (activeModule) {
-      case "engineering": raw = engineeringNavItems; break;
-      case "finance":     raw = buildFinanceNavItems(overdueCount); break;
-      case "material":    raw = materialNavItems; break;
-      case "followup":    raw = followupNavItems; break;
-      case "ticket":      raw = buildTicketNavItems(isAdminTier); break;
-      case "sales":       raw = salesNavItems; break;
-      case "admin":       raw = buildAdminNavItems(pendingApprovalCount); break;
-      default:            raw = [];
+      case "engineering":
+        raw = engineeringNavItems;
+        break;
+      case "finance":
+        raw = buildFinanceNavItems(overdueCount);
+        break;
+      case "material":
+        raw = materialNavItems;
+        break;
+      case "followup":
+        raw = followupNavItems;
+        break;
+      case "ticket":
+        raw = buildTicketNavItems(isAdminTier);
+        break;
+      case "sales":
+        raw = salesNavItems;
+        break;
+      case "records":
+        raw = recordsNavItems;
+        break;
+      case "admin":
+        raw = buildAdminNavItems(pendingApprovalCount);
+        break;
+      default:
+        raw = [];
     }
     return filterByRights(raw);
   };
@@ -375,7 +403,11 @@ export const AppSidebar = () => {
           transition={{ duration: 0.2, ease: "easeOut", delay: 0.06 }}
           className="relative z-10 flex-1 overflow-y-auto p-2 space-y-0.5"
         >
-          <SidebarNav items={getNavItems()} collapsed={false} accentColor={accentColor} />
+          <SidebarNav
+            items={getNavItems()}
+            collapsed={false}
+            accentColor={accentColor}
+          />
         </motion.div>
 
         {/* ── Footer ──────────────────────────────────────────────────────────── */}

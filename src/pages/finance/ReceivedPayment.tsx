@@ -384,7 +384,7 @@ export default function ReceivedPaymentPage() {
   // TypeOfDocId for the RECP doc type — resolved once on mount via module filter
   const [recDocTypeId, setRecDocTypeId] = useState<number | null>(null);
 
-  const finYearOptions = finYears.filter((fy) => fy.status === "Active");
+  const finYearOptions = finYears.filter((fy) => fy.status === "Active" && !fy.locked);
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || "";
 
