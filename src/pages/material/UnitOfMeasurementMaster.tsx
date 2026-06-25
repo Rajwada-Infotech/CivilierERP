@@ -375,6 +375,7 @@ export default function UnitOfMeasurementMaster() {
         }
       >
         <MasterPage
+        saveButtonClass="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500"
           title="Unit of Measurement"
           fields={FIELDS}
           columns={COLUMNS}

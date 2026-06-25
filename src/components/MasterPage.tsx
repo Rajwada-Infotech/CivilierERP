@@ -110,6 +110,7 @@ interface MasterPageProps {
     isEdit: boolean,
     allRecords: Record<string, unknown>[],
   ) => Record<string, unknown> | null;
+  saveButtonClass?: string;
   externalFormPatch?: Record<string, unknown> | null;
   externalFormPatchKey?: string | number | null;
   /**
@@ -183,6 +184,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   onFormChange,
   onFieldChange,
   onCustomSave,
+  saveButtonClass,
   externalFormPatch,
   externalFormPatchKey,
   exportConfig,
@@ -613,7 +615,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
         </div>
 
         {/* Footer — actions */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
           <p className="text-[11px] text-muted-foreground hidden sm:block">
             {canSave
               ? <span className="text-emerald-500 font-medium">Ready to save</span>
@@ -633,7 +635,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             <button
               onClick={handleSave}
               disabled={!canSave || (editingId === null ? !canCreate : !canEdit)}
-              className="flex-1 sm:flex-none px-4 sm:px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-opacity whitespace-nowrap"
+              className={`flex-1 sm:flex-none px-4 sm:px-5 py-2 rounded-lg text-sm font-heading font-semibold ${saveButtonClass || "gradient-accent"} text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-opacity whitespace-nowrap`}
             >
               {editingId !== null ? <Check size={14} /> : <Plus size={14} />}
               {editingId !== null ? `Update ${title}` : `Save ${title}`}

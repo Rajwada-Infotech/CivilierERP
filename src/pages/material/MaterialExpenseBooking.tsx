@@ -83,8 +83,10 @@ import {
   computeGrnNetWithTerms,
   dbToRecord,
   fmt,
+  fmtQty,
   generateEmiSchedule,
   recordToDb,
+  round3,
 } from "./ExpenseBooking/helpers";
 import type {
   BookingStatus,
@@ -806,13 +808,17 @@ function DocSelectorPanel({
                   Array.isArray(selected.grnItems) &&
                   selected.grnItems.length > 0 &&
                   (() => {
-                    const totalReceived = selected.grnItems.reduce(
-                      (s, i) => s + (Number(i.receivedQty) || 0),
-                      0,
+                    const totalReceived = round3(
+                      selected.grnItems.reduce(
+                        (s, i) => s + (Number(i.receivedQty) || 0),
+                        0,
+                      ),
                     );
-                    const totalRemaining = selected.grnItems.reduce(
-                      (s, i) => s + (Number(i.remainingQty) || 0),
-                      0,
+                    const totalRemaining = round3(
+                      selected.grnItems.reduce(
+                        (s, i) => s + (Number(i.remainingQty) || 0),
+                        0,
+                      ),
                     );
                     return (
                       <>
@@ -825,7 +831,7 @@ function DocSelectorPanel({
                             Received:
                           </span>
                           <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
-                            {totalReceived} units
+                            {fmtQty(totalReceived)} units
                           </span>
                         </div>
                         {totalRemaining > 0 && (
@@ -838,7 +844,7 @@ function DocSelectorPanel({
                               Pending:
                             </span>
                             <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-                              {totalRemaining} units
+                              {fmtQty(totalRemaining)} units
                             </span>
                           </div>
                         )}
@@ -1145,13 +1151,17 @@ function DocSelectorPanel({
                   }
                   return [];
                 })();
-                const totalReceived = parsedItems.reduce(
-                  (s, i) => s + (Number(i.receivedQty) || 0),
-                  0,
+                const totalReceived = round3(
+                  parsedItems.reduce(
+                    (s, i) => s + (Number(i.receivedQty) || 0),
+                    0,
+                  ),
                 );
-                const totalRemaining = parsedItems.reduce(
-                  (s, i) => s + (Number(i.remainingQty) || 0),
-                  0,
+                const totalRemaining = round3(
+                  parsedItems.reduce(
+                    (s, i) => s + (Number(i.remainingQty) || 0),
+                    0,
+                  ),
                 );
                 return (
                   <button
@@ -1220,12 +1230,12 @@ function DocSelectorPanel({
                         <div className="flex items-center gap-3 mt-1.5">
                           <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-md">
                             <Package size={9} />
-                            {totalReceived} received
+                            {fmtQty(totalReceived)} received
                           </span>
                           {totalRemaining > 0 && (
                             <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-md">
                               <Clock size={9} />
-                              {totalRemaining} pending
+                              {fmtQty(totalRemaining)} pending
                             </span>
                           )}
                           <span className="text-[10px] text-muted-foreground">
@@ -2316,7 +2326,10 @@ export default function MaterialExpenseBooking() {
         setSaved(true);
         await fetchRecords(page);
         fetchBookedSources();
-        setTimeout(() => { setSaved(false); cancelForm(); }, 1500);
+        setTimeout(() => {
+          setSaved(false);
+          cancelForm();
+        }, 1500);
       } else {
         const result = await apiFetch(
           API,
@@ -2333,7 +2346,10 @@ export default function MaterialExpenseBooking() {
         setSaved(true);
         await fetchRecords(page);
         fetchBookedSources();
-        setTimeout(() => { setSaved(false); cancelForm(); }, 1500);
+        setTimeout(() => {
+          setSaved(false);
+          cancelForm();
+        }, 1500);
       }
     } catch (err: any) {
       toast.error("Save failed: " + err.message);
@@ -2358,14 +2374,16 @@ export default function MaterialExpenseBooking() {
         );
 
   const filteredRecords = records.filter((r) => {
-    if (statusFilter && statusFilter !== "All" && r.status !== statusFilter) return false;
+    if (statusFilter && statusFilter !== "All" && r.status !== statusFilter)
+      return false;
     if (listSearch) {
       const q = listSearch.toLowerCase();
       if (
         !r.bookingReference?.toLowerCase().includes(q) &&
         !r.supplier?.toLowerCase().includes(q) &&
         !r.companyName?.toLowerCase().includes(q)
-      ) return false;
+      )
+        return false;
     }
     return true;
   });
@@ -2441,15 +2459,19 @@ export default function MaterialExpenseBooking() {
           ) : undefined
         }
       >
-
         {/* Form View */}
         {view === "form" && (
           <Card className="border-border shadow-sm">
             <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
               <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
               <div className="flex items-center gap-3 min-w-0">
-                <button type="button" onClick={cancelForm} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0">
-                  <ArrowLeft size={15} /><span className="hidden sm:inline">Back</span>
+                <button
+                  type="button"
+                  onClick={cancelForm}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                >
+                  <ArrowLeft size={15} />
+                  <span className="hidden sm:inline">Back</span>
                 </button>
                 <span className="text-emerald-500/40">|</span>
                 <div className="flex items-center gap-2 min-w-0">
@@ -2479,12 +2501,19 @@ export default function MaterialExpenseBooking() {
                       <select
                         value={form.companyId ? String(form.companyId) : ""}
                         onChange={(e) =>
-                          set("companyId", e.target.value ? parseInt(e.target.value, 10) : null)
+                          set(
+                            "companyId",
+                            e.target.value
+                              ? parseInt(e.target.value, 10)
+                              : null,
+                          )
                         }
                         className={selectCls}
                       >
                         <option value="">
-                          {companyOptions.length === 0 ? "No companies found" : "Select company…"}
+                          {companyOptions.length === 0
+                            ? "No companies found"
+                            : "Select company…"}
                         </option>
                         {companyOptions.map((c) => (
                           <option key={c.id} value={String(c.id)}>
@@ -2509,11 +2538,14 @@ export default function MaterialExpenseBooking() {
                     <div className="relative">
                       <select
                         value={form.projectSite || ""}
-                        onChange={(e) => set("projectSite", e.target.value || "")}
+                        onChange={(e) =>
+                          set("projectSite", e.target.value || "")
+                        }
                         className={selectCls}
                       >
                         <option value="">
-                          {filteredProjectOptions.length === 0 && !form.projectSite
+                          {filteredProjectOptions.length === 0 &&
+                          !form.projectSite
                             ? "No projects found"
                             : "Select project…"}
                         </option>
@@ -2565,7 +2597,14 @@ export default function MaterialExpenseBooking() {
                       <div className="relative">
                         <select
                           value={form.supplier || ""}
-                          onChange={(e) => set("supplier", e.target.value === "__none__" ? "" : e.target.value)}
+                          onChange={(e) =>
+                            set(
+                              "supplier",
+                              e.target.value === "__none__"
+                                ? ""
+                                : e.target.value,
+                            )
+                          }
                           className={selectCls}
                         >
                           <option value="__none__">— None —</option>
@@ -2787,7 +2826,10 @@ export default function MaterialExpenseBooking() {
                 {/* Info banner — for PO/WO_PO show auto-filled GST summary */}
                 {hasParentGST && (
                   <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-xs">
-                    <BadgePercent size={12} className="text-emerald-500 shrink-0" />
+                    <BadgePercent
+                      size={12}
+                      className="text-emerald-500 shrink-0"
+                    />
                     {(selectedDoc!.derivedCgstRate ?? 0) > 0 ||
                     (selectedDoc!.derivedSgstRate ?? 0) > 0 ? (
                       <span className="text-foreground">
@@ -3039,7 +3081,7 @@ export default function MaterialExpenseBooking() {
                                       {item.hsnCode || "—"}
                                     </td>
                                     <td className="px-3 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                                      {Number(item.receivedQty) || 0}
+                                      {fmtQty(Number(item.receivedQty) || 0)}
                                     </td>
                                     <td className="px-3 py-2.5 text-muted-foreground">
                                       {item.uom || "—"}
@@ -3250,7 +3292,10 @@ export default function MaterialExpenseBooking() {
                         <select
                           value={form.paymentType || "full"}
                           onChange={(e) =>
-                            set("paymentType", e.target.value as "full" | "partial")
+                            set(
+                              "paymentType",
+                              e.target.value as "full" | "partial",
+                            )
                           }
                           className={selectCls}
                         >
@@ -3347,12 +3392,35 @@ export default function MaterialExpenseBooking() {
 
               {/* Save row */}
               {(() => {
-                const ebCanSave = !!(form.bookingReference.trim() && form.bookingDate && form.companyId && (selectedDoc?.kind === "GRN" || (form.basicAmount && form.basicAmount > 0)));
-                const ebIsDirty = !!(form.companyId || form.supplier || form.invoiceReference || form.basicAmount || form.poId || form.bookingReference.trim());
+                const ebCanSave = !!(
+                  form.bookingReference.trim() &&
+                  form.bookingDate &&
+                  form.companyId &&
+                  (selectedDoc?.kind === "GRN" ||
+                    (form.basicAmount && form.basicAmount > 0))
+                );
+                const ebIsDirty = !!(
+                  form.companyId ||
+                  form.supplier ||
+                  form.invoiceReference ||
+                  form.basicAmount ||
+                  form.poId ||
+                  form.bookingReference.trim()
+                );
                 return (
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
                     <p className="text-[11px] text-muted-foreground hidden sm:block">
-                      {saved ? <span className="text-emerald-500 font-medium">Saved!</span> : ebCanSave ? <span className="text-emerald-500 font-medium">Ready to save</span> : "Fill in the required fields to save"}
+                      {saved ? (
+                        <span className="text-emerald-500 font-medium">
+                          Saved!
+                        </span>
+                      ) : ebCanSave ? (
+                        <span className="text-emerald-500 font-medium">
+                          Ready to save
+                        </span>
+                      ) : (
+                        "Fill in the required fields to save"
+                      )}
                     </p>
                     <div className="flex items-center gap-2 sm:ml-auto">
                       <button
@@ -3368,8 +3436,20 @@ export default function MaterialExpenseBooking() {
                         disabled={saving || saved || !ebCanSave}
                         className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
                       >
-                        {saved ? <Check size={14} /> : saving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />}
-                        {saved ? "Saved!" : saving ? "Saving…" : isEditing ? "Update Booking" : "Save Invoice"}
+                        {saved ? (
+                          <Check size={14} />
+                        ) : saving ? (
+                          <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        ) : (
+                          <Save size={14} />
+                        )}
+                        {saved
+                          ? "Saved!"
+                          : saving
+                            ? "Saving…"
+                            : isEditing
+                              ? "Update Booking"
+                              : "Save Invoice"}
                       </button>
                     </div>
                   </div>
@@ -3427,11 +3507,18 @@ export default function MaterialExpenseBooking() {
                     <div className="flex flex-col gap-3">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
-                          <CardTitle className="text-base font-semibold">Booking Register</CardTitle>
-                          <p className="text-xs text-muted-foreground mt-0.5">{totalRecords} record{totalRecords !== 1 ? "s" : ""}</p>
+                          <CardTitle className="text-base font-semibold">
+                            Booking Register
+                          </CardTitle>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {totalRecords} record{totalRecords !== 1 ? "s" : ""}
+                          </p>
                         </div>
                         <div className="relative w-full sm:w-64">
-                          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                          <Search
+                            size={13}
+                            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                          />
                           <Input
                             value={listSearch}
                             onChange={(e) => setListSearch(e.target.value)}
@@ -3439,7 +3526,10 @@ export default function MaterialExpenseBooking() {
                             className="pl-9 pr-8 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
                           />
                           {listSearch && (
-                            <button onClick={() => setListSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                            <button
+                              onClick={() => setListSearch("")}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                            >
                               <X size={12} />
                             </button>
                           )}
@@ -3460,454 +3550,459 @@ export default function MaterialExpenseBooking() {
                     </div>
                   </CardHeader>
                   <CardContent className="p-0">
-
-                {/* Mobile cards */}
-                <div className="flex flex-col gap-3 sm:hidden p-3">
-                  {filteredRecords.length === 0 && (
-                    <div className="text-center py-16 text-muted-foreground text-sm border rounded-xl border-dashed border-border">
-                      {statusFilter !== "All"
-                        ? `No bookings with status "${statusFilter}". Try a different filter.`
-                        : `No bookings yet. Click 'New Invoice' to get started.`}
+                    {/* Mobile cards */}
+                    <div className="flex flex-col gap-3 sm:hidden p-3">
+                      {filteredRecords.length === 0 && (
+                        <div className="text-center py-16 text-muted-foreground text-sm border rounded-xl border-dashed border-border">
+                          {statusFilter !== "All"
+                            ? `No bookings with status "${statusFilter}". Try a different filter.`
+                            : `No bookings yet. Click 'New Invoice' to get started.`}
+                        </div>
+                      )}
+                      {filteredRecords.map((rec, index) => (
+                        <RecordCard
+                          key={
+                            rec.id
+                              ? `booking-card-${rec.id}`
+                              : `booking-card-${index}`
+                          }
+                          rec={rec}
+                          onEdit={() => openAmend(rec)}
+                          onPreview={() => setPreviewRecord(rec)}
+                          onDelete={() => requestDelete(rec.id)}
+                          onApprovalSuccess={fetchRecords}
+                          canEdit={rights.canEdit}
+                          canDelete={rights.canDelete}
+                        />
+                      ))}
                     </div>
-                  )}
-                  {filteredRecords.map((rec, index) => (
-                    <RecordCard
-                      key={
-                        rec.id
-                          ? `booking-card-${rec.id}`
-                          : `booking-card-${index}`
-                      }
-                      rec={rec}
-                      onEdit={() => openAmend(rec)}
-                      onPreview={() => setPreviewRecord(rec)}
-                      onDelete={() => requestDelete(rec.id)}
-                      onApprovalSuccess={fetchRecords}
-                      canEdit={rights.canEdit}
-                      canDelete={rights.canDelete}
-                    />
-                  ))}
-                </div>
 
-                {/* Records table */}
-                <div className="hidden sm:block">
-                    <div className="rounded-md">
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="bg-muted/30">
-                            <TableHead className="text-xs font-heading w-[20%]">
-                              Booking Ref
-                            </TableHead>
-                            <TableHead className="text-xs font-heading w-[16%]">
-                              Vendor
-                            </TableHead>
-                            <TableHead className="text-xs font-heading w-[10%] text-right">
-                              Basic Amt
-                            </TableHead>
-                            <TableHead className="text-xs font-heading w-[8%] text-right hidden md:table-cell">
-                              CGST
-                            </TableHead>
-                            <TableHead className="text-xs font-heading w-[8%] text-right hidden md:table-cell">
-                              SGST
-                            </TableHead>
-                            <TableHead className="text-xs font-heading w-[12%] text-right">
-                              Net Amt
-                            </TableHead>
-                            <TableHead className="text-xs font-heading w-[12%] hidden lg:table-cell">
-                              GRN
-                            </TableHead>
-                            <TableHead className="text-xs font-heading w-[9%]">
-                              Status
-                            </TableHead>
-                            <TableHead className="text-xs font-heading w-[10%] text-right">
-                              Actions
-                            </TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {filteredRecords.map((rec, index) => {
-                            // For GRN-linked records, recompute from grnTotalAmount + billing terms
-                            // with correct pre/post-GST split (avoids stale ENetAmount from DB).
-                            // For all others, use computeBreakdown on stored basicAmount.
-                            const effectiveNet = (() => {
-                              if (
-                                rec.eSourceType === "GRN" &&
-                                rec.grnTotalAmount != null
-                              ) {
-                                const terms =
-                                  rec.billingTerms &&
-                                  rec.billingTerms.length > 0
-                                    ? rec.billingTerms
-                                    : rec.discount
-                                      ? [rec.discount]
-                                      : [];
-                                return computeGrnNetWithTerms(
-                                  rec.grnTotalAmount,
-                                  terms,
-                                  rec.basicAmount,
-                                );
-                              }
-                              const rbd = computeBreakdown(
-                                rec.basicAmount,
-                                rec.cgstRate,
-                                rec.sgstRate,
-                                rec.billingTerms && rec.billingTerms.length > 0
-                                  ? rec.billingTerms
-                                  : rec.discount,
-                              );
-                              return rec.netAmount ?? rbd.netAmount;
-                            })();
-                            return (
-                              <TableRow
-                                key={
-                                  rec.id
-                                    ? `booking-row-${rec.id}`
-                                    : `booking-row-${index}`
+                    {/* Records table */}
+                    <div className="hidden sm:block">
+                      <div className="rounded-md">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-muted/30">
+                              <TableHead className="text-xs font-heading w-[20%]">
+                                Booking Ref
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[16%]">
+                                Vendor
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[10%] text-right">
+                                Basic Amt
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[8%] text-right hidden md:table-cell">
+                                CGST
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[8%] text-right hidden md:table-cell">
+                                SGST
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[12%] text-right">
+                                Net Amt
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[12%] hidden lg:table-cell">
+                                GRN
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[9%]">
+                                Status
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[10%] text-right">
+                                Actions
+                              </TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredRecords.map((rec, index) => {
+                              // For GRN-linked records, recompute from grnTotalAmount + billing terms
+                              // with correct pre/post-GST split (avoids stale ENetAmount from DB).
+                              // For all others, use computeBreakdown on stored basicAmount.
+                              const effectiveNet = (() => {
+                                if (
+                                  rec.eSourceType === "GRN" &&
+                                  rec.grnTotalAmount != null
+                                ) {
+                                  const terms =
+                                    rec.billingTerms &&
+                                    rec.billingTerms.length > 0
+                                      ? rec.billingTerms
+                                      : rec.discount
+                                        ? [rec.discount]
+                                        : [];
+                                  return computeGrnNetWithTerms(
+                                    rec.grnTotalAmount,
+                                    terms,
+                                    rec.basicAmount,
+                                  );
                                 }
-                                className={`hover:bg-muted/30 transition-colors border-b border-border/50 last:border-0 ${rec.status === "Draft" ? "opacity-70" : ""}`}
-                              >
-                                <TableCell className="py-3">
-                                  {rec.status === "Draft" ? (
-                                    <p
-                                      className="text-[11px] font-semibold text-amber-500 dark:text-amber-400 leading-tight max-w-[180px] truncate"
-                                      title={rec.bookingReference || ""}
-                                    >
-                                      {rec.bookingReference || "—"}
-                                    </p>
-                                  ) : (
-                                    <p
-                                      className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 leading-tight max-w-[160px] truncate"
-                                      title={rec.bookingReference || ""}
-                                    >
-                                      {rec.bookingReference || "—"}
-                                    </p>
-                                  )}
-                                  <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
-                                    {rec.bookingDate && (
-                                      <span>{rec.bookingDate}</span>
+                                const rbd = computeBreakdown(
+                                  rec.basicAmount,
+                                  rec.cgstRate,
+                                  rec.sgstRate,
+                                  rec.billingTerms &&
+                                    rec.billingTerms.length > 0
+                                    ? rec.billingTerms
+                                    : rec.discount,
+                                );
+                                return rec.netAmount ?? rbd.netAmount;
+                              })();
+                              return (
+                                <TableRow
+                                  key={
+                                    rec.id
+                                      ? `booking-row-${rec.id}`
+                                      : `booking-row-${index}`
+                                  }
+                                  className={`hover:bg-muted/30 transition-colors border-b border-border/50 last:border-0 ${rec.status === "Draft" ? "opacity-70" : ""}`}
+                                >
+                                  <TableCell className="py-3">
+                                    {rec.status === "Draft" ? (
+                                      <p
+                                        className="text-[11px] font-semibold text-amber-500 dark:text-amber-400 leading-tight max-w-[180px] truncate"
+                                        title={rec.bookingReference || ""}
+                                      >
+                                        {rec.bookingReference || "—"}
+                                      </p>
+                                    ) : (
+                                      <p
+                                        className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 leading-tight max-w-[160px] truncate"
+                                        title={rec.bookingReference || ""}
+                                      >
+                                        {rec.bookingReference || "—"}
+                                      </p>
                                     )}
-                                    {rec.docTypeName ? (
-                                      <span className="opacity-60">
-                                        · {rec.docTypeName}
+                                    <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
+                                      {rec.bookingDate && (
+                                        <span>{rec.bookingDate}</span>
+                                      )}
+                                      {rec.docTypeName ? (
+                                        <span className="opacity-60">
+                                          · {rec.docTypeName}
+                                        </span>
+                                      ) : null}
+                                      {rec.emi?.enabled ? (
+                                        <span className="inline-flex items-center gap-0.5 text-[9px] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-1 py-0.5 rounded-full">
+                                          <CreditCard size={8} />
+                                          {rec.emi.installmentCount}x
+                                        </span>
+                                      ) : null}
+                                    </p>
+                                  </TableCell>
+                                  <TableCell className="text-xs max-w-[120px] truncate py-3 text-foreground/80">
+                                    {rec.supplier || "—"}
+                                  </TableCell>
+                                  <TableCell className="font-mono text-xs text-right text-muted-foreground py-3">
+                                    {rec.status === "Draft" ? (
+                                      <span className="text-muted-foreground/50">
+                                        —
+                                      </span>
+                                    ) : (
+                                      (() => {
+                                        // For GRN records, derive original base from grnTotalAmount
+                                        // since rec.basicAmount may be stale from old saves.
+                                        if (
+                                          rec.eSourceType === "GRN" &&
+                                          rec.grnTotalAmount != null
+                                        ) {
+                                          const gstRate =
+                                            (rec.cgstRate ?? 0) +
+                                            (rec.sgstRate ?? 0);
+                                          const base =
+                                            gstRate > 0
+                                              ? rec.grnTotalAmount /
+                                                (1 + gstRate / 100)
+                                              : rec.grnTotalAmount;
+                                          return `₹${fmt(Math.round(base * 100) / 100)}`;
+                                        }
+                                        return `₹${fmt(rec.basicAmount)}`;
+                                      })()
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="font-mono text-xs text-right text-foreground/70 py-3 hidden md:table-cell">
+                                    {rec.status === "Draft"
+                                      ? "—"
+                                      : `${rec.cgstRate}%`}
+                                  </TableCell>
+                                  <TableCell className="font-mono text-xs text-right text-foreground/70 py-3 hidden md:table-cell">
+                                    {rec.status === "Draft"
+                                      ? "—"
+                                      : `${rec.sgstRate}%`}
+                                  </TableCell>
+                                  <TableCell className="font-mono text-xs font-semibold text-right py-3">
+                                    {rec.status === "Draft" ? (
+                                      <span className="text-amber-500 dark:text-amber-400">
+                                        ₹{fmt(effectiveNet)}
+                                      </span>
+                                    ) : (
+                                      `₹${fmt(effectiveNet)}`
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="hidden lg:table-cell py-3 min-w-[100px]">
+                                    <GRNChainBadge bookingId={rec.id} />
+                                  </TableCell>
+                                  <TableCell className="py-3">
+                                    {rec.status === "Draft" ? (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25">
+                                        <Package
+                                          size={10}
+                                          className="shrink-0"
+                                        />
+                                        Pending Items
                                       </span>
                                     ) : null}
-                                    {rec.emi?.enabled ? (
-                                      <span className="inline-flex items-center gap-0.5 text-[9px] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-1 py-0.5 rounded-full">
-                                        <CreditCard size={8} />
-                                        {rec.emi.installmentCount}x
-                                      </span>
-                                    ) : null}
-                                  </p>
-                                </TableCell>
-                                <TableCell className="text-xs max-w-[120px] truncate py-3 text-foreground/80">
-                                  {rec.supplier || "—"}
-                                </TableCell>
-                                <TableCell className="font-mono text-xs text-right text-muted-foreground py-3">
-                                  {rec.status === "Draft" ? (
-                                    <span className="text-muted-foreground/50">
-                                      —
-                                    </span>
-                                  ) : (
-                                    (() => {
-                                      // For GRN records, derive original base from grnTotalAmount
-                                      // since rec.basicAmount may be stale from old saves.
-                                      if (
-                                        rec.eSourceType === "GRN" &&
-                                        rec.grnTotalAmount != null
-                                      ) {
-                                        const gstRate =
-                                          (rec.cgstRate ?? 0) +
-                                          (rec.sgstRate ?? 0);
-                                        const base =
-                                          gstRate > 0
-                                            ? rec.grnTotalAmount /
-                                              (1 + gstRate / 100)
-                                            : rec.grnTotalAmount;
-                                        return `₹${fmt(Math.round(base * 100) / 100)}`;
-                                      }
-                                      return `₹${fmt(rec.basicAmount)}`;
-                                    })()
-                                  )}
-                                </TableCell>
-                                <TableCell className="font-mono text-xs text-right text-foreground/70 py-3 hidden md:table-cell">
-                                  {rec.status === "Draft"
-                                    ? "—"
-                                    : `${rec.cgstRate}%`}
-                                </TableCell>
-                                <TableCell className="font-mono text-xs text-right text-foreground/70 py-3 hidden md:table-cell">
-                                  {rec.status === "Draft"
-                                    ? "—"
-                                    : `${rec.sgstRate}%`}
-                                </TableCell>
-                                <TableCell className="font-mono text-xs font-semibold text-right py-3">
-                                  {rec.status === "Draft" ? (
-                                    <span className="text-amber-500 dark:text-amber-400">
-                                      ₹{fmt(effectiveNet)}
-                                    </span>
-                                  ) : (
-                                    `₹${fmt(effectiveNet)}`
-                                  )}
-                                </TableCell>
-                                <TableCell className="hidden lg:table-cell py-3 min-w-[100px]">
-                                  <GRNChainBadge bookingId={rec.id} />
-                                </TableCell>
-                                <TableCell className="py-3">
-                                  {rec.status === "Draft" ? (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25">
-                                      <Package size={10} className="shrink-0" />
-                                      Pending Items
-                                    </span>
-                                  ) : null}
-                                  <ApprovalStatusChain
-                                    table="ExpenseBooking"
-                                    recordId={rec.id}
-                                  />
-                                </TableCell>
-                                <TableCell className="py-3">
-                                  <div className="flex gap-1 items-center justify-end">
-                                    <ApprovalActions
-                                      status={rec.status}
+                                    <ApprovalStatusChain
+                                      table="ExpenseBooking"
                                       recordId={rec.id}
-                                      endpoint="/api/expense-booking"
-                                      submitOnly
-                                      onSuccess={() => fetchRecords(page)}
                                     />
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-7 w-7 p-0"
-                                      onClick={() => setPreviewRecord(rec)}
-                                      title="Preview"
-                                    >
-                                      <Eye size={12} />
-                                    </Button>
-                                    {rights.canDelete && (
-                                    <Button
-                                      variant="destructive"
-                                      size="sm"
-                                      className="h-7 w-7 p-0"
-                                      onClick={() => requestDelete(rec.id)}
-                                    >
-                                      <Trash2 size={12} />
-                                    </Button>
-                                    )}
-                                  </div>
+                                  </TableCell>
+                                  <TableCell className="py-3">
+                                    <div className="flex gap-1 items-center justify-end">
+                                      <ApprovalActions
+                                        status={rec.status}
+                                        recordId={rec.id}
+                                        endpoint="/api/expense-booking"
+                                        submitOnly
+                                        onSuccess={() => fetchRecords(page)}
+                                      />
+                                      <button
+                                        type="button"
+                                        className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+                                        onClick={() => setPreviewRecord(rec)}
+                                        title="Preview"
+                                      >
+                                        <Eye size={15} />
+                                      </button>
+                                      {rights.canDelete && (
+                                        <button
+                                          type="button"
+                                          className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                                          onClick={() => requestDelete(rec.id)}
+                                          title="Delete"
+                                        >
+                                          <Trash2 size={15} />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                            {filteredRecords.length === 0 && (
+                              <TableRow>
+                                <TableCell
+                                  colSpan={9}
+                                  className="text-center py-14 text-muted-foreground text-sm"
+                                >
+                                  {statusFilter !== "All"
+                                    ? `No bookings with status "${statusFilter}". Try a different filter.`
+                                    : `No bookings yet. Click "New Invoice" to get started.`}
                                 </TableCell>
                               </TableRow>
-                            );
-                          })}
-                          {filteredRecords.length === 0 && (
-                            <TableRow>
-                              <TableCell
-                                colSpan={9}
-                                className="text-center py-14 text-muted-foreground text-sm"
-                              >
-                                {statusFilter !== "All"
-                                  ? `No bookings with status "${statusFilter}". Try a different filter.`
-                                  : `No bookings yet. Click "New Invoice" to get started.`}
-                              </TableCell>
-                            </TableRow>
-                          )}
-                        </TableBody>
-                      </Table>
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
                     </div>
-                </div>
 
-                {/* Pagination */}
-                {totalPages > 1 && (
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
-                    <p className="text-xs text-muted-foreground text-center sm:text-left">
-                      Page {page} of {totalPages} · {totalRecords} total
-                    </p>
-                    <div className="flex flex-wrap items-center justify-center gap-1 mt-2 sm:mt-0">
-                      <button
-                        onClick={() => fetchRecords(Math.max(1, page - 1))}
-                        disabled={page === 1}
-                        className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-                      >
-                        <ChevronLeft size={14} />
-                      </button>
-                      {Array.from(
-                        { length: Math.min(5, totalPages) },
-                        (_, i) => {
-                          const pg = page <= 3 ? i + 1 : page - 2 + i;
-                          if (pg < 1 || pg > totalPages) return null;
-                          return (
-                            <button
-                              key={pg}
-                              onClick={() => fetchRecords(pg)}
-                              className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${pg === page ? "border-emerald-500 bg-emerald-500 text-white" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
-                            >
-                              {pg}
-                            </button>
-                          );
-                        },
-                      )}
-                      <button
-                        onClick={() =>
-                          fetchRecords(Math.min(totalPages, page + 1))
-                        }
-                        disabled={page === totalPages}
-                        className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-                      >
-                        <ChevronRight size={14} />
-                      </button>
-                    </div>
-                  </div>
-                )}
+                    {/* Pagination */}
+                    {totalPages > 1 && (
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
+                        <p className="text-xs text-muted-foreground text-center sm:text-left">
+                          Page {page} of {totalPages} · {totalRecords} total
+                        </p>
+                        <div className="flex flex-wrap items-center justify-center gap-1 mt-2 sm:mt-0">
+                          <button
+                            onClick={() => fetchRecords(Math.max(1, page - 1))}
+                            disabled={page === 1}
+                            className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                          >
+                            <ChevronLeft size={14} />
+                          </button>
+                          {Array.from(
+                            { length: Math.min(5, totalPages) },
+                            (_, i) => {
+                              const pg = page <= 3 ? i + 1 : page - 2 + i;
+                              if (pg < 1 || pg > totalPages) return null;
+                              return (
+                                <button
+                                  key={pg}
+                                  onClick={() => fetchRecords(pg)}
+                                  className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${pg === page ? "border-emerald-500 bg-emerald-500 text-white" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                                >
+                                  {pg}
+                                </button>
+                              );
+                            },
+                          )}
+                          <button
+                            onClick={() =>
+                              fetchRecords(Math.min(totalPages, page + 1))
+                            }
+                            disabled={page === totalPages}
+                            className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                          >
+                            <ChevronRight size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </>
             )}
           </>
         )}
-      {/* BRS / Payment block dialog */}
-      <Dialog
-        open={!!deleteBlockInfo}
-        onOpenChange={() => setDeleteBlockInfo(null)}
-      >
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle size={16} className="shrink-0" />
-              Cannot Delete Booking
-            </DialogTitle>
-          </DialogHeader>
+        {/* BRS / Payment block dialog */}
+        <Dialog
+          open={!!deleteBlockInfo}
+          onOpenChange={() => setDeleteBlockInfo(null)}
+        >
+          <DialogContent className="w-[calc(100vw-2rem)] max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-destructive">
+                <AlertTriangle size={16} className="shrink-0" />
+                Cannot Delete Booking
+              </DialogTitle>
+            </DialogHeader>
 
-          {deleteBlockInfo?.reason === "brs_cleared" && (
-            <div className="space-y-4 text-sm">
-              <p className="text-muted-foreground">
-                This expense booking has payment(s) that are{" "}
-                <span className="font-semibold text-foreground">
-                  cleared in BRS
-                </span>
-                . To delete it, complete the following steps in order:
-              </p>
-              <ol className="space-y-2 pl-1">
-                {[
-                  {
-                    step: 1,
-                    label: "Go to Finance → BRS",
-                    sub: "Find the payment record and mark it as Uncleared",
-                  },
-                  {
-                    step: 2,
-                    label: "Go to Finance → Payment Management",
-                    sub: "Delete the payment record linked to this booking",
-                  },
-                  {
-                    step: 3,
-                    label: "Return here",
-                    sub: "Delete this expense booking",
-                  },
-                ].map(({ step, label, sub }) => (
-                  <li key={step} className="flex gap-3">
-                    <span className="shrink-0 w-5 h-5 rounded-full bg-destructive/10 text-destructive text-[11px] font-bold flex items-center justify-center mt-0.5">
-                      {step}
-                    </span>
-                    <div>
-                      <p className="font-medium text-foreground">{label}</p>
-                      <p className="text-xs text-muted-foreground">{sub}</p>
+            {deleteBlockInfo?.reason === "brs_cleared" && (
+              <div className="space-y-4 text-sm">
+                <p className="text-muted-foreground">
+                  This expense booking has payment(s) that are{" "}
+                  <span className="font-semibold text-foreground">
+                    cleared in BRS
+                  </span>
+                  . To delete it, complete the following steps in order:
+                </p>
+                <ol className="space-y-2 pl-1">
+                  {[
+                    {
+                      step: 1,
+                      label: "Go to Finance → BRS",
+                      sub: "Find the payment record and mark it as Uncleared",
+                    },
+                    {
+                      step: 2,
+                      label: "Go to Finance → Payment Management",
+                      sub: "Delete the payment record linked to this booking",
+                    },
+                    {
+                      step: 3,
+                      label: "Return here",
+                      sub: "Delete this expense booking",
+                    },
+                  ].map(({ step, label, sub }) => (
+                    <li key={step} className="flex gap-3">
+                      <span className="shrink-0 w-5 h-5 rounded-full bg-destructive/10 text-destructive text-[11px] font-bold flex items-center justify-center mt-0.5">
+                        {step}
+                      </span>
+                      <div>
+                        <p className="font-medium text-foreground">{label}</p>
+                        <p className="text-xs text-muted-foreground">{sub}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+                {deleteBlockInfo.clearedPayments &&
+                  deleteBlockInfo.clearedPayments.length > 0 && (
+                    <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">
+                      {deleteBlockInfo.clearedPayments.map((p) => (
+                        <div
+                          key={p.paymentId}
+                          className="flex items-center justify-between px-3 py-2"
+                        >
+                          <span className="text-xs font-mono text-foreground">
+                            {p.paymentName || `Payment #${p.paymentId}`}
+                          </span>
+                          <span className="text-xs font-semibold text-foreground">
+                            ₹
+                            {Number(p.amount).toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  </li>
-                ))}
-              </ol>
-              {deleteBlockInfo.clearedPayments &&
-                deleteBlockInfo.clearedPayments.length > 0 && (
-                  <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">
-                    {deleteBlockInfo.clearedPayments.map((p) => (
-                      <div
-                        key={p.paymentId}
-                        className="flex items-center justify-between px-3 py-2"
-                      >
-                        <span className="text-xs font-mono text-foreground">
-                          {p.paymentName || `Payment #${p.paymentId}`}
-                        </span>
-                        <span className="text-xs font-semibold text-foreground">
-                          ₹
-                          {Number(p.amount).toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                          })}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-            </div>
-          )}
+                  )}
+              </div>
+            )}
 
-          {deleteBlockInfo?.reason === "has_payments" && (
-            <div className="space-y-4 text-sm">
-              <p className="text-muted-foreground">
-                This expense booking has{" "}
-                <span className="font-semibold text-foreground">
-                  linked payment records
-                </span>
-                . Delete the payment(s) first before deleting this booking.
-              </p>
-              {deleteBlockInfo.linkedPayments &&
-                deleteBlockInfo.linkedPayments.length > 0 && (
-                  <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">
-                    {deleteBlockInfo.linkedPayments.map((p) => (
-                      <div
-                        key={p.paymentId}
-                        className="flex items-center justify-between px-3 py-2"
-                      >
-                        <span className="text-xs font-mono text-foreground">
-                          {p.paymentName || `Payment #${p.paymentId}`}
-                        </span>
-                        <span className="text-xs font-semibold text-foreground">
-                          ₹
-                          {Number(p.amount).toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                          })}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-            </div>
-          )}
+            {deleteBlockInfo?.reason === "has_payments" && (
+              <div className="space-y-4 text-sm">
+                <p className="text-muted-foreground">
+                  This expense booking has{" "}
+                  <span className="font-semibold text-foreground">
+                    linked payment records
+                  </span>
+                  . Delete the payment(s) first before deleting this booking.
+                </p>
+                {deleteBlockInfo.linkedPayments &&
+                  deleteBlockInfo.linkedPayments.length > 0 && (
+                    <div className="rounded-lg border border-border bg-muted/30 divide-y divide-border">
+                      {deleteBlockInfo.linkedPayments.map((p) => (
+                        <div
+                          key={p.paymentId}
+                          className="flex items-center justify-between px-3 py-2"
+                        >
+                          <span className="text-xs font-mono text-foreground">
+                            {p.paymentName || `Payment #${p.paymentId}`}
+                          </span>
+                          <span className="text-xs font-semibold text-foreground">
+                            ₹
+                            {Number(p.amount).toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+              </div>
+            )}
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteBlockInfo(null)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setDeleteBlockInfo(null)}
+              >
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-      {/* Delete Confirm */}
-      <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete Booking</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this expense booking? This cannot
-              be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
-            <Button variant="outline" onClick={() => setDeleteId(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => deleteId && handleDelete(deleteId)}
-            >
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        {/* Delete Confirm */}
+        <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+          <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Delete Booking</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete this expense booking? This
+                cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => setDeleteId(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => deleteId && handleDelete(deleteId)}
+              >
+                Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-      {/* Preview modal */}
-      <ExpenseBookingPreviewModal
-        previewRecord={previewRecord}
-        onClose={() => setPreviewRecord(null)}
-        onEdit={(record) => openAmend(record)}
-      />
+        {/* Preview modal */}
+        <ExpenseBookingPreviewModal
+          previewRecord={previewRecord}
+          onClose={() => setPreviewRecord(null)}
+          onEdit={(record) => openAmend(record)}
+        />
 
-      {/* Remaining GRN Items — auto-created silently on save */}
+        {/* Remaining GRN Items — auto-created silently on save */}
       </MaterialShell>
     </>
   );

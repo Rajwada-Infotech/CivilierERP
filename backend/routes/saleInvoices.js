@@ -206,8 +206,7 @@ router.post("/", async (req, res) => {
     // ── Guard: Sale Order must exist ─────────────────────────────────────────
     const soCheck = await pool
       .request()
-      .input("SaleOrderID", sql.Int, parseInt(SaleOrderID, 10))
-      .query(`
+      .input("SaleOrderID", sql.Int, parseInt(SaleOrderID, 10)).query(`
         SELECT SaleOrderID, SaleOrderNo, CustomerID, CompanyId, ProjectId,
                TotalAmount, fy_id, Status
         FROM   dbo.CustomerSaleOrders
@@ -222,8 +221,7 @@ router.post("/", async (req, res) => {
     // ── Guard: no existing active invoice for this SO ────────────────────────
     const dupCheck = await pool
       .request()
-      .input("SaleOrderID", sql.Int, so.SaleOrderID)
-      .query(`
+      .input("SaleOrderID", sql.Int, so.SaleOrderID).query(`
         SELECT COUNT(*) AS cnt
         FROM   dbo.SaleInvoices
         WHERE  SaleOrderID = @SaleOrderID
@@ -254,10 +252,25 @@ router.post("/", async (req, res) => {
     await transaction.begin();
 
     // Generate doc number
+    // SaleInvoice.tsx doesn't yet have a doc-type selector UI, so DocTypeId
+    // is usually not sent from the frontend — resolve a sensible default
+    // (the active TypeOfDoc row tagged for Sale Invoice) rather than hard
+    // failing every invoice creation until that UI exists.
+    let resolvedDocTypeId = DocTypeId ? parseInt(DocTypeId, 10) : null;
+    if (!resolvedDocTypeId) {
+      const defaultDocType = await pool.request().query(`
+        SELECT TOP 1 TypeOfDocId FROM dbo.TypeOfDoc
+        WHERE IsActive = 1
+          AND (DocNoPrefix = 'SI' OR links_to LIKE '%Sale Invoice%')
+        ORDER BY TypeOfDocId
+      `);
+      resolvedDocTypeId = defaultDocType.recordset[0]?.TypeOfDocId ?? null;
+    }
+
     let finalDocNo = null;
-    if (DocTypeId) {
+    if (resolvedDocTypeId) {
       finalDocNo = await lockNextDocNumber(pool, sql, {
-        docTypeId: parseInt(DocTypeId, 10),
+        docTypeId: resolvedDocTypeId,
         finYear,
         tableName: "SaleInvoices",
         docNoColumn: "SaleInvoiceNo",
@@ -283,7 +296,7 @@ router.post("/", async (req, res) => {
       .input("Amount", sql.Decimal(18, 2), invoiceAmount)
       .input("AmountReceived", sql.Decimal(18, 2), 0)
       .input("PaymentStatus", sql.NVarChar(20), "Pending Payment")
-      .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
+      .input("DocTypeId", sql.Int, resolvedDocTypeId)
       .input("FyId", sql.Int, fyId)
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
       .input("CreatedBy", sql.NVarChar(100), userEmail)
@@ -390,7 +403,10 @@ async function recalcInvoicePaymentStatus(pool, saleInvoiceId) {
       WHERE SaleInvoiceID = @SIID
     `);
   } catch (err) {
-    console.error("recalcInvoicePaymentStatus failed (non-fatal):", err.message);
+    console.error(
+      "recalcInvoicePaymentStatus failed (non-fatal):",
+      err.message,
+    );
   }
 }
 

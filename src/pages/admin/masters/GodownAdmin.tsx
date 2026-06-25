@@ -384,7 +384,7 @@ export default function GodownAdmin() {
           {rights.canCreate && (
             <button
               onClick={openAdd}
-              className="gradient-accent inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition"
+              className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition"
             >
               <Plus className="h-4 w-4" />
               Add Godown
@@ -771,7 +771,7 @@ export default function GodownAdmin() {
             <Button
               onClick={handleSubmit}
               disabled={isSaving}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+              className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               {isSaving ? "Saving…" : editing ? "Update" : "Create"}
             </Button>
