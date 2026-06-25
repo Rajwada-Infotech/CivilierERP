@@ -55,15 +55,15 @@ router.get("/", async (req, res) => {
         c.cr_code                   AS Industry,
         c.date_of_establishment     AS IncorporationDate,
         c.cin                       AS CIN,
-        c.pan                       AS PAN,
+        c.pan_no                    AS PAN,
         c.tan                       AS TAN,
         CASE
           WHEN c.gst_type IN ('Registered', 'Unregistered') THEN c.gst_type
           WHEN c.gst_type IS NOT NULL AND c.gst_type <> '' AND c.gst_type <> 'Unregistered' THEN 'Registered'
-          WHEN c.b_sub_identity_type IS NOT NULL OR c.gst_issue_date IS NOT NULL THEN 'Registered'
+          WHEN c.gst_no IS NOT NULL OR c.gst_issue_date IS NOT NULL THEN 'Registered'
           ELSE 'Unregistered'
         END                       AS GSTType,
-        c.b_sub_identity_type       AS GST,
+        c.gst_no                  AS GST,
         c.gst_issue_date            AS GSTDate,
         c.trade_license             AS TradeLicenseNo,
         c.rera_date                 AS TradeLicenseDate,
@@ -124,10 +124,10 @@ router.post("/", adminOnly, async (req, res) => {
       .input("cr_code", sql.NVarChar(50), f.industry || null)
       .input("date_of_establishment", sql.Date, f.incorporationDate || null)
       .input("cin", sql.NVarChar(50), f.cinNumber || null)
-      .input("pan", sql.NVarChar(20), f.panNumber || null)
+      .input("pan_no", sql.NVarChar(20), f.panNumber || null)
       .input("tan", sql.NVarChar(15), f.tanNumber || null)
       .input("gst_type", sql.NVarChar(50), gst.gstType)
-      .input("b_sub_identity_type", sql.NVarChar(100), gst.gstNumber)
+      .input("gst_no", sql.NVarChar(20), gst.gstNumber)
       .input("gst_issue_date", sql.Date, gst.gstDate)
       .input("trade_license", sql.NVarChar(100), f.tradeLicenseNo || null)
       .input("rera_date", sql.Date, f.tradeLicenseDate || null)
@@ -165,14 +165,14 @@ router.post("/", adminOnly, async (req, res) => {
       .input("date_of_entry", sql.Date, new Date()).query(`
         INSERT INTO dbo.enterprise (
           name, short_name, business_identity, business_type, entity_type, description,
-          cr_code, date_of_establishment, cin, pan, tan, gst_type, b_sub_identity_type, gst_issue_date,
+          cr_code, date_of_establishment, cin, pan_no, tan, gst_type, gst_no, gst_issue_date,
           trade_license, rera_date, address, city, state, country, pincode,
           phone_number, fax, email, website,
           authorized_capital, paid_up_capital, currency, fiscal_year_start, auditor_name,
           remarks, logo, enterprise_id, belongs_to, discontinue, status, date_of_entry
         ) VALUES (
           @name, @short_name, @business_identity, @business_type, @entity_type, @description,
-          @cr_code, @date_of_establishment, @cin, @pan, @tan, @gst_type, @b_sub_identity_type, @gst_issue_date,
+          @cr_code, @date_of_establishment, @cin, @pan_no, @tan, @gst_type, @gst_no, @gst_issue_date,
           @trade_license, @rera_date, @address, @city, @state, @country, @pincode,
           @phone_number, @fax, @email, @website,
           @authorized_capital, @paid_up_capital, @currency, @fiscal_year_start, @auditor_name,
@@ -209,10 +209,10 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("cr_code", sql.NVarChar(50), f.industry || null)
       .input("date_of_establishment", sql.Date, f.incorporationDate || null)
       .input("cin", sql.NVarChar(50), f.cinNumber || null)
-      .input("pan", sql.NVarChar(20), f.panNumber || null)
+      .input("pan_no", sql.NVarChar(20), f.panNumber || null)
       .input("tan", sql.NVarChar(15), f.tanNumber || null)
       .input("gst_type", sql.NVarChar(50), gst.gstType)
-      .input("b_sub_identity_type", sql.NVarChar(100), gst.gstNumber)
+      .input("gst_no", sql.NVarChar(20), gst.gstNumber)
       .input("gst_issue_date", sql.Date, gst.gstDate)
       .input("trade_license", sql.NVarChar(100), f.tradeLicenseNo || null)
       .input("rera_date", sql.Date, f.tradeLicenseDate || null)
@@ -252,8 +252,8 @@ router.put("/:id", adminOnly, async (req, res) => {
           name=@name, short_name=@short_name, business_identity=@business_identity,
           entity_type=@entity_type, description=@description, cr_code=@cr_code,
           date_of_establishment=@date_of_establishment,
-          cin=@cin, pan=@pan, tan=@tan,
-          gst_type=@gst_type, b_sub_identity_type=@b_sub_identity_type, gst_issue_date=@gst_issue_date,
+          cin=@cin, pan_no=@pan_no, tan=@tan,
+          gst_type=@gst_type, gst_no=@gst_no, gst_issue_date=@gst_issue_date,
           trade_license=@trade_license, rera_date=@rera_date,
           address=@address, city=@city, state=@state, country=@country, pincode=@pincode,
           phone_number=@phone_number, fax=@fax, email=@email, website=@website,

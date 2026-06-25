@@ -2191,6 +2191,8 @@ export default function GRN() {
           </Card>
         )}
 
+      </MaterialShell>
+
         {/* ══════════════════════════════════════════════════════════════════ */}
         {/*  VIEW MODAL                                                        */}
         {/* ══════════════════════════════════════════════════════════════════ */}
@@ -2764,7 +2766,6 @@ export default function GRN() {
               </div>
             );
           })()}
-      </MaterialShell>
 
       {/* GRN Delete Block Dialog */}
       <Dialog
