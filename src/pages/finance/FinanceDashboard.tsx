@@ -237,14 +237,11 @@ const FinanceDashboard = () => {
           onClick: () => navigate("/received-payments"),
         },
         {
-          label: "Pending Cheques",
-          value: data.cheques.pendingCount.toString(),
-          sub: `${data.cheques.clearedCount} cleared · ${data.cheques.totalCount} total`,
+          label: "Cheque Lots",
+          value: data.cheques.totalCount.toString(),
+          sub: `${data.cheques.clearedCount} cleared · ${data.cheques.pendingCount} active`,
           icon: BookOpen,
-          trend:
-            data.cheques.pendingCount > 0
-              ? ("down" as const)
-              : ("neutral" as const),
+          trend: "neutral" as const,
           accent: "border-l-amber-500",
           iconBg: "bg-amber-500/10",
           iconColor: "text-amber-600",
@@ -266,7 +263,9 @@ const FinanceDashboard = () => {
 
   const tableGlass = {
     background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
-    border: isDark ? "1px solid rgba(99,102,241,0.15)" : "1px solid rgba(99,102,241,0.18)",
+    border: isDark
+      ? "1px solid rgba(99,102,241,0.15)"
+      : "1px solid rgba(99,102,241,0.18)",
     backdropFilter: "blur(16px) saturate(150%)",
     WebkitBackdropFilter: "blur(16px) saturate(150%)",
     boxShadow: isDark
@@ -293,256 +292,446 @@ const FinanceDashboard = () => {
           </button>
         }
       >
-
-      {isError && (
-        <div className="px-4 py-3 rounded-lg bg-destructive/10 text-destructive text-sm border border-destructive/20">
-          Failed to load dashboard data. Please refresh the page.
-        </div>
-      )}
-
-      {/* ── Primary stat cards ────────────────────────────────────────────── */}
-      <GlassSection title="Today's Activity" icon={Receipt} accentColor="#6366f1">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {isLoading
-            ? Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)
-            : [
-                {
-                  label: "Payments Made Today",
-                  value: data?.paymentsMade.todayCount.toString() ?? "0",
-                  sub: `${fmt(data?.paymentsMade.todayAmount ?? 0)} paid today · ${data?.paymentsMade.totalCount ?? 0} total`,
-                  icon: Receipt,
-                  accentColor: "#f43f5e",
-                  onClick: () => navigate("/payments"),
-                  trend: "up" as const,
-                },
-                {
-                  label: "Received Today",
-                  value: data?.receivedPayments.todayCount.toString() ?? "0",
-                  sub: `${fmt(data?.receivedPayments.todayAmount ?? 0)} received · ${data?.receivedPayments.totalCount ?? 0} total`,
-                  icon: BadgeDollarSign,
-                  accentColor: "#10b981",
-                  onClick: () => navigate("/received-payments"),
-                  trend: "up" as const,
-                },
-                {
-                  label: "Pending Cheques",
-                  value: data?.cheques.pendingCount.toString() ?? "0",
-                  sub: `${data?.cheques.clearedCount ?? 0} cleared · ${data?.cheques.totalCount ?? 0} total`,
-                  icon: BookOpen,
-                  accentColor: "#f59e0b",
-                  onClick: () => navigate("/masters/cheque"),
-                  trend: (data?.cheques.pendingCount ?? 0) > 0 ? "down" as const : "neutral" as const,
-                },
-                {
-                  label: "Active Cards",
-                  value: data?.cards.activeCount.toString() ?? "0",
-                  sub: `${data?.cards.inactiveCount ?? 0} inactive · ${data?.cards.totalCount ?? 0} total`,
-                  icon: CreditCard,
-                  accentColor: "#8b5cf6",
-                  onClick: () => navigate("/masters/card"),
-                  trend: "neutral" as const,
-                },
-              ].map((s) => <FinanceGlassCard key={s.label} {...s} />)}
-        </div>
-      </GlassSection>
-
-      {/* ── Banks / Totals row ────────────────────────────────────────────── */}
-      <GlassSection title="Totals" icon={Landmark} accentColor="#6366f1">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {isLoading ? (
-            Array.from({ length: 3 }).map((_, i) => <StatCardSkeleton key={i} />)
-          ) : (
-            <>
-              <FinanceGlassCard
-                label="Bank Accounts"
-                value={(data?.banks.activeCount ?? 0).toString()}
-                sub={`${data?.banks.totalCount ?? 0} total bank heads`}
-                icon={Landmark}
-                accentColor="#3b82f6"
-                onClick={() => navigate("/masters/banks")}
-              />
-              <FinanceGlassCard
-                label="Total Payments Made"
-                value={fmt(data?.paymentsMade.totalAmount ?? 0)}
-                sub={`${data?.paymentsMade.totalCount ?? 0} entries all-time`}
-                icon={Receipt}
-                accentColor="#f43f5e"
-                trend="neutral"
-              />
-              <FinanceGlassCard
-                label="Total Received"
-                value={fmt(data?.receivedPayments.totalAmount ?? 0)}
-                sub={`${data?.receivedPayments.approvedCount ?? 0} approved · ${data?.receivedPayments.draftCount ?? 0} draft`}
-                icon={BadgeDollarSign}
-                accentColor="#10b981"
-                trend="neutral"
-              />
-            </>
-          )}
-        </div>
-      </GlassSection>
-
-      {/* ── Recent tables ─────────────────────────────────────────────────── */}
-      <GlassSection title="Recent Activity" icon={Receipt} accentColor="#6366f1">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Recent Payments Made */}
-          <div className="rounded-xl overflow-hidden" style={tableGlass}>
-            <div
-              className="flex items-center justify-between px-4 py-3 border-b"
-              style={{ borderColor: isDark ? "rgba(99,102,241,0.15)" : "rgba(99,102,241,0.12)" }}
-            >
-              <div className="flex items-center gap-2">
-                <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "rgba(244,63,94,0.15)" }}>
-                  <Receipt size={11} style={{ color: "#f43f5e" }} />
-                </div>
-                <span className="text-xs font-heading font-semibold" style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}>
-                  Recent Payments Made
-                </span>
-              </div>
-              <button onClick={() => navigate("/payments")} className="text-[10px] font-medium hover:opacity-70 transition-opacity" style={{ color: "#f43f5e" }}>
-                View all →
-              </button>
-            </div>
-            {isLoading ? (
-              <div className="p-4 space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-7 w-full" />)}</div>
-            ) : (data?.recentPaymentsMade.length ?? 0) === 0 ? (
-              <div className="text-center text-muted-foreground py-10 text-sm">No payments recorded yet</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="border-b" style={{ borderColor: isDark ? "rgba(99,102,241,0.10)" : "rgba(99,102,241,0.08)" }}>
-                      <TableHead className="text-xs">Name</TableHead>
-                      <TableHead className="text-xs">Mode</TableHead>
-                      <TableHead className="text-xs text-right">Amount</TableHead>
-                      <TableHead className="text-xs">Date</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(data?.recentPaymentsMade ?? []).map((p) => (
-                      <TableRow key={p.PPaymentID} className="border-b border-indigo-500/5 hover:bg-indigo-500/5 transition-colors">
-                        <TableCell className="text-xs font-medium truncate max-w-[120px]">{p.PPaymentName || "—"}</TableCell>
-                        <TableCell><Badge variant="outline" className="text-[10px] border-rose-500/30 text-rose-500">{p.PMode || "—"}</Badge></TableCell>
-                        <TableCell className="text-xs text-right font-semibold" style={{ color: "#f43f5e" }}>{p.PAmount != null ? fmt(p.PAmount) : "—"}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{fmtDate(p.PDate)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </div>
-
-          {/* Recent Received Payments */}
-          <div className="rounded-xl overflow-hidden" style={tableGlass}>
-            <div
-              className="flex items-center justify-between px-4 py-3 border-b"
-              style={{ borderColor: isDark ? "rgba(99,102,241,0.15)" : "rgba(99,102,241,0.12)" }}
-            >
-              <div className="flex items-center gap-2">
-                <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "rgba(16,185,129,0.15)" }}>
-                  <BadgeDollarSign size={11} style={{ color: "#10b981" }} />
-                </div>
-                <span className="text-xs font-heading font-semibold" style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}>
-                  Recent Received Payments
-                </span>
-              </div>
-              <button onClick={() => navigate("/received-payments")} className="text-[10px] font-medium hover:opacity-70 transition-opacity" style={{ color: "#10b981" }}>
-                View all →
-              </button>
-            </div>
-            {isLoading ? (
-              <div className="p-4 space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-7 w-full" />)}</div>
-            ) : (data?.recentPaymentsReceived.length ?? 0) === 0 ? (
-              <div className="text-center text-muted-foreground py-10 text-sm">No received payments recorded yet</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="border-b" style={{ borderColor: isDark ? "rgba(99,102,241,0.10)" : "rgba(99,102,241,0.08)" }}>
-                      <TableHead className="text-xs">From</TableHead>
-                      <TableHead className="text-xs">Mode</TableHead>
-                      <TableHead className="text-xs text-right">Amount</TableHead>
-                      <TableHead className="text-xs">Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(data?.recentPaymentsReceived ?? []).map((r) => (
-                      <TableRow key={r.RPPaymentID} className="border-b border-indigo-500/5 hover:bg-indigo-500/5 transition-colors">
-                        <TableCell className="text-xs font-medium truncate max-w-[120px]">{r.RPReceivedFrom || "—"}</TableCell>
-                        <TableCell><Badge variant="outline" className="text-[10px] border-emerald-500/30 text-emerald-500">{r.RPMode || "—"}</Badge></TableCell>
-                        <TableCell className="text-xs text-right font-semibold" style={{ color: "#10b981" }}>{r.RPAmount != null ? fmt(r.RPAmount) : "—"}</TableCell>
-                        <TableCell>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                            r.RPStatus === "Approved" ? "bg-emerald-500/15 text-emerald-500" :
-                            r.RPStatus === "Draft" || !r.RPStatus ? "bg-amber-500/15 text-amber-500" :
-                            "bg-blue-500/15 text-blue-500"
-                          }`}>{r.RPStatus || "Draft"}</span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </div>
-        </div>
-      </GlassSection>
-
-      {/* ── Cheque summary + Quick Actions ───────────────────────────────── */}
-      <GlassSection title="Cheque Summary" icon={BookOpen} accentColor="#f59e0b">
-        {!isLoading && data && (
-          <div className="rounded-xl p-4 flex flex-wrap gap-4" style={tableGlass}>
-            {[
-              { icon: BookOpen, label: "Total", value: data.cheques.totalCount, color: "#6366f1" },
-              { icon: Clock, label: "Pending", value: data.cheques.pendingCount, color: data.cheques.pendingCount > 0 ? "#f59e0b" : "#64748b" },
-              { icon: Clock, label: "Draft", value: data.cheques.draftCount, color: "#3b82f6" },
-              { icon: CheckCircle2, label: "Cleared", value: data.cheques.clearedCount, color: "#10b981" },
-            ].map(({ icon: Icon, label, value, color }) => (
-              <div key={label} className="flex items-center gap-3 px-4 py-2 rounded-lg" style={{ background: `${color}10`, border: `1px solid ${color}20` }}>
-                <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: `${color}20` }}>
-                  <Icon size={13} style={{ color }} />
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground font-heading uppercase tracking-wide">{label}</p>
-                  <p className="text-base font-bold font-heading" style={{ color }}>{value}</p>
-                </div>
-              </div>
-            ))}
+        {isError && (
+          <div className="px-4 py-3 rounded-lg bg-destructive/10 text-destructive text-sm border border-destructive/20">
+            Failed to load dashboard data. Please refresh the page.
           </div>
         )}
-      </GlassSection>
 
-      {/* ── Quick Actions ─────────────────────────────────────────────────── */}
-      <GlassSection title="Quick Actions" icon={CreditCard} accentColor="#8b5cf6">
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          {[
-            { label: "New Payment", icon: Receipt, path: "/payments", color: "#f43f5e" },
-            { label: "New Received", icon: BadgeDollarSign, path: "/received-payments", color: "#10b981" },
-            { label: "Cheques", icon: BookOpen, path: "/masters/cheque", color: "#f59e0b" },
-            { label: "Cards", icon: CreditCard, path: "/masters/card", color: "#8b5cf6" },
-            { label: "Banks", icon: Landmark, path: "/masters/banks", color: "#3b82f6" },
-          ].map(({ label, icon: Icon, path, color }) => (
-            <button
-              key={path}
-              onClick={() => navigate(path)}
-              className="group flex flex-col items-center gap-3 py-5 rounded-xl transition-all duration-200 active:scale-95"
-              style={{
-                background: isDark ? `${color}0A` : `${color}08`,
-                border: `1px solid ${color}25`,
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = `${color}18`; (e.currentTarget as HTMLElement).style.borderColor = `${color}40`; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = isDark ? `${color}0A` : `${color}08`; (e.currentTarget as HTMLElement).style.borderColor = `${color}25`; }}
-            >
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110" style={{ background: `${color}20`, border: `1px solid ${color}35` }}>
-                <Icon size={18} style={{ color }} />
+        {/* ── Primary stat cards ────────────────────────────────────────────── */}
+        <GlassSection
+          title="Today's Activity"
+          icon={Receipt}
+          accentColor="#6366f1"
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {isLoading
+              ? Array.from({ length: 4 }).map((_, i) => (
+                  <StatCardSkeleton key={i} />
+                ))
+              : [
+                  {
+                    label: "Payments Made Today",
+                    value: data?.paymentsMade.todayCount.toString() ?? "0",
+                    sub: `${fmt(data?.paymentsMade.todayAmount ?? 0)} paid today · ${data?.paymentsMade.totalCount ?? 0} total`,
+                    icon: Receipt,
+                    accentColor: "#f43f5e",
+                    onClick: () => navigate("/payments"),
+                    trend: "up" as const,
+                  },
+                  {
+                    label: "Received Today",
+                    value: data?.receivedPayments.todayCount.toString() ?? "0",
+                    sub: `${fmt(data?.receivedPayments.todayAmount ?? 0)} received · ${data?.receivedPayments.totalCount ?? 0} total`,
+                    icon: BadgeDollarSign,
+                    accentColor: "#10b981",
+                    onClick: () => navigate("/received-payments"),
+                    trend: "up" as const,
+                  },
+                  {
+                    label: "Cheque Lots",
+                    value: data?.cheques.totalCount.toString() ?? "0",
+                    sub: `${data?.cheques.clearedCount ?? 0} cleared · ${data?.cheques.pendingCount ?? 0} active`,
+                    icon: BookOpen,
+                    accentColor: "#f59e0b",
+                    onClick: () => navigate("/masters/cheque"),
+                    trend: "neutral" as const,
+                  },
+                  {
+                    label: "Active Cards",
+                    value: data?.cards.activeCount.toString() ?? "0",
+                    sub: `${data?.cards.inactiveCount ?? 0} inactive · ${data?.cards.totalCount ?? 0} total`,
+                    icon: CreditCard,
+                    accentColor: "#8b5cf6",
+                    onClick: () => navigate("/masters/card"),
+                    trend: "neutral" as const,
+                  },
+                ].map((s) => <FinanceGlassCard key={s.label} {...s} />)}
+          </div>
+        </GlassSection>
+
+        {/* ── Banks / Totals row ────────────────────────────────────────────── */}
+        <GlassSection title="Totals" icon={Landmark} accentColor="#6366f1">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {isLoading ? (
+              Array.from({ length: 3 }).map((_, i) => (
+                <StatCardSkeleton key={i} />
+              ))
+            ) : (
+              <>
+                <FinanceGlassCard
+                  label="Bank Accounts"
+                  value={(data?.banks.activeCount ?? 0).toString()}
+                  sub={`${data?.banks.totalCount ?? 0} total bank heads`}
+                  icon={Landmark}
+                  accentColor="#3b82f6"
+                  onClick={() => navigate("/masters/banks")}
+                />
+                <FinanceGlassCard
+                  label="Total Payments Made"
+                  value={fmt(data?.paymentsMade.totalAmount ?? 0)}
+                  sub={`${data?.paymentsMade.totalCount ?? 0} entries all-time`}
+                  icon={Receipt}
+                  accentColor="#f43f5e"
+                  trend="neutral"
+                />
+                <FinanceGlassCard
+                  label="Total Received"
+                  value={fmt(data?.receivedPayments.totalAmount ?? 0)}
+                  sub={`${data?.receivedPayments.approvedCount ?? 0} approved · ${data?.receivedPayments.draftCount ?? 0} draft`}
+                  icon={BadgeDollarSign}
+                  accentColor="#10b981"
+                  trend="neutral"
+                />
+              </>
+            )}
+          </div>
+        </GlassSection>
+
+        {/* ── Recent tables ─────────────────────────────────────────────────── */}
+        <GlassSection
+          title="Recent Activity"
+          icon={Receipt}
+          accentColor="#6366f1"
+        >
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Recent Payments Made */}
+            <div className="rounded-xl overflow-hidden" style={tableGlass}>
+              <div
+                className="flex items-center justify-between px-4 py-3 border-b"
+                style={{
+                  borderColor: isDark
+                    ? "rgba(99,102,241,0.15)"
+                    : "rgba(99,102,241,0.12)",
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  <div
+                    className="w-5 h-5 rounded-md flex items-center justify-center"
+                    style={{ background: "rgba(244,63,94,0.15)" }}
+                  >
+                    <Receipt size={11} style={{ color: "#f43f5e" }} />
+                  </div>
+                  <span
+                    className="text-xs font-heading font-semibold"
+                    style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}
+                  >
+                    Recent Payments Made
+                  </span>
+                </div>
+                <button
+                  onClick={() => navigate("/payments")}
+                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  style={{ color: "#f43f5e" }}
+                >
+                  View all →
+                </button>
               </div>
-              <span className="text-xs font-medium text-center leading-tight" style={{ color: isDark ? "#cbd5e1" : "#475569" }}>{label}</span>
-            </button>
-          ))}
-        </div>
-      </GlassSection>
+              {isLoading ? (
+                <div className="p-4 space-y-2">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <Skeleton key={i} className="h-7 w-full" />
+                  ))}
+                </div>
+              ) : (data?.recentPaymentsMade.length ?? 0) === 0 ? (
+                <div className="text-center text-muted-foreground py-10 text-sm">
+                  No payments recorded yet
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow
+                        className="border-b"
+                        style={{
+                          borderColor: isDark
+                            ? "rgba(99,102,241,0.10)"
+                            : "rgba(99,102,241,0.08)",
+                        }}
+                      >
+                        <TableHead className="text-xs">Name</TableHead>
+                        <TableHead className="text-xs">Mode</TableHead>
+                        <TableHead className="text-xs text-right">
+                          Amount
+                        </TableHead>
+                        <TableHead className="text-xs">Date</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(data?.recentPaymentsMade ?? []).map((p) => (
+                        <TableRow
+                          key={p.PPaymentID}
+                          className="border-b border-indigo-500/5 hover:bg-indigo-500/5 transition-colors"
+                        >
+                          <TableCell className="text-xs font-medium truncate max-w-[120px]">
+                            {p.PPaymentName || "—"}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] border-rose-500/30 text-rose-500"
+                            >
+                              {p.PMode || "—"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell
+                            className="text-xs text-right font-semibold"
+                            style={{ color: "#f43f5e" }}
+                          >
+                            {p.PAmount != null ? fmt(p.PAmount) : "—"}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {fmtDate(p.PDate)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
 
+            {/* Recent Received Payments */}
+            <div className="rounded-xl overflow-hidden" style={tableGlass}>
+              <div
+                className="flex items-center justify-between px-4 py-3 border-b"
+                style={{
+                  borderColor: isDark
+                    ? "rgba(99,102,241,0.15)"
+                    : "rgba(99,102,241,0.12)",
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  <div
+                    className="w-5 h-5 rounded-md flex items-center justify-center"
+                    style={{ background: "rgba(16,185,129,0.15)" }}
+                  >
+                    <BadgeDollarSign size={11} style={{ color: "#10b981" }} />
+                  </div>
+                  <span
+                    className="text-xs font-heading font-semibold"
+                    style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}
+                  >
+                    Recent Received Payments
+                  </span>
+                </div>
+                <button
+                  onClick={() => navigate("/received-payments")}
+                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  style={{ color: "#10b981" }}
+                >
+                  View all →
+                </button>
+              </div>
+              {isLoading ? (
+                <div className="p-4 space-y-2">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <Skeleton key={i} className="h-7 w-full" />
+                  ))}
+                </div>
+              ) : (data?.recentPaymentsReceived.length ?? 0) === 0 ? (
+                <div className="text-center text-muted-foreground py-10 text-sm">
+                  No received payments recorded yet
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow
+                        className="border-b"
+                        style={{
+                          borderColor: isDark
+                            ? "rgba(99,102,241,0.10)"
+                            : "rgba(99,102,241,0.08)",
+                        }}
+                      >
+                        <TableHead className="text-xs">From</TableHead>
+                        <TableHead className="text-xs">Mode</TableHead>
+                        <TableHead className="text-xs text-right">
+                          Amount
+                        </TableHead>
+                        <TableHead className="text-xs">Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(data?.recentPaymentsReceived ?? []).map((r) => (
+                        <TableRow
+                          key={r.RPPaymentID}
+                          className="border-b border-indigo-500/5 hover:bg-indigo-500/5 transition-colors"
+                        >
+                          <TableCell className="text-xs font-medium truncate max-w-[120px]">
+                            {r.RPReceivedFrom || "—"}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] border-emerald-500/30 text-emerald-500"
+                            >
+                              {r.RPMode || "—"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell
+                            className="text-xs text-right font-semibold"
+                            style={{ color: "#10b981" }}
+                          >
+                            {r.RPAmount != null ? fmt(r.RPAmount) : "—"}
+                          </TableCell>
+                          <TableCell>
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                                r.RPStatus === "Approved"
+                                  ? "bg-emerald-500/15 text-emerald-500"
+                                  : r.RPStatus === "Draft" || !r.RPStatus
+                                    ? "bg-amber-500/15 text-amber-500"
+                                    : "bg-blue-500/15 text-blue-500"
+                              }`}
+                            >
+                              {r.RPStatus || "Draft"}
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
+          </div>
+        </GlassSection>
+
+        {/* ── Cheque Summary ───────────────────────────────────────────── */}
+        <GlassSection
+          title="Cheque Summary"
+          icon={BookOpen}
+          accentColor="#f59e0b"
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {isLoading ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <StatCardSkeleton key={i} />
+              ))
+            ) : (
+              <>
+                <FinanceGlassCard
+                  label="Total Cheque Lots"
+                  value={(data?.cheques.totalCount ?? 0).toString()}
+                  sub="All cheque lots registered"
+                  icon={BookOpen}
+                  accentColor="#6366f1"
+                  onClick={() => navigate("/masters/cheque")}
+                />
+                <FinanceGlassCard
+                  label="Active Lots"
+                  value={(data?.cheques.pendingCount ?? 0).toString()}
+                  sub={`${data?.cheques.totalCount ?? 0} total registered`}
+                  icon={Clock}
+                  accentColor="#f59e0b"
+                  trend={
+                    (data?.cheques.pendingCount ?? 0) > 0 ? "up" : "neutral"
+                  }
+                  onClick={() => navigate("/masters/cheque")}
+                />
+                <FinanceGlassCard
+                  label="Draft Lots"
+                  value={(data?.cheques.draftCount ?? 0).toString()}
+                  sub="Lots not yet activated"
+                  icon={Clock}
+                  accentColor="#3b82f6"
+                  onClick={() => navigate("/masters/cheque")}
+                />
+                <FinanceGlassCard
+                  label="Cleared Lots"
+                  value={(data?.cheques.clearedCount ?? 0).toString()}
+                  sub="Fully utilised cheque lots"
+                  icon={CheckCircle2}
+                  accentColor="#10b981"
+                  onClick={() => navigate("/masters/cheque")}
+                />
+              </>
+            )}
+          </div>
+        </GlassSection>
+
+        {/* ── Quick Actions ─────────────────────────────────────────────────── */}
+        <GlassSection
+          title="Quick Actions"
+          icon={CreditCard}
+          accentColor="#8b5cf6"
+        >
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {[
+              {
+                label: "New Payment",
+                icon: Receipt,
+                path: "/payments",
+                color: "#f43f5e",
+              },
+              {
+                label: "New Received",
+                icon: BadgeDollarSign,
+                path: "/received-payments",
+                color: "#10b981",
+              },
+              {
+                label: "Cheques",
+                icon: BookOpen,
+                path: "/masters/cheque",
+                color: "#f59e0b",
+              },
+              {
+                label: "Cards",
+                icon: CreditCard,
+                path: "/masters/card",
+                color: "#8b5cf6",
+              },
+              {
+                label: "Banks",
+                icon: Landmark,
+                path: "/masters/banks",
+                color: "#3b82f6",
+              },
+            ].map(({ label, icon: Icon, path, color }) => (
+              <button
+                key={path}
+                onClick={() => navigate(path)}
+                className="group flex flex-col items-center gap-3 py-5 rounded-xl transition-all duration-200 active:scale-95"
+                style={{
+                  background: isDark ? `${color}0A` : `${color}08`,
+                  border: `1px solid ${color}25`,
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLElement).style.background =
+                    `${color}18`;
+                  (e.currentTarget as HTMLElement).style.borderColor =
+                    `${color}40`;
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLElement).style.background = isDark
+                    ? `${color}0A`
+                    : `${color}08`;
+                  (e.currentTarget as HTMLElement).style.borderColor =
+                    `${color}25`;
+                }}
+              >
+                <div
+                  className="w-10 h-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110"
+                  style={{
+                    background: `${color}20`,
+                    border: `1px solid ${color}35`,
+                  }}
+                >
+                  <Icon size={18} style={{ color }} />
+                </div>
+                <span
+                  className="text-xs font-medium text-center leading-tight"
+                  style={{ color: isDark ? "#cbd5e1" : "#475569" }}
+                >
+                  {label}
+                </span>
+              </button>
+            ))}
+          </div>
+        </GlassSection>
       </FinanceShell>
     </>
   );
