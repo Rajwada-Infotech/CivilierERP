@@ -1046,6 +1046,67 @@ function LogoRing({ size }: { size: number }) {
   );
 }
 
+// ── Rocket fly-by — plays once on successful login ─────────────────────────────
+function RocketFlyBy() {
+  return (
+    <motion.div
+      className="absolute inset-0 z-[60] pointer-events-none overflow-hidden"
+      initial={{ opacity: 1 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0, transition: { duration: 0.2 } }}
+    >
+      <motion.div
+        className="absolute"
+        style={{
+          width: "clamp(56px, 9vw, 110px)",
+          height: "clamp(56px, 9vw, 110px)",
+          left: "-20vw",
+          top: "78vh",
+        }}
+        initial={{ x: 0, y: 0, rotate: -38, scale: 0.7, opacity: 0 }}
+        animate={{
+          x: "130vw",
+          y: "-95vh",
+          rotate: -38,
+          scale: [0.7, 1.05, 1.05, 0.9],
+          opacity: [0, 1, 1, 0],
+        }}
+        transition={{
+          duration: 1.05,
+          ease: [0.22, 0.61, 0.36, 1],
+          times: [0, 0.15, 0.85, 1],
+        }}
+      >
+        {/* Exhaust trail */}
+        <motion.div
+          className="absolute rounded-full"
+          style={{
+            width: "140%",
+            height: "30%",
+            left: "-90%",
+            top: "55%",
+            background:
+              "linear-gradient(90deg, transparent, rgba(167,139,250,0.55) 40%, rgba(236,180,255,0.85) 100%)",
+            filter: "blur(6px)",
+            transform: "translateY(-50%) rotate(0deg)",
+          }}
+          animate={{ opacity: [0, 0.9, 0] }}
+          transition={{ duration: 1.05, times: [0, 0.3, 1] }}
+        />
+        <img
+          src="/Civilier.png"
+          alt=""
+          className="relative w-full h-full object-contain"
+          style={{
+            filter: "drop-shadow(0 6px 18px rgba(124,58,237,0.55))",
+          }}
+          draggable={false}
+        />
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────────
 export default function Login() {
   const [showPass, setShowPass] = useState(false);
@@ -1086,7 +1147,7 @@ export default function Login() {
           else if (role === "super_admin" || role === "admin")
             navigate(`/home/${uid}`, { replace: true });
           else navigate(`/home/${uid}`, { replace: true });
-        }, 700);
+        }, 1100);
       } else {
         setError(result.error || "Invalid email or password.");
         setIsLoading(false);
@@ -1207,6 +1268,9 @@ export default function Login() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Rocket fly-by — plays once on successful login */}
+      <AnimatePresence>{loginSuccess && <RocketFlyBy />}</AnimatePresence>
 
       {/* Card */}
       <motion.div
