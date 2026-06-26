@@ -163,6 +163,7 @@ const ALL_ROUTES = [
   { path: "/api/project-master", file: "./routes/projectMaster" },
   { path: "/api/block-master", file: "./routes/blockMaster" },
   { path: "/api/unit-master", file: "./routes/unitMaster" },
+  { path: "/api/room-master", file: "./routes/roomMaster" },
   { path: "/api/payment-plan-master", file: "./routes/paymentPlanMaster" },
   { path: "/api/business", file: "./routes/businessRoutes" },
   { path: "/api/tickets", file: "./routes/ticketRoutes" },

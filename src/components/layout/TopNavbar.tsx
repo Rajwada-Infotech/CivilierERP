@@ -42,6 +42,7 @@ import {
   Ruler,
   SlidersHorizontal,
   GitBranch,
+  DoorOpen,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
@@ -284,16 +285,10 @@ const materialSetupItems = [
 
 const followupSetupItems = [
   {
-    icon: ClipboardList,
-    label: "Payment Plan",
-    path: "/followup/setup/payment-plan-master",
-    color: "text-emerald-500",
-  },
-  {
-    icon: Layers,
-    label: "Block",
-    path: "/followup/setup/block-master",
-    color: "text-cyan-500",
+    icon: Users,
+    label: "Customers",
+    path: "/followup/setup/customer-master",
+    color: "text-violet-500",
   },
   {
     icon: Ruler,
@@ -302,10 +297,22 @@ const followupSetupItems = [
     color: "text-orange-500",
   },
   {
-    icon: Calendar,
-    label: "Reminders",
-    path: "/followup/follow-ups/reminders",
-    color: "text-indigo-500",
+    icon: Layers,
+    label: "Block",
+    path: "/followup/setup/block-master",
+    color: "text-cyan-500",
+  },
+  {
+    icon: DoorOpen,
+    label: "Room",
+    path: "/followup/setup/room-master",
+    color: "text-teal-500",
+  },
+  {
+    icon: ClipboardList,
+    label: "Payment Plan",
+    path: "/followup/setup/payment-plan-master",
+    color: "text-emerald-500",
   },
   {
     icon: Activity,
@@ -314,10 +321,10 @@ const followupSetupItems = [
     color: "text-purple-500",
   },
   {
-    icon: Users,
-    label: "Customers",
-    path: "/followup/setup/customer-master",
-    color: "text-violet-500",
+    icon: Calendar,
+    label: "Reminders",
+    path: "/followup/follow-ups/reminders",
+    color: "text-indigo-500",
   },
 ];
 
