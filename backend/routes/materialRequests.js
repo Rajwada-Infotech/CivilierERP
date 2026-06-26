@@ -488,7 +488,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
 });
 
 // ── POST / ─────────────────────────────────────────────────────────────────────
-router.post("/", authenticateToken, requirePageRight("material-requests", "create"), async (req, res) => {
+router.post("/", authenticateToken, requirePageRight("material-request", "create"), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
 
@@ -618,7 +618,7 @@ router.post("/", authenticateToken, requirePageRight("material-requests", "creat
 });
 
 // ── PUT /:id ───────────────────────────────────────────────────────────────────
-router.put("/:id", authenticateToken, requirePageRight("material-requests", "edit"), async (req, res) => {
+router.put("/:id", authenticateToken, requirePageRight("material-request", "edit"), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
 
@@ -711,7 +711,7 @@ router.put("/:id", authenticateToken, requirePageRight("material-requests", "edi
 });
 
 // ── DELETE /:id ────────────────────────────────────────────────────────────────
-router.delete("/:id", authenticateToken, requirePageRight("material-requests", "delete"), async (req, res) => {
+router.delete("/:id", authenticateToken, requirePageRight("material-request", "delete"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
@@ -750,7 +750,7 @@ router.delete("/:id", authenticateToken, requirePageRight("material-requests", "
 });
 
 // ── PUT /:id/submit ────────────────────────────────────────────────────────────
-router.put("/:id/submit", authenticateToken, requirePageRight("material-requests", "edit"), async (req, res) => {
+router.put("/:id/submit", authenticateToken, requirePageRight("material-request", "edit"), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
   try {
@@ -889,7 +889,7 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
 
 // ── PUT /:id/mark-ordered ──────────────────────────────────────────────────────
 // Called by the PO creation flow after a Normal PO is saved against this MR.
-router.put("/:id/mark-ordered", authenticateToken, requirePageRight("material-requests", "edit"), async (req, res) => {
+router.put("/:id/mark-ordered", authenticateToken, requirePageRight("material-request", "edit"), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
   try {
