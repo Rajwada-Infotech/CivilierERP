@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Wrench,
   Archive,
+  Pickaxe,
 } from "lucide-react";
 import {
   useModule,
@@ -89,6 +90,15 @@ const MODULES = [
     bg: "rgba(245,158,11,0.22)",
     ringRgb: "245,158,11",
   },
+  {
+    id: "insidework" as Module,
+    icon: Pickaxe,
+    label: "Inside Work",
+    desc: "Internal operations workspace",
+    color: "#0891b2",
+    bg: "rgba(8,145,178,0.22)",
+    ringRgb: "8,145,178",
+  },
 ];
 
 const ADMIN_MODULE = {
@@ -136,6 +146,7 @@ export const ModuleStrip: React.FC = () => {
     engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
     ticket:      ["ticket-dashboard", "tickets"],
     sales:       ["sale-order", "sale-invoice", "sales-payment"],
+    insidework:  ["insidework-dashboard"],
   };
 
   const userHasModuleAccess = (moduleId: string): boolean => {

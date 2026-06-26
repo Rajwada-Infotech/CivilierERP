@@ -105,6 +105,15 @@ const Transactions = lazy(() => import("./pages/finance/Transactions"));
 const Payment = lazy(() => import("./pages/finance/Payment"));
 const Brs = lazy(() => import("./pages/finance/Brs"));
 const Records = lazy(() => import("./pages/records/Records"));
+const InsideWorkDashboard = lazy(
+  () => import("./pages/insidework/InsideWorkDashboard"),
+);
+const DependencyMaster = lazy(
+  () => import("./pages/insidework/DependencyMaster"),
+);
+const InsideWorkActivity = lazy(
+  () => import("./pages/insidework/InsideWorkActivity"),
+);
 const ReceivedPayment = lazy(() => import("./pages/finance/ReceivedPayment"));
 const TrialBalance = lazy(() => import("./pages/finance/TrialBalance"));
 
@@ -116,6 +125,7 @@ const ContractorMaster = lazy(() => import("./pages/masters/ContractorMaster"));
 const SupplierMaster = lazy(() => import("./pages/masters/SupplierMaster"));
 const CustomerMaster = lazy(() => import("./pages/masters/CustomerMaster"));
 const UnitMaster = lazy(() => import("./pages/followup/UnitMaster"));
+const RoomMaster = lazy(() => import("./pages/followup/RoomMaster"));
 const BlockMaster = lazy(() => import("./pages/followup/BlockMaster"));
 const PaymentPlanMaster = lazy(
   () => import("./pages/followup/PaymentPlanMaster"),
@@ -642,6 +652,30 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/insidework"
+        element={
+          <ProtectedRoute pageKey="insidework-dashboard">
+            <InsideWorkDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/insidework/setup/dependency"
+        element={
+          <ProtectedRoute pageKey="dependency-master">
+            <DependencyMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/insidework/activity"
+        element={
+          <ProtectedRoute pageKey="insidework-activity">
+            <InsideWorkActivity />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/followup"
         element={
           <ProtectedRoute pageKey="followup-dashboard">
@@ -750,6 +784,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="followup-unit-master">
             <UnitMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/setup/room-master"
+        element={
+          <ProtectedRoute pageKey="followup-room-master">
+            <RoomMaster />
           </ProtectedRoute>
         }
       />

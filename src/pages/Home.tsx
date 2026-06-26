@@ -107,28 +107,56 @@ function deriveUserModuleAccess(
   const hasAny = (...keys: string[]) => keys.some((k) => pages.has(k));
 
   return {
-    finance:
-      hasAny("finance-dashboard", "new-payment", "received-payment", "brs", "transactions"),
-    material:
-      hasAny(
-        "material-dashboard", "material-request", "purchase-orders",
-        "vehicle-in-out", "grn-master", "material-issues", "expense-booking",
-        "stock-ledger", "stock-transfers", "debit-note", "amendments",
-      ),
-    engineering:
-      hasAny("engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"),
-    followup:
-      hasAny(
-        "followup-dashboard", "followup-applications", "followup-applicants",
-        "followup-bookings", "followup-unit-selections", "followup-welcome-calls",
-        "followup-agreements", "followup-legal-milestones", "followup-document-vault",
-        "followup-communicator", "followup-demands", "followup-payments",
-        "followup-construction-updates", "followup-noc", "followup-sales-deed",
-        "followup-pre-possession", "followup-possession-notice", "followup-handover",
-        "followup-tasks", "followup-reminders",
-      ),
-    sales:
-      hasAny("sale-order", "sale-invoice", "sales-payment"),
+    finance: hasAny(
+      "finance-dashboard",
+      "new-payment",
+      "received-payment",
+      "brs",
+      "transactions",
+    ),
+    material: hasAny(
+      "material-dashboard",
+      "material-request",
+      "purchase-orders",
+      "vehicle-in-out",
+      "grn-master",
+      "material-issues",
+      "expense-booking",
+      "stock-ledger",
+      "stock-transfers",
+      "debit-note",
+      "amendments",
+    ),
+    engineering: hasAny(
+      "engineering-dashboard",
+      "boq",
+      "engineering-work-order",
+      "work-done",
+      "dpr",
+    ),
+    followup: hasAny(
+      "followup-dashboard",
+      "followup-applications",
+      "followup-applicants",
+      "followup-bookings",
+      "followup-unit-selections",
+      "followup-welcome-calls",
+      "followup-agreements",
+      "followup-legal-milestones",
+      "followup-document-vault",
+      "followup-communicator",
+      "followup-demands",
+      "followup-payments",
+      "followup-construction-updates",
+      "followup-noc",
+      "followup-sales-deed",
+      "followup-pre-possession",
+      "followup-possession-notice",
+      "followup-handover",
+      "followup-tasks",
+      "followup-reminders",
+    ),
+    sales: hasAny("sale-order", "sale-invoice", "sales-payment"),
     ticket: true, // ticket module is open to all non-customer roles
     approvals: false,
     admin: false,
@@ -597,29 +625,56 @@ export default function HomePage() {
   // "engineer", custom roles, etc. — get the correct tile set based on their
   // actual DB-assigned pagePermissions rather than hardcoded role strings.
   const MODULE_PAGES: Record<string, string[]> = {
-    finance:     ["finance-dashboard", "new-payment", "received-payment", "brs", "transactions"],
-    material:    ["material-dashboard", "purchase-orders", "grn-master", "material-request", "material-issues", "stock-ledger"],
-    followup:    ["followup-dashboard", "followup-applications", "followup-bookings", "followup-agreements", "followup-demands"],
-    engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
-    ticket:      ["ticket-dashboard", "tickets"],
-    sales:       ["sale-order", "sale-invoice", "sales-payment"],
+    finance: [
+      "finance-dashboard",
+      "new-payment",
+      "received-payment",
+      "brs",
+      "transactions",
+    ],
+    material: [
+      "material-dashboard",
+      "purchase-orders",
+      "grn-master",
+      "material-request",
+      "material-issues",
+      "stock-ledger",
+    ],
+    followup: [
+      "followup-dashboard",
+      "followup-applications",
+      "followup-bookings",
+      "followup-agreements",
+      "followup-demands",
+    ],
+    engineering: [
+      "engineering-dashboard",
+      "boq",
+      "engineering-work-order",
+      "work-done",
+      "dpr",
+    ],
+    ticket: ["ticket-dashboard", "tickets"],
+    sales: ["sale-order", "sale-invoice", "sales-payment"],
   };
 
   const hasModuleAccess = (moduleId: string): boolean => {
     if (privileged) return true;
-    return (MODULE_PAGES[moduleId] ?? []).some((pk) => canAccessPage(pk as any));
+    return (MODULE_PAGES[moduleId] ?? []).some((pk) =>
+      canAccessPage(pk as any),
+    );
   };
 
   const access = {
-    finance:     hasModuleAccess("finance"),
-    material:    hasModuleAccess("material"),
+    finance: hasModuleAccess("finance"),
+    material: hasModuleAccess("material"),
     engineering: hasModuleAccess("engineering"),
-    followup:    hasModuleAccess("followup"),
-    ticket:      hasModuleAccess("ticket"),
-    sales:       hasModuleAccess("sales"),
-    approvals:   privileged,
-    admin:       privileged && !isDba,
-    dba:         isDba,
+    followup: hasModuleAccess("followup"),
+    ticket: hasModuleAccess("ticket"),
+    sales: hasModuleAccess("sales"),
+    approvals: privileged,
+    admin: privileged && !isDba,
+    dba: isDba,
   };
 
   const hour = new Date().getHours();
@@ -629,7 +684,13 @@ export default function HomePage() {
   const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } =
     useQuery<HomeDashboardData>({
       // Include access flags in key so the query refires when permissions change
-      queryKey: ["home-dashboard", role, access.finance, access.material, access.engineering],
+      queryKey: [
+        "home-dashboard",
+        role,
+        access.finance,
+        access.material,
+        access.engineering,
+      ],
       queryFn: () => fetchHomeDashboard(isAdmin, access),
       staleTime: 2 * 60 * 1000,
       refetchInterval: 5 * 60 * 1000,
@@ -989,7 +1050,7 @@ export default function HomePage() {
                     accent: "#f59e0b",
                   },
                   {
-                    label: "Pending cheques",
+                    label: "Cheque lots",
                     value: fin?.cheques?.pendingCount ?? 0,
                     accent: fin?.cheques?.pendingCount ? "#ef4444" : undefined,
                     icon: CreditCard,

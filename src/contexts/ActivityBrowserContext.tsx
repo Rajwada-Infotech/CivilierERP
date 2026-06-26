@@ -350,12 +350,6 @@ export const ActivityBrowserProvider: React.FC<{
 
   const recordLogin = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
-      if (
-        !PRIVILEGED_ROLES.includes(
-          user.role as (typeof PRIVILEGED_ROLES)[number],
-        )
-      )
-        return;
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
       const sessionId = generateUUID();
@@ -394,12 +388,6 @@ export const ActivityBrowserProvider: React.FC<{
 
   const recordLogout = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
-      if (
-        !PRIVILEGED_ROLES.includes(
-          user.role as (typeof PRIVILEGED_ROLES)[number],
-        )
-      )
-        return;
       const sessionId = localStorage.getItem("currentSessionId");
       if (!sessionId) return;
 
@@ -449,7 +437,6 @@ export const ActivityBrowserProvider: React.FC<{
       resource: string;
       details?: string;
     }) => {
-      if (!isPrivilegedUser()) return;
       const sessionId = localStorage.getItem("currentSessionId");
       const user = getStoredUser();
 
