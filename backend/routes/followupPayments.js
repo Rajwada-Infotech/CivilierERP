@@ -23,12 +23,10 @@ function buildReceiptNo(bookingNo, seq) {
   return `REC-${bookingNo}-${String(seq).padStart(3, "0")}`;
 }
 
-// ── GET / ─────────────────────────────────────────────────────────────────────
-// Returns all BookingPaymentTerms rows that have been Demanded or Paid,
-// with their receipt records joined. Supports pagination + filters.
+// ── GET / ───────────────────────────────────────────────────────────────────
 router.get(
   "/",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "read"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -92,7 +90,6 @@ router.get(
           bpt.DemandStatus,
           bpt.DemandNo,
           bpt.DemandRaisedOn,
-          -- Receipt summary (most recent receipt)
           (SELECT TOP 1 r.ReceiptNo    FROM dbo.FollowupPaymentReceipts r WHERE r.BookingTermId = bpt.Id ORDER BY r.CreatedAt DESC) AS LastReceiptNo,
           (SELECT TOP 1 r.AmountReceived FROM dbo.FollowupPaymentReceipts r WHERE r.BookingTermId = bpt.Id ORDER BY r.CreatedAt DESC) AS LastReceiptAmount,
           (SELECT TOP 1 r.PaymentDate  FROM dbo.FollowupPaymentReceipts r WHERE r.BookingTermId = bpt.Id ORDER BY r.CreatedAt DESC) AS LastPaymentDate,
@@ -111,7 +108,6 @@ router.get(
         OFFSET @skip ROWS FETCH NEXT @take ROWS ONLY
       `);
 
-      // Count
       const rCount = pool.request();
       if (projectId) rCount.input("projectId", sql.Int, projectId);
       if (statusFilter) rCount.input("status", sql.NVarChar(20), statusFilter);
@@ -127,7 +123,6 @@ router.get(
         WHERE ${WHERE}
       `);
 
-      // Summary
       const summaryResult = await pool.request().query(`
         SELECT
           SUM(CASE WHEN bpt.DemandStatus = 'Demanded' THEN bpt.ComputedAmount ELSE 0 END) AS OutstandingAmount,
@@ -153,10 +148,10 @@ router.get(
   },
 );
 
-// ── GET /projects ─────────────────────────────────────────────────────────────
+// ── GET /projects ────────────────────────────────────────────────────────────
 router.get(
   "/projects",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "read"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -175,10 +170,9 @@ router.get(
 );
 
 // ── GET /receipts/:termId ─────────────────────────────────────────────────────
-// All receipts for a specific milestone (for receipt history modal)
 router.get(
   "/receipts/:termId",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "read"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -203,11 +197,10 @@ router.get(
 );
 
 // ── POST /:termId/record ──────────────────────────────────────────────────────
-// Record a payment receipt against a demanded milestone.
-// Marks the milestone Paid when full amount is received.
+// Creates a new receipt — requires CanAdd
 router.post(
   "/:termId/record",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "write"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanAdd"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -227,7 +220,6 @@ router.post(
           error: `Payment mode must be one of: ${VALID_MODES.join(", ")}`,
         });
 
-      // Load the milestone
       const termResult = await pool.request().input("Id", sql.Int, termId)
         .query(`
           SELECT bpt.Id, bpt.BookingID, bpt.ComputedAmount, bpt.DemandStatus,
@@ -248,7 +240,6 @@ router.post(
           .status(400)
           .json({ error: "This milestone is already fully paid" });
 
-      // Count existing receipts to generate sequential receipt number
       const countResult = await pool
         .request()
         .input("BookingTermId", sql.Int, termId)
@@ -260,7 +251,6 @@ router.post(
 
       const parsedAmount = parseFloat(parseFloat(amount).toFixed(2));
 
-      // Insert receipt
       await pool
         .request()
         .input("BookingTermId", sql.Int, termId)
@@ -285,7 +275,6 @@ router.post(
              @PaymentDate, @ReferenceNo, @BankName, @Notes, @RecordedBy)
         `);
 
-      // Check total received vs milestone amount → mark Paid if >= 100%
       const totalResult = await pool
         .request()
         .input("BookingTermId", sql.Int, termId)
@@ -321,10 +310,10 @@ router.post(
 );
 
 // ── DELETE /receipts/:receiptId ───────────────────────────────────────────────
-// Remove a receipt (admin correction). Re-evaluates Paid status.
+// Removes a receipt — requires CanDelete
 router.delete(
   "/receipts/:receiptId",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "write"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanDelete"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -332,7 +321,6 @@ router.delete(
       if (!receiptId)
         return res.status(400).json({ error: "Invalid receipt ID" });
 
-      // Get the receipt so we know which term to re-evaluate
       const receiptResult = await pool
         .request()
         .input("Id", sql.Int, receiptId)
@@ -345,13 +333,11 @@ router.delete(
 
       const termId = receipt.BookingTermId;
 
-      // Delete the receipt
       await pool
         .request()
         .input("Id", sql.Int, receiptId)
         .query("DELETE FROM dbo.FollowupPaymentReceipts WHERE Id = @Id");
 
-      // Re-evaluate: sum remaining receipts
       const totalResult = await pool
         .request()
         .input("BookingTermId", sql.Int, termId)
@@ -370,7 +356,6 @@ router.delete(
       const totalReceived = parseFloat(totalResult.recordset[0].Total || 0);
       const stillPaid = totalReceived >= parseFloat(term?.ComputedAmount || 0);
 
-      // Revert to Demanded if no longer fully paid
       if (!stillPaid && term?.DemandStatus === "Paid") {
         await pool.request().input("Id", sql.Int, termId).query(`
             UPDATE dbo.BookingPaymentTerms

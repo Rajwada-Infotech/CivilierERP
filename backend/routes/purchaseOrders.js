@@ -6,6 +6,7 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
 const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
@@ -359,7 +360,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ── POST /  (Create) ──────────────────────────────────────────────────────────
-router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
+router.post("/", requirePageRight("purchase-orders", "create"), validateBody(purchaseOrderBodySchema), async (req, res) => {
   const {
     PurchaseOrderNo: poNoFromClient,
     PODate,
@@ -663,6 +664,7 @@ router.post("/", validateBody(purchaseOrderBodySchema), async (req, res) => {
 // ── PUT /:id  (Update) ────────────────────────────────────────────────────────
 router.put(
   "/:id",
+  requirePageRight("purchase-orders", "edit"),
   validateBody(purchaseOrderUpdateSchema),
   async (req, res) => {
     const id = requireValidId(req, res);
@@ -949,7 +951,7 @@ router.get("/:id/can-delete", async (req, res) => {
 // ── DELETE /:id ───────────────────────────────────────────────────────────────
 // PurchaseOrderItems child rows are cascade-deleted by FK constraint.
 // Guard: block if linked GRNs exist (those must be deleted first).
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("purchase-orders", "delete"), async (req, res) => {
   try {
     const id = requireValidId(req, res);
     if (!id) return;
@@ -1040,7 +1042,7 @@ router.delete("/:id", async (req, res) => {
 
 // ── Approval routes ───────────────────────────────────────────────────────────
 
-router.put("/:id/submit", async (req, res) => {
+router.put("/:id/submit", requirePageRight("purchase-orders", "edit"), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
   try {

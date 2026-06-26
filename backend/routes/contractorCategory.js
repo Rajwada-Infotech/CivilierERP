@@ -1,3 +1,5 @@
+const { requirePageRight } = require("../middleware/requirePageRight");
+const allowRoles = require("../middleware/role");
 const express = require("express");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -58,7 +60,7 @@ router.get("/", authMiddleware, async (req, res) => {
 });
 
 // ─── POST /create ─────────────────────────────────────────────────────────────
-router.post("/create", authMiddleware, async (req, res) => {
+router.post("/create", authMiddleware, requirePageRight("contractor-category", "create"), async (req, res) => {
   const { code, name, isActive = true } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
 
@@ -107,7 +109,7 @@ router.post("/create", authMiddleware, async (req, res) => {
 });
 
 // ─── PUT /update/:id ──────────────────────────────────────────────────────────
-router.put("/update/:id", authMiddleware, async (req, res) => {
+router.put("/update/:id", authMiddleware, requirePageRight("contractor-category", "edit"), async (req, res) => {
   const { id } = req.params;
   const { code, name, isActive } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
@@ -169,7 +171,7 @@ router.put("/update/:id", authMiddleware, async (req, res) => {
 // ─── DELETE /delete/:id ───────────────────────────────────────────────────────
 // Soft delete — sets CtIsActive = 0, does NOT remove the row.
 // Hard deleting category records breaks FK references in historical Work Orders / POs.
-router.delete("/delete/:id", authMiddleware, async (req, res) => {
+router.delete("/delete/:id", authMiddleware, requirePageRight("contractor-category", "delete"), async (req, res) => {
   const { id } = req.params;
   const actor = req.user?.email || req.user?.name || "system";
   const ctId  = parseInt(id, 10);

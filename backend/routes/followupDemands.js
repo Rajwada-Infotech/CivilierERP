@@ -31,10 +31,10 @@ function buildDemandNo(bookingNo, sortOrder) {
   return `DEM-${bookingNo}-${seq}`;
 }
 
-// ── GET / ─────────────────────────────────────────────────────────────────────
+// ── GET / ───────────────────────────────────────────────────────────────────
 router.get(
   "/",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "read"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -53,7 +53,6 @@ router.get(
         : null;
       const search = (req.query.search || "").trim();
 
-      // ── build WHERE + bind params for data query ──────────────────────────
       const conditions = ["fb.IsDeleted = 0"];
       const r = pool
         .request()
@@ -86,7 +85,6 @@ router.get(
         WHERE ${WHERE}
       `;
 
-      // ── data query ────────────────────────────────────────────────────────
       const dataRes = await r.query(`
         SELECT
           bpt.Id, bpt.BookingID, fb.BookingNo,
@@ -102,7 +100,6 @@ router.get(
         OFFSET @skip ROWS FETCH NEXT @take ROWS ONLY
       `);
 
-      // ── count query (fresh request, same filters) ─────────────────────────
       const r2 = pool.request();
       const cond2 = ["fb.IsDeleted = 0"];
       if (projectId) {
@@ -130,7 +127,6 @@ router.get(
         WHERE ${cond2.join(" AND ")}
       `);
 
-      // ── summary aggregates (no status/search filter — always full picture) ─
       const r3 = pool.request();
       const cond3 = ["fb.IsDeleted = 0"];
       if (projectId) {
@@ -167,10 +163,10 @@ router.get(
   },
 );
 
-// ── GET /projects ──────────────────────────────────────────────────────────────
+// ── GET /projects ────────────────────────────────────────────────────────────
 router.get(
   "/projects",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "read"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -188,10 +184,10 @@ router.get(
   },
 );
 
-// ── GET /booking/:bookingId ────────────────────────────────────────────────────
+// ── GET /booking/:bookingId ───────────────────────────────────────────────────
 router.get(
   "/booking/:bookingId",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "read"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanView"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -229,7 +225,7 @@ router.get(
 // ── PATCH /:id/raise ──────────────────────────────────────────────────────────
 router.patch(
   "/:id/raise",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "write"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanEdit"),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -289,7 +285,7 @@ router.patch(
 // ── PATCH /:id/undo-raise ─────────────────────────────────────────────────────
 router.patch(
   "/:id/undo-raise",
-  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "write"),
+  checkPermission(PERMISSION_MODULE, PERMISSION_SUBMODULE, "CanEdit"),
   async (req, res) => {
     try {
       const pool = getPool();

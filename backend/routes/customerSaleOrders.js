@@ -1,3 +1,4 @@
+const allowRoles = require("../middleware/role");
 const express = require("express");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -267,7 +268,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ── POST /  (Create) ──────────────────────────────────────────────────────────
-router.post("/", validateBody(customerSaleOrderBodySchema), async (req, res) => {
+router.post("/", allowRoles("admin", "super_admin", "dba"), validateBody(customerSaleOrderBodySchema), async (req, res) => {
   const {
     SaleOrderNo: soNoFromClient,
     SODate,
@@ -418,7 +419,7 @@ router.post("/", validateBody(customerSaleOrderBodySchema), async (req, res) => 
 });
 
 // ── PUT /:id  (Update) ────────────────────────────────────────────────────────
-router.put("/:id", validateBody(customerSaleOrderUpdateSchema), async (req, res) => {
+router.put("/:id", allowRoles("admin", "super_admin", "dba"), validateBody(customerSaleOrderUpdateSchema), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
 

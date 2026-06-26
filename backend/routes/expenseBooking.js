@@ -7,6 +7,7 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const { validateBody } = require("../middleware/validateRequest");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const {
@@ -1052,7 +1053,7 @@ router.get("/:id/approval-trail", async (req, res) => {
 });
 
 // ─── POST Create ──────────────────────────────────────────────────────────────
-router.post("/", validateBody(expenseBookingBodySchema), async (req, res) => {
+router.post("/", requirePageRight("expense-booking", "create"), validateBody(expenseBookingBodySchema), async (req, res) => {
   const {
     EName,
     EProjectName,
@@ -1625,6 +1626,7 @@ router.get("/:id/emi-schedule", async (req, res) => {
 // ─── PUT Pay EMI Installment ──────────────────────────────────────────────────
 router.put(
   "/:id/emi-schedule/:no/pay",
+  requirePageRight("expense-booking", "edit"),
   validateBody(emiPaySchema),
   async (req, res) => {
     const id = parseInt(req.params.id, 10);
@@ -1699,6 +1701,7 @@ router.put(
 // ─── PUT Toggle EMI off ───────────────────────────────────────────────────────
 router.put(
   "/:id/emi-toggle",
+  requirePageRight("expense-booking", "edit"),
   validateBody(emiToggleSchema),
   async (req, res) => {
     const id = parseInt(req.params.id, 10);
@@ -1951,6 +1954,7 @@ router.put(
 // ─── PUT Update ───────────────────────────────────────────────────────────────
 router.put(
   "/:id",
+  requirePageRight("expense-booking", "edit"),
   validateBody(expenseBookingUpdateSchema),
   async (req, res) => {
     const numericId = parseInt(req.params.id, 10);
@@ -2204,7 +2208,7 @@ router.put(
 );
 
 // ─── DELETE ───────────────────────────────────────────────────────────────────
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("expense-booking", "delete"), async (req, res) => {
   const numericId = parseInt(req.params.id, 10);
   if (!Number.isFinite(numericId) || numericId <= 0)
     return res.status(400).json({ error: "Invalid record id" });
@@ -2282,7 +2286,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 // ─── Approval Routes ──────────────────────────────────────────────────────────
-router.put("/:id/submit", async (req, res) => {
+router.put("/:id/submit", requirePageRight("expense-booking", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);

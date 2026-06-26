@@ -7,6 +7,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition, guardEdit } = require("../services/approvalService");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -321,7 +322,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ── POST /  (Create) ──────────────────────────────────────────────────────────
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("boq", "create"), async (req, res) => {
   const {
     BoqNo: boqNoFromClient,
     BoqDate,
@@ -445,7 +446,7 @@ router.post("/", async (req, res) => {
 });
 
 // ── PUT /:id  (Update) ────────────────────────────────────────────────────────
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const {
     BoqNo,
@@ -549,7 +550,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // ── DELETE /:id ───────────────────────────────────────────────────────────────
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("boq", "delete"), async (req, res) => {
   let transaction;
   try {
     const boqID = parseInt(req.params.id, 10);
@@ -607,7 +608,7 @@ router.delete("/:id", async (req, res) => {
 
 // ── Approval routes ───────────────────────────────────────────────────────────
 
-router.put("/:id/submit", async (req, res) => {
+router.put("/:id/submit", requirePageRight("boq", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);

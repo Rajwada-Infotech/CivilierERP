@@ -126,9 +126,20 @@ async function startWorker() {
     try {
       await runTicketEscalationJob();
     } catch (err) {
+      const isPoolTimeout =
+        err?.name === "TimeoutError" ||
+        /operation timed out/i.test(err?.message || "");
+
       logger.error(
-        { event: "WORKER_TICKET_ESCALATION_ERROR", err },
-        "Ticket escalation interval crashed",
+        { event: "WORKER_TICKET_ESCALATION_ERROR", err, isPoolTimeout },
+        isPoolTimeout
+          ? "Ticket escalation interval crashed — DB connection pool did not " +
+              "hand out a connection in time (pool likely exhausted or " +
+              "holding a dead connection). The pool health watchdog in " +
+              "db.js should recover this automatically within ~30s; if it " +
+              "recurs constantly, check DB_SERVER reachability and pool " +
+              "stats via getPoolStats()."
+          : "Ticket escalation interval crashed",
       );
     }
   }, getTicketEscalationIntervalMs());

@@ -6,6 +6,7 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const authMiddleware = require("../middleware/auth");
+const allowRoles = require("../middleware/role");
 
 const CACHE_NS = "approval-workflows";
 
@@ -54,7 +55,7 @@ router.get("/", authMiddleware, cache(CACHE_NS, 60), async (req, res) => {
 });
 
 // POST /api/approval-workflows
-router.post("/", authMiddleware, async (req, res) => {
+router.post("/", authMiddleware, allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const {
     name,
     type = "sequential",
@@ -111,7 +112,7 @@ router.post("/", authMiddleware, async (req, res) => {
 });
 
 // PUT /api/approval-workflows/:id
-router.put("/:id", authMiddleware, async (req, res) => {
+router.put("/:id", authMiddleware, allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const {
     name,
     type = "sequential",
@@ -154,7 +155,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
 });
 
 // PATCH /api/approval-workflows/:id/toggle
-router.patch("/:id/toggle", authMiddleware, async (req, res) => {
+router.patch("/:id/toggle", authMiddleware, allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   try {
     const pool = getPool();
     await pool
@@ -176,7 +177,7 @@ router.patch("/:id/toggle", authMiddleware, async (req, res) => {
 });
 
 // DELETE /api/approval-workflows/:id
-router.delete("/:id", authMiddleware, async (req, res) => {
+router.delete("/:id", authMiddleware, allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   try {
     const pool = getPool();
     await pool
