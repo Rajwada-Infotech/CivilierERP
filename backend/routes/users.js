@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
-const { getPool, sql } = require("../db");
+const { getPool, sql, queryWithRetry } = require("../db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { redisGet, redisSet, redisDel } = require("../redis");
@@ -61,17 +61,30 @@ router.post("/login", async (req, res) => {
       // Redis down — skip lockout check, proceed to DB auth
     }
 
-    const pool = getPool();
-    const result = await pool
-      .request()
-      .input("email", sql.NVarChar, normalizedEmail).query(`
-        SELECT u.id, u.name, u.email, u.RoleId, u.password, u.discontinue,
-               ISNULL(u.can_accept_tickets, 0) AS can_accept_tickets,
-               r.RName AS roleName
-        FROM dbo.users u
-        LEFT JOIN dbo.Role r ON u.RoleId = r.RId
-        WHERE u.email = @email
-      `);
+    let result;
+    try {
+      result = await queryWithRetry(async (request) =>
+        request
+          .input("email", sql.NVarChar, normalizedEmail).query(`
+            SELECT u.id, u.name, u.email, u.RoleId, u.password, u.discontinue,
+                   ISNULL(u.can_accept_tickets, 0) AS can_accept_tickets,
+                   r.RName AS roleName
+            FROM dbo.users u
+            LEFT JOIN dbo.Role r ON u.RoleId = r.RId
+            WHERE u.email = @email
+          `),
+      );
+    } catch (dbErr) {
+      // Pool exhausted / dead connection (tarn "operation timed out") —
+      // queryWithRetry already retried twice on transient errors, so if
+      // we're here the DB genuinely isn't answering. Tell the user that
+      // plainly instead of letting Express's generic 500 (or a silent
+      // hang up to requestTimeout) look like "login is broken".
+      console.error("Login DB Error:", dbErr);
+      return res.status(503).json({
+        error: "Login service is temporarily unavailable. Please try again in a moment.",
+      });
+    }
 
     const user = result.recordset[0];
     if (!user) {
