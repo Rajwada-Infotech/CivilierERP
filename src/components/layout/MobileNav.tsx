@@ -70,6 +70,7 @@ interface NavItemChild {
   path: string;
   icon?: React.ElementType;
   count?: number;
+  pageKey?: string;
 }
 
 interface NavItem {
@@ -79,6 +80,7 @@ interface NavItem {
   children?: NavItemChild[];
   count?: number;
   disabled?: boolean;
+  pageKey?: string;
 }
 
 interface SetupItem {
@@ -434,11 +436,6 @@ export const MobileNav: React.FC = () => {
   })();
 
   // ── Nav item definitions ────────────────────────────────────────────────────
-  // Desktop sidebar arrays (EngineeringSidebar.ts, FinanceSidebar.ts, etc.) are
-  // the single source of truth for nav structure. We adapt them into the local
-  // NavItem/NavItemChild shape here so mobile always mirrors desktop — no more
-  // hand-copied lists that can drift out of sync.
-
   const adaptChild = (child: DesktopSubItem): NavItemChild | null => {
     if (child.pageKey && !canAccessPage(child.pageKey as any)) return null;
     return {
@@ -461,9 +458,6 @@ export const MobileNav: React.FC = () => {
         return acc;
       }
       if (item.sections?.length) {
-        // Flatten sections into a single children list — mobile nav has no
-        // separate "sections" concept, desktop's nested sections become one
-        // flat expandable group.
         const children = item.sections
           .flatMap((s) => s.items)
           .map(adaptChild)
@@ -495,7 +489,9 @@ export const MobileNav: React.FC = () => {
       case "material":
         return adaptItems(materialNavItems as DesktopNavItem[]);
       case "finance":
-        return adaptItems(buildFinanceNavItems(overdueCount) as DesktopNavItem[]);
+        return adaptItems(
+          buildFinanceNavItems(overdueCount) as DesktopNavItem[],
+        );
       case "followup":
         return adaptItems(followupNavItems as DesktopNavItem[]);
       case "engineering":
@@ -513,13 +509,32 @@ export const MobileNav: React.FC = () => {
     }
   };
 
+  // Filter nav items by user's page rights — mirrors AppSidebar.tsx's
+  // filterByRights() so desktop and mobile can't drift apart again.
+  const filterByRights = (items: NavItem[]): NavItem[] => {
+    if (isAdmin) return items;
+    return items.reduce<NavItem[]>((acc, item) => {
+      if (item.children) {
+        const visibleChildren = item.children.filter(
+          (child) => !child.pageKey || canAccessPage(child.pageKey),
+        );
+        if (visibleChildren.length > 0) {
+          acc.push({ ...item, children: visibleChildren });
+        }
+      } else if (!item.pageKey || canAccessPage(item.pageKey)) {
+        acc.push(item);
+      }
+      return acc;
+    }, []);
+  };
+
   const navItems = isSuperAdminPage
     ? SUPER_ADMIN_NAV_ITEMS
     : isDbaPage
       ? DBA_NAV_ITEMS
       : isAdminPage
         ? ADMIN_NAV_ITEMS
-        : getModuleNavItems();
+        : filterByRights(getModuleNavItems());
 
   const go = (path: string) => {
     navigate(path);

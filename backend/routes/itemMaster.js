@@ -5,6 +5,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
+const { requirePageRight } = require("../middleware/requirePageRight");
 
 // ─── GET all items ────────────────────────────────────────────────────────────
 router.get("/", cache("item-master", 300), async (req, res) => {
@@ -140,7 +141,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ─── POST create item ─────────────────────────────────────────────────────────
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("item-master", "create"), async (req, res) => {
   const {
     M_Name,
     M_Description,
@@ -242,7 +243,7 @@ router.post("/", async (req, res) => {
 });
 
 // ─── PUT update item ──────────────────────────────────────────────────────────
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => {
   const { id } = req.params;
   const {
     M_Name,
@@ -342,7 +343,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // ─── DELETE item ──────────────────────────────────────────────────────────────
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("item-master", "delete"), async (req, res) => {
   const { id } = req.params;
   try {
     const pool = getPool();

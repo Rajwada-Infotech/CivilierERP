@@ -1119,7 +1119,7 @@ export function PrePossessionClearancePage() {
                             </button>
                             {openMenuId === rec.Id && (
                               <div className="pp-menu">
-                                <button
+                                {rights.canEdit && (<button
                                   className="pp-menu-item"
                                   onClick={() => {
                                     openEdit(rec);
@@ -1127,7 +1127,7 @@ export function PrePossessionClearancePage() {
                                   }}
                                 >
                                   <Pencil size={14} /> Edit
-                                </button>
+                                </button>)}
                                 {rights.canDelete && (
                                   <button
                                     className="pp-menu-item danger"

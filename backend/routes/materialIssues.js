@@ -26,6 +26,7 @@ router.use(routeLimiter);
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -366,7 +367,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
 });
 
 // ── POST / ────────────────────────────────────────────────────────────────────
-router.post("/", authenticateToken, async (req, res) => {
+router.post("/", authenticateToken, requirePageRight("material-issues", "create"), async (req, res) => {
   try {
     const pool = getPool();
     const {
@@ -528,7 +529,7 @@ router.post("/", authenticateToken, async (req, res) => {
 });
 
 // ── PUT /:id ──────────────────────────────────────────────────────────────────
-router.put("/:id", authenticateToken, async (req, res) => {
+router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
@@ -633,7 +634,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
 });
 
 // ── DELETE /:id ───────────────────────────────────────────────────────────────
-router.delete("/:id", authenticateToken, async (req, res) => {
+router.delete("/:id", authenticateToken, requirePageRight("material-issues", "delete"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
@@ -925,7 +926,7 @@ router.get("/prefill/:type/:id", authenticateToken, async (req, res) => {
 });
 
 // ── PUT /:id/submit — Pending re-submission after rejection ───────────────────
-router.put("/:id/submit", authenticateToken, async (req, res) => {
+router.put("/:id/submit", authenticateToken, requirePageRight("material-issues", "edit"), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });

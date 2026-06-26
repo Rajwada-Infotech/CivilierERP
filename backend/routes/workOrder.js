@@ -1,3 +1,4 @@
+const { requirePageRight } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -369,7 +370,7 @@ router.get(
   },
 );
 
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("work-order-master", "create"), async (req, res) => {
   const {
     CompanyId,
     ProjectId,
@@ -482,7 +483,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePageRight("work-order-master", "edit"), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
 
@@ -573,7 +574,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("work-order-master", "delete"), async (req, res) => {
   try {
     const id = requireValidId(req, res);
     if (!id) return;
@@ -701,7 +702,7 @@ router.get("/:id/activities", async (req, res) => {
   }
 });
 
-router.post("/:id/activities", async (req, res) => {
+router.post("/:id/activities", requirePageRight("work-order-master", "edit"), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
 
@@ -758,7 +759,7 @@ router.post("/:id/activities", async (req, res) => {
   }
 });
 
-router.put("/:id/activities/:activityId", async (req, res) => {
+router.put("/:id/activities/:activityId", requirePageRight("work-order-master", "edit"), async (req, res) => {
   if (!requireValidId(req, res)) return;
 
   const {
@@ -801,7 +802,7 @@ router.put("/:id/activities/:activityId", async (req, res) => {
   }
 });
 
-router.delete("/:id/activities/:activityId", async (req, res) => {
+router.delete("/:id/activities/:activityId", requirePageRight("work-order-master", "edit"), async (req, res) => {
   try {
     if (!requireValidId(req, res)) return;
     const pool = getPool();
@@ -860,7 +861,7 @@ router.get(
  * POST material — now includes DocNo FK (required by FK_WorkOrderActivityMaterials_DocNo)
  * DocNo is fetched from the WorkOrderHeader via the activity's WorkOrderHeaderId
  */
-router.post("/:id/activities/:activityId/materials", async (req, res) => {
+router.post("/:id/activities/:activityId/materials", requirePageRight("work-order-master", "edit"), async (req, res) => {
   if (!requireValidId(req, res)) return;
 
   const { ItemId, UOMId, Quantity, Rate, Remarks, SupplierIdPerLine } =
@@ -922,6 +923,7 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
 
 router.put(
   "/:id/activities/:activityId/materials/:materialId",
+  requirePageRight("work-order-master", "edit"),
   async (req, res) => {
     if (!requireValidId(req, res)) return;
 
@@ -962,6 +964,7 @@ router.put(
 
 router.delete(
   "/:id/activities/:activityId/materials/:materialId",
+  requirePageRight("work-order-master", "delete"),
   async (req, res) => {
     try {
       if (!requireValidId(req, res)) return;
@@ -983,7 +986,7 @@ router.delete(
 // =============================================
 //  BULK SAVE  —  POST /api/work-orders/:id/save-full
 // =============================================
-router.post("/:id/save-full", async (req, res) => {
+router.post("/:id/save-full", requirePageRight("work-order-master", "edit"), async (req, res) => {
   const headerId = requireValidId(req, res);
   if (!headerId) return;
   const { header, activities } = req.body;
@@ -1502,7 +1505,7 @@ router.post("/:id/save-full", async (req, res) => {
 
 // ── Approval transitions ──────────────────────────────────────────────────────
 
-router.put("/:id/submit", async (req, res) => {
+router.put("/:id/submit", requirePageRight("work-order-master", "edit"), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
   try {
@@ -1650,7 +1653,7 @@ router.get("/:id/create-po-prefill", async (req, res) => {
 // Materials without a SupplierIdPerLine are grouped under supplierId = null
 // (they produce one combined WO-PO with no supplier set).
 //
-router.post("/:id/confirm", async (req, res) => {
+router.post("/:id/confirm", requirePageRight("work-order-master", "edit"), async (req, res) => {
   const headerId = requireValidId(req, res);
   if (!headerId) return;
   const userEmail = requireUserName(req, res);

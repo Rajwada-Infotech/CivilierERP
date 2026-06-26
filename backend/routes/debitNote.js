@@ -3,6 +3,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 
@@ -47,7 +48,7 @@ router.get("/", async (req, res) => {
 });
 
 // ─── ADD debit note ───────────────────────────────────────────────────────────
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("debit-note", "create"), async (req, res) => {
   const { company_id, project_id, supplier_id, bill_id, is_active } = req.body;
 
   const company_id_val = toInt(company_id);
@@ -97,7 +98,7 @@ router.post("/", async (req, res) => {
 });
 
 // ─── UPDATE debit note ────────────────────────────────────────────────────────
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePageRight("debit-note", "edit"), async (req, res) => {
   const { company_id, project_id, supplier_id, bill_id, is_active } = req.body;
 
   const company_id_val = toInt(company_id);
@@ -154,7 +155,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // ─── DELETE debit note ────────────────────────────────────────────────────────
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("debit-note", "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) {
     return res.status(400).json({ error: "Invalid record id" });

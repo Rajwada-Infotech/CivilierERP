@@ -3,6 +3,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 
@@ -78,7 +79,7 @@ router.get("/", cache("stock-transfers", 60), async (req, res) => {
 //   2. Insert OUT entries in StockLedger for FromGodown
 //   3. Insert IN  entries in StockLedger for ToGodown
 //   4. Record the StockTransfer header
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("stock-transfers", "create"), async (req, res) => {
   const pool = getPool();
   const transaction = pool.transaction();
   try {

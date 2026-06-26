@@ -19,7 +19,7 @@ const { getPool, sql } = require("../db");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 // Reuse Engineering permission guard — DPR is an Engineering report
-router.use(checkPermissionForMethod("Engineering", "WorkDone"));
+router.use(checkPermissionForMethod("Engineering", "DPR"));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -581,7 +581,7 @@ function AppRoutes() {
       <Route
         path="/reports"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="reports">
             <Reports />
           </ProtectedRoute>
         }
@@ -589,7 +589,7 @@ function AppRoutes() {
       <Route
         path="/widgets"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="widgets">
             <Widgets />
           </ProtectedRoute>
         }
@@ -597,7 +597,7 @@ function AppRoutes() {
       <Route
         path="/command-center"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="command-center">
             <CommandCenter />
           </ProtectedRoute>
         }
@@ -605,7 +605,7 @@ function AppRoutes() {
       <Route
         path="/tasks"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="tasks">
             <Tasks />
           </ProtectedRoute>
         }
@@ -613,7 +613,7 @@ function AppRoutes() {
       <Route
         path="/tasks/:id"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="tasks">
             <TaskDetail />
           </ProtectedRoute>
         }
@@ -645,7 +645,7 @@ function AppRoutes() {
       <Route
         path="/records"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="records">
             <Records />
           </ProtectedRoute>
         }
@@ -685,7 +685,7 @@ function AppRoutes() {
       <Route
         path="/followup/reminders"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-reminders">
             <FollowupReminders />
           </ProtectedRoute>
         }
@@ -693,7 +693,7 @@ function AppRoutes() {
       <Route
         path="/followup/tasks"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-tasks">
             <FollowupTasks />
           </ProtectedRoute>
         }
@@ -701,7 +701,7 @@ function AppRoutes() {
       <Route
         path="/followup/log"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-log">
             <FollowupLog />
           </ProtectedRoute>
         }
@@ -709,7 +709,7 @@ function AppRoutes() {
       <Route
         path="/followup/follow-ups/reminders"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-reminders">
             <FollowupReminders />
           </ProtectedRoute>
         }
@@ -717,7 +717,7 @@ function AppRoutes() {
       <Route
         path="/followup/follow-ups/po-reminders"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="po-reminders">
             <POReminders />
           </ProtectedRoute>
         }
@@ -725,7 +725,7 @@ function AppRoutes() {
       <Route
         path="/followup/follow-ups/wo-reminders"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="wo-reminders">
             <WOReminders />
           </ProtectedRoute>
         }
@@ -733,7 +733,7 @@ function AppRoutes() {
       <Route
         path="/followup/follow-ups/chq-reminders"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="chq-reminders">
             <CHQReminders />
           </ProtectedRoute>
         }
@@ -741,7 +741,7 @@ function AppRoutes() {
       <Route
         path="/followup/follow-ups/grn-reminders"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="grn-reminders">
             <GRNReminders />
           </ProtectedRoute>
         }
@@ -749,7 +749,7 @@ function AppRoutes() {
       <Route
         path="/followup/follow-ups/tds-reminders"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="tds-reminders">
             <TDSReminders />
           </ProtectedRoute>
         }
@@ -765,7 +765,7 @@ function AppRoutes() {
       <Route
         path="/followup/setup/pending-tasks"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-pending-tasks">
             <PendingTasksPage />
           </ProtectedRoute>
         }
@@ -773,7 +773,7 @@ function AppRoutes() {
       <Route
         path="/followup/setup/customer-master"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-customer-master">
             <CustomerMaster />
           </ProtectedRoute>
         }
@@ -781,7 +781,7 @@ function AppRoutes() {
       <Route
         path="/followup/setup/unit-master"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-unit-master">
             <UnitMaster />
           </ProtectedRoute>
         }
@@ -789,7 +789,7 @@ function AppRoutes() {
       <Route
         path="/followup/setup/block-master"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-block-master">
             <BlockMaster />
           </ProtectedRoute>
         }
@@ -797,7 +797,7 @@ function AppRoutes() {
       <Route
         path="/followup/setup/payment-plan-master"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="payment-plan-master">
             <PaymentPlanMaster />
           </ProtectedRoute>
         }
@@ -805,7 +805,7 @@ function AppRoutes() {
       <Route
         path="/followup/follow-ups/log"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-log">
             <FollowupLog />
           </ProtectedRoute>
         }
@@ -829,7 +829,7 @@ function AppRoutes() {
       <Route
         path="/applicant-timeline/:id"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-applicant-timeline">
             <ApplicantTimeline />
           </ProtectedRoute>
         }
@@ -957,7 +957,7 @@ function AppRoutes() {
       <Route
         path="/followup/reports/customer"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-report-customer">
             <CustomerReportPage />
           </ProtectedRoute>
         }
@@ -965,7 +965,7 @@ function AppRoutes() {
       <Route
         path="/followup/reports/financial"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-report-financial">
             <FinancialReportPage />
           </ProtectedRoute>
         }
@@ -973,7 +973,7 @@ function AppRoutes() {
       <Route
         path="/followup/reports/project-status"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="followup-report-project-status">
             <ProjectStatusReportPage />
           </ProtectedRoute>
         }
@@ -1028,7 +1028,7 @@ function AppRoutes() {
       <Route
         path="/masters/contractors"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="contractor-master">
             <ContractorMaster />
           </ProtectedRoute>
         }
@@ -1036,7 +1036,7 @@ function AppRoutes() {
       <Route
         path="/masters/suppliers"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="supplier-master">
             <SupplierMaster />
           </ProtectedRoute>
         }
@@ -1044,7 +1044,7 @@ function AppRoutes() {
       <Route
         path="/masters/customers"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="customer-master">
             <CustomerMaster />
           </ProtectedRoute>
         }
@@ -1052,7 +1052,7 @@ function AppRoutes() {
       <Route
         path="/masters/banks"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="bank-master">
             <BankMaster />
           </ProtectedRoute>
         }
@@ -1060,7 +1060,7 @@ function AppRoutes() {
       <Route
         path="/masters/expenses"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="expenses-master">
             <ExpensesMaster />
           </ProtectedRoute>
         }
@@ -1068,7 +1068,7 @@ function AppRoutes() {
       <Route
         path="/masters/items"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="item-master">
             <ItemMaster />
           </ProtectedRoute>
         }
@@ -1076,7 +1076,7 @@ function AppRoutes() {
       <Route
         path="/masters/item-groups"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="item-group">
             <ItemGroupMaster />
           </ProtectedRoute>
         }
@@ -1084,7 +1084,7 @@ function AppRoutes() {
       <Route
         path="/masters/hsn"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="hsn-master">
             <HsnMaster />
           </ProtectedRoute>
         }
@@ -1100,7 +1100,7 @@ function AppRoutes() {
       <Route
         path="/masters/cheque"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="cheque-master">
             <ChequeMaster />
           </ProtectedRoute>
         }
@@ -1148,7 +1148,7 @@ function AppRoutes() {
       <Route
         path="/material/boq"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="boq">
             <BOQ />
           </ProtectedRoute>
         }
@@ -1157,7 +1157,7 @@ function AppRoutes() {
       <Route
         path="/material/work-order"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="work-order-master">
             <WorkOrderMaster />
           </ProtectedRoute>
         }
@@ -1205,7 +1205,7 @@ function AppRoutes() {
       <Route
         path="/material/t-c-master"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="t-c-master">
             <TCMaster />
           </ProtectedRoute>
         }
@@ -1213,7 +1213,7 @@ function AppRoutes() {
       <Route
         path="/material/inventory-master"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="inventory-master">
             <InventoryMaster />
           </ProtectedRoute>
         }
@@ -1350,7 +1350,7 @@ function AppRoutes() {
       <Route
         path="/engineering/amendment-menu"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="engineering-amendment-menu">
             <EngineeringAmendmentMenu />
           </ProtectedRoute>
         }
@@ -1358,7 +1358,7 @@ function AppRoutes() {
       <Route
         path="/masters/card"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="card-master">
             <CardMaster />
           </ProtectedRoute>
         }
@@ -1366,7 +1366,7 @@ function AppRoutes() {
       <Route
         path="/masters/tds"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="tds-master">
             <TdsMaster />
           </ProtectedRoute>
         }
@@ -1374,7 +1374,7 @@ function AppRoutes() {
       <Route
         path="/masters/account-group"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="account-group">
             <AccountGroupMaster />
           </ProtectedRoute>
         }
@@ -1382,7 +1382,7 @@ function AppRoutes() {
       <Route
         path="/masters/named-entry-type"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="named-entry-type">
             <NamedEntryTypeMaster />
           </ProtectedRoute>
         }
@@ -1390,7 +1390,7 @@ function AppRoutes() {
       <Route
         path="/masters/type-of-doc"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="type-of-doc">
             <TypeOfDocMaster />
           </ProtectedRoute>
         }
@@ -1398,7 +1398,7 @@ function AppRoutes() {
       <Route
         path="/masters/activity"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="activity-master">
             <ActivityMaster />
           </ProtectedRoute>
         }
@@ -1406,7 +1406,7 @@ function AppRoutes() {
       <Route
         path="/masters/general-ledger"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="general-ledger">
             <GeneralLedgerMaster />
           </ProtectedRoute>
         }
@@ -1414,7 +1414,7 @@ function AppRoutes() {
       <Route
         path="/masters/debit-note"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="debit-note">
             <DebitNoteMaster />
           </ProtectedRoute>
         }
@@ -1422,7 +1422,7 @@ function AppRoutes() {
       <Route
         path="/masters/billing-terms"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="billing-terms">
             <BillingTermsMaster />
           </ProtectedRoute>
         }
@@ -1446,7 +1446,7 @@ function AppRoutes() {
       <Route
         path="/masters/business-unit"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="business-unit-master">
             <EnterpriseMasterPage />
           </ProtectedRoute>
         }
@@ -1454,7 +1454,7 @@ function AppRoutes() {
       <Route
         path="/masters/unit-measurement"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="unit-of-measurement">
             <UnitOfMeasurementMaster />
           </ProtectedRoute>
         }
@@ -1464,7 +1464,7 @@ function AppRoutes() {
       <Route
         path="/user/profile"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="user-profile">
             <UserProfilePage />
           </ProtectedRoute>
         }
@@ -1479,7 +1479,7 @@ function AppRoutes() {
       <Route
         path="/dba/control-panel"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="dba-control-panel">
             <ControlPanel />
           </ProtectedRoute>
         }
@@ -1487,7 +1487,7 @@ function AppRoutes() {
       <Route
         path="/dba/ads"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="dba-ads">
             <AdsManager />
           </ProtectedRoute>
         }
@@ -1495,7 +1495,7 @@ function AppRoutes() {
       <Route
         path="/dba/reminders"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="dba-reminders">
             <RemindersManager />
           </ProtectedRoute>
         }
@@ -1503,7 +1503,7 @@ function AppRoutes() {
       <Route
         path="/dba/payment-logs"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="dba-payment-logs">
             <PaymentLogs />
           </ProtectedRoute>
         }
@@ -1511,7 +1511,7 @@ function AppRoutes() {
       <Route
         path="/dba/:userId?"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="dba-dashboard">
             <DBADashboard />
           </ProtectedRoute>
         }

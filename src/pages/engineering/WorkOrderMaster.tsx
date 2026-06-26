@@ -1749,13 +1749,13 @@ const WorkOrderDetailPanel: React.FC<{
                   );
                 }}
               />
-              <button
+              {rights.canEdit && (<button
                 onClick={() => onEdit(workOrderId)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/30 text-primary text-xs font-medium hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
               >
                 <PenSquare size={12} />
                 Edit
-              </button>
+              </button>)}
               {detail.Status === "Approved" && (
                 <button
                   onClick={() => void handleCreateMaterialPO()}
