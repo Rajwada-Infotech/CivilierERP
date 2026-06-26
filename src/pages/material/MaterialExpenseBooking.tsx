@@ -558,15 +558,23 @@ function DocSelectorPanel({
 
   const q = search.toLowerCase();
 
+  // FinYear labels are free text (e.g. "FY 2026-2027", "2026-2027", "26-27")
+  // so exact-string comparisons routinely miss real matches. Extract the
+  // 2-digit year tokens from both sides and compare those instead.
+  const yearTokens = (str?: string): string[] =>
+    (str?.match(/\d{2,4}/g) || []).map((s) => s.slice(-2));
+
   const inFinYear = (docNo?: string, recFinYear?: string) => {
     if (!filterFinYear) return true;
-    if (recFinYear) return recFinYear === filterFinYear;
+    const filterYears = yearTokens(filterFinYear);
+    if (!filterYears.length) return true;
+    if (recFinYear) {
+      const recYears = yearTokens(recFinYear);
+      return recYears.some((y) => filterYears.includes(y));
+    }
     if (!docNo) return true;
-    if (docNo.includes(filterFinYear)) return true;
-    const [startYearStr, endYearStr] = filterFinYear.split("-");
-    if (startYearStr && docNo.includes(`-${startYearStr}-`)) return true;
-    if (endYearStr && docNo.includes(`-${endYearStr}-`)) return true;
-    return false;
+    const docYears = yearTokens(docNo);
+    return docYears.some((y) => filterYears.includes(y));
   };
 
   const filteredPO = poList.filter((p) => {

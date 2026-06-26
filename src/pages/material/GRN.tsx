@@ -975,8 +975,9 @@ export default function GRN() {
   const createMutation = useMutation({
     mutationFn: grnApi.addGRN,
     onSuccess: async (res) => {
-      queryClient.invalidateQueries({ queryKey: ["grns"] });
       setPage(1);
+      await queryClient.invalidateQueries({ queryKey: ["grns"] });
+      await queryClient.refetchQueries({ queryKey: ["grns"], type: "all" });
       const generated = res?.grnNo || "";
       setFormData(buildEmptyForm());
       setEditingId(null);
@@ -992,8 +993,9 @@ export default function GRN() {
     mutationFn: (payload: GRNFormDataPayload) =>
       grnApi.updateGRN(editingId!, payload),
     onSuccess: async () => {
-      queryClient.invalidateQueries({ queryKey: ["grns"] });
       setPage(1);
+      await queryClient.invalidateQueries({ queryKey: ["grns"] });
+      await queryClient.refetchQueries({ queryKey: ["grns"], type: "all" });
       setFormData(buildEmptyForm());
       setEditingId(null);
       setShowForm(false);
@@ -1005,9 +1007,10 @@ export default function GRN() {
 
   deleteMutation = useMutation({
     mutationFn: grnApi.deleteGRN,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["grns"] });
+    onSuccess: async () => {
       setPage(1);
+      await queryClient.invalidateQueries({ queryKey: ["grns"] });
+      await queryClient.refetchQueries({ queryKey: ["grns"], type: "all" });
       toast.success("GRN deleted");
     },
     onError: (err: any) => toast.error(err.message || "Failed to delete GRN"),
