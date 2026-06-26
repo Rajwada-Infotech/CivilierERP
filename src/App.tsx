@@ -125,6 +125,7 @@ const ContractorMaster = lazy(() => import("./pages/masters/ContractorMaster"));
 const SupplierMaster = lazy(() => import("./pages/masters/SupplierMaster"));
 const CustomerMaster = lazy(() => import("./pages/masters/CustomerMaster"));
 const UnitMaster = lazy(() => import("./pages/followup/UnitMaster"));
+const RoomMaster = lazy(() => import("./pages/followup/RoomMaster"));
 const BlockMaster = lazy(() => import("./pages/followup/BlockMaster"));
 const PaymentPlanMaster = lazy(
   () => import("./pages/followup/PaymentPlanMaster"),
@@ -783,6 +784,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="followup-unit-master">
             <UnitMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/setup/room-master"
+        element={
+          <ProtectedRoute pageKey="followup-room-master">
+            <RoomMaster />
           </ProtectedRoute>
         }
       />
