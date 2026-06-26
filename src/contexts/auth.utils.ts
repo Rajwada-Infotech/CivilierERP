@@ -17,142 +17,28 @@ export const PRIVILEGED_ROLES: UserRole[] = ["super_admin", "admin", "dba"];
 // ======================
 // PAGE DEFINITIONS
 // ======================
+// PAGE_DEFINITIONS: used only to derive FULL_ACCESS for privileged roles.
+// Keys must match dbo.PageDefinitions (DB-style kebab-case).
+// This list intentionally covers only the core pages; the DB is the real source of truth.
 export const PAGE_DEFINITIONS: PageDefinition[] = [
-  {
-    key: "dashboard",
-    label: "Dashboard",
-    path: "/",
-    group: "Main",
-    availableActions: ["view", "print", "export"],
-  },
-  {
-    key: "transactions",
-    label: "Transactions",
-    path: "/transactions",
-    group: "Main",
-    availableActions: [
-      "view",
-      "create",
-      "edit",
-      "delete",
-      "print",
-      "export",
-      "approve",
-      "reject",
-    ],
-  },
-  {
-    key: "reports",
-    label: "Reports",
-    path: "/reports",
-    group: "Main",
-    availableActions: ["view", "print", "preview", "export"],
-  },
-  {
-    key: "widgets",
-    label: "Widgets",
-    path: "/widgets",
-    group: "Main",
-    availableActions: ["view", "print", "export"],
-  },
-  {
-    key: "tasks",
-    label: "Tasks",
-    path: "/tasks",
-    group: "Main",
-    availableActions: ["view", "create", "edit", "delete", "print"],
-  },
-  {
-    key: "payments",
-    label: "Payments",
-    path: "/payments",
-    group: "Main",
-    availableActions: ["view", "create", "edit", "delete", "print", "export"],
-  },
-  {
-    key: "master_contractors",
-    label: "Contractors",
-    path: "/masters/contractors",
-    group: "Masters",
-    availableActions: ["view", "create", "edit", "delete", "print", "export"],
-  },
-  {
-    key: "master_suppliers",
-    label: "Suppliers",
-    path: "/masters/suppliers",
-    group: "Masters",
-    availableActions: ["view", "create", "edit", "delete", "print", "export"],
-  },
-  {
-    key: "master_customers",
-    label: "Customers",
-    path: "/masters/customers",
-    group: "Masters",
-    availableActions: ["view", "create", "edit", "delete", "print", "export"],
-  },
-  {
-    key: "master_banks",
-    label: "Banks",
-    path: "/masters/banks",
-    group: "Masters",
-    availableActions: ["view", "create", "edit", "delete", "print", "export"],
-  },
-  {
-    key: "master_expenses",
-    label: "Expenses",
-    path: "/masters/expenses",
-    group: "Masters",
-    availableActions: ["view", "create", "edit", "delete", "print", "export"],
-  },
-  {
-    key: "master_items",
-    label: "Items",
-    path: "/masters/items",
-    group: "Masters",
-    availableActions: ["view", "create", "edit", "delete", "print", "export"],
-  },
-  {
-    key: "master_item_groups",
-    label: "Item Groups",
-    path: "/masters/item-groups",
-    group: "Masters",
-    availableActions: ["view", "create", "edit", "delete"],
-  },
-  {
-    key: "master_hsn",
-    label: "HSN",
-    path: "/masters/hsn",
-    group: "Masters",
-    availableActions: ["view", "create", "edit", "delete", "print", "export"],
-  },
-  {
-    key: "admin_menu_rights",
-    label: "Menu Rights",
-    path: "/admin/rights/menu",
-    group: "Admin",
-    availableActions: ["view", "create", "edit", "delete"],
-  },
-  {
-    key: "admin_widgets_rights",
-    label: "Widgets Rights",
-    path: "/admin/rights/widgets",
-    group: "Admin",
-    availableActions: ["view", "create", "edit", "delete"],
-  },
-  {
-    key: "admin_fin_year_rights",
-    label: "Fin Year",
-    path: "/admin/rights/fin-year",
-    group: "Admin",
-    availableActions: ["view", "create", "edit", "delete"],
-  },
-  {
-    key: "admin_approval_setup",
-    label: "Approval Setup",
-    path: "/admin/approval/setup",
-    group: "Admin",
-    availableActions: ["view", "create", "edit", "delete"],
-  },
+  { key: "dashboard",            label: "Dashboard",         path: "/",                       group: "Main",    availableActions: ["view","print","export"] },
+  { key: "transactions",         label: "Transactions",      path: "/transactions",            group: "Finance", availableActions: ["view","create","edit","delete","print","export"] },
+  { key: "reports",              label: "Reports",           path: "/reports",                 group: "Main",    availableActions: ["view","print","preview","export"] },
+  { key: "widgets",              label: "Widgets",           path: "/widgets",                 group: "Main",    availableActions: ["view","print","export"] },
+  { key: "tasks",                label: "Tasks",             path: "/tasks",                   group: "Main",    availableActions: ["view","create","edit","delete","print"] },
+  { key: "records",              label: "Records",           path: "/records",                 group: "Main",    availableActions: ["view","print","export"] },
+  { key: "contractor-master",    label: "Contractors",       path: "/masters/contractors",     group: "Masters", availableActions: ["view","create","edit","delete","print","export"] },
+  { key: "supplier-master",      label: "Suppliers",         path: "/masters/suppliers",       group: "Masters", availableActions: ["view","create","edit","delete","print","export"] },
+  { key: "customer-master",      label: "Customers",         path: "/masters/customers",       group: "Masters", availableActions: ["view","create","edit","delete","print","export"] },
+  { key: "bank-master",          label: "Banks",             path: "/masters/banks",           group: "Masters", availableActions: ["view","create","edit","delete","print","export"] },
+  { key: "expenses-master",      label: "Expenses",          path: "/masters/expenses",        group: "Masters", availableActions: ["view","create","edit","delete","print","export"] },
+  { key: "item-master",          label: "Items",             path: "/masters/items",           group: "Masters", availableActions: ["view","create","edit","delete","print","export"] },
+  { key: "item-group",           label: "Item Groups",       path: "/masters/item-groups",     group: "Masters", availableActions: ["view","create","edit","delete"] },
+  { key: "hsn-master",           label: "HSN",               path: "/masters/hsn",             group: "Masters", availableActions: ["view","create","edit","delete","print","export"] },
+  { key: "menu-rights",          label: "Menu Rights",       path: "/admin/rights/menu",       group: "Admin",   availableActions: ["view","create","edit","delete"] },
+  { key: "widget-rights",        label: "Widget Rights",     path: "/admin/rights/widgets",    group: "Admin",   availableActions: ["view","create","edit","delete"] },
+  { key: "fin-year-rights",      label: "Fin Year Rights",   path: "/admin/rights/fin-year",   group: "Admin",   availableActions: ["view","create","edit","delete"] },
+  { key: "approval-setup",       label: "Approval Setup",    path: "/admin/approval/setup",    group: "Admin",   availableActions: ["view","create","edit","delete"] },
   {
     key: "admin_post_approval_rights",
     label: "Post Approval",
@@ -174,10 +60,20 @@ export const ENGINEER_ACCESS: PagePermission[] = [
   { page: "tasks", actions: ["view", "create", "edit"] },
   { page: "transactions", actions: ["view", "create"] },
   { page: "payments", actions: ["view"] },
-  { page: "master_contractors", actions: ["view"] },
-  { page: "master_suppliers", actions: ["view"] },
-  { page: "master_items", actions: ["view"] },
-  { page: "master_item_groups", actions: ["view"] },
+  // Masters — DB-style keys
+  { page: "contractor-master", actions: ["view"] },
+  { page: "supplier-master", actions: ["view"] },
+  { page: "item-master", actions: ["view"] },
+  { page: "item-group", actions: ["view"] },
+  // Engineering
+  { page: "engineering-dashboard", actions: ["view"] },
+  { page: "engineering-work-order", actions: ["view", "create", "edit"] },
+  { page: "boq", actions: ["view"] },
+  { page: "dpr", actions: ["view", "create"] },
+  { page: "work-done", actions: ["view", "create"] },
+  { page: "amendments", actions: ["view", "create", "edit"] },
+  { page: "tickets", actions: ["view", "create", "edit"] },
+  { page: "ticket-dashboard", actions: ["view"] },
 ];
 
 export const DEFAULT_USER_ACCESS: PagePermission[] = [
@@ -207,11 +103,11 @@ export const getInitials = (name: string) =>
     .slice(0, 2);
 
 export const ADMIN_ONLY_PAGES: PageKey[] = [
-  "admin_menu_rights",
-  "admin_widgets_rights",
-  "admin_fin_year_rights",
-  "admin_approval_setup",
-  "admin_post_approval_rights",
+  "menu-rights", "widget-rights", "fin-year-rights",
+  "approval-setup", "post-approval-rights", "page-definitions",
+  "users", "role-master",
+  "dba-control-panel", "dba-ads", "dba-reminders",
+  "dba-payment-logs", "dba-dashboard", "dba-profile",
 ];
 
 // Updated to use centralized PRIVILEGED_ROLES

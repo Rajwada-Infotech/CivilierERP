@@ -1,3 +1,4 @@
+const { requirePageRight } = require("../middleware/requirePageRight");
 const express = require("express")
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
