@@ -111,6 +111,9 @@ const InsideWorkDashboard = lazy(
 const DependencyMaster = lazy(
   () => import("./pages/insidework/DependencyMaster"),
 );
+const InsideWorkActivity = lazy(
+  () => import("./pages/insidework/InsideWorkActivity"),
+);
 const ReceivedPayment = lazy(() => import("./pages/finance/ReceivedPayment"));
 const TrialBalance = lazy(() => import("./pages/finance/TrialBalance"));
 
@@ -660,6 +663,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="dependency-master">
             <DependencyMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/insidework/activity"
+        element={
+          <ProtectedRoute pageKey="insidework-activity">
+            <InsideWorkActivity />
           </ProtectedRoute>
         }
       />
