@@ -37,6 +37,7 @@ import {
   Ruler,
   Activity,
   Pickaxe,
+  GitBranch,
 } from "lucide-react";
 
 import { useModule, MODULE_DASHBOARD_ROUTES } from "@/contexts/ModuleContext";
@@ -356,6 +357,15 @@ const adminSetupItems: SetupItem[] = [
   },
 ];
 
+const insideworkSetupItems: SetupItem[] = [
+  {
+    icon: GitBranch,
+    label: "Dependency",
+    path: "/insidework/setup/dependency",
+    color: "text-cyan-500",
+  },
+];
+
 export const MobileNav: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
@@ -410,6 +420,12 @@ export const MobileNav: React.FC = () => {
       return {
         items: engineeringSetupItems,
         label: "Engineering",
+        available: true,
+      };
+    if (activeModule === "insidework")
+      return {
+        items: insideworkSetupItems,
+        label: "Inside Work",
         available: true,
       };
     if (activeModule === "finance")

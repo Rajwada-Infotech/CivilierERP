@@ -41,6 +41,7 @@ import {
   ClipboardList,
   Ruler,
   SlidersHorizontal,
+  GitBranch,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
@@ -326,6 +327,16 @@ const engineeringSetupItems = [
     label: "Activity",
     path: "/masters/activity",
     color: "text-orange-400",
+  },
+];
+
+const insideworkSetupItems = [
+  {
+    icon: GitBranch,
+    label: "Dependency",
+    path: "/insidework/setup/dependency",
+    color: "text-cyan-500",
+    pageKey: "dependency-master",
   },
 ];
 
@@ -755,6 +766,13 @@ export const TopNavbar = () => {
         items: filterSetupItems(engineeringSetupItems),
         label: "Engineering",
         colorStyle: makeColorStyle("engineering"),
+        available: true,
+      };
+    if (activeModule === "insidework")
+      return {
+        items: filterSetupItems(insideworkSetupItems),
+        label: "Inside Work",
+        colorStyle: makeColorStyle("insidework"),
         available: true,
       };
     if (activeModule === "finance")

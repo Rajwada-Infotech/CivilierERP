@@ -117,6 +117,7 @@ const ALL_ROUTES = [
   { path: "/api/user-activity", file: "./routes/userActivity" },
   { path: "/api/cheque-leaf", file: "./routes/chequeLeaf" },
   { path: "/api/contractor-category", file: "./routes/contractorCategory" },
+  { path: "/api/dependency", file: "./routes/dependency" },
   { path: "/api/approval-workflows", file: "./routes/approvalWorkflows" },
   { path: "/api/approval-inbox", file: "./routes/approvalInbox" },
   { path: "/api/tasks", file: "./routes/tasks" },

@@ -1050,7 +1050,7 @@ function LogoRing({ size }: { size: number }) {
 function RocketFlyBy() {
   return (
     <motion.div
-      className="absolute inset-0 z-[60] pointer-events-none overflow-hidden"
+      className="absolute inset-0 z-[60] pointer-events-none"
       initial={{ opacity: 1 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0, transition: { duration: 0.2 } }}
@@ -1163,7 +1163,7 @@ export default function Login() {
 
   return (
     <div
-      className="min-h-screen w-full flex items-center justify-center px-4 py-8 overflow-auto relative"
+      className="min-h-screen w-full flex items-center justify-center px-4 py-8 overflow-x-hidden overflow-y-auto relative"
       style={{
         background:
           "linear-gradient(160deg, #f3e8ff 0%, #ede9fe 30%, #ffffff 65%, #f8f4ff 100%)",
