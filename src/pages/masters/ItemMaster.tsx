@@ -14,6 +14,8 @@ import {
   Package,
   Download,
   Upload,
+  RotateCcw,
+  Save,
 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -938,7 +940,7 @@ const ItemMaster: React.FC = () => {
               onClick={handleImportClick}
               disabled={importing}
               title="Import items from a filled-in CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-primary-foreground hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {importing ? (
                 <Loader2 size={13} className="animate-spin" />
@@ -1133,24 +1135,30 @@ const ItemMaster: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mt-5">
-            <p className="hidden sm:block text-xs text-muted-foreground">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden mt-2">
+            <p className="hidden sm:block text-[11px] text-muted-foreground">
               Ready to save
             </p>
-            <div className="flex gap-3 sm:ml-auto">
+            <div className="flex items-center gap-2 sm:ml-auto">
               <button
                 onClick={handleReset}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
+                className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
               >
-                Reset
+                <RotateCcw size={12} /> Reset
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="flex-1 sm:flex-none whitespace-nowrap px-5 py-2 rounded-lg font-heading text-sm font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-primary/20 hover:-translate-y-0.5 transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
               >
-                {saving && <Loader2 size={14} className="animate-spin" />}
-                {editingId ? "Update" : "Save"}
+                {saving ? (
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : editingId ? (
+                  <Check size={14} />
+                ) : (
+                  <Save size={14} />
+                )}
+                {saving ? "Saving…" : editingId ? "Update" : "Save"}
               </button>
             </div>
           </div>

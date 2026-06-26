@@ -476,48 +476,44 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     ),
   },
   {
-    accessorKey: "Status",
-    header: "Status",
-    cell: ({ row }) => (
-      <ApprovalStatusChain
-        table="VehicleInOut"
-        recordId={row.original.VehicleInOutID}
-      />
-    ),
-  },
-  {
     id: "actions",
-    header: "",
+    header: () => <div className="text-right">ACTIONS</div>,
     enableSorting: false,
     cell: ({ row }) => {
       const rec = row.original;
       return (
-        <div className="flex items-center justify-end gap-1.5">
-          <button
-            onClick={() => _onView(rec)}
-            className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
-            title="View"
-          >
-            <Eye size={15} />
-          </button>
-          {_canEdit && (
+        <div className="flex items-center justify-end gap-3">
+          <ApprovalStatusChain
+            table="VehicleInOut"
+            recordId={rec.VehicleInOutID}
+          />
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => _onEdit(rec)}
-              className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
-              title="Edit"
+              onClick={() => _onView(rec)}
+              className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+              title="View details"
             >
-              <Edit3 size={15} />
+              <Eye size={15} />
             </button>
-          )}
-          {_canDelete && (
-            <button
-              onClick={() => _onDelete(rec.VehicleInOutID)}
-              className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
-              title="Delete"
-            >
-              <Trash2 size={15} />
-            </button>
-          )}
+            {_canEdit && (
+              <button
+                onClick={() => _onEdit(rec)}
+                className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
+                title="Edit this entry"
+              >
+                <Edit3 size={15} />
+              </button>
+            )}
+            {_canDelete && (
+              <button
+                onClick={() => _onDelete(rec.VehicleInOutID)}
+                className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                title="Delete this entry"
+              >
+                <Trash2 size={15} />
+              </button>
+            )}
+          </div>
         </div>
       );
     },
@@ -1328,36 +1324,43 @@ export default function VehicleInOut() {
               </SectionCard>
 
               {/* ── Actions ── */}
-              <div className="flex flex-col sm:flex-row items-center gap-3 pt-2 border-t border-border">
-                <button
-                  onClick={() => {
-                    setForm(buildEmpty(activeFinYear));
-                    setEditingId(null);
-                    setErrors({});
-                  }}
-                  disabled={createMut.isPending || updateMut.isPending}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-border hover:bg-muted text-sm transition-colors disabled:opacity-50"
-                >
-                  <RotateCcw size={14} /> Reset
-                </button>
-                <button
-                  onClick={onSubmit}
-                  disabled={
-                    createMut.isPending || updateMut.isPending || uploading
-                  }
-                  className="w-full sm:w-auto bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow-sm transition disabled:opacity-60"
-                >
-                  {createMut.isPending || updateMut.isPending ? (
-                    <RefreshCw size={14} className="animate-spin" />
-                  ) : (
-                    <Save size={14} />
-                  )}
-                  {createMut.isPending || updateMut.isPending
-                    ? "Saving…"
-                    : editingId
-                      ? "Update"
-                      : "Save Entry"}
-                </button>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden mt-4 -mx-5 -mb-5">
+                <p className="hidden sm:block text-[11px] text-muted-foreground">
+                  Ready to save
+                </p>
+                <div className="flex items-center gap-2 sm:ml-auto">
+                  <button
+                    onClick={() => {
+                      setForm(buildEmpty(activeFinYear));
+                      setEditingId(null);
+                      setErrors({});
+                    }}
+                    disabled={createMut.isPending || updateMut.isPending}
+                    className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                  >
+                    <RotateCcw size={12} /> Reset
+                  </button>
+                  <button
+                    onClick={onSubmit}
+                    disabled={
+                      createMut.isPending || updateMut.isPending || uploading
+                    }
+                    className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                  >
+                    {createMut.isPending || updateMut.isPending ? (
+                      <RefreshCw size={14} className="animate-spin" />
+                    ) : editingId ? (
+                      <Check size={14} />
+                    ) : (
+                      <Save size={14} />
+                    )}
+                    {createMut.isPending || updateMut.isPending
+                      ? "Saving…"
+                      : editingId
+                        ? "Update"
+                        : "Save Entry"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1491,6 +1494,8 @@ export default function VehicleInOut() {
             </div>
           </CardContent>
         </Card>
+
+      </MaterialShell>
 
         {/* ═══════════════════════════════════════════════════════════════════ */}
         {/* VIEW MODAL                                                          */}
@@ -1691,7 +1696,6 @@ export default function VehicleInOut() {
             </div>
           </div>
         )}
-      </MaterialShell>
 
       {/* ── Camera capture modal ── */}
       {showCamera && (

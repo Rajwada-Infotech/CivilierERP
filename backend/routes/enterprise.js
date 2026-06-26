@@ -27,10 +27,10 @@ router.get(
       const result = await request.query(`
       SELECT
         id, name, short_name, business_identity, entity_type,
-        b_sub_identity_type, belongs_to,
+        gst_no, belongs_to,
         address, address_line2, address_line3, city, state, country, pincode,
         phone_number, email, website, fax,
-        pan, cin, tan, gst_type, gst_issue_date, trade_license,
+        pan_no, cin, tan, gst_type, gst_issue_date, trade_license,
         currency, fiscal_year_start,
         start_date, start_fin_year, end_date, date_of_entry, date_of_establishment,
         CASE WHEN discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
@@ -66,7 +66,6 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     entity_type,
     business_identity,
     business_type,
-    b_sub_identity_type,
     belongs_to,
     logo,
     date_of_entry,
@@ -74,7 +73,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     start_date,
     start_fin_year,
     currency,
-    pan,
+    pan_no,
     cin,
     address,
     address_line2,
@@ -111,11 +110,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("entity_type", sql.NVarChar(100), entity_type || null)
       .input("business_identity", sql.NVarChar(100), business_identity || null)
       .input("business_type", sql.NVarChar(100), "E")
-      .input(
-        "b_sub_identity_type",
-        sql.NVarChar(100),
-        b_sub_identity_type || null,
-      )
+      .input("gst_no", sql.NVarChar(20), gst_no || null)
       .input("belongs_to", sql.Int, belongs_to || null)
       .input("logo", sql.NVarChar(sql.MAX), logo || null)
       .input("date_of_entry", sql.Date, date_of_entry || null)
@@ -124,6 +119,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("start_fin_year", sql.NVarChar(50), start_fin_year || null)
       .input("currency", sql.NVarChar(10), currency || null)
       .input("pan", sql.NVarChar(20), pan || null)
+      .input("pan_no", sql.NVarChar(20), pan || null)
       .input("cin", sql.NVarChar(50), cin || null)
       .input("address", sql.NVarChar(sql.MAX), address || null)
       .input("address_line2", sql.NVarChar(sql.MAX), address_line2 || null)
@@ -152,10 +148,10 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("profit_center", sql.NVarChar(100), profit_center || null).query(`
         INSERT INTO dbo.enterprise (
           name, short_name, entity_type,
-          business_identity, business_type, b_sub_identity_type,
+          business_identity, business_type, gst_no,
           belongs_to, logo, date_of_entry, date_of_establishment,
           start_date, start_fin_year,
-          currency, pan, cin, address, address_line2, city, state, country, pincode,
+          currency, pan_no, cin, address, address_line2, city, state, country, pincode,
           email, phone_number, website, latitude, longitude,
           tds_limit, description, gst_type, gst_issue_date,
           tan, rera_no, rera_date, trade_license,
@@ -163,10 +159,10 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
           fiscal_year_start, cost_center, profit_center
         ) VALUES (
           @name, @short_name, @entity_type,
-          @business_identity, @business_type, @b_sub_identity_type,
+          @business_identity, @business_type, @gst_no,
           @belongs_to, @logo, @date_of_entry, @date_of_establishment,
           @start_date, @start_fin_year,
-          @currency, @pan, @cin, @address, @address_line2, @city, @state, @country, @pincode,
+          @currency, @pan_no, @cin, @address, @address_line2, @city, @state, @country, @pincode,
           @email, @phone_number, @website, @latitude, @longitude,
           @tds_limit, @description, @gst_type, @gst_issue_date,
           @tan, @rera_no, @rera_date, @trade_license,
@@ -236,11 +232,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("entity_type", sql.NVarChar(100), entity_type || null)
       .input("business_identity", sql.NVarChar(100), business_identity || null)
       .input("business_type", sql.NVarChar(100), "E")
-      .input(
-        "b_sub_identity_type",
-        sql.NVarChar(100),
-        b_sub_identity_type || null,
-      )
+      .input("gst_no", sql.NVarChar(20), gst_no || null)
       .input("belongs_to", sql.Int, belongs_to || null)
       .input("logo", sql.NVarChar(sql.MAX), logo || null)
       .input("date_of_entry", sql.Date, date_of_entry || null)
@@ -248,7 +240,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("start_date", sql.Date, start_date || null)
       .input("start_fin_year", sql.NVarChar(50), start_fin_year || null)
       .input("currency", sql.NVarChar(10), currency || null)
-      .input("pan", sql.NVarChar(20), pan || null)
+      .input("pan_no", sql.NVarChar(20), pan_no || null)
       .input("cin", sql.NVarChar(50), cin || null)
       .input("address", sql.NVarChar(sql.MAX), address || null)
       .input("address_line2", sql.NVarChar(sql.MAX), address_line2 || null)
@@ -278,10 +270,10 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
         UPDATE dbo.enterprise SET
           name=@name, short_name=@short_name, entity_type=@entity_type,
           business_identity=@business_identity, business_type='E',
-          b_sub_identity_type=@b_sub_identity_type, belongs_to=@belongs_to, logo=@logo,
+          gst_no=@gst_no, belongs_to=@belongs_to, logo=@logo,
           date_of_entry=@date_of_entry, date_of_establishment=@date_of_establishment,
           start_date=@start_date, start_fin_year=@start_fin_year,
-          currency=@currency, pan=@pan, cin=@cin,
+          currency=@currency, pan_no=@pan_no, cin=@cin,
           address=@address, address_line2=@address_line2, city=@city, state=@state,
           country=@country, pincode=@pincode,
           email=@email, phone_number=@phone_number, website=@website,

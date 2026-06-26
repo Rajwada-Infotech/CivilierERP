@@ -51,6 +51,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import * as grnApi from "@/api/grnApi";
+import { getSystemGeneratedLedgers } from "@/api/generalLedgerApi";
 import { getProjects } from "@/api/grnApi";
 import { getGodowns } from "@/api/godownsApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -623,24 +624,24 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   // ── Actions ──────────────────────────────────────────────────────────────
   {
     id: "actions",
-    header: "",
+    header: () => <div className="text-right">ACTIONS</div>,
     enableSorting: false,
     cell: ({ row }) => {
       const grn = row.original;
       return (
-        <div className="flex items-center justify-end gap-1.5">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => onView(grn)}
-            className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
-            title="View"
+            className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+            title="View details"
           >
             <Eye size={15} />
           </button>
           {_canDelete && (
             <button
               onClick={() => handleDeleteGrn(String(grn.GRNID))}
-              className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
-              title="Delete"
+              className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+              title="Delete this GRN"
             >
               <Trash2 size={15} />
             </button>
@@ -743,6 +744,25 @@ export default function GRN() {
   const [viewingGrn, setViewingGrn] = useState<any | null>(null);
   const [viewModalTab, setViewModalTab] = useState<"details" | "posting">(
     "details",
+  );
+  const [systemLedgers, setSystemLedgers] = useState<{ id: number; label: string; code: string | null }[]>([]);
+
+  // Fetch system-generated ledgers for GRN posting rows
+  React.useEffect(() => {
+    getSystemGeneratedLedgers()
+      .then((data) => setSystemLedgers(data))
+      .catch(() => setSystemLedgers([]));
+  }, []);
+
+  // Match the real system-generated ledger (if it exists yet) for each GRN posting row
+  const grnPurchaseLedger = systemLedgers.find((d) =>
+    d.label.toLowerCase().includes("purchase"),
+  );
+  const grnPendingLedger = systemLedgers.find((d) =>
+    d.label.toLowerCase().includes("pending"),
+  );
+  const grnProvisionalCreditLedger = systemLedgers.find((d) =>
+    d.label.toLowerCase().includes("provisional") && d.label.toLowerCase().includes("credit"),
   );
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -2052,7 +2072,7 @@ export default function GRN() {
                   formData.docNo !== "" ||
                   formData.items.some((i) => i.receivedQty > 0 || i.rate > 0);
                 return (
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
                     <p className="text-[11px] text-muted-foreground hidden sm:block">
                       {canSave ? (
                         <span className="text-emerald-500 font-medium">
@@ -2190,6 +2210,8 @@ export default function GRN() {
             </CardContent>
           </Card>
         )}
+
+      </MaterialShell>
 
         {/* ══════════════════════════════════════════════════════════════════ */}
         {/*  VIEW MODAL                                                        */}
@@ -2684,41 +2706,46 @@ export default function GRN() {
                       {/* Debit / Credit stub table */}
                       <div className="rounded-xl border border-border overflow-hidden">
                         {/* Table header */}
-                        <div className="grid grid-cols-[2fr_1fr_1fr_1fr] bg-muted/40 border-b border-border px-4 py-2.5 text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
+                        <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
                           <span>Account</span>
                           <span className="text-center">Cost Centre</span>
                           <span className="text-right">Debit (₹)</span>
                           <span className="text-right">Credit (₹)</span>
                         </div>
 
-                        {/* Stub rows */}
-                        {[
-                          { account: "Stock / Inventory A/c", side: "debit" },
-                          {
-                            account: "GRN Accrual / Supplier Payable A/c",
-                            side: "credit",
-                          },
-                          { account: "Input GST A/c", side: "debit" },
-                        ].map((row, i) => (
+                        {/* Posting rows — shows the real system-generated ledger once it exists, no dropdown */}
+                        {(
+                          [
+                            { key: "purchase", label: "Purchase A/c", side: "debit", ledger: grnPurchaseLedger },
+                            { key: "pgrn", label: "Provision for Pending GRN A/c", side: "credit", ledger: grnPendingLedger },
+                            { key: "provisionalCredit", label: "Provisional Credit Available", side: "debit", ledger: grnProvisionalCreditLedger },
+                          ] as { key: string; label: string; side: "debit" | "credit"; ledger: { id: number; label: string; code: string | null } | undefined }[]
+                        ).map((row) => (
                           <div
-                            key={i}
-                            className="grid grid-cols-[2fr_1fr_1fr_1fr] px-4 py-3 border-b border-border/50 last:border-b-0 items-center"
+                            key={row.key}
+                            className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 border-b border-border/50 last:border-b-0 items-center gap-1 sm:gap-2"
                           >
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
                               <span
                                 className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                                  row.side === "debit"
-                                    ? "bg-emerald-500"
-                                    : "bg-rose-500"
+                                  row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"
                                 }`}
                               />
-                              <span className="text-xs text-foreground">
-                                {row.account}
-                              </span>
+                              {row.ledger ? (
+                                <span
+                                  className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0"
+                                  title={`${row.ledger.label}${row.ledger.code ? ` (${row.ledger.code})` : ""}`}
+                                >
+                                  {row.ledger.label}
+                                  {row.ledger.code ? ` (${row.ledger.code})` : ""}
+                                </span>
+                              ) : (
+                                <span className="text-[11px] sm:text-xs text-muted-foreground italic break-words min-w-0">
+                                  {row.label} — not configured
+                                </span>
+                              )}
                             </div>
-                            <span className="text-xs text-muted-foreground text-center">
-                              —
-                            </span>
+                            <span className="text-xs text-muted-foreground text-center">—</span>
                             <span className="text-xs text-right text-muted-foreground font-mono">
                               {row.side === "debit" ? "—" : ""}
                             </span>
@@ -2729,7 +2756,7 @@ export default function GRN() {
                         ))}
 
                         {/* Totals footer */}
-                        <div className="grid grid-cols-[2fr_1fr_1fr_1fr] px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold">
+                        <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
                           <span className="uppercase tracking-widest text-muted-foreground text-[10px]">
                             Total
                           </span>
@@ -2764,7 +2791,6 @@ export default function GRN() {
               </div>
             );
           })()}
-      </MaterialShell>
 
       {/* GRN Delete Block Dialog */}
       <Dialog

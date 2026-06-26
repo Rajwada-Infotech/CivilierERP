@@ -2409,8 +2409,8 @@ export default function BookingsPage() {
           booking={selectedBooking}
           onClose={() => setSelectedBooking(null)}
           onEdit={() => openEdit(selectedBooking)}
-          onEdit={() => openEdit(selectedBooking)}
           canEdit={rights.canEdit}
+        />
       )}
 
       {/* Audit log drawer */}

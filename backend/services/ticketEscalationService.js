@@ -1,7 +1,7 @@
 "use strict";
 
 const logger = require("../logger");
-const { getPool, sql } = require("../db");
+const { getPool, sql, queryWithRetry } = require("../db");
 
 const DEFAULT_SLA_MINUTES = {
   Urgent: 30,
@@ -100,12 +100,12 @@ async function runTicketEscalationJob(options = {}) {
       return [];
     }
 
-    const result = await pool
-      .request()
-      .input("urgentMinutes", sql.Int, sla.Urgent)
-      .input("highMinutes", sql.Int, sla.High)
-      .input("mediumMinutes", sql.Int, sla.Medium)
-      .input("lowMinutes", sql.Int, sla.Low).query(`
+    const result = await queryWithRetry(pool, (request) =>
+      request
+        .input("urgentMinutes", sql.Int, sla.Urgent)
+        .input("highMinutes", sql.Int, sla.High)
+        .input("mediumMinutes", sql.Int, sla.Medium)
+        .input("lowMinutes", sql.Int, sla.Low).query(`
         UPDATE t
         SET
           escalation_level = 1,
@@ -135,7 +135,8 @@ async function runTicketEscalationJob(options = {}) {
         WHERE t.status IN ('Pending', 'InProgress')
           AND t.escalated_at IS NULL
           AND DATEDIFF(MINUTE, t.created_at, SYSUTCDATETIME()) >= thresholds.sla_minutes
-      `);
+      `),
+    );
 
     const escalatedTickets = result.recordset || [];
     const canWriteComments =

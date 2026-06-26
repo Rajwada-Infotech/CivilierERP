@@ -99,7 +99,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), validateBody(menuT
           UpdatedBy = @UpdatedBy,
           UpdatedAt = @UpdatedAt,
           ApprovedBy = @ApprovedBy,
-          ApprovedAt = @ApprovedAt
+          ApprovedAt = COALESCE(@ApprovedAt, ApprovedAt)
         WHERE Id = @Id
       `);
     res.json({ message: "Menu type updated successfully" });

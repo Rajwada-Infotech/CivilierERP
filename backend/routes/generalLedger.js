@@ -5,7 +5,6 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { requirePageRight } = require("../middleware/requirePageRight");
 
 let accountHeadColumnMetaPromise = null;
 
@@ -69,9 +68,10 @@ router.get("/options", async (req, res) => {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT
-        LHeadId   AS id,
+        LHeadId            AS id,
         ISNULL(DisplayName, LHeadName) AS label,
-        LHeadCode AS code
+        LHeadCode          AS code,
+        ISNULL(IsSystemGenerated, 0) AS isSystemGenerated
       FROM dbo.AccountHeadMaster
       WHERE LHeadType = 'GL'
         AND LHeadStatus = 1
@@ -80,6 +80,29 @@ router.get("/options", async (req, res) => {
     res.json(result.recordset);
   } catch (err) {
     console.error("GL OPTIONS ERROR:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /system-generated ─────────────────────────────────────────────────────
+// Returns only the system-generated GL ledger accounts (for GRN posting dropdowns).
+router.get("/system-generated", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT
+        LHeadId   AS id,
+        LHeadName AS label,
+        LHeadCode AS code
+      FROM dbo.AccountHeadMaster
+      WHERE LHeadType         = 'GL'
+        AND LHeadStatus       = 1
+        AND ISNULL(IsSystemGenerated, 0) = 1
+      ORDER BY LHeadName
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("GL SYSTEM-GENERATED ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -126,6 +149,7 @@ router.get("/", cache("general-ledger", 300), async (req, res) => {
         lh.LHeadStatus,
         lh.LHeadType,
         lh.isEdited,
+        ISNULL(lh.IsSystemGenerated, 0) AS IsSystemGenerated,
         ag.Name        AS GroupName,
         ag.ParentGroupId,
         parent.Name    AS ParentGroupName,
@@ -175,6 +199,7 @@ router.get("/:id", cache("general-ledger-detail", 180), async (req, res) => {
           lh.LHeadStatus,
           lh.LHeadType,
           lh.isEdited,
+          ISNULL(lh.IsSystemGenerated, 0) AS IsSystemGenerated,
           ag.Name     AS GroupName,
           ag.ParentGroupId,
           parent.Name AS ParentGroupName
@@ -200,11 +225,19 @@ router.get("/:id", cache("general-ledger-detail", 180), async (req, res) => {
 
 // ── POST / ────────────────────────────────────────────────────────────────────
 // Creates a new GL ledger head. LHeadName is required; all other fields are optional.
-router.post("/", requirePageRight("general-ledger", "create"), async (req, res) => {
-  const { LHeadName, LHeadCode, LBelongsTo, LHeadStatus } = req.body;
+router.post("/", async (req, res) => {
+  const { LHeadName, LHeadCode, LBelongsTo, LHeadStatus, IsSystemGenerated } = req.body;
 
   if (!LHeadName || !String(LHeadName).trim()) {
     return res.status(400).json({ error: "LHeadName is required" });
+  }
+
+  // Only super_admin can create system-generated ledgers
+  if (IsSystemGenerated) {
+    const userRole = req.user?.role ?? "";
+    if (userRole !== "super_admin") {
+      return res.status(403).json({ error: "Only Super Admin can create system-generated ledger accounts." });
+    }
   }
 
   try {
@@ -227,6 +260,7 @@ router.post("/", requirePageRight("general-ledger", "create"), async (req, res) 
         LBelongsTo ? parseInt(LBelongsTo, 10) : null,
       )
       .input("LHeadStatus", sql.Bit, LHeadStatus !== false ? 1 : 0)
+      .input("IsSystemGenerated", sql.Bit, IsSystemGenerated ? 1 : 0)
       .input("LHeadType", sql.VarChar(50), "GL")
       .input("LHeadAddress", sql.VarChar(300), "N/A")
       .input("LHeadContactPerson", sql.VarChar(100), "N/A")
@@ -243,6 +277,7 @@ router.post("/", requirePageRight("general-ledger", "create"), async (req, res) 
       "LHeadCode",
       "LBelongsTo",
       "LHeadStatus",
+      "IsSystemGenerated",
       "LHeadType",
       "LHeadAddress",
       "LHeadContactPerson",
@@ -285,13 +320,13 @@ router.post("/", requirePageRight("general-ledger", "create"), async (req, res) 
 
 // ── PUT /:id ──────────────────────────────────────────────────────────────────
 // Updates an existing GL ledger head. LHeadType is always preserved as 'GL'.
-router.put("/:id", requirePageRight("general-ledger", "edit"), async (req, res) => {
+router.put("/:id", async (req, res) => {
   const numericId = parseInt(req.params.id, 10);
   if (!Number.isFinite(numericId) || numericId <= 0) {
     return res.status(400).json({ error: "Invalid record id" });
   }
 
-  const { LHeadName, LHeadCode, LBelongsTo, LHeadStatus } = req.body;
+  const { LHeadName, LHeadCode, LBelongsTo, LHeadStatus, IsSystemGenerated } = req.body;
 
   if (!LHeadName || !String(LHeadName).trim()) {
     return res.status(400).json({ error: "LHeadName is required" });
@@ -319,6 +354,12 @@ router.put("/:id", requirePageRight("general-ledger", "edit"), async (req, res) 
       )
       .input("LHeadStatus", sql.Bit, LHeadStatus !== false ? 1 : 0);
 
+    // Only super_admin can toggle IsSystemGenerated
+    const userRole = req.user?.role ?? "";
+    if (IsSystemGenerated !== undefined && userRole === "super_admin") {
+      request.input("IsSystemGenerated", sql.Bit, IsSystemGenerated ? 1 : 0);
+    }
+
     const updates = [
       "LHeadName   = @LHeadName",
       "LHeadCode   = @LHeadCode",
@@ -326,6 +367,10 @@ router.put("/:id", requirePageRight("general-ledger", "edit"), async (req, res) 
       "LHeadStatus = @LHeadStatus",
       "isEdited    = 1",
     ];
+
+    if (IsSystemGenerated !== undefined && userRole === "super_admin") {
+      updates.push("IsSystemGenerated = @IsSystemGenerated");
+    }
 
     if (hasColumn(columnMeta, "UpdatedBy")) {
       request.input("UpdatedBy", sql.NVarChar(100), userEmail);
@@ -359,7 +404,8 @@ router.put("/:id", requirePageRight("general-ledger", "edit"), async (req, res) 
 // ── DELETE /:id ───────────────────────────────────────────────────────────────
 // Hard-deletes a GL ledger head. Scoped to LHeadType = 'GL' as a safety guard
 // so this route can never accidentally delete non-GL account heads.
-router.delete("/:id", requirePageRight("general-ledger", "delete"), async (req, res) => {
+// System-generated ledgers (IsSystemGenerated = 1) can only be deleted by super_admin.
+router.delete("/:id", async (req, res) => {
   const numericId = parseInt(req.params.id, 10);
   if (!Number.isFinite(numericId) || numericId <= 0) {
     return res.status(400).json({ error: "Invalid record id" });
@@ -367,6 +413,33 @@ router.delete("/:id", requirePageRight("general-ledger", "delete"), async (req, 
 
   try {
     const pool = getPool();
+
+    // Fetch the record first to check IsSystemGenerated
+    const checkResult = await pool
+      .request()
+      .input("id", sql.Int, numericId)
+      .query(`
+        SELECT ISNULL(IsSystemGenerated, 0) AS IsSystemGenerated
+        FROM dbo.AccountHeadMaster
+        WHERE LHeadId = @id AND LHeadType = 'GL'
+      `);
+
+    if (checkResult.recordset.length === 0) {
+      return res.status(404).json({ error: "General ledger record not found" });
+    }
+
+    const isSystemGenerated = checkResult.recordset[0].IsSystemGenerated === true
+      || checkResult.recordset[0].IsSystemGenerated === 1;
+
+    if (isSystemGenerated) {
+      const userRole = req.user?.role ?? "";
+      if (userRole !== "super_admin") {
+        return res.status(403).json({
+          error: "System-generated ledger accounts can only be deleted by a Super Admin.",
+        });
+      }
+    }
+
     const result = await pool.request().input("id", sql.Int, numericId).query(`
         DELETE FROM dbo.AccountHeadMaster
         WHERE LHeadId   = @id

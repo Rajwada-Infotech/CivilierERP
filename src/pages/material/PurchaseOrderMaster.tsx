@@ -1905,18 +1905,18 @@ const PurchaseOrderMaster: React.FC = () => {
                           />
                           <button
                             onClick={() => goToView(item)}
-                            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition"
-                            title="View"
+                            className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+                            title="View details"
                           >
-                            <Eye size={14} />
+                            <Eye size={15} />
                           </button>
                           {rights.canDelete && (
                           <button
                             onClick={() => handleDelete(item._id)}
-                            className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 text-muted-foreground hover:text-red-500 transition"
-                            title="Delete"
+                            className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                            title="Delete this order"
                           >
-                            <Trash2 size={14} />
+                            <Trash2 size={15} />
                           </button>
                           )}
                         </div>
@@ -2864,16 +2864,6 @@ const PurchaseOrderMaster: React.FC = () => {
                       </dd>
                     </div>
                   )}
-                  {companyDetails.gst_no && (
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        GSTIN
-                      </dt>
-                      <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
-                        {companyDetails.gst_no}
-                      </dd>
-                    </div>
-                  )}
                   {companyDetails.phone_number && (
                     <div>
                       <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -2893,6 +2883,16 @@ const PurchaseOrderMaster: React.FC = () => {
                       <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
                         <Mail size={12} className="text-muted-foreground" />
                         {companyDetails.email}
+                      </dd>
+                    </div>
+                  )}
+                  {companyDetails.gst_no && (
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        GSTIN
+                      </dt>
+                      <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
+                        {companyDetails.gst_no}
                       </dd>
                     </div>
                   )}
@@ -3521,7 +3521,7 @@ const PurchaseOrderMaster: React.FC = () => {
           const poCanSave = !!(form.supplierId && form.companyId && form.projectId && lineItems.some((li) => li.itemName || li.rate > 0));
           const poIsDirty = !!(form.supplierId || form.companyId || form.projectId || form.remarks || form.expectedDate || lineItems.some((li) => li.itemName || li.rate > 0));
           return (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border pb-6">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
               <p className="text-[11px] text-muted-foreground hidden sm:block">
                 {saved ? <span className="text-emerald-500 font-medium">Saved!</span> : poCanSave ? <span className="text-emerald-500 font-medium">Ready to save</span> : "Fill in the required fields to save"}
               </p>

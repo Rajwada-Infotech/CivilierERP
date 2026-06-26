@@ -20,6 +20,7 @@ import {
   Archive,
   User,
   Wrench,
+  Pickaxe,
 } from "lucide-react";
 
 // ── Per-module nav definitions ────────────────────────────────────────────────
@@ -33,6 +34,7 @@ import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
 import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { salesNavItems } from "./sidebars/SalesSidebar";
 import { recordsNavItems } from "./sidebars/RecordsSidebar";
+import { insideWorkNavItems } from "./sidebars/InsideWorkSidebar";
 import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar ──────────────────────────────────────────────────────────────
@@ -100,6 +102,13 @@ const MODULE_HEADER: Record<
     color: "#f59e0b",
     from: "from-amber-500/30",
     to: "to-amber-500/0",
+  },
+  insidework: {
+    label: "Inside Work",
+    icon: Pickaxe,
+    color: "#0891b2",
+    from: "from-cyan-600/30",
+    to: "to-cyan-600/0",
   },
   admin: {
     label: "Admin",
@@ -287,6 +296,9 @@ export const AppSidebar = () => {
         break;
       case "records":
         raw = recordsNavItems;
+        break;
+      case "insidework":
+        raw = insideWorkNavItems;
         break;
       case "admin":
         raw = buildAdminNavItems(pendingApprovalCount);

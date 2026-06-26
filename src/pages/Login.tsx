@@ -1046,6 +1046,95 @@ function LogoRing({ size }: { size: number }) {
   );
 }
 
+// ── Welcome back card — slides up once on successful login ─────────────────────
+function WelcomeBackCard({ name }: { name?: string }) {
+  const firstName = name?.trim().split(/\s+/)[0] || "";
+
+  return (
+    <motion.div
+      className="absolute inset-0 z-[60] flex items-center justify-center pointer-events-none px-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0, transition: { duration: 0.18 } }}
+    >
+      <motion.div
+        className="relative flex flex-col items-center gap-3 px-8 py-7 rounded-3xl text-center"
+        style={{
+          background: "rgba(255,255,255,0.92)",
+          border: "1px solid rgba(196,181,253,0.6)",
+          boxShadow:
+            "0 20px 60px -10px rgba(124,58,237,0.35), 0 0 0 1px rgba(255,255,255,0.4) inset",
+        }}
+        initial={{ y: 48, opacity: 0, scale: 0.94 }}
+        animate={{ y: 0, opacity: 1, scale: 1 }}
+        exit={{
+          y: -16,
+          opacity: 0,
+          scale: 0.97,
+          transition: { duration: 0.18 },
+        }}
+        transition={{ type: "spring", stiffness: 340, damping: 26 }}
+      >
+        {/* check badge */}
+        <motion.div
+          className="w-12 h-12 rounded-full flex items-center justify-center shrink-0"
+          style={{ background: "linear-gradient(135deg, #7c3aed, #5b21b6)" }}
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          transition={{
+            type: "spring",
+            stiffness: 420,
+            damping: 18,
+            delay: 0.08,
+          }}
+        >
+          <motion.svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="white"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <motion.path
+              d="M5 13l4 4L19 7"
+              initial={{ pathLength: 0 }}
+              animate={{ pathLength: 1 }}
+              transition={{ duration: 0.35, delay: 0.18 }}
+            />
+          </motion.svg>
+        </motion.div>
+
+        <div>
+          <motion.p
+            className="text-lg font-bold tracking-tight"
+            style={{
+              background: "linear-gradient(135deg,#4c1d95,#7c3aed,#a78bfa)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+            }}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.16, duration: 0.3 }}
+          >
+            Welcome back{firstName ? `, ${firstName}` : ""}!
+          </motion.p>
+          <motion.p
+            className="text-xs text-slate-500 mt-0.5"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.24, duration: 0.3 }}
+          >
+            Taking you to your dashboard…
+          </motion.p>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────────
 export default function Login() {
   const [showPass, setShowPass] = useState(false);
@@ -1055,6 +1144,7 @@ export default function Login() {
   const [showHints, setShowHints] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [loginSuccess, setLoginSuccess] = useState(false);
+  const [loginName, setLoginName] = useState("");
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -1076,6 +1166,7 @@ export default function Login() {
     try {
       const result = await login(email, password);
       if (result.success) {
+        setLoginName(result.name || "");
         setLoginSuccess(true);
         setTimeout(() => {
           const role = result.role;
@@ -1086,7 +1177,7 @@ export default function Login() {
           else if (role === "super_admin" || role === "admin")
             navigate(`/home/${uid}`, { replace: true });
           else navigate(`/home/${uid}`, { replace: true });
-        }, 700);
+        }, 1000);
       } else {
         setError(result.error || "Invalid email or password.");
         setIsLoading(false);
@@ -1102,7 +1193,7 @@ export default function Login() {
 
   return (
     <div
-      className="min-h-screen w-full flex items-center justify-center px-4 py-8 overflow-auto relative"
+      className="min-h-screen w-full flex items-center justify-center px-4 py-8 overflow-x-hidden overflow-y-auto relative"
       style={{
         background:
           "linear-gradient(160deg, #f3e8ff 0%, #ede9fe 30%, #ffffff 65%, #f8f4ff 100%)",
@@ -1147,65 +1238,9 @@ export default function Login() {
         />
       </div>
 
-      {/* Success overlay */}
+      {/* Welcome back card — plays once on successful login */}
       <AnimatePresence>
-        {loginSuccess && (
-          <motion.div
-            className="absolute inset-0 z-50 flex items-center justify-center"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            style={{
-              background: "rgba(243,232,255,0.6)",
-              backdropFilter: "blur(8px)",
-            }}
-          >
-            <motion.div
-              initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: "spring", stiffness: 300, damping: 20 }}
-              className="flex flex-col items-center gap-3"
-            >
-              <motion.div
-                className="w-16 h-16 rounded-full flex items-center justify-center"
-                style={{
-                  background: "linear-gradient(135deg, #7c3aed, #5b21b6)",
-                }}
-                animate={{
-                  boxShadow: [
-                    "0 0 0px rgba(124,58,237,0)",
-                    "0 0 40px rgba(124,58,237,0.6)",
-                    "0 0 0px rgba(124,58,237,0)",
-                  ],
-                }}
-                transition={{ duration: 1, repeat: Infinity }}
-              >
-                <motion.svg
-                  width="28"
-                  height="28"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="white"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  initial={{ pathLength: 0 }}
-                  animate={{ pathLength: 1 }}
-                  transition={{ duration: 0.5, delay: 0.2 }}
-                >
-                  <motion.path
-                    d="M5 13l4 4L19 7"
-                    initial={{ pathLength: 0 }}
-                    animate={{ pathLength: 1 }}
-                    transition={{ duration: 0.4, delay: 0.1 }}
-                  />
-                </motion.svg>
-              </motion.div>
-              <p className="text-sm font-semibold text-purple-700">
-                Welcome back!
-              </p>
-            </motion.div>
-          </motion.div>
-        )}
+        {loginSuccess && <WelcomeBackCard name={loginName} />}
       </AnimatePresence>
 
       {/* Card */}

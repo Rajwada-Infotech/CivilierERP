@@ -263,9 +263,9 @@ export function DocNumberPreview({
             onValueChange={handleSelect}
             disabled={docTypesLoading || readOnly}
           >
-            <SelectTrigger className="w-full min-w-0 rounded-lg border border-border bg-background text-sm !ring-0 !shadow-none !outline-none focus:!ring-0 focus-visible:!ring-0 focus-visible:!ring-offset-0 data-[state=open]:!ring-0 [&>span]:truncate">
+            <SelectTrigger className="w-full min-w-0 rounded-xl border-2 border-emerald-500/50 bg-background/80 backdrop-blur-sm text-sm px-4 py-2.5 h-auto !ring-0 !shadow-none !outline-none focus:!ring-0 focus:border-emerald-500 focus-visible:!ring-0 focus-visible:!ring-offset-0 data-[state=open]:border-emerald-500 data-[state=open]:!ring-0 transition-colors [&>span]:truncate">
               <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-                <Hash size={13} className="text-muted-foreground shrink-0" />
+                <Hash size={13} className="text-emerald-500 shrink-0" />
                 <SelectValue
                   className="truncate"
                   placeholder={
@@ -314,9 +314,9 @@ export function DocNumberPreview({
             onClick={handleRefresh}
             disabled={isSpinning}
             title="Refresh next number"
-            className="h-9 w-9 flex items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:text-foreground hover:border-emerald-500/40 transition-colors shrink-0"
+            className="h-10 w-10 flex items-center justify-center rounded-xl border-2 border-emerald-500/50 bg-background/80 backdrop-blur-sm text-muted-foreground hover:text-emerald-500 hover:border-emerald-500 transition-colors shrink-0"
           >
-            <RefreshCw size={13} className={isSpinning ? "animate-spin" : ""} />
+            <RefreshCw size={13} className={isSpinning ? "animate-spin text-emerald-500" : ""} />
           </button>
         )}
       </div>

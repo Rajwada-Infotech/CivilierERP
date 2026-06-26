@@ -15,6 +15,7 @@ export type Module =
   | "ticket"
   | "sales"
   | "records"
+  | "insidework"
   | "admin"
   | null;
 
@@ -27,6 +28,7 @@ export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
   ticket: "/ticket",
   sales: "/sales/sale-order",
   records: "/records",
+  insidework: "/insidework",
   admin: "/admin/dashboard",
 };
 
@@ -69,9 +71,11 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
                 ? "🛒 Sales"
                 : activeModule === "records"
                   ? "🗄️ Records"
-                  : activeModule === "admin"
-                    ? "🔧 Admin"
-                    : "No Module Selected";
+                  : activeModule === "insidework"
+                    ? "⛏️ Inside Work"
+                    : activeModule === "admin"
+                      ? "🔧 Admin"
+                      : "No Module Selected";
 
   const setActiveModule = useCallback((m: Module) => {
     setActiveModuleState(m);
@@ -114,6 +118,7 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
       "ticket",
       "sales",
       "records",
+      "insidework",
       "admin",
     ];
 
@@ -138,6 +143,9 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     } else if (pathname.startsWith("/records")) {
       setActiveModuleState("records");
       localStorage.setItem("activeModule", "records");
+    } else if (pathname.startsWith("/insidework")) {
+      setActiveModuleState("insidework");
+      localStorage.setItem("activeModule", "insidework");
     } else if (pathname.startsWith("/finance") || pathname === "/finance") {
       setActiveModuleState("finance");
       localStorage.setItem("activeModule", "finance");
