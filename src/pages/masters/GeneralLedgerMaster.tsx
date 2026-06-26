@@ -30,7 +30,10 @@ import {
   FolderOpen,
   Layers,
   RotateCcw,
+  ShieldCheck,
+  Lock,
 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface AccountGroup {
@@ -63,12 +66,14 @@ interface LedgerHead {
   LBelongsTo: number | null;
   GroupName: string | null;
   LHeadStatus: boolean;
+  IsSystemGenerated: boolean;
 }
 
 interface LedgerForm {
   LHeadName: string;
   LHeadCode: string;
   LBelongsTo: string;
+  IsSystemGenerated: boolean;
 }
 
 interface PaginatedResponse<T> {
@@ -83,6 +88,7 @@ const EMPTY_FORM: LedgerForm = {
   LHeadName: "",
   LHeadCode: "",
   LBelongsTo: "",
+  IsSystemGenerated: false,
 };
 
 
@@ -96,6 +102,7 @@ function buildGLColumns(
   onView: (l: LedgerHead) => void,
   canEdit: boolean,
   canDelete: boolean,
+  isSuperAdmin: boolean,
 ): ColumnDef<LedgerHead, unknown>[] {
   return [
     {
@@ -110,10 +117,22 @@ function buildGLColumns(
     {
       accessorKey: "LHeadName",
       header: "Account Name",
-      cell: ({ getValue }) => (
-        <span className="font-medium text-foreground">
-          {getValue() as string}
-        </span>
+      cell: ({ row, getValue }) => (
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-foreground">
+            {getValue() as string}
+          </span>
+          {row.original.IsSystemGenerated && (
+            <span
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+              style={{ background: "rgba(99,102,241,0.12)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.25)" }}
+              title="System-generated — protected"
+            >
+              <ShieldCheck size={9} />
+              System
+            </span>
+          )}
+        </div>
       ),
     },
     {
@@ -184,12 +203,21 @@ function buildGLColumns(
               </button>
             )}
             {canDelete && (
-              <button
-                onClick={() => setDeleteConfirm(id)}
-                className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10"
-              >
-                <Trash2 size={13} />
-              </button>
+              row.original.IsSystemGenerated && !isSuperAdmin ? (
+                <span
+                  className="p-1.5 rounded-lg text-muted-foreground/40 cursor-not-allowed"
+                  title="System-generated — only Super Admin can delete"
+                >
+                  <Lock size={13} />
+                </span>
+              ) : (
+                <button
+                  onClick={() => setDeleteConfirm(id)}
+                  className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10"
+                >
+                  <Trash2 size={13} />
+                </button>
+              )
             )}
           </div>
         );
@@ -202,6 +230,8 @@ function buildGLColumns(
 const GeneralLedgerMaster: React.FC = () => {
   const qc = useQueryClient();
   const rights = usePageRights("general-ledger");
+  const { currentUser } = useAuth();
+  const isSuperAdmin = currentUser?.role === "super_admin";
   const { theme } = useTheme();
   const isDark = theme !== "light";
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -275,6 +305,7 @@ const GeneralLedgerMaster: React.FC = () => {
         LHeadName: data.LHeadName,
         LHeadCode: data.LHeadCode || null,
         LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
+        IsSystemGenerated: data.IsSystemGenerated,
       }),
     onSuccess: () => {
       toast.success("Ledger account created");
@@ -290,6 +321,7 @@ const GeneralLedgerMaster: React.FC = () => {
         LHeadName: data.LHeadName,
         LHeadCode: data.LHeadCode || null,
         LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
+        IsSystemGenerated: data.IsSystemGenerated,
       }),
     onSuccess: () => {
       toast.success("Ledger account updated");
@@ -359,6 +391,7 @@ const GeneralLedgerMaster: React.FC = () => {
       LHeadName: l.LHeadName ?? "",
       LHeadCode: l.LHeadCode ?? "",
       LBelongsTo: l.LBelongsTo != null ? String(l.LBelongsTo) : "",
+      IsSystemGenerated: !!l.IsSystemGenerated,
     });
     hasManuallyEditedCode.current = true; // Existing code should be preserved
     setErrors({});
@@ -376,6 +409,7 @@ const GeneralLedgerMaster: React.FC = () => {
         setViewRecord,
         rights.canEdit,
         rights.canDelete,
+        isSuperAdmin,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editingId, deleteConfirm, rights.canEdit, rights.canDelete],
@@ -561,6 +595,38 @@ const GeneralLedgerMaster: React.FC = () => {
                     Auto-generated from account name (you can override manually)
                   </p>
                 </div>
+
+                {/* System Generated — super_admin only */}
+                {isSuperAdmin && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                      <ShieldCheck size={11} className="text-indigo-400" />
+                      System Generated
+                    </label>
+                    <div className="flex items-center gap-3 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setForm((p) => ({ ...p, IsSystemGenerated: !p.IsSystemGenerated }))}
+                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${
+                          form.IsSystemGenerated
+                            ? "bg-indigo-500"
+                            : "bg-muted"
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                            form.IsSystemGenerated ? "translate-x-4" : "translate-x-0.5"
+                          }`}
+                        />
+                      </button>
+                      <span className="text-xs text-muted-foreground">
+                        {form.IsSystemGenerated
+                          ? "Protected — only Super Admin can delete"
+                          : "Not protected"}
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Account Group */}
                 <div className="space-y-1.5">
@@ -775,6 +841,18 @@ const GeneralLedgerMaster: React.FC = () => {
                   {viewRecord.LHeadStatus ? "Active" : "Inactive"}
                 </span>
               </div>
+              {viewRecord.IsSystemGenerated && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                    Protection
+                  </p>
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold"
+                    style={{ background: "rgba(99,102,241,0.12)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.25)" }}>
+                    <ShieldCheck size={11} />
+                    System-generated — Super Admin only
+                  </span>
+                </div>
+              )}
             </div>
             <div className="px-5 py-3 border-t border-border flex justify-end gap-2 bg-muted/20">
               <button

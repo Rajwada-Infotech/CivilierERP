@@ -5,6 +5,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
+const { requirePageRight } = require("../middleware/requirePageRight");
 
 // Bust stale cache on every deploy/restart so schema changes take effect immediately
 bumpCacheVersion("uom-master").catch(() => {});
@@ -36,7 +37,7 @@ router.post("/cache-bust", async (req, res) => {
 });
 
 // ADD UOM
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("unit-of-measurement", "create"), async (req, res) => {
   const { UOMName, UOMCode, Symbol, Remarks, IsActive } = req.body;
   const createdBy = req.user?.userId || null;
 
@@ -65,7 +66,7 @@ router.post("/", async (req, res) => {
 });
 
 // UPDATE UOM
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePageRight("unit-of-measurement", "edit"), async (req, res) => {
   const { id } = req.params;
   const { UOMName, UOMCode, Symbol, Remarks, IsActive } = req.body;
   const updatedBy = req.user?.userId || null;
@@ -101,7 +102,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // ─── DELETE UOM — safe: check all reference tables first ──────────────────────
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("unit-of-measurement", "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });

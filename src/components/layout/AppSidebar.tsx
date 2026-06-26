@@ -231,7 +231,7 @@ export const AppSidebar = () => {
       if (item.children) {
         const visibleChildren = item.children.filter(
           (child: SubItem) =>
-            !child.pageKey || canAccessPage(child.pageKey as any),
+            !child.pageKey || canAccessPage(child.pageKey),
         );
         if (visibleChildren.length > 0) {
           acc.push({ ...item, children: visibleChildren });
@@ -239,7 +239,7 @@ export const AppSidebar = () => {
       } else if (item.sections) {
         acc.push(item); // sections don't have individual pageKeys yet
       } else {
-        if (!item.pageKey || canAccessPage(item.pageKey as any)) {
+        if (!item.pageKey || canAccessPage(item.pageKey)) {
           acc.push(item);
         }
       }

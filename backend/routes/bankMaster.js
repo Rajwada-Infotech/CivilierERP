@@ -3,6 +3,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { validateBody } = require("../middleware/validateRequest");
 const { bumpCacheVersion } = require("../redis");
@@ -137,7 +138,7 @@ router.get("/", cache("bank-master", 300), async (req, res) => {
 });
 
 // ====================== CREATE BANK ======================
-router.post("/", validateBody(bankMasterCreateSchema), async (req, res) => {
+router.post("/", requirePageRight("bank-master", "create"), validateBody(bankMasterCreateSchema), async (req, res) => {
   const {
     BName,
     BBranch,
@@ -303,7 +304,7 @@ router.post("/", validateBody(bankMasterCreateSchema), async (req, res) => {
 });
 
 // ====================== UPDATE BANK ======================
-router.put("/:id", validateBody(bankMasterUpdateSchema), async (req, res) => {
+router.put("/:id", requirePageRight("bank-master", "edit"), validateBody(bankMasterUpdateSchema), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
   const {
@@ -425,7 +426,7 @@ router.put("/:id", validateBody(bankMasterUpdateSchema), async (req, res) => {
 });
 
 // ====================== DELETE BANK ======================
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("bank-master", "delete"), async (req, res) => {
   try {
     const id = requireValidId(req, res);
     if (!id) return;

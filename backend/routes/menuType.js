@@ -1,3 +1,4 @@
+const allowRoles = require("../middleware/role");
 const express = require("express");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -44,7 +45,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST
-router.post("/", validateBody(menuTypeCreateSchema), async (req, res) => {
+router.post("/", allowRoles("admin", "super_admin", "dba"), validateBody(menuTypeCreateSchema), async (req, res) => {
   const { MenuReceipt, MenuPayment, MenuBOQ, MenuPurchaseOrder, MenuWorkOrder, CreatedBy } = req.body;
   try {
     const pool = await getPool();
@@ -72,7 +73,7 @@ router.post("/", validateBody(menuTypeCreateSchema), async (req, res) => {
 });
 
 // PUT
-router.put("/:id", validateBody(menuTypeUpdateSchema), async (req, res) => {
+router.put("/:id", allowRoles("admin", "super_admin", "dba"), validateBody(menuTypeUpdateSchema), async (req, res) => {
   const { MenuReceipt, MenuPayment, MenuBOQ, MenuPurchaseOrder, MenuWorkOrder, UpdatedBy, ApprovedBy, ApprovedAt } = req.body;
   try {
     const pool = await getPool();
@@ -109,7 +110,7 @@ router.put("/:id", validateBody(menuTypeUpdateSchema), async (req, res) => {
 });
 
 // DELETE
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   try {
     const pool = await getPool();
     await pool

@@ -12,6 +12,12 @@ import { useAuth } from "@/contexts/AuthContext";
  *   // rights.canPrint  → show "Print" button
  *   // rights.canExport → show "Export" button
  *
+ * pageKey should match the kebab-case keys defined in the backend's
+ * ROLE_RIGHTS_PAGE_MAP (roles.js) and/or the DB-driven page-definitions
+ * table — these are now the single real source of truth. PageKey is `string`,
+ * so a typo here won't be caught at compile time; double check the key
+ * against roles.js or /api/page-definitions if a page seems to always deny.
+ *
  * Privileged roles (super_admin, admin, dba) always get all rights = true.
  */
 export function usePageRights(pageKey: string) {
@@ -24,7 +30,7 @@ export function usePageRights(pageKey: string) {
 
   const check = (action: string): boolean => {
     if (privileged) return true;
-    return canDoAction(pageKey as any, action as any);
+    return canDoAction(pageKey, action as any);
   };
 
   return {
