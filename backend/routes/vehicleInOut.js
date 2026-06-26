@@ -35,6 +35,7 @@ const { getPool, sql } = require("../db");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition } = require("../services/approvalService");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   resolveDocTypeId,
   lockNextDocNumber,
@@ -261,7 +262,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ── POST / — create ───────────────────────────────────────────────────────────
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -379,7 +380,7 @@ router.post("/", async (req, res) => {
 });
 
 // ── PUT /:id — update ─────────────────────────────────────────────────────────
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -455,7 +456,7 @@ router.put("/:id", async (req, res) => {
 // ── PUT /:id/submit — Draft/Rejected → Pending ────────────────────────────────
 // Records are auto-submitted on creation; this is only needed to re-submit
 // after a rejection (or as a fallback if auto-submit failed).
-router.put("/:id/submit", async (req, res) => {
+router.put("/:id/submit", requirePageRight("vehicle-in-out", "edit"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -534,7 +535,7 @@ router.put("/:id/reject", async (req, res) => {
 // ── DELETE /:id ───────────────────────────────────────────────────────────────
 // Attachments cascade-delete automatically via FK_VehicleInOutAttachments_Parent
 // (ON DELETE CASCADE) — no manual cleanup needed since everything lives in SQL.
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("vehicle-in-out", "delete"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -568,7 +569,7 @@ router.delete("/:id", async (req, res) => {
 // VehicleInOutID exists — same flow as ticket attachments. Each row starts
 // with VehicleInOutID = NULL and gets linked once the parent record is
 // actually saved (see linkAttachments() in POST / and PUT /:id above).
-router.post("/upload", upload.array("file", 20), async (req, res) => {
+router.post("/upload", requirePageRight("vehicle-in-out", "edit"), upload.array("file", 20), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -649,7 +650,7 @@ router.get("/attachment/:attachId", async (req, res) => {
 // ── DELETE /attachment/:attachId — remove a single attachment ─────────────────
 // Used when the user removes a captured photo / file before saving the form,
 // or removes one from an existing record while editing.
-router.delete("/attachment/:attachId", async (req, res) => {
+router.delete("/attachment/:attachId", requirePageRight("vehicle-in-out", "delete"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 

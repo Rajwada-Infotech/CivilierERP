@@ -5,6 +5,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
+const { requirePageRight } = require("../middleware/requirePageRight");
 
 router.get("/", cache("billing-terms", 300), async (req, res) => {
   try {
@@ -18,7 +19,7 @@ router.get("/", cache("billing-terms", 300), async (req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("billing-terms", "create"), async (req, res) => {
   const { Name, Description, CalculationType, DeductionType, IsActive } =
     req.body;
   try {
@@ -44,7 +45,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePageRight("billing-terms", "edit"), async (req, res) => {
   const { Name, Description, CalculationType, DeductionType, IsActive } =
     req.body;
   try {
@@ -77,7 +78,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("billing-terms", "delete"), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });

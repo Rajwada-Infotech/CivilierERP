@@ -14,19 +14,13 @@ import {
   Crown,
   ShieldCheck,
   Package,
-  Building2,
   MessageSquare,
   Users,
   ChevronRight,
-  FileWarning,
   Database,
   Calendar,
   Landmark,
-  Bell,
-  CalendarClock,
   TrendingUp,
-  CheckSquare,
-  PackageMinus,
   ClipboardList,
   Wrench,
   Grip,
@@ -42,20 +36,42 @@ import {
   LayoutGrid,
   Ruler,
   Activity,
+  Pickaxe,
+  GitBranch,
+  DoorOpen,
 } from "lucide-react";
 
 import { useModule, MODULE_DASHBOARD_ROUTES } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";
+import { useReminders } from "@/hooks/useReminders";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
+
+// ── Desktop sidebar definitions — single source of truth, mirrored here ──────
+import { engineeringNavItems } from "./sidebars/EngineeringSidebar";
+import { buildFinanceNavItems } from "./sidebars/FinanceSidebar";
+import { materialNavItems } from "./sidebars/MaterialSidebar";
+import { followupNavItems } from "./sidebars/FollowupSidebar";
+import { buildAdminNavItems } from "./sidebars/AdminSidebar";
+import { dbaNavItems } from "./sidebars/DbaSidebar";
+import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
+import { buildTicketNavItems } from "./sidebars/TicketSidebar";
+import { salesNavItems } from "./sidebars/SalesSidebar";
+import { recordsNavItems } from "./sidebars/RecordsSidebar";
+import { insideWorkNavItems } from "./sidebars/InsideWorkSidebar";
+import type {
+  NavItem as DesktopNavItem,
+  SubItem as DesktopSubItem,
+} from "./sidebars/SidebarPrimitives";
 
 interface NavItemChild {
   label: string;
   path: string;
   icon?: React.ElementType;
   count?: number;
+  pageKey?: string;
 }
 
 interface NavItem {
@@ -65,6 +81,7 @@ interface NavItem {
   children?: NavItemChild[];
   count?: number;
   disabled?: boolean;
+  pageKey?: string;
 }
 
 interface SetupItem {
@@ -134,6 +151,14 @@ const MODULE_META: Record<
     icon: Archive,
     label: "Records",
     route: MODULE_DASHBOARD_ROUTES.records,
+  },
+  insidework: {
+    h: 192,
+    s: 91,
+    l: 36,
+    icon: Pickaxe,
+    label: "Inside Work",
+    route: MODULE_DASHBOARD_ROUTES.insidework,
   },
   admin: {
     h: 217,
@@ -250,10 +275,10 @@ const materialSetupItems: SetupItem[] = [
 
 const followupSetupItems: SetupItem[] = [
   {
-    icon: Layers,
-    label: "Block",
-    path: "/followup/setup/block-master",
-    color: "text-cyan-500",
+    icon: Users,
+    label: "Customers",
+    path: "/followup/setup/customer-master",
+    color: "text-violet-500",
   },
   {
     icon: Ruler,
@@ -262,10 +287,22 @@ const followupSetupItems: SetupItem[] = [
     color: "text-orange-500",
   },
   {
-    icon: Calendar,
-    label: "Reminders",
-    path: "/followup/follow-ups/reminders",
-    color: "text-indigo-500",
+    icon: Layers,
+    label: "Block",
+    path: "/followup/setup/block-master",
+    color: "text-cyan-500",
+  },
+  {
+    icon: DoorOpen,
+    label: "Room",
+    path: "/followup/setup/room-master",
+    color: "text-teal-500",
+  },
+  {
+    icon: ClipboardList,
+    label: "Payment Plan",
+    path: "/followup/setup/payment-plan-master",
+    color: "text-emerald-500",
   },
   {
     icon: Activity,
@@ -274,10 +311,10 @@ const followupSetupItems: SetupItem[] = [
     color: "text-purple-500",
   },
   {
-    icon: Users,
-    label: "Customers",
-    path: "/followup/setup/customer-master",
-    color: "text-violet-500",
+    icon: Calendar,
+    label: "Reminders",
+    path: "/followup/follow-ups/reminders",
+    color: "text-indigo-500",
   },
 ];
 
@@ -335,6 +372,15 @@ const adminSetupItems: SetupItem[] = [
   },
 ];
 
+const insideworkSetupItems: SetupItem[] = [
+  {
+    icon: GitBranch,
+    label: "Dependency",
+    path: "/insidework/setup/dependency",
+    color: "text-cyan-500",
+  },
+];
+
 export const MobileNav: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
@@ -343,19 +389,24 @@ export const MobileNav: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, setTheme } = useTheme();
-  const { currentUser } = useAuth();
+  const { currentUser, canAccessPage } = useAuth();
   const { activeModule, setActiveModule } = useModule();
   const { handleLogout, overlay: logoutOverlay } = useGracefulLogout();
+  const { badgeCount: overdueCount } = useReminders();
 
   const isAdminPage =
     location.pathname.startsWith("/admin") ||
     location.pathname.startsWith("/users") ||
     location.pathname.startsWith("/dba") ||
+    location.pathname.startsWith("/superadmin") ||
     ADMIN_PATHS.some((p) => location.pathname.startsWith(p));
   const isSuperAdmin = currentUser?.role?.toLowerCase() === "super_admin";
   const isDba = currentUser?.role?.toLowerCase() === "dba";
   const isAdmin =
     currentUser?.role?.toLowerCase() === "admin" || isSuperAdmin || isDba;
+  const isSuperAdminPage =
+    isSuperAdmin && location.pathname.startsWith("/superadmin");
+  const isDbaPage = isAdmin && location.pathname.startsWith("/dba");
 
   // Close on route change
   useEffect(() => {
@@ -386,399 +437,117 @@ export const MobileNav: React.FC = () => {
         label: "Engineering",
         available: true,
       };
+    if (activeModule === "insidework")
+      return {
+        items: insideworkSetupItems,
+        label: "Inside Work",
+        available: true,
+      };
     if (activeModule === "finance")
       return { items: financeSetupItems, label: "Finance", available: true };
     return { items: [] as SetupItem[], label: "", available: false };
   })();
 
   // ── Nav item definitions ────────────────────────────────────────────────────
-  const ADMIN_NAV_ITEMS: NavItem[] = [
-    { label: "Control Center", icon: BarChart3, path: "/admin/dashboard" },
-    {
-      label: "Enterprise",
-      icon: Building2,
-      children: [
-        {
-          label: "Enterprise",
-          path: "/admin/masters/business-unit",
-          icon: FileText,
-        },
-        { label: "Project", path: "/admin/masters/project", icon: FileText },
-        { label: "Company", path: "/admin/masters/company", icon: FileText },
-      ],
-    },
-    {
-      label: "User Control",
-      icon: Users,
-      children: [
-        { label: "Manage Users", path: "/users", icon: FileText },
-        {
-          label: "Activity Browser",
-          path: "/admin/activity-browser",
-          icon: FileText,
-        },
-      ],
-    },
-    {
-      label: "Rights",
-      icon: ShieldCheck,
-      children: [
-        { label: "Menu", path: "/admin/rights/menu", icon: FileText },
-        { label: "Widgets", path: "/admin/rights/widgets", icon: FileText },
-        {
-          label: "Financial Year",
-          path: "/admin/rights/fin-year",
-          icon: FileText,
-        },
-      ],
-    },
-    {
-      label: "Approval",
-      icon: CheckCircle2,
-      children: [
-        {
-          label: "Inbox",
-          path: "/admin/approval/inbox",
-          icon: FileText,
-        },
-        {
-          label: "Approval Setup",
-          path: "/admin/approval/setup",
-          icon: FileText,
-        },
-        {
-          label: "Post Approval Rights",
-          path: "/admin/approval/post-rights",
-          icon: FileText,
-        },
-      ],
-    },
-    {
-      label: "Security",
-      icon: ShieldCheck,
-      children: [
-        {
-          label: "Password Reset",
-          path: "/admin/security/password-reset",
-          icon: FileText,
-        },
-      ],
-    },
-    {
-      label: "Communicator",
-      icon: MessageSquare,
-      children: [
-        {
-          label: "SMS Setup",
-          path: "/admin/communicator/sms-setup",
-          icon: FileText,
-        },
-        {
-          label: "Email Setup",
-          path: "/admin/communicator/email-setup",
-          icon: FileText,
-        },
-        {
-          label: "WhatsApp Setup",
-          path: "/admin/communicator/whatsapp-setup",
-          icon: FileText,
-        },
-        {
-          label: "Integration Channels",
-          path: "/admin/masters/integration-channels",
-          icon: FileText,
-        },
-      ],
-    },
-    {
-      label: "Masters",
-      icon: Database,
-      children: [
-        {
-          label: "Contractor Categories",
-          path: "/admin/masters/contractor-categories",
-          icon: FileText,
-        },
-        {
-          label: "Godowns",
-          path: "/admin/masters/godowns",
-          icon: FileText,
-        },
-        {
-          label: "Page Definitions",
-          path: "/admin/page-definitions",
-          icon: FileText,
-        },
-      ],
-    },
-    {
-      label: "Support Tickets",
-      icon: MessageSquare,
-      children: [
-        {
-          label: "Resolution",
-          path: "/admin/tickets/resolution",
-          icon: FileText,
-        },
-      ],
-    },
-    {
-      label: "API Integration",
-      icon: ShieldCheck,
-      path: "/admin/api-integration",
-    },
-    { label: "Live Metrics", icon: BarChart3, path: "/admin/metrics" },
-    { label: "Signature", icon: FileText, path: "/admin/signature" },
-  ];
+  const adaptChild = (child: DesktopSubItem): NavItemChild | null => {
+    if (child.pageKey && !canAccessPage(child.pageKey as any)) return null;
+    return {
+      label: child.label,
+      path: child.path,
+      icon: child.icon,
+      count: child.badge,
+    };
+  };
+
+  const adaptItems = (items: DesktopNavItem[]): NavItem[] =>
+    items.reduce<NavItem[]>((acc, item) => {
+      if (item.children?.length) {
+        const children = item.children
+          .map(adaptChild)
+          .filter((c): c is NavItemChild => c !== null);
+        if (children.length) {
+          acc.push({ label: item.label, icon: item.icon, children });
+        }
+        return acc;
+      }
+      if (item.sections?.length) {
+        const children = item.sections
+          .flatMap((s) => s.items)
+          .map(adaptChild)
+          .filter((c): c is NavItemChild => c !== null);
+        if (children.length) {
+          acc.push({ label: item.label, icon: item.icon, children });
+        }
+        return acc;
+      }
+      if (item.pageKey && !canAccessPage(item.pageKey as any)) return acc;
+      if (item.path) {
+        acc.push({ label: item.label, icon: item.icon, path: item.path });
+      }
+      return acc;
+    }, []);
+
+  const ADMIN_NAV_ITEMS: NavItem[] = adaptItems(
+    buildAdminNavItems(0) as DesktopNavItem[],
+  );
+
+  const SUPER_ADMIN_NAV_ITEMS: NavItem[] = adaptItems(
+    superAdminNavItems as DesktopNavItem[],
+  );
+
+  const DBA_NAV_ITEMS: NavItem[] = adaptItems(dbaNavItems as DesktopNavItem[]);
 
   const getModuleNavItems = (): NavItem[] => {
     switch (activeModule) {
       case "material":
-        return [
-          { label: "Dashboard", icon: BarChart3, path: "/material" },
-          {
-            label: "Transaction",
-            icon: Receipt,
-            children: [
-              {
-                label: "Material Request",
-                path: "/material/material-request",
-                icon: ClipboardList,
-              },
-              {
-                label: "Purchase Order",
-                path: "/material/purchase-order",
-                icon: FileText,
-              },
-              { label: "GRN", path: "/material/grn", icon: Package },
-              { label: "Issues", path: "/material/issues", icon: PackageMinus },
-              {
-                label: "Invoice",
-                path: "/material/expense-booking",
-                icon: Receipt,
-              },
-            ],
-          },
-          { label: "Stock", icon: Archive, path: "/material/stock" },
-          {
-            label: "Transfer",
-            icon: ClipboardList,
-            path: "/material/stock-transfer",
-          },
-          {
-            label: "Debit Note",
-            icon: FileWarning,
-            path: "/material/debit-note",
-          },
-          {
-            label: "Amendment Menu",
-            icon: CheckSquare,
-            path: "/material/amendment-menu",
-          },
-        ];
+        return adaptItems(materialNavItems as DesktopNavItem[]);
       case "finance":
-        return [
-          { label: "Dashboard", icon: BarChart3, path: "/finance" },
-          {
-            label: "Transaction",
-            icon: Landmark,
-            children: [
-              { label: "Payment", path: "/payments", icon: FileText },
-              {
-                label: "Received Payment",
-                path: "/received-payments",
-                icon: FileText,
-              },
-              { label: "BRS", path: "/brs", icon: FileText },
-            ],
-          },
-          {
-            label: "Query",
-            icon: Landmark,
-            children: [
-              { label: "Trial Balance", path: "/transactions", icon: FileText },
-              { label: "Tasks", path: "/tasks", icon: CheckCircle2 },
-            ],
-          },
-        ];
+        return adaptItems(
+          buildFinanceNavItems(overdueCount) as DesktopNavItem[],
+        );
       case "followup":
-        return [
-          { label: "Dashboard", icon: BarChart3, path: "/followup" },
-          {
-            label: "Sales",
-            icon: Users,
-            children: [
-              {
-                label: "Applications",
-                path: "/followup/sales/applications",
-                icon: FileText,
-              },
-              {
-                label: "Bookings",
-                path: "/followup/sales/bookings",
-                icon: FileText,
-              },
-              {
-                label: "Unit Selection",
-                path: "/followup/sales/unit-selection",
-                icon: FileText,
-              },
-              {
-                label: "Welcome Calls",
-                path: "/followup/sales/welcome-calls",
-                icon: FileText,
-              },
-            ],
-          },
-          {
-            label: "Agreement",
-            icon: FileText,
-            children: [
-              {
-                label: "Agreements",
-                path: "/followup/agreement/agreements",
-                icon: FileText,
-              },
-            ],
-          },
-          {
-            label: "Closure",
-            icon: CheckCircle2,
-            children: [
-              { label: "NOC", path: "/followup/closure/noc", icon: FileText },
-              {
-                label: "Sales Deed",
-                path: "/followup/closure/sales-deed",
-                icon: FileText,
-              },
-              {
-                label: "Handover",
-                path: "/followup/closure/handover",
-                icon: FileText,
-              },
-            ],
-          },
-          {
-            label: "Construction",
-            icon: HardHat,
-            children: [
-              {
-                label: "Updates",
-                path: "/followup/construction/updates",
-                icon: FileText,
-              },
-            ],
-          },
-          {
-            label: "Follow-Ups",
-            icon: CalendarClock,
-            children: [
-              {
-                label: "Tasks",
-                path: "/followup/follow-ups/tasks",
-                icon: CheckCircle2,
-              },
-              {
-                label: "Follow-Up Log",
-                path: "/followup/follow-ups/log",
-                icon: FileText,
-              },
-              {
-                label: "Reminders",
-                path: "/followup/follow-ups/reminders",
-                icon: Bell,
-              },
-              {
-                label: "PO Reminders",
-                path: "/followup/follow-ups/po-reminders",
-                icon: Bell,
-              },
-              {
-                label: "WO Reminders",
-                path: "/followup/follow-ups/wo-reminders",
-                icon: Bell,
-              },
-              {
-                label: "CHQ Reminders",
-                path: "/followup/follow-ups/chq-reminders",
-                icon: Bell,
-              },
-              {
-                label: "TDS Reminders",
-                path: "/followup/follow-ups/tds-reminders",
-                icon: Bell,
-              },
-              {
-                label: "GRN Reminders",
-                path: "/followup/follow-ups/grn-reminders",
-                icon: Bell,
-              },
-            ],
-          },
-        ];
+        return adaptItems(followupNavItems as DesktopNavItem[]);
       case "engineering":
-        return [
-          { label: "Dashboard", icon: BarChart3, path: "/engineering" },
-          {
-            label: "Transaction",
-            icon: ClipboardList,
-            children: [
-              {
-                label: "Work Order",
-                path: "/engineering/work-order",
-                icon: HardHat,
-              },
-              { label: "BOQ", path: "/engineering/boq", icon: FileText },
-              {
-                label: "Work Done",
-                path: "/engineering/work-done",
-                icon: Wrench,
-              },
-            ],
-          },
-        ];
+        return adaptItems(engineeringNavItems as DesktopNavItem[]);
       case "ticket":
-        return [
-          { label: "Dashboard", icon: BarChart3, path: "/ticket" },
-          {
-            label: "Tickets",
-            icon: MessageSquare,
-            children: [
-              {
-                label: "Create Ticket",
-                path: "/ticket/create",
-                icon: FileText,
-              },
-              {
-                label: "My Tickets",
-                path: "/ticket/my-tickets",
-                icon: FileText,
-              },
-              ...(isAdmin
-                ? [
-                    {
-                      label: "Pending Tickets",
-                      path: "/ticket/pending",
-                      icon: FileText,
-                    },
-                  ]
-                : []),
-              {
-                label: "Resolved Tickets",
-                path: "/ticket/resolved",
-                icon: FileText,
-              },
-            ],
-          },
-        ];
+        return adaptItems(buildTicketNavItems(isAdmin) as DesktopNavItem[]);
+      case "sales":
+        return adaptItems(salesNavItems as DesktopNavItem[]);
       case "records":
-        return [{ label: "All Records", icon: Archive, path: "/records" }];
+        return adaptItems(recordsNavItems as DesktopNavItem[]);
+      case "insidework":
+        return adaptItems(insideWorkNavItems as DesktopNavItem[]);
       default:
         return [];
     }
   };
 
-  const navItems = isAdminPage ? ADMIN_NAV_ITEMS : getModuleNavItems();
+  // Filter nav items by user's page rights — mirrors AppSidebar.tsx's
+  // filterByRights() so desktop and mobile can't drift apart again.
+  const filterByRights = (items: NavItem[]): NavItem[] => {
+    if (isAdmin) return items;
+    return items.reduce<NavItem[]>((acc, item) => {
+      if (item.children) {
+        const visibleChildren = item.children.filter(
+          (child) => !child.pageKey || canAccessPage(child.pageKey),
+        );
+        if (visibleChildren.length > 0) {
+          acc.push({ ...item, children: visibleChildren });
+        }
+      } else if (!item.pageKey || canAccessPage(item.pageKey)) {
+        acc.push(item);
+      }
+      return acc;
+    }, []);
+  };
+
+  const navItems = isSuperAdminPage
+    ? SUPER_ADMIN_NAV_ITEMS
+    : isDbaPage
+      ? DBA_NAV_ITEMS
+      : isAdminPage
+        ? ADMIN_NAV_ITEMS
+        : filterByRights(getModuleNavItems());
 
   const go = (path: string) => {
     navigate(path);

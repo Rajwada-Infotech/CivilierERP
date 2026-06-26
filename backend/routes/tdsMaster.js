@@ -5,6 +5,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
+const { requirePageRight } = require("../middleware/requirePageRight");
 
 router.get("/", cache("tds-master", 300), async (req, res) => {
   try {
@@ -16,7 +17,7 @@ router.get("/", cache("tds-master", 300), async (req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("tds-master", "create"), async (req, res) => {
   const { Nature, Name, Percentage, Status } = req.body;
   try {
     const pool = getPool();
@@ -38,7 +39,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePageRight("tds-master", "edit"), async (req, res) => {
   const { Nature, Name, Percentage, Status } = req.body;
   try {
     const pool = getPool();
@@ -63,7 +64,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("tds-master", "delete"), async (req, res) => {
   try {
     const pool = getPool();
     await pool

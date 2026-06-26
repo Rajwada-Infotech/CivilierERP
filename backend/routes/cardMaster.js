@@ -1,3 +1,4 @@
+const { requirePageRight } = require("../middleware/requirePageRight");
 const express = require("express")
 const router = express.Router()
 const rateLimit = require("express-rate-limit");
@@ -21,7 +22,7 @@ const requireUserEmail = (req, res) => {
 };
 
 // GET all cards
-// created_by/updated_by now store email strings directly — no JOIN needed
+// created_by/updated_by now store email strings directly â€” no JOIN needed
 // Optional ?bankId= filter (and implicit active-only) is used by the Payment
 // form's card selector, mirroring the /cheque-lots?bankId= pattern.
 router.get("/", cache("card-master", 300), async (req, res) => {
@@ -52,7 +53,7 @@ router.get("/", cache("card-master", 300), async (req, res) => {
 })
 
 // POST - Create card
-router.post("/", validateBody(cardMasterCreateSchema), async (req, res) => {
+router.post("/", requirePageRight("card-master", "create"), validateBody(cardMasterCreateSchema), async (req, res) => {
   const {
     company_name, bank_id, bank_name, account_number, ifsc_code,
     card_network, card_type, card_holder_name, card_number,
@@ -81,7 +82,7 @@ router.post("/", validateBody(cardMasterCreateSchema), async (req, res) => {
       .input("reminder_days",    sql.Int,       reminder_days || null)
       .input("status",           sql.Bit,       status ? 1 : 0)
       .input("created_at",       sql.DateTime2, new Date())
-      .input("created_by",       sql.NVarChar(100), userEmail)  // ✅ real email
+      .input("created_by",       sql.NVarChar(100), userEmail)  // âœ… real email
       .query(`
         INSERT INTO dbo.card_master (
           company_name, bank_id, bank_name, account_number, ifsc_code,
@@ -104,7 +105,7 @@ router.post("/", validateBody(cardMasterCreateSchema), async (req, res) => {
 })
 
 // PUT - Update card
-router.put("/:id", validateBody(cardMasterUpdateSchema), async (req, res) => {
+router.put("/:id", requirePageRight("card-master", "edit"), validateBody(cardMasterUpdateSchema), async (req, res) => {
   const {
     company_name, bank_id, bank_name, account_number, ifsc_code,
     card_network, card_type, card_holder_name, card_number,
@@ -134,7 +135,7 @@ router.put("/:id", validateBody(cardMasterUpdateSchema), async (req, res) => {
       .input("reminder_days",    sql.Int,            reminder_days || null)
       .input("status",           sql.Bit,            status ? 1 : 0)
       .input("updated_at",       sql.DateTime2,      new Date())
-      .input("updated_by",       sql.NVarChar(100),  userEmail)  // ✅ real email
+      .input("updated_by",       sql.NVarChar(100),  userEmail)  // âœ… real email
       .query(`
         UPDATE dbo.card_master SET
           company_name=@company_name, bank_id=@bank_id, bank_name=@bank_name,
@@ -155,7 +156,7 @@ router.put("/:id", validateBody(cardMasterUpdateSchema), async (req, res) => {
 })
 
 // DELETE - Remove card
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("card-master", "delete"), async (req, res) => {
   try {
     const pool = getPool()
     await pool.request()
