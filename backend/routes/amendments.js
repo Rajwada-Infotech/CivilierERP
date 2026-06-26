@@ -1,5 +1,6 @@
 const express = require("express");
 const { getPool, sql } = require("../db");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const authMiddleware = require("../middleware/auth");
 const role = require("../middleware/role");
 
@@ -281,7 +282,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("amendments", "create"), async (req, res) => {
   const userName = requireUserName(req, res);
   if (!userName) return;
 
@@ -373,7 +374,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePageRight("amendments", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
     return res.status(400).json({ error: "Invalid amendment id" });
@@ -437,7 +438,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-router.post("/:id/submit", async (req, res) => {
+router.post("/:id/submit", requirePageRight("amendments", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
     return res.status(400).json({ error: "Invalid amendment id" });
@@ -565,7 +566,7 @@ router.post("/:id/reject", role(...APPROVER_ROLES), async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("amendments", "delete"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) {
     return res.status(400).json({ error: "Invalid amendment id" });
@@ -634,7 +635,7 @@ router.get("/:id/line-changes", async (req, res) => {
   }
 });
 
-router.post("/:id/line-changes", async (req, res) => {
+router.post("/:id/line-changes", requirePageRight("amendments", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid amendment id" });
 

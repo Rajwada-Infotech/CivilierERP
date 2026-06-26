@@ -1315,7 +1315,7 @@ export function NOCPage() {
                               </button>
                               {openMenuId === noc.Id && (
                                 <div className="noc-menu">
-                                  <button
+                                  {rights.canEdit && (<button
                                     className="noc-menu-item"
                                     onClick={() => {
                                       openEdit(noc);
@@ -1323,7 +1323,7 @@ export function NOCPage() {
                                     }}
                                   >
                                     <Pencil size={13} /> Edit
-                                  </button>
+                                  </button>)}
                                   {rights.canDelete && (
                                     <button
                                       className="noc-menu-item danger"

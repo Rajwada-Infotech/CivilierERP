@@ -1125,7 +1125,7 @@ export function PossessionNoticePage() {
                             </button>
                             {openMenuId === rec.Id && (
                               <div className="pn-menu">
-                                <button
+                                {rights.canEdit && (<button
                                   className="pn-menu-item"
                                   onClick={() => {
                                     openEdit(rec);
@@ -1133,7 +1133,7 @@ export function PossessionNoticePage() {
                                   }}
                                 >
                                   <Pencil size={14} /> Edit
-                                </button>
+                                </button>)}
                                 {rights.canDelete && (
                                   <button
                                     className="pn-menu-item danger"

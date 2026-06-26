@@ -5,6 +5,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   transition,
   getWorkflow,
@@ -147,7 +148,7 @@ router.get("/:id", async (req, res) => {
 // approval immediately after creation (Draft -> Pending), so it shows up
 // in the Approval Inbox right away. StockLedger OUT/IN entries are only
 // posted once the order clears its final approval level (see PUT /:id/approve).
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("sale-order", "create"), async (req, res) => {
   const pool = getPool();
   try {
     const {
@@ -329,7 +330,7 @@ router.post("/", async (req, res) => {
 });
 
 // ── PUT /:id/submit — Draft/Rejected → Pending ─────────────────────────────
-router.put("/:id/submit", async (req, res) => {
+router.put("/:id/submit", requirePageRight("sale-order", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
@@ -505,7 +506,7 @@ router.put("/:id/reject", async (req, res) => {
 // Deleting a Pending or Approved order would silently reverse stock
 // movements / lose an audit trail, so it's blocked here the same way
 // material issues, GRNs, etc. guard their delete routes.
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("sale-order", "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 

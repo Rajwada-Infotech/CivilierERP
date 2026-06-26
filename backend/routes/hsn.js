@@ -19,7 +19,7 @@ router.get("/", cache("hsn", 300), async (req, res) => {
   }
 })
 
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("hsn-master", "create"), async (req, res) => {
   const {
     HCode, HDescription, HShortDescription,
     HCGST, HSGST, HIGST, HStatus,
@@ -60,7 +60,7 @@ router.post("/", async (req, res) => {
   }
 })
 
-router.put("/:code", async (req, res) => {
+router.put("/:code", requirePageRight("hsn-master", "edit"), async (req, res) => {
   const { code } = req.params
   const {
     HDescription, HShortDescription,
@@ -104,7 +104,7 @@ router.put("/:code", async (req, res) => {
   }
 })
 
-router.delete("/:code", async (req, res) => {
+router.delete("/:code", requirePageRight("hsn-master", "delete"), async (req, res) => {
   const { code } = req.params
   try {
     const pool = getPool()

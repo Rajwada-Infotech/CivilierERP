@@ -1,3 +1,4 @@
+const allowRoles = require("../middleware/role");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -58,7 +59,7 @@ router.get(
 bumpCacheVersion("enterprises").catch(() => {});
 
 // ADD
-router.post("/", async (req, res) => {
+router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const {
     name,
     short_name,
@@ -181,7 +182,7 @@ router.post("/", async (req, res) => {
 });
 
 // UPDATE
-router.put("/:id", async (req, res) => {
+router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const { id } = req.params;
   const {
     name,
@@ -300,7 +301,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // DELETE — blocked if enterprise has linked companies or projects
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id))
     return res.status(400).json({ error: "Invalid enterprise ID" });

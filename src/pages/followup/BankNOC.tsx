@@ -1035,7 +1035,7 @@ export function BankNOCPage() {
                               >
                                 <MoreHorizontal size={16} />
                               </button>
-                              {openMenuId === rec.Id && (
+                              {openMenuId === rec.Id && rights.canEdit && (
                                 <div className="bnoc-menu">
                                   <button
                                     className="bnoc-menu-item"

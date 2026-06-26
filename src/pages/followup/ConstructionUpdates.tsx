@@ -1202,7 +1202,7 @@ export function ConstructionUpdatesPage() {
                               </button>
                               {openMenuId === cu.Id && (
                                 <div className="cu-menu" style={{ position: "fixed", top: menuPos.top, right: menuPos.right, zIndex: 200 }}>
-                                  <button
+                                  {rights.canEdit && (<button
                                     className="cu-menu-item"
                                     onClick={() => {
                                       openEdit(cu);
@@ -1210,7 +1210,7 @@ export function ConstructionUpdatesPage() {
                                     }}
                                   >
                                     <Pencil size={13} /> Edit
-                                  </button>
+                                  </button>)}
                                   {rights.canDelete && (
                                     <button
                                       className="cu-menu-item danger"

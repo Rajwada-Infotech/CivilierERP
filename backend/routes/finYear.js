@@ -6,6 +6,7 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const { validateBody } = require("../middleware/validateRequest");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   finYearCreateSchema,
   finYearUpdateSchema,
@@ -27,7 +28,7 @@ router.get("/", cache("fin-year", 300), async (req, res) => {
   }
 });
 
-router.post("/", validateBody(finYearCreateSchema), async (req, res) => {
+router.post("/", requirePageRight("financial-year-master", "create"), validateBody(finYearCreateSchema), async (req, res) => {
   const { fy_label, start_date, end_date, is_active, is_locked } = req.body;
   try {
     const pool = getPool();
@@ -51,7 +52,7 @@ router.post("/", validateBody(finYearCreateSchema), async (req, res) => {
 });
 
 // Partial UPDATE — only columns present in req.body are modified.
-router.put("/:id", validateBody(finYearUpdateSchema), async (req, res) => {
+router.put("/:id", requirePageRight("financial-year-master", "edit"), validateBody(finYearUpdateSchema), async (req, res) => {
   const { fy_label, start_date, end_date, is_active, is_locked } = req.body;
   try {
     const pool = getPool();
@@ -101,7 +102,7 @@ router.put("/:id", validateBody(finYearUpdateSchema), async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("financial-year-master", "delete"), async (req, res) => {
   try {
     const pool = getPool();
     await pool
