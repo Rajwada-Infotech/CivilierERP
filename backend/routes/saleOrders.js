@@ -50,7 +50,7 @@ const HEADER_JOINS = `
 `;
 
 // ─── GET list of sale orders ───────────────────────────────────────────────
-router.get("/", cache("sale-orders", 60), async (req, res) => {
+router.get("/", requirePageRight("sale-order", "view"), cache("sale-orders", 60), async (req, res) => {
   try {
     const pool = getPool();
     const {
@@ -119,7 +119,7 @@ router.get("/", cache("sale-orders", 60), async (req, res) => {
 });
 
 // ─── GET single sale order ─────────────────────────────────────────────────
-router.get("/:id", async (req, res) => {
+router.get("/:id", requirePageRight("sale-order", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool
@@ -352,7 +352,7 @@ router.put("/:id/submit", requirePageRight("sale-order", "edit"), async (req, re
 });
 
 // ── PUT /:id/approve — Pending → Approved (posts stock on final approval) ──
-router.put("/:id/approve", async (req, res) => {
+router.put("/:id/approve", requirePageRight("sale-order", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const pool = getPool();
   try {
@@ -478,7 +478,7 @@ router.put("/:id/approve", async (req, res) => {
 });
 
 // ── PUT /:id/reject — Pending → Rejected ───────────────────────────────────
-router.put("/:id/reject", async (req, res) => {
+router.put("/:id/reject", requirePageRight("sale-order", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { note } = req.body;
   try {
