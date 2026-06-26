@@ -488,8 +488,8 @@ const ContractorMaster: React.FC = () => {
   const saving = createMut.isPending || updateMut.isPending;
   const isDirty = Object.keys(form).some(
     (k) =>
-      String((form as Record<string, unknown>)[k] ?? "") !==
-      String((EMPTY_FORM as Record<string, unknown>)[k] ?? ""),
+      String((form as unknown as Record<string, unknown>)[k] ?? "") !==
+      String((EMPTY_FORM as unknown as Record<string, unknown>)[k] ?? ""),
   );
   const canSave = form.LHeadName.trim() !== "";
 

@@ -132,6 +132,7 @@ const AccessCardMaster = () => {
     reminder_enabled: false,
     reminder_days: null,
     status: r.status !== false,
+    bank_id: (r.bank_id as number) ?? null,
   });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
