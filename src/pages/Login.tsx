@@ -1072,8 +1072,8 @@ function RocketFlyBy() {
           opacity: [0, 1, 1, 0],
         }}
         transition={{
-          duration: 1.05,
-          ease: [0.22, 0.61, 0.36, 1],
+          duration: 1.4,
+          ease: "linear",
           times: [0, 0.15, 0.85, 1],
         }}
       >
@@ -1091,10 +1091,10 @@ function RocketFlyBy() {
             transform: "translateY(-50%) rotate(0deg)",
           }}
           animate={{ opacity: [0, 0.9, 0] }}
-          transition={{ duration: 1.05, times: [0, 0.3, 1] }}
+          transition={{ duration: 1.4, times: [0, 0.3, 1] }}
         />
         <img
-          src="/Civilier.png"
+          src="/Civilier-transparent.png"
           alt=""
           className="relative w-full h-full object-contain"
           style={{
@@ -1147,7 +1147,7 @@ export default function Login() {
           else if (role === "super_admin" || role === "admin")
             navigate(`/home/${uid}`, { replace: true });
           else navigate(`/home/${uid}`, { replace: true });
-        }, 1100);
+        }, 1450);
       } else {
         setError(result.error || "Invalid email or password.");
         setIsLoading(false);
