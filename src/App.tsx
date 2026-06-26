@@ -105,6 +105,9 @@ const Transactions = lazy(() => import("./pages/finance/Transactions"));
 const Payment = lazy(() => import("./pages/finance/Payment"));
 const Brs = lazy(() => import("./pages/finance/Brs"));
 const Records = lazy(() => import("./pages/records/Records"));
+const InsideWorkDashboard = lazy(
+  () => import("./pages/insidework/InsideWorkDashboard"),
+);
 const ReceivedPayment = lazy(() => import("./pages/finance/ReceivedPayment"));
 const TrialBalance = lazy(() => import("./pages/finance/TrialBalance"));
 
@@ -638,6 +641,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Records />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/insidework"
+        element={
+          <ProtectedRoute pageKey="insidework-dashboard">
+            <InsideWorkDashboard />
           </ProtectedRoute>
         }
       />

@@ -55,6 +55,7 @@ const MODULE_COLORS: Record<string, string> = {
   "Follow-Up": "bg-purple-500/10 text-purple-400 border-purple-500/20",
   Ticket: "bg-red-500/10 text-red-400 border-red-500/20",
   Sales: "bg-pink-500/10 text-pink-400 border-pink-500/20",
+  "Inside Work": "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
   Masters: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
   Reports: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
 };
