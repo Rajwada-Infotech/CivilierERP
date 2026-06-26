@@ -5,6 +5,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
+const { requirePageRight } = require("../middleware/requirePageRight");
 
 // ─── Sanitizer ───────────────────────────────────────────────────────────────
 const cleanStr = (v, len = 255) => {
@@ -58,7 +59,7 @@ router.get("/", authMiddleware, async (req, res) => {
 });
 
 // ─── POST /create ─────────────────────────────────────────────────────────────
-router.post("/create", authMiddleware, async (req, res) => {
+router.post("/create", authMiddleware, requirePageRight("dependency-master", "create"), async (req, res) => {
   const { code, name, isActive = true } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
 
@@ -107,7 +108,7 @@ router.post("/create", authMiddleware, async (req, res) => {
 });
 
 // ─── PUT /update/:id ──────────────────────────────────────────────────────────
-router.put("/update/:id", authMiddleware, async (req, res) => {
+router.put("/update/:id", authMiddleware, requirePageRight("dependency-master", "edit"), async (req, res) => {
   const { id } = req.params;
   const { code, name, isActive } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
@@ -171,7 +172,7 @@ router.put("/update/:id", authMiddleware, async (req, res) => {
 // Hard deleting dependency records would break FK references in historical
 // records that reference this master, the same reasoning used for
 // Contractor Category.
-router.delete("/delete/:id", authMiddleware, async (req, res) => {
+router.delete("/delete/:id", authMiddleware, requirePageRight("dependency-master", "delete"), async (req, res) => {
   const { id } = req.params;
   const actor = req.user?.email || req.user?.name || "system";
   const dpId  = parseInt(id, 10);
