@@ -6,6 +6,7 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const allowRoles = require("../middleware/role");
+const { requirePageRight } = require("../middleware/requirePageRight");
 
 const adminOnly = allowRoles("admin", "super_admin");
 
@@ -173,7 +174,7 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
 });
 
 // ─── POST — create (always Draft) ─────────────────────────────────────────────
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("account-head", "create"), async (req, res) => {
   const {
     LHeadName,
     LHeadCode,
@@ -355,7 +356,7 @@ router.get("/bank-options", async (req, res) => {
 });
 
 // ─── PUT /:id/submit — user submits for approval ───────────────────────────────
-router.put("/:id/submit", async (req, res) => {
+router.put("/:id/submit", requirePageRight("account-head", "edit"), async (req, res) => {
   try {
     const userName = requireUserName(req, res);
     if (!userName) return;
@@ -481,7 +482,7 @@ router.put("/:id/reject", adminOnly, async (req, res) => {
 });
 
 // ─── PUT /:id — update (blocked if Approved) ──────────────────────────────────
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) => {
   const {
     LHeadName,
     LHeadCode,
@@ -622,7 +623,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // ─── DELETE ────────────────────────────────────────────────────────────────────
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("account-head", "delete"), async (req, res) => {
   try {
     const pool = getPool();
 

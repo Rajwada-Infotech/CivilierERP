@@ -56,6 +56,11 @@ interface NavItemChild {
   path: string;
   icon?: React.ElementType;
   count?: number;
+  /** Page key checked against canAccessPage(); must match the keys used by
+   * the desktop sidebar files (src/components/layout/sidebars/*.ts) and the
+   * backend's ROLE_RIGHTS_PAGE_MAP (roles.js), since those are the real
+   * source of truth this is matched against. */
+  pageKey?: string;
 }
 
 interface NavItem {
@@ -65,6 +70,8 @@ interface NavItem {
   children?: NavItemChild[];
   count?: number;
   disabled?: boolean;
+  /** Page key for leaf items (no children). See NavItemChild.pageKey. */
+  pageKey?: string;
 }
 
 interface SetupItem {
@@ -343,7 +350,7 @@ export const MobileNav: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, setTheme } = useTheme();
-  const { currentUser } = useAuth();
+  const { currentUser, canAccessPage } = useAuth();
   const { activeModule, setActiveModule } = useModule();
   const { handleLogout, overlay: logoutOverlay } = useGracefulLogout();
 
@@ -535,7 +542,7 @@ export const MobileNav: React.FC = () => {
     switch (activeModule) {
       case "material":
         return [
-          { label: "Dashboard", icon: BarChart3, path: "/material" },
+          { label: "Dashboard", icon: BarChart3, path: "/material", pageKey: "material-dashboard" },
           {
             label: "Transaction",
             icon: Receipt,
@@ -544,66 +551,73 @@ export const MobileNav: React.FC = () => {
                 label: "Material Request",
                 path: "/material/material-request",
                 icon: ClipboardList,
+                pageKey: "material-request",
               },
               {
                 label: "Purchase Order",
                 path: "/material/purchase-order",
                 icon: FileText,
+                pageKey: "purchase-orders",
               },
-              { label: "GRN", path: "/material/grn", icon: Package },
-              { label: "Issues", path: "/material/issues", icon: PackageMinus },
+              { label: "GRN", path: "/material/grn", icon: Package, pageKey: "grn-master" },
+              { label: "Issues", path: "/material/issues", icon: PackageMinus, pageKey: "material-issues" },
               {
                 label: "Invoice",
                 path: "/material/expense-booking",
                 icon: Receipt,
+                pageKey: "expense-booking",
               },
             ],
           },
-          { label: "Stock", icon: Archive, path: "/material/stock" },
+          { label: "Stock", icon: Archive, path: "/material/stock", pageKey: "stock-ledger" },
           {
             label: "Transfer",
             icon: ClipboardList,
             path: "/material/stock-transfer",
+            pageKey: "stock-transfers",
           },
           {
             label: "Debit Note",
             icon: FileWarning,
             path: "/material/debit-note",
+            pageKey: "debit-note",
           },
           {
             label: "Amendment Menu",
             icon: CheckSquare,
             path: "/material/amendment-menu",
+            pageKey: "amendments",
           },
         ];
       case "finance":
         return [
-          { label: "Dashboard", icon: BarChart3, path: "/finance" },
+          { label: "Dashboard", icon: BarChart3, path: "/finance", pageKey: "finance-dashboard" },
           {
             label: "Transaction",
             icon: Landmark,
             children: [
-              { label: "Payment", path: "/payments", icon: FileText },
+              { label: "Payment", path: "/payments", icon: FileText, pageKey: "new-payment" },
               {
                 label: "Received Payment",
                 path: "/received-payments",
                 icon: FileText,
+                pageKey: "received-payment",
               },
-              { label: "BRS", path: "/brs", icon: FileText },
+              { label: "BRS", path: "/brs", icon: FileText, pageKey: "brs" },
             ],
           },
           {
             label: "Query",
             icon: Landmark,
             children: [
-              { label: "Trial Balance", path: "/transactions", icon: FileText },
-              { label: "Tasks", path: "/tasks", icon: CheckCircle2 },
+              { label: "Trial Balance", path: "/transactions", icon: FileText, pageKey: "transactions" },
+              { label: "Tasks", path: "/tasks", icon: CheckCircle2, pageKey: "tasks" },
             ],
           },
         ];
       case "followup":
         return [
-          { label: "Dashboard", icon: BarChart3, path: "/followup" },
+          { label: "Dashboard", icon: BarChart3, path: "/followup", pageKey: "followup-dashboard" },
           {
             label: "Sales",
             icon: Users,
@@ -612,21 +626,25 @@ export const MobileNav: React.FC = () => {
                 label: "Applications",
                 path: "/followup/sales/applications",
                 icon: FileText,
+                pageKey: "followup-applications",
               },
               {
                 label: "Bookings",
                 path: "/followup/sales/bookings",
                 icon: FileText,
+                pageKey: "followup-bookings",
               },
               {
                 label: "Unit Selection",
                 path: "/followup/sales/unit-selection",
                 icon: FileText,
+                pageKey: "followup-unit-selections",
               },
               {
                 label: "Welcome Calls",
                 path: "/followup/sales/welcome-calls",
                 icon: FileText,
+                pageKey: "followup-welcome-calls",
               },
             ],
           },
@@ -638,6 +656,7 @@ export const MobileNav: React.FC = () => {
                 label: "Agreements",
                 path: "/followup/agreement/agreements",
                 icon: FileText,
+                pageKey: "followup-agreements",
               },
             ],
           },
@@ -645,16 +664,18 @@ export const MobileNav: React.FC = () => {
             label: "Closure",
             icon: CheckCircle2,
             children: [
-              { label: "NOC", path: "/followup/closure/noc", icon: FileText },
+              { label: "NOC", path: "/followup/closure/noc", icon: FileText, pageKey: "followup-noc" },
               {
                 label: "Sales Deed",
                 path: "/followup/closure/sales-deed",
                 icon: FileText,
+                pageKey: "followup-sales-deed",
               },
               {
                 label: "Handover",
                 path: "/followup/closure/handover",
                 icon: FileText,
+                pageKey: "followup-handover",
               },
             ],
           },
@@ -666,6 +687,7 @@ export const MobileNav: React.FC = () => {
                 label: "Updates",
                 path: "/followup/construction/updates",
                 icon: FileText,
+                pageKey: "followup-construction-updates",
               },
             ],
           },
@@ -677,48 +699,56 @@ export const MobileNav: React.FC = () => {
                 label: "Tasks",
                 path: "/followup/follow-ups/tasks",
                 icon: CheckCircle2,
+                pageKey: "followup-tasks",
               },
               {
                 label: "Follow-Up Log",
                 path: "/followup/follow-ups/log",
                 icon: FileText,
+                pageKey: "followup-tasks",
               },
               {
                 label: "Reminders",
                 path: "/followup/follow-ups/reminders",
                 icon: Bell,
+                pageKey: "followup-reminders",
               },
               {
                 label: "PO Reminders",
                 path: "/followup/follow-ups/po-reminders",
                 icon: Bell,
+                pageKey: "followup-reminders",
               },
               {
                 label: "WO Reminders",
                 path: "/followup/follow-ups/wo-reminders",
                 icon: Bell,
+                pageKey: "followup-reminders",
               },
               {
                 label: "CHQ Reminders",
                 path: "/followup/follow-ups/chq-reminders",
                 icon: Bell,
+                pageKey: "followup-reminders",
               },
               {
                 label: "TDS Reminders",
                 path: "/followup/follow-ups/tds-reminders",
                 icon: Bell,
+                pageKey: "followup-reminders",
               },
               {
                 label: "GRN Reminders",
                 path: "/followup/follow-ups/grn-reminders",
                 icon: Bell,
+                pageKey: "followup-reminders",
               },
             ],
           },
         ];
       case "engineering":
         return [
-          { label: "Dashboard", icon: BarChart3, path: "/engineering" },
+          { label: "Dashboard", icon: BarChart3, path: "/engineering", pageKey: "engineering-dashboard" },
           {
             label: "Transaction",
             icon: ClipboardList,
@@ -727,12 +757,14 @@ export const MobileNav: React.FC = () => {
                 label: "Work Order",
                 path: "/engineering/work-order",
                 icon: HardHat,
+                pageKey: "engineering-work-order",
               },
-              { label: "BOQ", path: "/engineering/boq", icon: FileText },
+              { label: "BOQ", path: "/engineering/boq", icon: FileText, pageKey: "boq" },
               {
                 label: "Work Done",
                 path: "/engineering/work-done",
                 icon: Wrench,
+                pageKey: "work-done",
               },
             ],
           },
@@ -778,7 +810,30 @@ export const MobileNav: React.FC = () => {
     }
   };
 
-  const navItems = isAdminPage ? ADMIN_NAV_ITEMS : getModuleNavItems();
+  // Filter nav items by user's page rights — mirrors AppSidebar.tsx's
+  // filterByRights() so desktop and mobile can't drift apart again. Admin
+  // pages are intentionally left unfiltered (role-tier gating only, by
+  // design — see ADMIN_NAV_ITEMS usage below).
+  const filterByRights = (items: NavItem[]): NavItem[] => {
+    if (isAdmin) return items;
+    return items.reduce<NavItem[]>((acc, item) => {
+      if (item.children) {
+        const visibleChildren = item.children.filter(
+          (child) => !child.pageKey || canAccessPage(child.pageKey),
+        );
+        if (visibleChildren.length > 0) {
+          acc.push({ ...item, children: visibleChildren });
+        }
+      } else if (!item.pageKey || canAccessPage(item.pageKey)) {
+        acc.push(item);
+      }
+      return acc;
+    }, []);
+  };
+
+  const navItems = isAdminPage
+    ? ADMIN_NAV_ITEMS
+    : filterByRights(getModuleNavItems());
 
   const go = (path: string) => {
     navigate(path);

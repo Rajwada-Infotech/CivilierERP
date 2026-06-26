@@ -764,7 +764,7 @@ function AppRoutes() {
       <Route
         path="/followup/setup/payment-plan-master"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="payment-plan-master">
             <PaymentPlanMaster />
           </ProtectedRoute>
         }
@@ -1124,7 +1124,7 @@ function AppRoutes() {
       <Route
         path="/material/work-order"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="work-order-master">
             <WorkOrderMaster />
           </ProtectedRoute>
         }
@@ -1341,7 +1341,7 @@ function AppRoutes() {
       <Route
         path="/masters/account-group"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute pageKey="account-group">
             <AccountGroupMaster />
           </ProtectedRoute>
         }

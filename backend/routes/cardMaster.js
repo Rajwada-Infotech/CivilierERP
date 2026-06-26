@@ -52,7 +52,7 @@ router.get("/", cache("card-master", 300), async (req, res) => {
 })
 
 // POST - Create card
-router.post("/", validateBody(cardMasterCreateSchema), async (req, res) => {
+router.post("/", requirePageRight("card-master", "create"), validateBody(cardMasterCreateSchema), async (req, res) => {
   const {
     company_name, bank_id, bank_name, account_number, ifsc_code,
     card_network, card_type, card_holder_name, card_number,
@@ -104,7 +104,7 @@ router.post("/", validateBody(cardMasterCreateSchema), async (req, res) => {
 })
 
 // PUT - Update card
-router.put("/:id", validateBody(cardMasterUpdateSchema), async (req, res) => {
+router.put("/:id", requirePageRight("card-master", "edit"), validateBody(cardMasterUpdateSchema), async (req, res) => {
   const {
     company_name, bank_id, bank_name, account_number, ifsc_code,
     card_network, card_type, card_holder_name, card_number,
@@ -155,7 +155,7 @@ router.put("/:id", validateBody(cardMasterUpdateSchema), async (req, res) => {
 })
 
 // DELETE - Remove card
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("card-master", "delete"), async (req, res) => {
   try {
     const pool = getPool()
     await pool.request()

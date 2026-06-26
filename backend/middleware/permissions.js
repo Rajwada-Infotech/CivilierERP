@@ -99,6 +99,36 @@ const ACTION_TO_PAGE_ACTION = {
   CanDelete: "delete",
 };
 
+// ─── ACTION NAME NORMALIZATION ───────────────────────────────────────────────
+// checkPermission() is meant to be called with the canonical "CanView" /
+// "CanAdd" / "CanEdit" / "CanDelete" names (these are the literal RoleRights
+// column names). Some route files (e.g. followupDemands.js, followupPayments.js)
+// were written using a shorthand "read"/"write" vocabulary instead. Passing an
+// unrecognized action string used to silently resolve to `undefined` in both
+// `permission[action]` and `ACTION_TO_PAGE_ACTION[action]`, which always
+// evaluates false — meaning those routes could NEVER be granted to anyone
+// except SUPERUSER_ROLES, no matter what an admin set in Role Rights or the
+// Permission Editor. This map normalizes known shorthand to the canonical
+// names so that bug class can't silently recur. Prefer fixing call sites to
+// use the canonical names directly; this is a safety net, not a license to
+// keep using shorthand.
+const ACTION_ALIASES = {
+  read: "CanView",
+  view: "CanView",
+  write: "CanEdit",
+  create: "CanAdd",
+  add: "CanAdd",
+  edit: "CanEdit",
+  update: "CanEdit",
+  delete: "CanDelete",
+  remove: "CanDelete",
+};
+
+function normalizeAction(action) {
+  if (ACTION_TO_PAGE_ACTION[action]) return action;
+  return ACTION_ALIASES[action] || action;
+}
+
 const PERMISSION_PAGE_KEYS = {
   "admin:documenttype": ["document-type", "typeofdoc"],
   "engineering:boq": ["boq"],
@@ -212,7 +242,7 @@ async function getEffectivePagePermissions(userId, roleId) {
 
 async function userHasPermission(userId, module, subModule, action) {
   if (!userId) return false;
-  const pageAction = ACTION_TO_PAGE_ACTION[action];
+  const pageAction = ACTION_TO_PAGE_ACTION[normalizeAction(action)];
   if (!pageAction) return false;
 
   const rights = await userPermissionCache.get(userId);
@@ -233,12 +263,31 @@ async function userHasPermission(userId, module, subModule, action) {
   });
 }
 
+
+async function userHasPermissionByPage(userId, pageKey, action) {
+  if (!userId || !pageKey) return false;
+  const rights = await userPermissionCache.get(userId);
+  if (!Array.isArray(rights) || rights.length === 0) return false;
+
+  const targetPage = String(pageKey).toLowerCase();
+  const targetAction = String(action).toLowerCase();
+
+  return rights.some((right) => {
+    const page = String(right && right.page || "").toLowerCase();
+    if (page !== targetPage) return false;
+    const actions = Array.isArray(right && right.actions)
+      ? right.actions.map((item) => String(item).toLowerCase())
+      : [];
+    return actions.includes(targetAction);
+  });
+}
 const checkPermission = (module, subModule, action = "CanView") => {
   return async (req, res, next) => {
     try {
       const roleId = req.user?.roleId;
       const role = normalizeRole(req.user?.role);
       const userId = req.user?.userId ?? req.user?.id;
+      const normalizedAction = normalizeAction(action);
 
       if (!roleId) {
         return res
@@ -251,11 +300,11 @@ const checkPermission = (module, subModule, action = "CanView") => {
 
       const permission = await permissionCache.get(roleId, module, subModule);
 
-      if (permission && Number(permission[action]) === 1) {
+      if (permission && Number(permission[normalizedAction]) === 1) {
         return next();
       }
 
-      if (await userHasPermission(userId, module, subModule, action)) {
+      if (await userHasPermission(userId, module, subModule, normalizedAction)) {
         return next();
       }
 
@@ -272,4 +321,5 @@ module.exports = {
   permissionCache,
   userPermissionCache,
   getEffectivePagePermissions,
+  userHasPermissionByPage,
 };

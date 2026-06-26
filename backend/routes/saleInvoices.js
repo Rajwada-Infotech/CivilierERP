@@ -1,3 +1,4 @@
+const { requirePageRight } = require("../middleware/requirePageRight");
 const express = require("express");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -183,7 +184,7 @@ router.get("/:id", async (req, res) => {
 //  2. Invoice amount defaults to the Sale Order's TotalAmount when not provided.
 //  3. PaymentStatus starts as "Pending Payment".
 //
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("sale-invoice", "create"), async (req, res) => {
   const {
     SaleOrderID,
     InvoiceDate,

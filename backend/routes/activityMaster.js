@@ -1,3 +1,4 @@
+const allowRoles = require("../middleware/role");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -88,7 +89,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ─── POST (Create) ────────────────────────────────────────────────────────────
-router.post("/", async (req, res) => {
+router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const {
     activity_name,
     short_description,
@@ -150,7 +151,7 @@ router.post("/", async (req, res) => {
 });
 
 // ─── PUT (Update) ─────────────────────────────────────────────────────────────
-router.put("/:id", async (req, res) => {
+router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const {
     activity_name,
     short_description,
@@ -222,7 +223,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // ─── PATCH (Approve) ──────────────────────────────────────────────────────────
-router.patch("/:id/approve", async (req, res) => {
+router.patch("/:id/approve", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   try {
     const pool = getPool();
     const now = new Date();
@@ -251,7 +252,7 @@ router.patch("/:id/approve", async (req, res) => {
 });
 
 // ─── DELETE ───────────────────────────────────────────────────────────────────
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   try {
     const pool = getPool();
 

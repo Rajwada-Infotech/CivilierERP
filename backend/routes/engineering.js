@@ -9,6 +9,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition, guardEdit } = require("../services/approvalService");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -401,7 +402,7 @@ router.get("/work-done/:id", async (req, res) => {
   }
 });
 
-router.post("/work-done", async (req, res) => {
+router.post("/work-done", requirePageRight("engineering-work-order", "create"), async (req, res) => {
   let transaction;
   try {
     const userEmail = requireUserEmail(req, res);
@@ -566,7 +567,7 @@ router.post("/work-done", async (req, res) => {
   }
 });
 
-router.put("/work-done/:id", async (req, res) => {
+router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"), async (req, res) => {
   try {
     await guardEdit("work-done", req.params.id);
   } catch (err) {
@@ -724,7 +725,7 @@ router.put("/work-done/:id", async (req, res) => {
   }
 });
 
-router.delete("/work-done/:id", async (req, res) => {
+router.delete("/work-done/:id", requirePageRight("engineering-work-order", "delete"), async (req, res) => {
   try {
     const role = req.user?.role;
     if (!role || !["admin", "manager"].includes(role.toLowerCase())) {
@@ -765,7 +766,7 @@ router.delete("/work-done/:id", async (req, res) => {
   }
 });
 
-router.put("/work-done/:id/submit", async (req, res) => {
+router.put("/work-done/:id/submit", requirePageRight("engineering-work-order", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);

@@ -1,3 +1,4 @@
+const { requirePageRight } = require("../middleware/requirePageRight");
 // routes/paymentPlanMaster.js  — flat PaymentTermMaster CRUD
 // Mounted at: /api/payment-plan-master  (no server.js change needed)
 const express = require("express");
@@ -47,7 +48,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ── POST ─────────────────────────────────────────────────────────────────────
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("payment-plan-master", "create"), async (req, res) => {
   const { TermName, ValueType, TermValue } = req.body;
   if (!TermName?.trim())
     return res.status(400).json({ error: "TermName is required" });
@@ -81,7 +82,7 @@ router.post("/", async (req, res) => {
 });
 
 // ── PUT ──────────────────────────────────────────────────────────────────────
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePageRight("payment-plan-master", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });
@@ -138,7 +139,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // ── DELETE — hard if unused, soft otherwise ──────────────────────────────────
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("payment-plan-master", "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });
