@@ -159,7 +159,7 @@ async function getMaxSerial_NewProject({
   const dnsRes = await pool
     .request()
     .input("Prefix", sql.NVarChar(50), docNoPrefix)
-    .input("FinYear", sql.NVarChar(10), finYear).query(`
+    .input("FinYear", sql.NVarChar(20), finYear).query(`
       SELECT MAX(ISNULL(DocSerial, 0)) AS MaxSeq
       FROM   dbo.DocNumberSequence
       WHERE  DocNoPrefix = @Prefix
@@ -461,7 +461,7 @@ async function lockNextDocNumber(
       .input("DocYear", sql.SmallInt, tier === "new-dash" ? year : null)
       .input(
         "FinYear",
-        sql.NVarChar(10),
+        sql.NVarChar(20),
         tier !== "legacy" ? resolvedFinYear : null,
       )
       .input("DocSerial", sql.Int, seq)
@@ -583,7 +583,7 @@ async function previewNextDocNumber(pool, sql, docTypeId, finYear) {
   const result = await pool
     .request()
     .input("TypeOfDocId", sql.Int, docTypeId)
-    .input("ClientFinYear", sql.NVarChar(10), clientFinYear)
+    .input("ClientFinYear", sql.NVarChar(20), clientFinYear)
     .input("Year", sql.SmallInt, year)
     .input("YearPct", sql.NVarChar(20), `%-${year}-%`).query(`
       SELECT
