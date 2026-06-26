@@ -13,7 +13,7 @@ const {
   backPatchRecordId,
 } = require("../utils/docNumberLock");
 
-router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
+// Sale Invoices are gated per-route via requirePageRight("sale-invoice", ...)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -37,23 +37,25 @@ async function invalidateCaches() {
 const SI_SELECT = `
   SELECT
     si.SaleInvoiceID,
-    si.SaleInvoiceNo,
+    si.SaleInvoiceNo                  AS DocNo,
     si.InvoiceDate,
     si.SaleOrderID,
-    so.SaleOrderNo,
+    so.SaleOrderNo                    AS SaleOrderDocNo,
     si.CustomerID,
-    ah.LHeadName          AS CustomerName,
-    si.CompanyId,
-    co.name               AS CompanyName,
-    si.ProjectId,
-    pr.name               AS ProjectName,
-    si.Amount,
+    ah.LHeadName                      AS CustomerName,
+    si.CustomerID                     AS ToCompanyID,
+    ah.LHeadName                      AS ToCompanyName,
+    si.CompanyId                      AS FromCompanyID,
+    co.name                           AS FromCompanyName,
+    si.ProjectId                      AS ToProjectID,
+    pr.name                           AS ToProjectName,
+    si.Amount                         AS TotalAmount,
     si.AmountReceived,
     si.PaymentStatus,
     si.DocTypeId,
-    td.Prefix             AS DocTypePrefix,
+    td.Prefix                         AS DocTypePrefix,
     si.fy_id,
-    fy.FName              AS FinYearName,
+    fy.FName                          AS FinYearName,
     si.Remarks,
     si.CreatedBy,
     si.CreatedAt,
@@ -90,6 +92,7 @@ const SI_SELECT = `
 // ── GET /  ────────────────────────────────────────────────────────────────────
 router.get(
   "/",
+  requirePageRight("sale-invoice", "view"),
   cache("sale-invoices", 300, { shared: true }),
   async (req, res) => {
     try {
@@ -144,8 +147,43 @@ router.get(
   },
 );
 
+// ── GET /:id/paid-invoices-for-po  ────────────────────────────────────────────
+// Returns Sale Invoices that are fully paid and not yet linked to a PO —
+// used by the Purchase Order form to populate the "Source Sale Invoice" picker.
+router.get("/paid-for-po", requirePageRight("sale-invoice", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT
+        si.SaleInvoiceID,
+        si.SaleInvoiceNo,
+        si.InvoiceDate,
+        si.Amount,
+        si.CustomerID,
+        ah.LHeadName AS CustomerName,
+        so.SaleOrderID,
+        so.SaleOrderNo
+      FROM dbo.SaleInvoices si
+      LEFT JOIN dbo.CustomerSaleOrders so ON so.SaleOrderID = si.SaleOrderID
+      LEFT JOIN dbo.AccountHeadMaster  ah ON ah.LHeadId     = si.CustomerID
+      WHERE si.PaymentStatus = 'Paid'
+        AND si.IsDeleted = 0
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.PurchaseOrders po
+          WHERE po.SourceSaleInvoiceId = si.SaleInvoiceID
+            AND ISNULL(po.Status,'') NOT IN ('Deleted','Rejected')
+        )
+      ORDER BY si.SaleInvoiceID DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("GET paid-for-po error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /:id  ─────────────────────────────────────────────────────────────────
-router.get("/:id", async (req, res) => {
+router.get("/:id", requirePageRight("sale-invoice", "view"), async (req, res) => {
   try {
     const id = requireValidId(req, res);
     if (!id) return;
@@ -321,8 +359,11 @@ router.post("/", requirePageRight("sale-invoice", "create"), async (req, res) =>
 
     res.status(201).json({
       SaleInvoiceID: newId,
+      DocNo: finalDocNo,
       SaleInvoiceNo: finalDocNo,
+      TotalAmount: invoiceAmount,
       PaymentStatus: "Pending Payment",
+      message: "Sale invoice created successfully",
     });
   } catch (err) {
     if (transaction) {
@@ -331,41 +372,6 @@ router.post("/", requirePageRight("sale-invoice", "create"), async (req, res) =>
       } catch (_) {}
     }
     console.error("POST SaleInvoice error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── GET /:id/paid-invoices-for-po  ────────────────────────────────────────────
-// Returns Sale Invoices that are fully paid and not yet linked to a PO —
-// used by the Purchase Order form to populate the "Source Sale Invoice" picker.
-router.get("/paid-for-po", async (req, res) => {
-  try {
-    const pool = getPool();
-    const result = await pool.request().query(`
-      SELECT
-        si.SaleInvoiceID,
-        si.SaleInvoiceNo,
-        si.InvoiceDate,
-        si.Amount,
-        si.CustomerID,
-        ah.LHeadName AS CustomerName,
-        so.SaleOrderID,
-        so.SaleOrderNo
-      FROM dbo.SaleInvoices si
-      LEFT JOIN dbo.CustomerSaleOrders so ON so.SaleOrderID = si.SaleOrderID
-      LEFT JOIN dbo.AccountHeadMaster  ah ON ah.LHeadId     = si.CustomerID
-      WHERE si.PaymentStatus = 'Paid'
-        AND si.IsDeleted = 0
-        AND NOT EXISTS (
-          SELECT 1 FROM dbo.PurchaseOrders po
-          WHERE po.SourceSaleInvoiceId = si.SaleInvoiceID
-            AND ISNULL(po.Status,'') NOT IN ('Deleted','Rejected')
-        )
-      ORDER BY si.SaleInvoiceID DESC
-    `);
-    res.json(result.recordset);
-  } catch (err) {
-    console.error("GET paid-for-po error:", err);
     res.status(500).json({ error: err.message });
   }
 });
