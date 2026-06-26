@@ -1187,10 +1187,12 @@ function BookingDrawer({
   booking,
   onClose,
   onEdit,
+  canEdit,
 }: {
   booking: Booking;
   onClose: () => void;
   onEdit: () => void;
+  canEdit: boolean;
 }) {
   const { data: paymentSchedule = [], isLoading: scheduleLoading } = useQuery<
     BookingPaymentTerm[]
