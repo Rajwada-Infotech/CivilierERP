@@ -538,6 +538,7 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     paymentName: "",
     mode: "",
     amount: null,
+    baseAmount: null,
     date: new Date().toISOString().slice(0, 10),
     bankId: null,
     bankName: "",
