@@ -1,20 +1,25 @@
-﻿const { userHasPermissionByPage } = require("./permissions");
+﻿const { getEffectivePagePermissions } = require("./permissions");
 
 /**
  * Authorization middleware keyed directly on the `page` slug stored in
- * dbo.UserPageRightsJson (e.g. "financial-year-master", "item-master").
+ * dbo.UserPageRightsJson (e.g. "financial-year-master", "item-master") and,
+ * as of this version, also on role-level defaults in dbo.RoleRights.
  *
- * Why this exists instead of reusing checkPermission(Module, SubModule, action):
- * RoleRights is empty in production (0 rows) — checkPermission's primary
- * lookup path always misses and falls through to userHasPermission(), which
- * matches against page keys derived from Module/SubModule via
- * getCandidatePageKeys(). That indirection is unnecessary risk for new
- * routes: it's easy to pick a Module/SubModule pair that doesn't resolve to
- * the real page key, which would silently 403 everyone non-superuser.
- * This middleware skips the indirection and checks the page key directly.
+ * History: this used to call userHasPermissionByPage(), which only checked
+ * the per-user row in UserPageRightsJson. RoleRights was empty in
+ * production at the time, so role-level defaults were a dead path anyway —
+ * every new user got NULL rights and required a manual per-user grant via
+ * Menu Rights (or SSMS) before they could access anything, even pages their
+ * role should logically always have.
+ *
+ * RoleRights is now seeded for role-level baselines (see migration 123),
+ * and getEffectivePagePermissions(userId, roleId) merges role-level rights
+ * with any per-user overrides/additions in UserPageRightsJson. A user with
+ * no per-user row at all now still gets whatever their role grants.
  *
  * action: one of "view" | "create" | "edit" | "delete" | "print" | "export"
- * (matches the literal strings stored in RightsJson actions arrays).
+ * (matches the literal strings stored in RightsJson actions arrays, and the
+ * same strings produced by getRolePagePermissions() from RoleRights columns).
  */
 function requirePageRight(pageKey, action) {
   return async (req, res, next) => {
@@ -24,11 +29,24 @@ function requirePageRight(pageKey, action) {
       if (SUPERUSER_ROLES.has(role)) return next();
 
       const userId = req.user?.userId ?? req.user?.id;
+      const roleId = req.user?.roleId;
       if (!userId) {
         return res.status(401).json({ error: "Invalid token - missing user id" });
       }
 
-      const allowed = await userHasPermissionByPage(userId, pageKey, action);
+      const targetPage = String(pageKey).toLowerCase();
+      const targetAction = String(action).toLowerCase();
+
+      const effective = await getEffectivePagePermissions(userId, roleId);
+      const allowed = effective.some((right) => {
+        const page = String(right?.page || "").toLowerCase();
+        if (page !== targetPage) return false;
+        const actions = Array.isArray(right?.actions)
+          ? right.actions.map((item) => String(item).toLowerCase())
+          : [];
+        return actions.includes(targetAction);
+      });
+
       if (!allowed) {
         return res.status(403).json({ error: "Access denied" });
       }
