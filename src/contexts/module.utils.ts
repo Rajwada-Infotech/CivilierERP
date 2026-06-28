@@ -12,6 +12,7 @@ export type Module =
   | "sales"
   | "records"
   | "civilworkdpr"
+  | "sales-automation"
   | "admin"
   | null;
 
@@ -25,5 +26,6 @@ export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
   sales: "/sales",
   records: "/records",
   civilworkdpr: "/civilworkdpr",
+  "sales-automation": "/sales-automation/social-media",
   admin: "/admin/dashboard",
 };
