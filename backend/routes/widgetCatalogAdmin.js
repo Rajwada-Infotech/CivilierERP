@@ -53,7 +53,7 @@ router.get("/", async (_req, res) => {
 });
 
 // ── POST / — add a new widget ─────────────────────────────────────────────────
-router.post("/", async (req, res) => {
+router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const { key, label, iconKey, category, description, sortOrder = 0 } = req.body;
 
   const wKey  = clean(key, 100);
@@ -100,7 +100,7 @@ router.post("/", async (req, res) => {
 });
 
 // ── PUT /:key — update metadata ───────────────────────────────────────────────
-router.put("/:key", async (req, res) => {
+router.put("/:key", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const wKey = req.params.key;
   const { label, iconKey, category, description, sortOrder } = req.body;
 
@@ -149,7 +149,7 @@ router.put("/:key", async (req, res) => {
 });
 
 // ── PATCH /:key/toggle — flip IsActive ────────────────────────────────────────
-router.patch("/:key/toggle", async (req, res) => {
+router.patch("/:key/toggle", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const wKey = req.params.key;
   try {
     const pool = getPool();
@@ -180,7 +180,7 @@ router.patch("/:key/toggle", async (req, res) => {
 });
 
 // ── DELETE /:key — hard delete, blocks if any user has this widget assigned ───
-router.delete("/:key", async (req, res) => {
+router.delete("/:key", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const wKey = req.params.key;
   try {
     const pool = getPool();

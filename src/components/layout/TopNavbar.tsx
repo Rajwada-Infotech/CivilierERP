@@ -41,6 +41,8 @@ import {
   ClipboardList,
   Ruler,
   SlidersHorizontal,
+  GitBranch,
+  DoorOpen,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
@@ -107,6 +109,7 @@ const MODULE_GLOW_RGB: Record<string, string> = {
   ticket: "236,72,153",
   sales: "168,85,247",
   records: "245,158,11",
+  insidework: "8,145,178",
   admin: "59,130,246",
 };
 
@@ -119,6 +122,7 @@ const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
   ticket: { h: 330, s: 81, l: 60 }, // #ec4899 pink
   sales: { h: 271, s: 91, l: 65 }, // #a855f7 purple
   records: { h: 38, s: 92, l: 50 }, // #f59e0b amber
+  insidework: { h: 192, s: 91, l: 36 }, // #0891b2 cyan/teal
   admin: { h: 217, s: 91, l: 60 }, // #3b82f6 blue
 };
 
@@ -281,16 +285,10 @@ const materialSetupItems = [
 
 const followupSetupItems = [
   {
-    icon: ClipboardList,
-    label: "Payment Plan",
-    path: "/followup/setup/payment-plan-master",
-    color: "text-emerald-500",
-  },
-  {
-    icon: Layers,
-    label: "Block",
-    path: "/followup/setup/block-master",
-    color: "text-cyan-500",
+    icon: Users,
+    label: "Customers",
+    path: "/followup/setup/customer-master",
+    color: "text-violet-500",
   },
   {
     icon: Ruler,
@@ -299,10 +297,22 @@ const followupSetupItems = [
     color: "text-orange-500",
   },
   {
-    icon: Calendar,
-    label: "Reminders",
-    path: "/followup/follow-ups/reminders",
-    color: "text-indigo-500",
+    icon: Layers,
+    label: "Block",
+    path: "/followup/setup/block-master",
+    color: "text-cyan-500",
+  },
+  {
+    icon: DoorOpen,
+    label: "Room",
+    path: "/followup/setup/room-master",
+    color: "text-teal-500",
+  },
+  {
+    icon: ClipboardList,
+    label: "Payment Plan",
+    path: "/followup/setup/payment-plan-master",
+    color: "text-emerald-500",
   },
   {
     icon: Activity,
@@ -311,10 +321,10 @@ const followupSetupItems = [
     color: "text-purple-500",
   },
   {
-    icon: Users,
-    label: "Customers",
-    path: "/followup/setup/customer-master",
-    color: "text-violet-500",
+    icon: Calendar,
+    label: "Reminders",
+    path: "/followup/follow-ups/reminders",
+    color: "text-indigo-500",
   },
 ];
 
@@ -324,6 +334,16 @@ const engineeringSetupItems = [
     label: "Activity",
     path: "/masters/activity",
     color: "text-orange-400",
+  },
+];
+
+const insideworkSetupItems = [
+  {
+    icon: GitBranch,
+    label: "Dependency",
+    path: "/insidework/setup/dependency",
+    color: "text-cyan-500",
+    pageKey: "dependency-master",
   },
 ];
 
@@ -753,6 +773,13 @@ export const TopNavbar = () => {
         items: filterSetupItems(engineeringSetupItems),
         label: "Engineering",
         colorStyle: makeColorStyle("engineering"),
+        available: true,
+      };
+    if (activeModule === "insidework")
+      return {
+        items: filterSetupItems(insideworkSetupItems),
+        label: "Inside Work",
+        colorStyle: makeColorStyle("insidework"),
         available: true,
       };
     if (activeModule === "finance")

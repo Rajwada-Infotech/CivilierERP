@@ -524,7 +524,10 @@ export function ExpenseBookingPreviewModal({
                     </table>
                   </div>
                 </div>
-                {/* Cumulative GST summary — recomputes GST when pre-GST terms adjust the base */}
+                {/* Cumulative GST summary — recomputes GST when pre-GST terms adjust the base.
+                Row order mirrors how the amount is actually derived: pre-GST terms
+                adjust the base BEFORE tax, so they render before CGST/SGST/Gross;
+                post-GST terms adjust the gross AFTER tax, so they render after it. */}
                 {(() => {
                   const origBase = grnBreakdown.totals.totalBase;
                   const origCGST = grnBreakdown.totals.totalCGST;
@@ -538,16 +541,22 @@ export function ExpenseBookingPreviewModal({
                   const preTerms = billingTerms.filter(
                     (t: any) => t.appliedOn !== "post-gst",
                   );
+                  const postTerms = billingTerms.filter(
+                    (t: any) => t.appliedOn === "post-gst",
+                  );
 
-                  // Compute adjusted taxable base
+                  // Running base after pre-GST terms, captured per-term for display
+                  const preTermRows: { term: any; base: number; amt: number }[] =
+                    [];
                   let taxableBase = origBase;
                   for (const t of preTerms) {
-                    const a =
+                    const amt =
                       t.type === "percentage"
                         ? (taxableBase * (t.value ?? 0)) / 100
                         : (t.value ?? 0);
-                    if (t.deductionType === "Addition") taxableBase += a;
-                    else taxableBase = Math.max(0, taxableBase - a);
+                    preTermRows.push({ term: t, base: taxableBase, amt });
+                    if (t.deductionType === "Addition") taxableBase += amt;
+                    else taxableBase = Math.max(0, taxableBase - amt);
                   }
 
                   const hasPreTerms = preTerms.length > 0;
@@ -560,6 +569,55 @@ export function ExpenseBookingPreviewModal({
                   const displayGross = hasPreTerms
                     ? taxableBase + displayCGST + displaySGST
                     : origGross;
+
+                  // Running gross after post-GST terms, captured per-term for display
+                  const postTermRows: { term: any; base: number; amt: number }[] =
+                    [];
+                  let runGross = displayGross;
+                  for (const t of postTerms) {
+                    const amt =
+                      t.type === "percentage"
+                        ? (runGross * (t.value ?? 0)) / 100
+                        : (t.value ?? 0);
+                    postTermRows.push({ term: t, base: runGross, amt });
+                    if (t.deductionType === "Addition") runGross += amt;
+                    else runGross = Math.max(0, runGross - amt);
+                  }
+
+                  const renderTermRow = (
+                    row: { term: any; amt: number },
+                    isPreGst: boolean,
+                    i: number,
+                  ) => {
+                    const { term: t, amt } = row;
+                    const isAdd = t.deductionType === "Addition";
+                    return (
+                      <div
+                        key={t._key ?? t.masterTermId ?? `${isPreGst}-${i}`}
+                        className={`flex items-center justify-between px-4 py-2.5 ${isAdd ? "bg-emerald-500/5" : "bg-red-500/5"}`}
+                      >
+                        <p
+                          className={`text-xs flex items-center gap-1.5 ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
+                        >
+                          <TrendingUp size={10} />
+                          {t.masterTermName || `Term ${i + 1}`}
+                          <span className="font-mono text-[10px] opacity-70">
+                            {t.type === "percentage"
+                              ? `${t.value ?? 0}%`
+                              : `₹${fmt(t.value ?? 0)}`}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground/60">
+                            ({isPreGst ? "pre-GST" : "post-GST"})
+                          </span>
+                        </p>
+                        <p
+                          className={`font-mono text-sm font-semibold ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}
+                        >
+                          {isAdd ? "+ " : "− "}₹{fmt(amt)}
+                        </p>
+                      </div>
+                    );
+                  };
 
                   return (
                     <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-sm">
@@ -574,6 +632,7 @@ export function ExpenseBookingPreviewModal({
                           ₹{fmt(origBase)}
                         </p>
                       </div>
+                      {preTermRows.map((row, i) => renderTermRow(row, true, i))}
                       {displayCGST > 0 && (
                         <div className="flex items-center justify-between px-4 py-2.5">
                           <div>
@@ -615,104 +674,7 @@ export function ExpenseBookingPreviewModal({
                           ₹{fmt(displayGross)}
                         </p>
                       </div>
-                      {/* Billing term rows — rendered with correct pre/post-GST base.
-                      Pre-GST terms apply sequentially on the base amount.
-                      Post-GST terms apply sequentially on the gross (base + recalculated GST). */}
-                      {billingTerms.map((t: any, i: number) => {
-                        const origBase = grnBreakdown.totals.totalBase;
-                        const origCGST = grnBreakdown.totals.totalCGST;
-                        const origSGST = grnBreakdown.totals.totalSGST;
-                        const origGross = grnBreakdown.totals.totalInclGST;
-                        const effectiveCGSTRate =
-                          origBase > 0 ? (origCGST / origBase) * 100 : 0;
-                        const effectiveSGSTRate =
-                          origBase > 0 ? (origSGST / origBase) * 100 : 0;
-
-                        const isPreGst = t.appliedOn !== "post-gst";
-                        const preTerms = billingTerms.filter(
-                          (_t: any) => _t.appliedOn !== "post-gst",
-                        );
-                        const postTerms = billingTerms.filter(
-                          (_t: any) => _t.appliedOn === "post-gst",
-                        );
-
-                        let base: number;
-                        if (isPreGst) {
-                          // Running base after previous pre-GST terms
-                          let running = origBase;
-                          for (let j = 0; j < preTerms.indexOf(t); j++) {
-                            const prev = preTerms[j];
-                            const a =
-                              prev.type === "percentage"
-                                ? (running * (prev.value ?? 0)) / 100
-                                : (prev.value ?? 0);
-                            if (prev.deductionType === "Addition") running += a;
-                            else running = Math.max(0, running - a);
-                          }
-                          base = running;
-                        } else {
-                          // Running gross after all pre-GST terms + previous post-GST terms
-                          let runBase = origBase;
-                          for (const pt of preTerms) {
-                            const a =
-                              pt.type === "percentage"
-                                ? (runBase * (pt.value ?? 0)) / 100
-                                : (pt.value ?? 0);
-                            if (pt.deductionType === "Addition") runBase += a;
-                            else runBase = Math.max(0, runBase - a);
-                          }
-                          const adjGross =
-                            preTerms.length > 0
-                              ? runBase +
-                                (runBase * effectiveCGSTRate) / 100 +
-                                (runBase * effectiveSGSTRate) / 100
-                              : origGross;
-                          let runGross = adjGross;
-                          for (let j = 0; j < postTerms.indexOf(t); j++) {
-                            const prev = postTerms[j];
-                            const a =
-                              prev.type === "percentage"
-                                ? (runGross * (prev.value ?? 0)) / 100
-                                : (prev.value ?? 0);
-                            if (prev.deductionType === "Addition")
-                              runGross += a;
-                            else runGross = Math.max(0, runGross - a);
-                          }
-                          base = runGross;
-                        }
-
-                        const amt =
-                          t.type === "percentage"
-                            ? (base * (t.value ?? 0)) / 100
-                            : (t.value ?? 0);
-                        const isAdd = t.deductionType === "Addition";
-                        return (
-                          <div
-                            key={t._key ?? t.masterTermId ?? i}
-                            className={`flex items-center justify-between px-4 py-2.5 ${isAdd ? "bg-emerald-500/5" : "bg-red-500/5"}`}
-                          >
-                            <p
-                              className={`text-xs flex items-center gap-1.5 ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
-                            >
-                              <TrendingUp size={10} />
-                              {t.masterTermName || `Term ${i + 1}`}
-                              <span className="font-mono text-[10px] opacity-70">
-                                {t.type === "percentage"
-                                  ? `${t.value ?? 0}%`
-                                  : `₹${fmt(t.value ?? 0)}`}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground/60">
-                                ({isPreGst ? "pre-GST" : "post-GST"})
-                              </span>
-                            </p>
-                            <p
-                              className={`font-mono text-sm font-semibold ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}
-                            >
-                              {isAdd ? "+ " : "− "}₹{fmt(amt)}
-                            </p>
-                          </div>
-                        );
-                      })}
+                      {postTermRows.map((row, i) => renderTermRow(row, false, i))}
                     </div>
                   );
                 })()}

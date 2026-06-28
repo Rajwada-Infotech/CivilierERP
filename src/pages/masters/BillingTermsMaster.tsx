@@ -483,6 +483,9 @@ const BillingTermsMaster: React.FC = () => {
                 },
               ],
             } : undefined}
+            canCreate={rights.canCreate}
+            canEdit={rights.canEdit}
+            canDelete={rights.canDelete}
           />
         )}
 

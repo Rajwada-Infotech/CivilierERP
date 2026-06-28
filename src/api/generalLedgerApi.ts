@@ -26,6 +26,7 @@ export interface LedgerHead {
   LHeadStatus: boolean;
   LHeadType: string;
   isEdited: boolean | null;
+  IsSystemGenerated: boolean;
   GroupName: string | null;
   ParentGroupId: number | null;
   ParentGroupName: string | null;
@@ -36,6 +37,7 @@ export interface LedgerPayload {
   LHeadCode?: string | null;
   LBelongsTo?: number | null;
   LHeadStatus?: boolean;
+  IsSystemGenerated?: boolean;
 }
 
 export interface LedgerOption {
@@ -112,6 +114,7 @@ export const addLedger = async (
       LHeadCode: payload.LHeadCode?.trim().toUpperCase() || null,
       LBelongsTo: payload.LBelongsTo ?? null,
       LHeadStatus: payload.LHeadStatus !== false,
+      IsSystemGenerated: payload.IsSystemGenerated ?? false,
     }),
   });
   return handleResponse<{ message: string }>(res);
@@ -141,4 +144,11 @@ export const deleteLedger = async (
 ): Promise<{ message: string }> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   return handleResponse<{ message: string }>(res);
+};
+// ─── GET SYSTEM-GENERATED LEDGERS ─────────────────────────────────────────────
+// Returns only ledger accounts marked IsSystemGenerated = 1.
+// Used by the GRN Posting tab dropdowns.
+export const getSystemGeneratedLedgers = async (): Promise<LedgerOption[]> => {
+  const res = await fetchWithAuth(`${BASE}/system-generated`);
+  return handleResponse<LedgerOption[]>(res);
 };

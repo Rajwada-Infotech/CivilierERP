@@ -1,6 +1,20 @@
 export type UserRole = "super_admin" | "admin" | "user" | "dba" | "engineer" | "customer";
 
-export type PageKey =
+// PageKey used to be a closed union of ~19 hardcoded keys. The real system
+// (backend ROLE_RIGHTS_PAGE_MAP in roles.js, DB-driven /api/page-definitions,
+// and 40+ sidebar pageKey tags across Engineering/Material/Finance/Followup)
+// uses far more keys than this union ever listed, which forced `as any`
+// casts everywhere a real page key was used (usePageRights.ts, AppSidebar.tsx,
+// MenuRights.tsx) and silently defeated TypeScript's ability to catch typos.
+// Widened to `string` so the type system stays honest about there being one
+// real source of truth (the DB), not a second hardcoded list pretending to
+// constrain it.
+export type PageKey = string;
+
+// Legacy keys kept only for reference / for any code still pattern-matching
+// against the original hardcoded set (e.g. ADMIN_ONLY_PAGES in auth.utils.ts).
+// Not used to constrain PageKey anymore.
+export type LegacyPageKey =
   | "dashboard"
   | "transactions"
   | "reports"

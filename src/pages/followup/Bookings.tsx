@@ -1227,12 +1227,12 @@ function BookingDrawer({
               </div>
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              <button
+              {canEdit && (<button
                 onClick={onEdit}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-[12px] font-semibold hover:bg-primary/90 transition-colors"
               >
                 <Edit2 size={11} /> Edit
-              </button>
+                </button>)}
               <button
                 onClick={onClose}
                 className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -2409,6 +2409,7 @@ export default function BookingsPage() {
           booking={selectedBooking}
           onClose={() => setSelectedBooking(null)}
           onEdit={() => openEdit(selectedBooking)}
+          canEdit={rights.canEdit}
         />
       )}
 

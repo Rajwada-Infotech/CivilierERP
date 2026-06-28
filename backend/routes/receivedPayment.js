@@ -1,3 +1,4 @@
+const { requirePageRight } = require("../middleware/requirePageRight");
 const express = require("express");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -113,7 +114,7 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
 });
 
 // ── POST / ────────────────────────────────────────────────────────────────────
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("received-payment", "create"), async (req, res) => {
   try {
     const {
       RPCompanyName,
@@ -344,7 +345,7 @@ router.post("/", async (req, res) => {
 });
 
 // ── PUT /:id ──────────────────────────────────────────────────────────────────
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -457,7 +458,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // ── DELETE /:id ───────────────────────────────────────────────────────────────
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("received-payment", "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ error: "Invalid payment id" });
@@ -521,7 +522,7 @@ router.delete("/:id", async (req, res) => {
 
 // ── PATCH /:id/submit ─────────────────────────────────────────────────────────
 // Sets status = 'Pending' so it appears in the admin Approval Inbox
-router.patch("/:id/submit", async (req, res) => {
+router.patch("/:id/submit", requirePageRight("received-payment", "edit"), async (req, res) => {
   try {
     const { id } = req.params;
     const submittedBy = req.user?.name || req.user?.email || null;

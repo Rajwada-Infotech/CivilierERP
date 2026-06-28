@@ -1306,7 +1306,7 @@ export function HandoverPage() {
                               </button>
                               {openMenuId === ho.Id && (
                                 <div className="ho-menu">
-                                  <button
+                                  {rights.canEdit && (<button
                                     className="ho-menu-item"
                                     onClick={() => {
                                       openEdit(ho);
@@ -1314,7 +1314,7 @@ export function HandoverPage() {
                                     }}
                                   >
                                     <Pencil size={14} /> Edit
-                                  </button>
+                                  </button>)}
                                   {rights.canDelete && (
                                     <button
                                       className="ho-menu-item danger"

@@ -39,6 +39,7 @@ const ROLE_RIGHTS_PAGE_MAP = {
   "engineering-boq": { module: "Engineering", submodule: "BOQ" },
   "work-done": { module: "Engineering", submodule: "WorkDone" },
   "engineering-dashboard": { module: "Engineering", submodule: "WorkDone" },
+  dpr: { module: "Engineering", submodule: "DPR" },
   "work-order": { module: "Engineering", submodule: "WorkOrders" },
   "engineering-work-order": { module: "Engineering", submodule: "WorkOrders" },
   brs: { module: "Finance", submodule: "BRS" },

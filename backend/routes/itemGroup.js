@@ -5,6 +5,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
+const { requirePageRight } = require("../middleware/requirePageRight");
 
 router.get("/", cache("item-groups", 300), async (req, res) => {
   try {
@@ -53,7 +54,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("item-group", "create"), async (req, res) => {
   const {
     M_Name, M_Description, M_code,
     M_Type, M_BelongsTo, M_Group,
@@ -117,7 +118,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePageRight("item-group", "edit"), async (req, res) => {
   const { id } = req.params;
   const {
     M_Name, M_Description, M_code,
@@ -182,7 +183,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("item-group", "delete"), async (req, res) => {
   const { id } = req.params;
   try {
     const pool = getPool();

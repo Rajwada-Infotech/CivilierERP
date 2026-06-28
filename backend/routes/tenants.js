@@ -45,7 +45,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // CREATE tenant
-router.post("/", validateBody(tenantCreateSchema), async (req, res) => {
+router.post("/", allowRoles("admin", "super_admin", "dba"), validateBody(tenantCreateSchema), async (req, res) => {
   const {
     tenant_id,
     name,
@@ -82,7 +82,7 @@ router.post("/", validateBody(tenantCreateSchema), async (req, res) => {
 });
 
 // UPDATE tenant (including tenant_id rename)
-router.put("/:id", validateBody(tenantUpdateSchema), async (req, res) => {
+router.put("/:id", allowRoles("admin", "super_admin", "dba"), validateBody(tenantUpdateSchema), async (req, res) => {
   const { id } = req.params;
   const {
     tenant_id,
@@ -125,6 +125,7 @@ router.put("/:id", validateBody(tenantUpdateSchema), async (req, res) => {
 // PATCH tenant status (suspend / activate)
 router.patch(
   "/:id/status",
+  allowRoles("admin", "super_admin", "dba"),
   validateBody(tenantPatchStatusSchema),
   async (req, res) => {
     const { status } = req.body;
@@ -144,7 +145,7 @@ router.patch(
 );
 
 // DELETE tenant
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   try {
     const pool = getPool();
     await pool
