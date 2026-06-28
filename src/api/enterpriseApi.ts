@@ -55,6 +55,17 @@ export const getEnterprises = async (): Promise<Enterprise[]> => {
   return Array.isArray(data) ? (data as Enterprise[]) : [];
 };
 
+// Full records (with address/city/state etc.) filtered by business_type —
+// used where the caller needs more than the slim {id,label} options list,
+// e.g. to auto-fill a site location from a project's address.
+export const getEnterprisesByType = async (
+  businessType: string,
+): Promise<Enterprise[]> => {
+  const res = await fetchWithAuth(`${BASE_URL}?business_type=${businessType}`);
+  const data = await handle<unknown>(res);
+  return Array.isArray(data) ? (data as Enterprise[]) : [];
+};
+
 export const addEnterprise = async (data: Partial<Enterprise>) => {
   const res = await fetchWithAuth(BASE_URL, {
     method: "POST",

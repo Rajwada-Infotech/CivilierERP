@@ -23,6 +23,7 @@ router.get("/", cache("room-master", 300), async (req, res) => {
         r.UnitId,
         u.UnitName,
         r.RoomName,
+        r.Floor,
         r.IsActive,
         r.CreatedAt,
         r.UpdatedAt
@@ -92,7 +93,7 @@ router.get("/units", async (req, res) => {
 
 // POST — add room
 router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
-  const { ProjectId, UnitId, RoomName, IsActive } = req.body;
+  const { ProjectId, UnitId, RoomName, Floor, IsActive } = req.body;
   const createdBy = req.user?.userId || null;
   try {
     const pool = getPool();
@@ -112,11 +113,12 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("BlockId",   sql.Int, BlockId)
       .input("UnitId",    sql.Int, parseInt(UnitId))
       .input("RoomName",  sql.NVarChar(100), RoomName)
+      .input("Floor",     sql.NVarChar(50), Floor || null)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
       .input("CreatedBy", sql.Int, createdBy)
       .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
-        INSERT INTO dbo.RoomMaster (ProjectId, BlockId, UnitId, RoomName, IsActive, CreatedBy, CreatedAt)
-        VALUES (@ProjectId, @BlockId, @UnitId, @RoomName, @IsActive, @CreatedBy, @CreatedAt)
+        INSERT INTO dbo.RoomMaster (ProjectId, BlockId, UnitId, RoomName, Floor, IsActive, CreatedBy, CreatedAt)
+        VALUES (@ProjectId, @BlockId, @UnitId, @RoomName, @Floor, @IsActive, @CreatedBy, @CreatedAt)
       `);
     await bumpCacheVersion("room-master");
     res.json({ message: "Room added successfully" });
@@ -129,7 +131,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 // PUT — update room
 router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const { id } = req.params;
-  const { ProjectId, UnitId, RoomName, IsActive } = req.body;
+  const { ProjectId, UnitId, RoomName, Floor, IsActive } = req.body;
   const updatedBy = req.user?.userId || null;
   try {
     const pool = getPool();
@@ -149,6 +151,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("BlockId",   sql.Int, BlockId)
       .input("UnitId",    sql.Int, parseInt(UnitId))
       .input("RoomName",  sql.NVarChar(100), RoomName)
+      .input("Floor",     sql.NVarChar(50), Floor || null)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
       .input("UpdatedBy", sql.Int, updatedBy)
       .input("UpdatedAt", sql.DateTime2(3), new Date()).query(`
@@ -157,6 +160,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
           BlockId   = @BlockId,
           UnitId    = @UnitId,
           RoomName  = @RoomName,
+          Floor     = @Floor,
           IsActive  = @IsActive,
           UpdatedBy = @UpdatedBy,
           UpdatedAt = @UpdatedAt
