@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -140,24 +140,27 @@ const SalesDashboard = () => {
       if (!res.ok) throw new Error("Failed to fetch dashboard data");
       return res.json();
     },
-    staleTime: 60_000,
-    refetchInterval: 2 * 60_000,
+    staleTime: 2 * 60_000,
+    refetchInterval: 5 * 60_000,
     refetchOnWindowFocus: true,
   });
 
   const data = rawData ?? EMPTY_DATA;
 
-  const tableGlass = {
-    background: isDark ? "rgba(17,11,26,0.5)" : "rgba(255,255,255,0.72)",
-    border: isDark
-      ? "1px solid rgba(168,85,247,0.15)"
-      : "1px solid rgba(168,85,247,0.18)",
-    backdropFilter: "blur(16px) saturate(150%)",
-    WebkitBackdropFilter: "blur(16px) saturate(150%)",
-    boxShadow: isDark
-      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-      : "0 4px 24px rgba(168,85,247,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
-  };
+  const tableGlass = useMemo(
+    () => ({
+      background: isDark ? "rgba(17,11,26,0.5)" : "rgba(255,255,255,0.72)",
+      border: isDark
+        ? "1px solid rgba(168,85,247,0.15)"
+        : "1px solid rgba(168,85,247,0.18)",
+      backdropFilter: "blur(16px) saturate(150%)",
+      WebkitBackdropFilter: "blur(16px) saturate(150%)",
+      boxShadow: isDark
+        ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
+        : "0 4px 24px rgba(168,85,247,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+    }),
+    [isDark],
+  );
 
   return (
     <>

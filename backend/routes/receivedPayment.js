@@ -582,8 +582,11 @@ router.put("/:id/approve", async (req, res) => {
       await postReceivedPaymentApproval(pool, parseInt(id, 10), actor);
     } catch (glErr) {
       // Ledger posting must never block the approval itself.
+      // `id` is passed as a separate argument (not interpolated into the
+      // format string) so it can never be misread as a format specifier.
       console.error(
-        `[generalLedger] posting failed for received-payment #${id}:`,
+        "[generalLedger] posting failed for received-payment #%s:",
+        id,
         glErr.message,
       );
     }

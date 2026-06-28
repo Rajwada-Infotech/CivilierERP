@@ -33,13 +33,13 @@ IF EXISTS (
 )
 BEGIN
   ALTER TABLE dbo.ChequeMaster ADD Status_bit BIT NOT NULL DEFAULT 1;
-  EXEC('UPDATE dbo.ChequeMaster SET Status_bit = CASE WHEN Status IN (''0'', ''Inactive'') THEN 0 ELSE 1 END');
+  UPDATE dbo.ChequeMaster SET Status_bit = CASE WHEN Status IN ('0', 'Inactive') THEN 0 ELSE 1 END;
   IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = 'DF_ChequeMaster_Status')
     ALTER TABLE dbo.ChequeMaster DROP CONSTRAINT DF_ChequeMaster_Status;
   IF EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('dbo.ChequeMaster') AND name = 'IX_ChequeMaster_CId_Covering')
     DROP INDEX IX_ChequeMaster_CId_Covering ON dbo.ChequeMaster;
   ALTER TABLE dbo.ChequeMaster DROP COLUMN Status;
-  EXEC sp_rename 'dbo.ChequeMaster.Status_bit', 'Status', 'COLUMN';
+  EXEC sp_rename @objname = 'dbo.ChequeMaster.Status_bit', @newname = 'Status', @objtype = 'COLUMN';
 END
 GO
 

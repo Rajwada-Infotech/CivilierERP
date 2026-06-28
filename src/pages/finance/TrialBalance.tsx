@@ -1102,9 +1102,7 @@ export default function TrialBalance() {
                       className="px-4 py-20 text-center text-muted-foreground text-sm"
                     >
                       {rows.length === 0
-                        ? loading
-                          ? "Loading Trial Balance…"
-                          : "No entries found for the selected period."
+                        ? "No entries found for the selected period."
                         : search
                           ? "No accounts match your search."
                           : "No accounts with activity for this period. Toggle \u201cShow all accounts\u201d to see zero-balance accounts."}
