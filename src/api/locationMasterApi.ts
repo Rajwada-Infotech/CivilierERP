@@ -37,6 +37,7 @@ export interface RoomRecord {
   UnitId: number | null;
   UnitName: string | null;
   RoomName: string;
+  Floor: string | null;
   IsActive: boolean;
 }
 

@@ -363,6 +363,9 @@ const ContractorRegister: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
   const locationRooms = locationRoomsAll.filter((r) => r.UnitId === labourForm.unitId);
+  // Floor isn't picked manually — it's whichever floor the selected Room is
+  // recorded on in Room Master.
+  const selectedRoomFloor = locationRooms.find((r) => r.Id === labourForm.roomId)?.Floor || "";
 
   const allocationsForLabourProject = labourProjectId
     ? allocations.filter((a) => a.projectId === labourProjectId)
@@ -576,7 +579,9 @@ const ContractorRegister: React.FC = () => {
     const rows = [...parseNames(row.skilledLabourNames, "Skilled"), ...parseNames(row.unskilledLabourNames, "Unskilled")];
     const win = window.open("", "_blank");
     if (!win) return;
-    const location = [row.blockName, row.unitName, row.roomName].filter(Boolean).join(" / ") || "—";
+    const location = [row.blockName, row.unitName, row.roomName, row.floor ? `Floor ${row.floor}` : null]
+      .filter(Boolean)
+      .join(" / ") || "—";
     win.document.write(`
       <html>
         <head>
@@ -955,7 +960,7 @@ const ContractorRegister: React.FC = () => {
                     <Building2 size={13} className="text-cyan-600" />
                     <span className="text-xs font-heading font-semibold text-foreground">Location</span>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                     <Field label="Project">
                       <NativeSelect
                         value={labourProjectId}
@@ -1010,9 +1015,14 @@ const ContractorRegister: React.FC = () => {
                       >
                         <option value="">{labourForm.unitId ? "Select room…" : "Pick a unit first"}</option>
                         {locationRooms.map((r) => (
-                          <option key={r.Id} value={r.Id}>{r.RoomName}</option>
+                          <option key={r.Id} value={r.Id}>{r.RoomName}{r.Floor ? ` (Floor ${r.Floor})` : ""}</option>
                         ))}
                       </NativeSelect>
+                    </Field>
+                    <Field label="Floor">
+                      <div className={`${inputCls()} flex items-center bg-muted/40`}>
+                        {selectedRoomFloor || <span className="text-muted-foreground">Auto from Room</span>}
+                      </div>
                     </Field>
                   </div>
                 </div>
@@ -1298,8 +1308,8 @@ const ContractorRegister: React.FC = () => {
               <div className="space-y-3 pt-1">
                 <p className="text-xs text-muted-foreground">
                   {printTarget.activityName || "—"} · {printTarget.contractorName || "—"}
-                  {[printTarget.blockName, printTarget.unitName, printTarget.roomName].filter(Boolean).length > 0 && (
-                    <> — {[printTarget.blockName, printTarget.unitName, printTarget.roomName].filter(Boolean).join(" / ")}</>
+                  {[printTarget.blockName, printTarget.unitName, printTarget.roomName, printTarget.floor ? `Floor ${printTarget.floor}` : null].filter(Boolean).length > 0 && (
+                    <> — {[printTarget.blockName, printTarget.unitName, printTarget.roomName, printTarget.floor ? `Floor ${printTarget.floor}` : null].filter(Boolean).join(" / ")}</>
                   )}
                 </p>
                 <div className="rounded-lg border border-border divide-y divide-border max-h-80 overflow-y-auto">
