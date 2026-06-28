@@ -1158,7 +1158,7 @@ const ItemMaster: React.FC = () => {
                 ) : (
                   <Save size={14} />
                 )}
-                {saving ? "Saving…" : editingId ? "Update" : "Save"}
+                {saving ? "Saving…" : editingId ? "Update Item" : "Save Item"}
               </button>
             </div>
           </div>
