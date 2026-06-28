@@ -186,8 +186,8 @@ const MOCK_STATUS_BREAKDOWN = [
 ];
 
 // ─── Dashboard component ──────────────────────────────────────────────────────
-export default function InsideWorkDashboard() {
-  const rights = usePageRights("insidework-dashboard");
+export default function CivilWorkDprDashboard() {
+  const rights = usePageRights("civilworkdpr-dashboard");
   const navigate = useNavigate();
   const [isFetching, setIsFetching] = React.useState(false);
 
@@ -198,7 +198,7 @@ export default function InsideWorkDashboard() {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Inside Work"]} />
+      <Breadcrumbs items={["Dashboard", "Civil Work DPR"]} />
       <div className="relative p-4 sm:p-6 space-y-6 sm:space-y-8">
         <DashboardBackground />
 
@@ -210,7 +210,7 @@ export default function InsideWorkDashboard() {
             </div>
             <div className="min-w-0">
               <h1 className="text-lg sm:text-xl font-heading font-bold text-foreground truncate">
-                Inside Work
+                Civil Work DPR
               </h1>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Internal operations workspace
@@ -232,7 +232,7 @@ export default function InsideWorkDashboard() {
           <AlertCircle size={14} className="shrink-0 text-cyan-500" />
           <span>
             This is a placeholder dashboard with sample data — it'll connect to
-            real data once Inside Work pages are built out.
+            real data once Civil Work DPR pages are built out.
           </span>
         </div>
 
@@ -334,7 +334,7 @@ export default function InsideWorkDashboard() {
                 title="Recent Activity"
                 sub="Last 4 entries"
                 action="View all"
-                onAction={() => navigate("/insidework")}
+                onAction={() => navigate("/civilworkdpr")}
               />
             </div>
             {!MOCK_TASKS.length ? (
@@ -375,21 +375,21 @@ export default function InsideWorkDashboard() {
               {
                 label: "Dashboard",
                 icon: Pickaxe,
-                path: "/insidework",
+                path: "/civilworkdpr",
                 color: "text-cyan-600",
                 bg: "bg-cyan-500/10",
               },
               {
                 label: "Tasks",
                 icon: ClipboardList,
-                path: "/insidework",
+                path: "/civilworkdpr",
                 color: "text-blue-600",
                 bg: "bg-blue-500/10",
               },
               {
                 label: "Tools",
                 icon: Wrench,
-                path: "/insidework",
+                path: "/civilworkdpr",
                 color: "text-orange-600",
                 bg: "bg-orange-500/10",
               },

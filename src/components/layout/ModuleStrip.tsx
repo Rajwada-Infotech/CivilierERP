@@ -79,9 +79,9 @@ const MODULES = [
     ringRgb: "168,85,247",
   },
   {
-    id: "insidework" as Module,
+    id: "civilworkdpr" as Module,
     icon: Pickaxe,
-    label: "Inside Work",
+    label: "Civil Work DPR",
     desc: "Internal operations workspace",
     color: "#0891b2",
     bg: "rgba(8,145,178,0.22)",
@@ -143,7 +143,7 @@ export const ModuleStrip: React.FC = () => {
     engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
     ticket:      ["ticket-dashboard", "tickets"],
     sales:       ["sale-order", "sale-invoice", "sales-payment"],
-    insidework:  ["insidework-dashboard"],
+    civilworkdpr: ["civilworkdpr-dashboard"],
   };
 
   const userHasModuleAccess = (moduleId: string): boolean => {
