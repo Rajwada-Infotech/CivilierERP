@@ -61,7 +61,10 @@ function Calendar({
         // ── Day states ────────────────────────────────────────────────────────
         selected:
           "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground rounded-md",
-        today: "bg-accent text-accent-foreground rounded-md",
+        // Outline only — avoids visually merging with the "selected" fill,
+        // since --accent and --primary share the same hue in this theme.
+        today:
+          "rounded-md ring-1 ring-inset ring-primary/50 aria-selected:ring-0",
         outside:
           "day-outside text-muted-foreground opacity-50 aria-selected:bg-accent/50 aria-selected:text-muted-foreground aria-selected:opacity-30",
         disabled: "text-muted-foreground opacity-50",

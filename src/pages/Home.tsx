@@ -1028,8 +1028,6 @@ export default function HomePage() {
                 accent="#3b82f6"
                 delay={nextDelay()}
                 loading={isLoading}
-                badge={fin?.cheques?.pendingCount}
-                badgeLabel="cheques"
                 stats={[
                   {
                     label: "Total payments",
