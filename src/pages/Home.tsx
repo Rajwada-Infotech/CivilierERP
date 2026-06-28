@@ -30,6 +30,7 @@ import {
   LineChart,
   ShoppingCart,
   Receipt,
+  Pickaxe,
 } from "lucide-react";
 import {
   fetchHomeDashboard,
@@ -40,6 +41,7 @@ import {
   type TaskSummary,
   type SalesSummaryData,
 } from "@/api/homeDashboardApi";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
 // These mirror the logic in TopNavbar / auth.utils so the home page
@@ -656,6 +658,11 @@ export default function HomePage() {
     ],
     ticket: ["ticket-dashboard", "tickets"],
     sales: ["sale-order", "sale-invoice", "sales-payment"],
+    civilworkdpr: [
+      "civilworkdpr-dashboard",
+      "civilworkdpr-dependency",
+      "civilworkdpr-contractor-register",
+    ],
   };
 
   const hasModuleAccess = (moduleId: string): boolean => {
@@ -672,6 +679,7 @@ export default function HomePage() {
     followup: hasModuleAccess("followup"),
     ticket: hasModuleAccess("ticket"),
     sales: hasModuleAccess("sales"),
+    civilworkdpr: hasModuleAccess("civilworkdpr"),
     approvals: privileged,
     admin: privileged && !isDba,
     dba: isDba,
@@ -696,6 +704,22 @@ export default function HomePage() {
       refetchInterval: 5 * 60 * 1000,
       retry: 2,
     });
+
+  // Civil Work DPR isn't part of the main home-dashboard aggregator yet —
+  // it has its own lightweight stats endpoint, so the tile queries that
+  // directly instead of growing the shared backend aggregation.
+  const { data: civilDpr } = useQuery({
+    queryKey: ["home-civilworkdpr"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/civilworkdpr-dashboard");
+      if (!res.ok) throw new Error("Failed to fetch Civil Work DPR stats");
+      return res.json();
+    },
+    enabled: access.civilworkdpr,
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    retry: 1,
+  });
 
   const fin = data?.finance;
   const mat = data?.material;
@@ -1201,6 +1225,44 @@ export default function HomePage() {
                     label: "Handovers due",
                     value: fol?.scheduledHandovers ?? 0,
                     accent: fol?.scheduledHandovers ? "#ef4444" : undefined,
+                  },
+                ]}
+              />
+            )}
+
+            {/* Civil Work DPR */}
+            {access.civilworkdpr && (
+              <ModuleCard
+                title="Civil Work DPR"
+                href="/civilworkdpr"
+                icon={Pickaxe}
+                accent="#0891b2"
+                delay={nextDelay()}
+                loading={isLoading}
+                badge={civilDpr?.progress?.pendingReviewCount}
+                badgeLabel="pending review"
+                stats={[
+                  {
+                    label: "Active activities",
+                    value: civilDpr?.activities?.activeCount ?? 0,
+                    accent: "#0891b2",
+                  },
+                  {
+                    label: "Workers assigned",
+                    value: civilDpr?.allocations?.workerCount ?? 0,
+                    accent: "#3b82f6",
+                    icon: HardHat,
+                  },
+                  {
+                    label: "Pending review",
+                    value: civilDpr?.progress?.pendingReviewCount ?? 0,
+                    accent: civilDpr?.progress?.pendingReviewCount ? "#f59e0b" : undefined,
+                  },
+                  {
+                    label: "Labour on site today",
+                    value: civilDpr?.labour?.totalToday ?? 0,
+                    accent: "#10b981",
+                    icon: Users,
                   },
                 ]}
               />

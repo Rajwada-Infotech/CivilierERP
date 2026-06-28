@@ -83,6 +83,11 @@ const fields: FieldDef[] = [
     required: true,
   },
   {
+    name: "floor",
+    label: "Floor",
+    type: "text",
+  },
+  {
     name: "isActive",
     label: "Status",
     type: "toggle",
@@ -95,6 +100,7 @@ const columns = [
   { key: "blockName", label: "Block" },
   { key: "unitName", label: "Unit" },
   { key: "roomName", label: "Room Name" },
+  { key: "floor", label: "Floor" },
   { key: "isActive", label: "Status" },
 ];
 
@@ -103,6 +109,7 @@ const exportColumns: ExportColumn[] = [
   { header: "Block", accessor: "blockName" },
   { header: "Unit", accessor: "unitName" },
   { header: "Room Name", accessor: "roomName" },
+  { header: "Floor", accessor: "floor" },
   { header: "Status", accessor: "isActive" },
 ];
 
@@ -146,6 +153,7 @@ const RoomMaster: React.FC = () => {
       unitId: String(item.UnitId),
       unitName: item.UnitName ?? "",
       roomName: item.RoomName ?? "",
+      floor: item.Floor ?? "",
       isActive: Boolean(item.IsActive),
     }));
   }, [rooms]);
@@ -157,6 +165,7 @@ const RoomMaster: React.FC = () => {
     ProjectId: parseInt(r.projectId),
     UnitId: parseInt(r.unitId),
     RoomName: r.roomName?.trim() || null,
+    Floor: r.floor?.trim() || null,
     IsActive: r.isActive !== false,
   });
 
@@ -236,6 +245,7 @@ const RoomMaster: React.FC = () => {
             { key: "blockName", label: "Block" },
             { key: "unitName", label: "Unit" },
             { key: "roomName", label: "Room Name" },
+            { key: "floor", label: "Floor" },
             { key: "isActive", label: "Status" },
           ],
         }}
@@ -250,6 +260,7 @@ const RoomMaster: React.FC = () => {
               <tr><td>Block</td><td>${row.blockName || "—"}</td></tr>
               <tr><td>Unit</td><td>${row.unitName || "—"}</td></tr>
               <tr><td>Room Name</td><td>${row.roomName || "—"}</td></tr>
+              <tr><td>Floor</td><td>${row.floor || "—"}</td></tr>
               <tr><td>Status</td><td>${row.isActive ? "Active" : "Inactive"}</td></tr>
             </table></body></html>
           `);

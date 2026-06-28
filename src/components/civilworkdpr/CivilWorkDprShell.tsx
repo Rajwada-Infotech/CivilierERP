@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { Pickaxe } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
 
-interface InsideWorkShellProps {
+interface CivilWorkDprShellProps {
   title: string;
   subtitle?: string;
   icon?: React.ElementType;
@@ -12,13 +12,13 @@ interface InsideWorkShellProps {
 }
 
 /**
- * Shared glass-themed wrapper for all Inside Work module pages.
+ * Shared glass-themed wrapper for all Civil Work DPR module pages.
  * Provides ambient cyan glow, frosted header band, and consistent layout.
- * Mirrors MaterialShell / FinanceShell, recolored to the Inside Work
- * module's cyan accent (#0891b2 — matches MODULE_COLORS.insidework in
+ * Mirrors MaterialShell / FinanceShell, recolored to the Civil Work DPR
+ * module's cyan accent (#0891b2 — matches MODULE_COLORS.civilworkdpr in
  * TopNavbar.tsx).
  */
-export const InsideWorkShell: React.FC<InsideWorkShellProps> = ({
+export const CivilWorkDprShell: React.FC<CivilWorkDprShellProps> = ({
   title,
   subtitle,
   icon: PageIcon,
@@ -144,8 +144,8 @@ export const InsideWorkShell: React.FC<InsideWorkShellProps> = ({
   );
 };
 
-/** Glass-styled stat card for Inside Work pages */
-export const InsideWorkGlassCard: React.FC<{
+/** Glass-styled stat card for Civil Work DPR pages */
+export const CivilWorkDprGlassCard: React.FC<{
   label: string;
   value: React.ReactNode;
   sub?: string;

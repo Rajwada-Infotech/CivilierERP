@@ -629,7 +629,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
     cell: ({ row }) => {
       const grn = row.original;
       return (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-end gap-2">
           <button
             onClick={() => onView(grn)}
             className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"

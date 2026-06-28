@@ -79,9 +79,9 @@ const MODULES = [
     ringRgb: "168,85,247",
   },
   {
-    id: "insidework" as Module,
+    id: "civilworkdpr" as Module,
     icon: Pickaxe,
-    label: "Inside Work",
+    label: "Civil Work DPR",
     desc: "Internal operations workspace",
     color: "#0891b2",
     bg: "rgba(8,145,178,0.22)",
@@ -143,7 +143,7 @@ export const ModuleStrip: React.FC = () => {
     engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
     ticket:      ["ticket-dashboard", "tickets"],
     sales:       ["sale-order", "sale-invoice", "sales-payment"],
-    insidework:  ["insidework-dashboard"],
+    civilworkdpr: ["civilworkdpr-dashboard"],
   };
 
   const userHasModuleAccess = (moduleId: string): boolean => {
@@ -235,21 +235,27 @@ export const ModuleStrip: React.FC = () => {
             />
           </AnimatePresence>
 
-          {/* ── Logo / Sparkle section ─────────────────────────────────────── */}
+          {/* ── Logo / Refresh button ──────────────────────────────────────── */}
           <div className="relative z-10 flex justify-center items-center pt-5 pb-5">
-            <motion.div
+            <motion.button
+              type="button"
+              title="Refresh"
+              onClick={() => window.location.reload()}
               animate={{ rotate: [0, 8, -8, 0], scale: [1, 1.08, 1] }}
               transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+              whileHover={{ scale: 1.15 }}
+              whileTap={{ scale: 0.9, rotate: 180 }}
+              className="cursor-pointer rounded-full"
             >
               <img
                 src="/loader.gif"
-                alt="CivilierERP"
+                alt="Refresh"
                 width={50}
                 height={50}
-                className="object-contain select-none pointer-events-none"
+                className="object-contain select-none"
                 draggable={false}
               />
-            </motion.div>
+            </motion.button>
           </div>
 
           {/* Divider below logo */}
