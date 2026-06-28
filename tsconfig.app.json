@@ -22,4 +22,5 @@
     "useDefineForClassFields": true,
   },
   "include": ["src"],
+  "exclude": ["src/pages/finance/Records.tsx"],
 }

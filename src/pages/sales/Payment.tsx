@@ -451,13 +451,13 @@ function PaymentHistoryTable({
                   </p>
                   <p>{viewing.RPMode}</p>
                 </div>
-                {viewing.RPTransactionId && (
+                {viewing.RPTransactionID && (
                   <div className="col-span-2">
                     <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">
                       Transaction / UTR
                     </p>
                     <p className="font-mono text-xs">
-                      {viewing.RPTransactionId}
+                      {viewing.RPTransactionID}
                     </p>
                   </div>
                 )}
@@ -617,7 +617,7 @@ export default function Payment() {
       RPBankName: selectedBank.BName ?? null,
       RPDepositBankId: selectedBank.BId,
       RPDepositBankName: selectedBank.BName ?? null,
-      RPTransactionId: txnRef || null,
+      RPTransactionID: txnRef || null,
       RPCheckNumber: chequeNo || null,
       RPRemarks: `[SalePayment] ${remarks}`.trim(),
       RPStatus: "Draft",
