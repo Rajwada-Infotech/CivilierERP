@@ -6,31 +6,14 @@ import React, {
   useEffect,
 } from "react";
 import { useLocation } from "react-router-dom";
+import { MODULE_DASHBOARD_ROUTES } from "@/contexts/module.utils";
+import type { Module } from "@/contexts/module.utils";
 
-export type Module =
-  | "finance"
-  | "material"
-  | "followup"
-  | "engineering"
-  | "ticket"
-  | "sales"
-  | "records"
-  | "insidework"
-  | "admin"
-  | null;
-
-// Single source of truth for module dashboard routes
-export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
-  finance: "/finance",
-  material: "/material",
-  followup: "/followup",
-  engineering: "/engineering",
-  ticket: "/ticket",
-  sales: "/sales",
-  records: "/records",
-  insidework: "/insidework",
-  admin: "/admin/dashboard",
-};
+// Module/MODULE_DASHBOARD_ROUTES now live in module.utils.ts and are NOT
+// re-exported here — this file only exports components/hooks. Mixing
+// component and non-component exports in one file breaks Vite Fast Refresh
+// (forces a full reload on every edit instead of hot-patching). Import the
+// type/constant directly from "@/contexts/module.utils" instead.
 
 interface ModuleContextType {
   activeModule: Module;

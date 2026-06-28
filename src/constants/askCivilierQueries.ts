@@ -36,7 +36,7 @@ import {
   History,
   ShelvingUnit,
 } from "lucide-react";
-import type { Module } from "@/contexts/ModuleContext";
+import type { Module } from "@/contexts/module.utils";
 
 export interface SuggestedQuery {
   id: string;
