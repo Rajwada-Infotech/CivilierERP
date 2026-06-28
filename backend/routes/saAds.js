@@ -16,9 +16,6 @@ const PERMISSION_SUBMODULE = "Ads";
 bumpCacheVersion("sa-ads").catch(() => {});
 
 // GET /
-// NOTE: TotalLeadsGenerated / CostPerLead / ConversionRate / BookingCount /
-// ROI / RevenueGenerated depend on dbo.SaLead (Phase 2) and the Booking
-// handoff (Phase 4). Returned as null until those exist.
 router.get(
   "/",
   requirePageRight("sa-ads", "view"),
@@ -36,6 +33,30 @@ router.get(
       }
 
       const result = await r.query(`
+        WITH lead_stats AS (
+          SELECT
+            l.AdId,
+            COUNT(*) AS TotalLeadsGenerated,
+            SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS BookingCount,
+            SUM(COALESCE(fb.TotalValue, fb.BookingAmount, 0)) AS RevenueGenerated
+          FROM dbo.SaLead l
+          LEFT JOIN dbo.FollowupBookings fb
+            ON fb.Id = l.BookingId
+           AND ISNULL(fb.IsDeleted, 0) = 0
+          WHERE l.IsActive = 1
+          GROUP BY l.AdId
+        ),
+        invoice_stats AS (
+          SELECT
+            i.AdId,
+            COUNT(*) AS InvoiceCount,
+            SUM(i.TotalAmount) AS InvoiceSpend
+          FROM dbo.SaMarketingInvoice i
+          WHERE i.IsActive = 1
+            AND i.AdId IS NOT NULL
+            AND i.PaymentStatus <> 'Cancelled'
+          GROUP BY i.AdId
+        )
         SELECT
           a.Id,
           a.CampaignId,
@@ -51,20 +72,67 @@ router.get(
           a.IsActive,
           a.CreatedAt,
           a.UpdatedAt,
-          NULL AS TotalLeadsGenerated,
-          NULL AS CostPerLead,
-          NULL AS ConversionRate,
-          NULL AS BookingCount,
-          NULL AS ROI,
-          NULL AS RevenueGenerated
+          ISNULL(ls.TotalLeadsGenerated, 0) AS TotalLeadsGenerated,
+          CASE
+            WHEN ISNULL(ls.TotalLeadsGenerated, 0) > 0
+              THEN CAST(COALESCE(inv.InvoiceSpend, a.Spent, 0) AS FLOAT) / ls.TotalLeadsGenerated
+            ELSE 0
+          END AS CostPerLead,
+          CASE
+            WHEN ISNULL(ls.TotalLeadsGenerated, 0) > 0
+              THEN CAST(ISNULL(ls.BookingCount, 0) AS FLOAT) / ls.TotalLeadsGenerated * 100
+            ELSE 0
+          END AS ConversionRate,
+          ISNULL(ls.BookingCount, 0) AS BookingCount,
+          COALESCE(ls.RevenueGenerated, 0) AS RevenueGenerated,
+          COALESCE(inv.InvoiceSpend, a.Spent, 0) AS CostSpent,
+          ISNULL(inv.InvoiceCount, 0) AS InvoiceCount,
+          CASE
+            WHEN COALESCE(inv.InvoiceSpend, a.Spent, 0) > 0
+              THEN (COALESCE(ls.RevenueGenerated, 0) - COALESCE(inv.InvoiceSpend, a.Spent, 0))
+                / COALESCE(inv.InvoiceSpend, a.Spent, 0) * 100
+            ELSE 0
+          END AS ROI
         FROM dbo.SaAd a
         JOIN dbo.SaCampaign c ON c.Id = a.CampaignId
+        LEFT JOIN lead_stats ls ON ls.AdId = a.Id
+        LEFT JOIN invoice_stats inv ON inv.AdId = a.Id
         WHERE ${where}
         ORDER BY a.CreatedAt DESC
       `);
       res.json(result.recordset);
     } catch (err) {
       console.error("[sa-ads] GET error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// GET /dropdown
+router.get(
+  "/dropdown",
+  requirePageRight("sa-ads", "view"),
+  cache("sa-ads-dropdown", 600),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const campaignId = parseInt(req.query.campaignId, 10);
+      const r = pool.request();
+      let where = "a.IsActive = 1";
+      if (Number.isFinite(campaignId) && campaignId > 0) {
+        where += " AND a.CampaignId = @CampaignId";
+        r.input("CampaignId", sql.Int, campaignId);
+      }
+      const result = await r.query(`
+        SELECT a.Id, a.Name, a.CampaignId, c.CampaignCode, c.Name AS CampaignName
+        FROM dbo.SaAd a
+        JOIN dbo.SaCampaign c ON c.Id = a.CampaignId
+        WHERE ${where}
+        ORDER BY c.CampaignCode, a.Name
+      `);
+      res.json(result.recordset);
+    } catch (err) {
+      console.error("[sa-ads] GET /dropdown error:", err.message);
       res.status(500).json({ error: err.message });
     }
   },

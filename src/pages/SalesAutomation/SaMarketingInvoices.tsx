@@ -23,7 +23,10 @@ async function fetchAdOptions(): Promise<{ value: string; label: string }[]> {
   const res = await fetchWithAuth("/api/sa/ads/dropdown");
   if (!res.ok) return [];
   const data: any[] = await res.json();
-  return data.map((a) => ({ value: String(a.Id), label: a.Name }));
+  return data.map((a) => ({
+    value: String(a.Id),
+    label: [a.CampaignCode, a.Name].filter(Boolean).join(" - "),
+  }));
 }
 
 const fields: FieldDef[] = [

@@ -206,6 +206,7 @@ const ALL_ROUTES = [
   { path: "/api/sa/marketing-invoices", file: "./routes/saMarketingInvoices" },
   { path: "/api/sa/dashboard", file: "./routes/saDashboard" },
   { path: "/api/sa/reports", file: "./routes/saReports" },
+  { path: "/api/sa/distribution-rules", file: "./routes/saDistributionRules" },
 ];
 
 // ─── createApp ───────────────────────────────────────────────────────────────

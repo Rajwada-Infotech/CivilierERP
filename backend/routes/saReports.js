@@ -32,18 +32,41 @@ router.get("/campaign-performance", requirePageRight("sa-campaigns", "view"), as
   try {
     const pool = getPool();
     const r = await pool.request().query(`
+      WITH ad_stats AS (
+        SELECT
+          a.CampaignId,
+          COUNT(*) AS TotalAds,
+          SUM(COALESCE(inv.InvoiceSpend, a.Spent, 0)) AS CostSpent
+        FROM dbo.SaAd a
+        OUTER APPLY (
+          SELECT SUM(i.TotalAmount) AS InvoiceSpend
+          FROM dbo.SaMarketingInvoice i
+          WHERE i.AdId = a.Id
+            AND i.IsActive = 1
+            AND i.PaymentStatus <> 'Cancelled'
+        ) inv
+        GROUP BY a.CampaignId
+      ),
+      lead_stats AS (
+        SELECT
+          l.CampaignId,
+          COUNT(*) AS TotalLeads,
+          SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings
+        FROM dbo.SaLead l
+        WHERE l.IsActive = 1
+        GROUP BY l.CampaignId
+      )
       SELECT c.Id, c.CampaignCode, c.Name, c.Budget, c.Status,
-        COUNT(DISTINCT a.Id) AS TotalAds,
-        COUNT(DISTINCT l.Id) AS TotalLeads,
-        ISNULL(SUM(DISTINCT a.Spent), 0) AS CostSpent,
-        SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings,
-        CASE WHEN COUNT(DISTINCT l.Id) > 0
-          THEN CAST(SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS FLOAT) / COUNT(DISTINCT l.Id) * 100
+        ISNULL(a.TotalAds, 0) AS TotalAds,
+        ISNULL(l.TotalLeads, 0) AS TotalLeads,
+        ISNULL(a.CostSpent, 0) AS CostSpent,
+        ISNULL(l.Bookings, 0) AS Bookings,
+        CASE WHEN ISNULL(l.TotalLeads, 0) > 0
+          THEN CAST(ISNULL(l.Bookings, 0) AS FLOAT) / l.TotalLeads * 100
           ELSE 0 END AS ConversionPct
       FROM dbo.SaCampaign c
-      LEFT JOIN dbo.SaAd a ON a.CampaignId = c.Id
-      LEFT JOIN dbo.SaLead l ON l.CampaignId = c.Id
-      GROUP BY c.Id, c.CampaignCode, c.Name, c.Budget, c.Status
+      LEFT JOIN ad_stats a ON a.CampaignId = c.Id
+      LEFT JOIN lead_stats l ON l.CampaignId = c.Id
       ORDER BY TotalLeads DESC
     `);
     res.json(r.recordset);
@@ -55,17 +78,47 @@ router.get("/ad-performance", requirePageRight("sa-ads", "view"), async (req, re
   try {
     const pool = getPool();
     const r = await pool.request().query(`
-      SELECT a.Id, a.Name, a.Status, a.Budget, a.Spent, c.Name AS CampaignName,
-        COUNT(l.Id) AS LeadsGenerated,
-        SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings,
-        CASE WHEN COUNT(l.Id) > 0 THEN a.Spent / COUNT(l.Id) ELSE 0 END AS CostPerLead,
-        CASE WHEN COUNT(l.Id) > 0
-          THEN CAST(SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS FLOAT) / COUNT(l.Id) * 100
-          ELSE 0 END AS ConversionRate
+      WITH lead_stats AS (
+        SELECT
+          l.AdId,
+          COUNT(*) AS LeadsGenerated,
+          SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings,
+          SUM(COALESCE(fb.TotalValue, fb.BookingAmount, 0)) AS RevenueGenerated
+        FROM dbo.SaLead l
+        LEFT JOIN dbo.FollowupBookings fb
+          ON fb.Id = l.BookingId
+         AND ISNULL(fb.IsDeleted, 0) = 0
+        WHERE l.IsActive = 1
+        GROUP BY l.AdId
+      ),
+      invoice_stats AS (
+        SELECT AdId, SUM(TotalAmount) AS InvoiceSpend
+        FROM dbo.SaMarketingInvoice
+        WHERE IsActive = 1
+          AND AdId IS NOT NULL
+          AND PaymentStatus <> 'Cancelled'
+        GROUP BY AdId
+      )
+      SELECT a.Id, a.Name, a.Status, a.Budget,
+        COALESCE(i.InvoiceSpend, a.Spent, 0) AS Spent,
+        c.Name AS CampaignName,
+        ISNULL(l.LeadsGenerated, 0) AS LeadsGenerated,
+        ISNULL(l.Bookings, 0) AS Bookings,
+        CASE WHEN ISNULL(l.LeadsGenerated, 0) > 0
+          THEN CAST(COALESCE(i.InvoiceSpend, a.Spent, 0) AS FLOAT) / l.LeadsGenerated
+          ELSE 0 END AS CostPerLead,
+        CASE WHEN ISNULL(l.LeadsGenerated, 0) > 0
+          THEN CAST(ISNULL(l.Bookings, 0) AS FLOAT) / l.LeadsGenerated * 100
+          ELSE 0 END AS ConversionRate,
+        ISNULL(l.RevenueGenerated, 0) AS RevenueGenerated,
+        CASE WHEN COALESCE(i.InvoiceSpend, a.Spent, 0) > 0
+          THEN (ISNULL(l.RevenueGenerated, 0) - COALESCE(i.InvoiceSpend, a.Spent, 0))
+            / COALESCE(i.InvoiceSpend, a.Spent, 0) * 100
+          ELSE 0 END AS RoiPercent
       FROM dbo.SaAd a
       LEFT JOIN dbo.SaCampaign c ON a.CampaignId = c.Id
-      LEFT JOIN dbo.SaLead l ON l.AdId = a.Id
-      GROUP BY a.Id, a.Name, a.Status, a.Budget, a.Spent, c.Name
+      LEFT JOIN lead_stats l ON l.AdId = a.Id
+      LEFT JOIN invoice_stats i ON i.AdId = a.Id
       ORDER BY LeadsGenerated DESC
     `);
     res.json(r.recordset);
@@ -77,14 +130,33 @@ router.get("/cost-per-lead", requirePageRight("sa-campaigns", "view"), async (re
   try {
     const pool = getPool();
     const r = await pool.request().query(`
+      WITH campaign_spend AS (
+        SELECT
+          a.CampaignId,
+          SUM(COALESCE(inv.InvoiceSpend, a.Spent, 0)) AS TotalSpent
+        FROM dbo.SaAd a
+        OUTER APPLY (
+          SELECT SUM(i.TotalAmount) AS InvoiceSpend
+          FROM dbo.SaMarketingInvoice i
+          WHERE i.AdId = a.Id
+            AND i.IsActive = 1
+            AND i.PaymentStatus <> 'Cancelled'
+        ) inv
+        GROUP BY a.CampaignId
+      ),
+      campaign_leads AS (
+        SELECT CampaignId, COUNT(*) AS TotalLeads
+        FROM dbo.SaLead
+        WHERE IsActive = 1
+        GROUP BY CampaignId
+      )
       SELECT c.Name AS CampaignName, c.CampaignCode,
-        ISNULL(SUM(a.Spent), 0) AS TotalSpent,
-        COUNT(l.Id) AS TotalLeads,
-        CASE WHEN COUNT(l.Id) > 0 THEN ISNULL(SUM(a.Spent), 0) / COUNT(l.Id) ELSE 0 END AS CostPerLead
+        ISNULL(s.TotalSpent, 0) AS TotalSpent,
+        ISNULL(l.TotalLeads, 0) AS TotalLeads,
+        CASE WHEN ISNULL(l.TotalLeads, 0) > 0 THEN ISNULL(s.TotalSpent, 0) / l.TotalLeads ELSE 0 END AS CostPerLead
       FROM dbo.SaCampaign c
-      LEFT JOIN dbo.SaAd a ON a.CampaignId = c.Id
-      LEFT JOIN dbo.SaLead l ON l.CampaignId = c.Id
-      GROUP BY c.Name, c.CampaignCode
+      LEFT JOIN campaign_spend s ON s.CampaignId = c.Id
+      LEFT JOIN campaign_leads l ON l.CampaignId = c.Id
       ORDER BY CostPerLead ASC
     `);
     res.json(r.recordset);
@@ -208,17 +280,44 @@ router.get("/marketing-roi", requirePageRight("sa-campaigns", "view"), async (re
   try {
     const pool = getPool();
     const r = await pool.request().query(`
+      WITH campaign_spend AS (
+        SELECT
+          a.CampaignId,
+          SUM(COALESCE(inv.InvoiceSpend, a.Spent, 0)) AS TotalSpent
+        FROM dbo.SaAd a
+        OUTER APPLY (
+          SELECT SUM(i.TotalAmount) AS InvoiceSpend
+          FROM dbo.SaMarketingInvoice i
+          WHERE i.AdId = a.Id
+            AND i.IsActive = 1
+            AND i.PaymentStatus <> 'Cancelled'
+        ) inv
+        GROUP BY a.CampaignId
+      ),
+      campaign_leads AS (
+        SELECT
+          l.CampaignId,
+          COUNT(*) AS TotalLeads,
+          SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings,
+          SUM(COALESCE(fb.TotalValue, fb.BookingAmount, 0)) AS RevenueGenerated
+        FROM dbo.SaLead l
+        LEFT JOIN dbo.FollowupBookings fb
+          ON fb.Id = l.BookingId
+         AND ISNULL(fb.IsDeleted, 0) = 0
+        WHERE l.IsActive = 1
+        GROUP BY l.CampaignId
+      )
       SELECT c.Name AS CampaignName, c.CampaignCode, c.Budget,
-        ISNULL(SUM(a.Spent), 0) AS TotalSpent,
-        COUNT(DISTINCT l.Id) AS TotalLeads,
-        SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings,
-        CASE WHEN ISNULL(SUM(a.Spent), 0) > 0
-          THEN (SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) * 100000.0 - ISNULL(SUM(a.Spent), 0)) / ISNULL(SUM(a.Spent), 0) * 100
+        ISNULL(s.TotalSpent, 0) AS TotalSpent,
+        ISNULL(l.TotalLeads, 0) AS TotalLeads,
+        ISNULL(l.Bookings, 0) AS Bookings,
+        ISNULL(l.RevenueGenerated, 0) AS RevenueGenerated,
+        CASE WHEN ISNULL(s.TotalSpent, 0) > 0
+          THEN (ISNULL(l.RevenueGenerated, 0) - ISNULL(s.TotalSpent, 0)) / ISNULL(s.TotalSpent, 0) * 100
           ELSE 0 END AS RoiPercent
       FROM dbo.SaCampaign c
-      LEFT JOIN dbo.SaAd a ON a.CampaignId = c.Id
-      LEFT JOIN dbo.SaLead l ON l.CampaignId = c.Id
-      GROUP BY c.Name, c.CampaignCode, c.Budget
+      LEFT JOIN campaign_spend s ON s.CampaignId = c.Id
+      LEFT JOIN campaign_leads l ON l.CampaignId = c.Id
       ORDER BY RoiPercent DESC
     `);
     res.json(r.recordset);

@@ -5,6 +5,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/sa/lead-distribution";
+const RULES_API = "/api/sa/distribution-rules";
 
 async function fetchPending(level: number): Promise<any[]> {
   const res = await fetchWithAuth(`${API}/pending?level=${level}`);
@@ -21,6 +22,11 @@ async function fetchHistory(): Promise<any[]> {
   if (!res.ok) throw new Error("Failed to fetch distribution history");
   return res.json();
 }
+async function fetchRules(): Promise<any[]> {
+  const res = await fetchWithAuth(RULES_API);
+  if (!res.ok) throw new Error("Failed to fetch distribution rules");
+  return res.json();
+}
 
 const SaLeadDistribution: React.FC = () => {
   const queryClient = useQueryClient();
@@ -29,7 +35,7 @@ const SaLeadDistribution: React.FC = () => {
   const [selectedLeads, setSelectedLeads] = useState<number[]>([]);
   const [assignments, setAssignments] = useState<Record<number, number>>({});
   const [percentages, setPercentages] = useState<Record<number, number>>({});
-  const [tab, setTab] = useState<"distribute" | "history">("distribute");
+  const [tab, setTab] = useState<"distribute" | "history" | "rules">("distribute");
 
   const { data: pending = [], isLoading: loadingPending } = useQuery({
     queryKey: ["sa-pending-leads", level],
@@ -38,6 +44,26 @@ const SaLeadDistribution: React.FC = () => {
   });
   const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
   const { data: history = [], isLoading: loadingHistory } = useQuery({ queryKey: ["sa-dist-history"], queryFn: fetchHistory, staleTime: 60_000 });
+  const { data: rules = [], isLoading: loadingRules } = useQuery({ queryKey: ["sa-dist-rules"], queryFn: fetchRules, staleTime: 60_000 });
+  const [newRule, setNewRule] = React.useState({ Level: 1, ScopeType: "Global", ScopeId: "", Method: "Percentage", members: [] as { UserId: number; Weight: number }[] });
+  const [runningAuto, setRunningAuto] = React.useState(false);
+
+  const handleRunAuto = async (level: 1 | 2) => {
+    setRunningAuto(true);
+    try {
+      const res = await fetchWithAuth(`${RULES_API}/run-now/${level}`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Auto-distribution failed");
+      toast.success(`Auto-distributed ${data.distributedCount} of ${data.eligibleCount} leads`);
+      await queryClient.invalidateQueries({ queryKey: ["sa-pending-leads"] });
+      await queryClient.invalidateQueries({ queryKey: ["sa-dist-history"] });
+      await queryClient.invalidateQueries({ queryKey: ["sa-leads"] });
+    } catch (err: any) {
+      toast.error(err.message || "Auto-distribution failed");
+    } finally {
+      setRunningAuto(false);
+    }
+  };
 
   const eligibleUsers = useMemo(() => {
     if (level === 1) return users.filter((u: any) => u.role === "team_leader" || u.role === "admin");
@@ -115,10 +141,10 @@ const SaLeadDistribution: React.FC = () => {
 
         {/* Tabs */}
         <div className="flex gap-2 border-b border-border">
-          {(["distribute", "history"] as const).map((t) => (
+          {(["distribute", "history", "rules"] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2 text-sm font-medium capitalize transition-colors ${tab === t ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"}`}>
-              {t === "distribute" ? "Distribute Leads" : "Distribution History"}
+              {t === "distribute" ? "Distribute Leads" : t === "history" ? "Distribution History" : "Auto-Distribution Rules"}
             </button>
           ))}
         </div>
@@ -152,6 +178,10 @@ const SaLeadDistribution: React.FC = () => {
               <button onClick={handleDistribute} disabled={!selectedLeads.length}
                 className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium disabled:opacity-40 hover:bg-primary/90 transition-colors">
                 Distribute {selectedLeads.length ? `(${selectedLeads.length})` : ""}
+              </button>
+              <button onClick={() => handleRunAuto(level)} disabled={runningAuto}
+                className="px-4 py-2 rounded-md border border-border text-sm font-medium text-muted-foreground hover:bg-accent disabled:opacity-40 transition-colors">
+                {runningAuto ? "Running..." : `Auto-Distribute L${level}`}
               </button>
             </div>
 
@@ -249,6 +279,107 @@ const SaLeadDistribution: React.FC = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {tab === "rules" && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">Auto-Distribution Rules</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Configure weighted splits. The engine uses a running-total deficit algorithm to stay on-ratio over time.</p>
+              </div>
+            </div>
+            {loadingRules ? (
+              <div className="text-sm text-muted-foreground">Loading rules...</div>
+            ) : rules.length === 0 ? (
+              <div className="rounded-lg border border-border p-6 text-center text-sm text-muted-foreground">No distribution rules configured yet. Create one below.</div>
+            ) : (
+              <div className="space-y-3">
+                {rules.map((r: any) => (
+                  <div key={r.Id} className="rounded-lg border border-border p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">L{r.Level}</span>
+                        <span className="text-sm font-medium text-foreground">{r.ScopeType === "Global" ? "Global" : r.ScopeType === "Campaign" ? `Campaign: ${r.ScopeCampaignName || r.ScopeId}` : `Team Lead: ${r.ScopeTeamLeadName || r.ScopeId}`}</span>
+                        <span className="text-xs text-muted-foreground">· {r.Method}</span>
+                      </div>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${r.IsActive ? "bg-green-500/10 text-green-600" : "bg-muted text-muted-foreground"}`}>{r.IsActive ? "Active" : "Inactive"}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {(r.members || []).map((m: any) => (
+                        <div key={m.Id} className="flex items-center gap-1.5 text-xs bg-muted/40 rounded px-2 py-1">
+                          <span className="text-foreground font-medium">{m.UserName}</span>
+                          <span className="text-muted-foreground">{m.Weight}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="rounded-lg border border-border p-4 space-y-4">
+              <h3 className="text-sm font-semibold text-foreground">Create New Rule</h3>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Level</label>
+                  <select value={newRule.Level} onChange={(e) => setNewRule((r) => ({ ...r, Level: parseInt(e.target.value) as 1|2 }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                    <option value={1}>Level 1 (Admin ? Team Lead)</option>
+                    <option value={2}>Level 2 (Team Lead ? Salesperson)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Scope</label>
+                  <select value={newRule.ScopeType} onChange={(e) => setNewRule((r) => ({ ...r, ScopeType: e.target.value, ScopeId: "" }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                    <option value="Global">Global (all leads at this level)</option>
+                    {newRule.Level === 1 && <option value="Campaign">Campaign-specific</option>}
+                    {newRule.Level === 2 && <option value="TeamLead">Team Lead-specific</option>}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Method</label>
+                  <select value={newRule.Method} onChange={(e) => setNewRule((r) => ({ ...r, Method: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                    <option value="Percentage">Percentage</option>
+                    <option value="FixedCount">Fixed Count</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs text-muted-foreground">Members &amp; Weights</label>
+                  <button onClick={() => setNewRule((r) => ({ ...r, members: [...r.members, { UserId: 0, Weight: 0 }] }))}
+                    className="text-xs text-primary hover:underline">+ Add member</button>
+                </div>
+                {newRule.members.map((m, i) => (
+                  <div key={i} className="flex items-center gap-2 mb-2">
+                    <select value={m.UserId} onChange={(e) => setNewRule((r) => { const ms = [...r.members]; ms[i] = { ...ms[i], UserId: parseInt(e.target.value) }; return { ...r, members: ms }; })}
+                      className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background">
+                      <option value={0}>Select user</option>
+                      {users.map((u: any) => <option key={u.Id} value={u.Id}>{u.Name}</option>)}
+                    </select>
+                    <input type="number" min={0} max={100} value={m.Weight}
+                      onChange={(e) => setNewRule((r) => { const ms = [...r.members]; ms[i] = { ...ms[i], Weight: parseFloat(e.target.value) || 0 }; return { ...r, members: ms }; })}
+                      className="w-20 text-sm border border-border rounded px-2 py-1.5 bg-background" placeholder="Weight" />
+                    <button onClick={() => setNewRule((r) => ({ ...r, members: r.members.filter((_, j) => j !== i) }))}
+                      className="text-xs text-red-500 hover:underline">Remove</button>
+                  </div>
+                ))}
+              </div>
+              <button onClick={async () => {
+                if (!newRule.members.length || newRule.members.some(m => !m.UserId)) return toast.error("Add at least one member with a user selected");
+                try {
+                  const res = await fetchWithAuth(RULES_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Level: newRule.Level, ScopeType: newRule.ScopeType, ScopeId: newRule.ScopeId ? parseInt(newRule.ScopeId) : null, Method: newRule.Method, members: newRule.members }) });
+                  if (!res.ok) throw new Error((await res.json()).error || "Failed to create rule");
+                  toast.success("Rule created");
+                  setNewRule({ Level: 1, ScopeType: "Global", ScopeId: "", Method: "Percentage", members: [] });
+                  await queryClient.invalidateQueries({ queryKey: ["sa-dist-rules"] });
+                } catch (err: any) { toast.error(err.message); }
+              }} className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors">
+                Create Rule
+              </button>
+            </div>
           </div>
         )}
       </div>

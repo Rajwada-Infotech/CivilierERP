@@ -9,21 +9,45 @@ router.get("/marketing", requirePageRight("sa-campaigns", "view"), async (req, r
     const pool = getPool();
 
     const totals = await pool.request().query(`
+      WITH ad_spend AS (
+        SELECT SUM(COALESCE(inv.InvoiceSpend, a.Spent, 0)) AS MarketingSpend
+        FROM dbo.SaAd a
+        OUTER APPLY (
+          SELECT SUM(i.TotalAmount) AS InvoiceSpend
+          FROM dbo.SaMarketingInvoice i
+          WHERE i.AdId = a.Id
+            AND i.IsActive = 1
+            AND i.PaymentStatus <> 'Cancelled'
+        ) inv
+      ),
+      booking_revenue AS (
+        SELECT
+          COUNT(*) AS BookingCount,
+          SUM(COALESCE(fb.TotalValue, fb.BookingAmount, 0)) AS RevenueGenerated
+        FROM dbo.SaLead l
+        LEFT JOIN dbo.FollowupBookings fb
+          ON fb.Id = l.BookingId
+         AND ISNULL(fb.IsDeleted, 0) = 0
+        WHERE l.BookingId IS NOT NULL
+      )
       SELECT
         (SELECT COUNT(*) FROM dbo.SaCampaign WHERE IsActive = 1) AS TotalCampaigns,
         (SELECT COUNT(*) FROM dbo.SaAd WHERE IsActive = 1 AND Status = 'Active') AS ActiveAds,
-        (SELECT COUNT(*) FROM dbo.SaLead) AS TotalLeads,
-        (SELECT ISNULL(SUM(Spent), 0) FROM dbo.SaAd) AS MarketingSpend,
-        (SELECT ISNULL(SUM(TotalAmount), 0) FROM dbo.SaMarketingInvoice WHERE PaymentStatus = 'Paid') AS InvoicedPaid
+        (SELECT COUNT(*) FROM dbo.SaLead WHERE IsActive = 1) AS TotalLeads,
+        ISNULL((SELECT MarketingSpend FROM ad_spend), 0) AS MarketingSpend,
+        (SELECT ISNULL(SUM(TotalAmount), 0) FROM dbo.SaMarketingInvoice WHERE IsActive = 1 AND PaymentStatus = 'Paid') AS InvoicedPaid,
+        ISNULL((SELECT BookingCount FROM booking_revenue), 0) AS BookingCount,
+        ISNULL((SELECT RevenueGenerated FROM booking_revenue), 0) AS RevenueGenerated
     `);
 
     const t = totals.recordset[0];
     const costPerLead = t.TotalLeads > 0 ? (t.MarketingSpend / t.TotalLeads) : 0;
+    const roi = t.MarketingSpend > 0 ? ((t.RevenueGenerated - t.MarketingSpend) / t.MarketingSpend) * 100 : 0;
 
     const bestCampaign = await pool.request().query(`
       SELECT TOP 1 c.Id, c.Name, c.CampaignCode, COUNT(l.Id) AS LeadCount
       FROM dbo.SaCampaign c
-      LEFT JOIN dbo.SaLead l ON l.CampaignId = c.Id
+      LEFT JOIN dbo.SaLead l ON l.CampaignId = c.Id AND l.IsActive = 1
       WHERE c.IsActive = 1
       GROUP BY c.Id, c.Name, c.CampaignCode
       ORDER BY COUNT(l.Id) DESC
@@ -32,16 +56,10 @@ router.get("/marketing", requirePageRight("sa-campaigns", "view"), async (req, r
     const bestAd = await pool.request().query(`
       SELECT TOP 1 a.Id, a.Name, COUNT(l.Id) AS LeadCount
       FROM dbo.SaAd a
-      LEFT JOIN dbo.SaLead l ON l.AdId = a.Id
+      LEFT JOIN dbo.SaLead l ON l.AdId = a.Id AND l.IsActive = 1
       WHERE a.IsActive = 1
       GROUP BY a.Id, a.Name
       ORDER BY COUNT(l.Id) DESC
-    `);
-
-    const bookedRevenue = await pool.request().query(`
-      SELECT COUNT(*) AS BookingCount
-      FROM dbo.SaLead
-      WHERE BookingId IS NOT NULL
     `);
 
     res.json({
@@ -51,7 +69,9 @@ router.get("/marketing", requirePageRight("sa-campaigns", "view"), async (req, r
       marketingSpend: t.MarketingSpend,
       costPerLead: Math.round(costPerLead * 100) / 100,
       invoicedPaid: t.InvoicedPaid,
-      bookingsGenerated: bookedRevenue.recordset[0].BookingCount,
+      revenueGenerated: t.RevenueGenerated,
+      roi: Math.round(roi * 100) / 100,
+      bookingsGenerated: t.BookingCount,
       bestCampaign: bestCampaign.recordset[0] || null,
       bestAd: bestAd.recordset[0] || null,
     });

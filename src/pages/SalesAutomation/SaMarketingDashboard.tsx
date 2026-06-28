@@ -45,6 +45,8 @@ const SaMarketingDashboard: React.FC = () => {
           <StatCard icon={IndianRupee} label="Marketing Spend" value={`₹${(data?.marketingSpend ?? 0).toLocaleString()}`} />
           <StatCard icon={IndianRupee} label="Cost Per Lead" value={`₹${data?.costPerLead ?? 0}`} />
           <StatCard icon={IndianRupee} label="Invoices Paid" value={`₹${(data?.invoicedPaid ?? 0).toLocaleString()}`} />
+          <StatCard icon={IndianRupee} label="Revenue Generated" value={`â‚¹${(data?.revenueGenerated ?? 0).toLocaleString()}`} />
+          <StatCard icon={TrendingUp} label="ROI" value={`${data?.roi ?? 0}%`} />
           <StatCard icon={Award} label="Bookings Generated" value={data?.bookingsGenerated ?? 0} />
         </div>
 

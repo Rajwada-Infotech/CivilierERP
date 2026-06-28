@@ -9,6 +9,14 @@ const { getPool, sql } = require("../db");
 
 bumpCacheVersion("sa-marketing-invoices").catch(() => {});
 
+async function invalidateMarketingInvoiceDependents() {
+  await Promise.all([
+    bumpCacheVersion("sa-marketing-invoices"),
+    bumpCacheVersion("sa-ads"),
+    bumpCacheVersion("sa-campaigns"),
+  ]);
+}
+
 // GET all invoices
 router.get("/", cache("sa-marketing-invoices", 300), async (req, res) => {
   try {
@@ -62,7 +70,7 @@ router.post("/", requirePageRight("sa-marketing-invoices", "create"), async (req
           (@InvoiceNumber, @VendorName, @CampaignId, @AdId, @InvoiceDate, @Amount, @GstAmount,
            @DueDate, @PaymentStatus, @Notes, @IsActive, @CreatedBy, @CreatedAt)
       `);
-    await bumpCacheVersion("sa-marketing-invoices");
+    await invalidateMarketingInvoiceDependents();
     res.json({ message: "Invoice added successfully" });
   } catch (err) {
     if (err.number === 2627 || err.number === 2601)
@@ -102,7 +110,7 @@ router.put("/:id", requirePageRight("sa-marketing-invoices", "edit"), async (req
           UpdatedBy = @UpdatedBy, UpdatedAt = @UpdatedAt
         WHERE Id = @Id
       `);
-    await bumpCacheVersion("sa-marketing-invoices");
+    await invalidateMarketingInvoiceDependents();
     res.json({ message: "Invoice updated successfully" });
   } catch (err) {
     if (err.number === 2627 || err.number === 2601)
@@ -128,7 +136,7 @@ router.delete("/:id", requirePageRight("sa-marketing-invoices", "delete"), async
     await pool.request()
       .input("Id", sql.Int, id)
       .query("DELETE FROM dbo.SaMarketingInvoice WHERE Id = @Id");
-    await bumpCacheVersion("sa-marketing-invoices");
+    await invalidateMarketingInvoiceDependents();
     res.json({ message: `Invoice "${InvoiceNumber}" deleted successfully` });
   } catch (err) {
     console.error("[sa-marketing-invoices] DELETE error:", err.message);

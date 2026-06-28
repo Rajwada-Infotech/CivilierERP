@@ -56,7 +56,9 @@ const columns = [
   { key: "platformName", label: "Platform" },
   { key: "budget", label: "Budget (Rs)", hideOnMobile: true },
   { key: "totalAds", label: "Ads", hideOnMobile: true },
+  { key: "totalLeads", label: "Leads", hideOnMobile: true },
   { key: "costSpent", label: "Spent (Rs)", hideOnMobile: true },
+  { key: "costPerLead", label: "CPL (Rs)", hideOnMobile: true },
   { key: "status", label: "Status" },
   { key: "isActive", label: "Active" },
 ];
@@ -67,10 +69,18 @@ const exportColumns: ExportColumn[] = [
   { header: "Platform", accessor: "platformName" },
   { header: "Budget", accessor: "budget" },
   { header: "Total Ads", accessor: "totalAds" },
+  { header: "Total Leads", accessor: "totalLeads" },
   { header: "Spent", accessor: "costSpent" },
+  { header: "Cost Per Lead", accessor: "costPerLead" },
+  { header: "Conversion %", accessor: "conversionPct" },
   { header: "Active Days", accessor: "activeDays" },
   { header: "Status", accessor: "status" },
 ];
+
+function toNumber(value: unknown): number {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+}
 
 const SaCampaignMaster: React.FC = () => {
   const queryClient = useQueryClient();
@@ -96,7 +106,10 @@ const SaCampaignMaster: React.FC = () => {
       status: item.Status ?? "Active",
       isActive: Boolean(item.IsActive),
       totalAds: item.TotalAds ?? 0,
-      costSpent: item.CostSpent ?? 0,
+      totalLeads: item.TotalLeads ?? 0,
+      costSpent: toNumber(item.CostSpent),
+      costPerLead: toNumber(item.CostPerLead),
+      conversionPct: toNumber(item.ConversionPct),
       activeDays: item.ActiveDays ?? "",
     }));
   }, [campaigns]);
@@ -177,7 +190,10 @@ const SaCampaignMaster: React.FC = () => {
               { key: "endDate", label: "End Date" },
               { key: "budget", label: "Budget (Rs)" },
               { key: "totalAds", label: "Total Ads" },
+              { key: "totalLeads", label: "Total Leads" },
               { key: "costSpent", label: "Cost Spent (Rs)" },
+              { key: "costPerLead", label: "Cost Per Lead (Rs)" },
+              { key: "conversionPct", label: "Conversion %" },
               { key: "activeDays", label: "Active Days" },
               { key: "status", label: "Status" },
               { key: "isActive", label: "Active" },

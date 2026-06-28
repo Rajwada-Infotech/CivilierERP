@@ -27,6 +27,30 @@ router.get(
     try {
       const pool = getPool();
       const result = await pool.request().query(`
+        WITH ad_stats AS (
+          SELECT
+            a.CampaignId,
+            COUNT(*) AS TotalAds,
+            SUM(COALESCE(inv.InvoiceSpend, a.Spent, 0)) AS CostSpent
+          FROM dbo.SaAd a
+          OUTER APPLY (
+            SELECT SUM(i.TotalAmount) AS InvoiceSpend
+            FROM dbo.SaMarketingInvoice i
+            WHERE i.AdId = a.Id
+              AND i.IsActive = 1
+              AND i.PaymentStatus <> 'Cancelled'
+          ) inv
+          GROUP BY a.CampaignId
+        ),
+        lead_stats AS (
+          SELECT
+            l.CampaignId,
+            COUNT(*) AS TotalLeads,
+            SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS BookingCount
+          FROM dbo.SaLead l
+          WHERE l.IsActive = 1
+          GROUP BY l.CampaignId
+        )
         SELECT
           c.Id,
           c.CampaignCode,
@@ -42,18 +66,24 @@ router.get(
           c.IsActive,
           c.CreatedAt,
           c.UpdatedAt,
-          (SELECT COUNT(*) FROM dbo.SaAd a WHERE a.CampaignId = c.Id) AS TotalAds,
-          (SELECT ISNULL(SUM(a.Spent), 0) FROM dbo.SaAd a WHERE a.CampaignId = c.Id) AS CostSpent,
+          ISNULL(a.TotalAds, 0) AS TotalAds,
+          ISNULL(a.CostSpent, 0) AS CostSpent,
           CASE
             WHEN c.EndDate IS NOT NULL THEN DATEDIFF(DAY, c.StartDate, c.EndDate)
             WHEN c.StartDate IS NOT NULL THEN DATEDIFF(DAY, c.StartDate, GETDATE())
             ELSE NULL
           END AS ActiveDays,
-          NULL AS TotalLeads,
-          NULL AS CostPerLead,
-          NULL AS ConversionPct
+          ISNULL(l.TotalLeads, 0) AS TotalLeads,
+          CASE WHEN ISNULL(l.TotalLeads, 0) > 0 THEN ISNULL(a.CostSpent, 0) / l.TotalLeads ELSE 0 END AS CostPerLead,
+          CASE
+            WHEN ISNULL(l.TotalLeads, 0) > 0
+              THEN CAST(ISNULL(l.BookingCount, 0) AS FLOAT) / l.TotalLeads * 100
+            ELSE 0
+          END AS ConversionPct
         FROM dbo.SaCampaign c
         LEFT JOIN dbo.SaSocialMediaPlatform p ON p.Id = c.PlatformId
+        LEFT JOIN ad_stats a ON a.CampaignId = c.Id
+        LEFT JOIN lead_stats l ON l.CampaignId = c.Id
         ORDER BY c.CreatedAt DESC
       `);
       res.json(result.recordset);
@@ -81,6 +111,28 @@ router.get(
       res.json(result.recordset);
     } catch (err) {
       console.error("[sa-campaigns] GET /platforms error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// GET /dropdown
+router.get(
+  "/dropdown",
+  requirePageRight("sa-campaigns", "view"),
+  cache("sa-campaigns-dropdown", 600),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const result = await pool.request().query(`
+        SELECT Id, Name, CampaignCode, PlatformId
+        FROM dbo.SaCampaign
+        WHERE IsActive = 1
+        ORDER BY CampaignCode, Name
+      `);
+      res.json(result.recordset);
+    } catch (err) {
+      console.error("[sa-campaigns] GET /dropdown error:", err.message);
       res.status(500).json({ error: err.message });
     }
   },

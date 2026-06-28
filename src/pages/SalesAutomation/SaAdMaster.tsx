@@ -44,7 +44,7 @@ const fields: FieldDef[] = [
   { name: "creativeRef", label: "Creative Reference", type: "text" },
   { name: "budget", label: "Budget (Rs)", type: "number" },
   { name: "dailySpend", label: "Daily Spend (Rs)", type: "number" },
-  { name: "spent", label: "Amount Spent (Rs)", type: "number" },
+  { name: "spent", label: "Fallback Spend (Rs)", type: "number" },
   { name: "runningSince", label: "Running Since", type: "date" },
   {
     name: "status",
@@ -61,7 +61,11 @@ const columns = [
   { key: "campaignName", label: "Campaign" },
   { key: "adType", label: "Type", hideOnMobile: true },
   { key: "budget", label: "Budget (Rs)", hideOnMobile: true },
-  { key: "spent", label: "Spent (Rs)", hideOnMobile: true },
+  { key: "costSpent", label: "Cost Spent (Rs)", hideOnMobile: true },
+  { key: "totalLeadsGenerated", label: "Leads", hideOnMobile: true },
+  { key: "costPerLead", label: "CPL (Rs)", hideOnMobile: true },
+  { key: "conversionRate", label: "Conv. %", hideOnMobile: true },
+  { key: "roi", label: "ROI %", hideOnMobile: true },
   { key: "status", label: "Status" },
   { key: "isActive", label: "Active" },
 ];
@@ -73,10 +77,23 @@ const exportColumns: ExportColumn[] = [
   { header: "Creative Ref", accessor: "creativeRef" },
   { header: "Budget", accessor: "budget" },
   { header: "Daily Spend", accessor: "dailySpend" },
-  { header: "Spent", accessor: "spent" },
+  { header: "Fallback Spend", accessor: "spent" },
+  { header: "Cost Spent", accessor: "costSpent" },
+  { header: "Invoice Count", accessor: "invoiceCount" },
+  { header: "Total Leads Generated", accessor: "totalLeadsGenerated" },
+  { header: "Cost Per Lead", accessor: "costPerLead" },
+  { header: "Conversion Rate", accessor: "conversionRate" },
+  { header: "Booking Count", accessor: "bookingCount" },
+  { header: "Revenue Generated", accessor: "revenueGenerated" },
+  { header: "ROI", accessor: "roi" },
   { header: "Running Since", accessor: "runningSince" },
   { header: "Status", accessor: "status" },
 ];
+
+function toNumber(value: unknown): number {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+}
 
 const SaAdMaster: React.FC = () => {
   const queryClient = useQueryClient();
@@ -99,6 +116,14 @@ const SaAdMaster: React.FC = () => {
       budget: item.Budget ?? 0,
       dailySpend: item.DailySpend ?? 0,
       spent: item.Spent ?? 0,
+      costSpent: toNumber(item.CostSpent),
+      invoiceCount: item.InvoiceCount ?? 0,
+      totalLeadsGenerated: item.TotalLeadsGenerated ?? 0,
+      costPerLead: toNumber(item.CostPerLead),
+      conversionRate: toNumber(item.ConversionRate),
+      bookingCount: item.BookingCount ?? 0,
+      revenueGenerated: toNumber(item.RevenueGenerated),
+      roi: toNumber(item.ROI),
       runningSince: item.RunningSince ? String(item.RunningSince).slice(0, 10) : "",
       status: item.Status ?? "Active",
       isActive: Boolean(item.IsActive),
@@ -180,7 +205,15 @@ const SaAdMaster: React.FC = () => {
               { key: "creativeRef", label: "Creative Reference" },
               { key: "budget", label: "Budget (Rs)" },
               { key: "dailySpend", label: "Daily Spend (Rs)" },
-              { key: "spent", label: "Amount Spent (Rs)" },
+              { key: "spent", label: "Fallback Spend (Rs)" },
+              { key: "costSpent", label: "Cost Spent (Rs)" },
+              { key: "invoiceCount", label: "Linked Invoices" },
+              { key: "totalLeadsGenerated", label: "Total Leads Generated" },
+              { key: "costPerLead", label: "Cost Per Lead (Rs)" },
+              { key: "conversionRate", label: "Conversion Rate %" },
+              { key: "bookingCount", label: "Booking Count" },
+              { key: "revenueGenerated", label: "Revenue Generated (Rs)" },
+              { key: "roi", label: "ROI %" },
               { key: "runningSince", label: "Running Since" },
               { key: "status", label: "Status" },
               { key: "isActive", label: "Active" },
