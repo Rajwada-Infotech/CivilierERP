@@ -82,15 +82,6 @@ const MODULES = [
     ringRgb: "168,85,247",
   },
   {
-    id: "records" as Module,
-    icon: Archive,
-    label: "Records",
-    desc: "Every attachment, in one place",
-    color: "#f59e0b",
-    bg: "rgba(245,158,11,0.22)",
-    ringRgb: "245,158,11",
-  },
-  {
     id: "insidework" as Module,
     icon: Pickaxe,
     label: "Inside Work",
@@ -98,6 +89,15 @@ const MODULES = [
     color: "#0891b2",
     bg: "rgba(8,145,178,0.22)",
     ringRgb: "8,145,178",
+  },
+  {
+    id: "records" as Module,
+    icon: Archive,
+    label: "Records",
+    desc: "Every attachment, in one place",
+    color: "#f59e0b",
+    bg: "rgba(245,158,11,0.22)",
+    ringRgb: "245,158,11",
   },
 ];
 

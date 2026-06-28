@@ -26,7 +26,7 @@ export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
   followup: "/followup",
   engineering: "/engineering",
   ticket: "/ticket",
-  sales: "/sales/sale-order",
+  sales: "/sales",
   records: "/records",
   insidework: "/insidework",
   admin: "/admin/dashboard",
