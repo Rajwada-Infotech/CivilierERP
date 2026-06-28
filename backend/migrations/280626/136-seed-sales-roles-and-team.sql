@@ -1,15 +1,15 @@
 -- 136-seed-sales-roles-and-team.sql
--- Seeds Sales Team Lead (STL) and Sales Person (SP) roles into dbo.Roles
--- Creates dbo.SaSalesTeam for dynamic team lead -> salesperson membership
--- Users are created via the Admin UI or run136.js seed script
+-- Seeds Sales Team Lead (STL) and Sales Person (SP) into dbo.Role (the correct role table).
+-- Creates dbo.SaSalesTeam for dynamic team lead -> salesperson membership.
+-- NOTE: dbo.Roles (a duplicate table) was dropped; dbo.Role is canonical.
 
-IF NOT EXISTS (SELECT 1 FROM dbo.Roles WHERE RCode = ''STL'')
-  INSERT INTO dbo.Roles(RCode,RName,RDesc,RCreatedBy,RCreatedAt)
-  VALUES(''STL'',''Sales Team Lead'',''Sales Team Leader role'',''migration-136'',SYSDATETIME());
+IF NOT EXISTS (SELECT 1 FROM dbo.Role WHERE RCode = ''STL'')
+  INSERT INTO dbo.Role(RCode,RName,RDesc,RCreatedBy,RCreatedAt)
+  VALUES(''STL'',''sales_team_lead'',''Sales Team Leader role'',''migration-136'',SYSDATETIME());
 
-IF NOT EXISTS (SELECT 1 FROM dbo.Roles WHERE RCode = ''SP'')
-  INSERT INTO dbo.Roles(RCode,RName,RDesc,RCreatedBy,RCreatedAt)
-  VALUES(''SP'',''Sales Person'',''Sales Person role'',''migration-136'',SYSDATETIME());
+IF NOT EXISTS (SELECT 1 FROM dbo.Role WHERE RCode = ''SP'')
+  INSERT INTO dbo.Role(RCode,RName,RDesc,RCreatedBy,RCreatedAt)
+  VALUES(''SP'',''sales_person'',''Sales Person role'',''migration-136'',SYSDATETIME());
 
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = ''SaSalesTeam'' AND schema_id = SCHEMA_ID(''dbo''))
 BEGIN
@@ -26,4 +26,4 @@ BEGIN
   CREATE INDEX IX_SaSalesTeam_Lead ON dbo.SaSalesTeam(TeamLeadUserId, IsActive);
 END
 GO
-PRINT ''Migration 136: Sales roles and SaSalesTeam done'';
+PRINT ''Migration 136: Sales roles (dbo.Role) and SaSalesTeam done'';
