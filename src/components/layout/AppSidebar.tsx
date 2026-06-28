@@ -21,6 +21,7 @@ import {
   User,
   Wrench,
   Pickaxe,
+  Megaphone,
 } from "lucide-react";
 
 // ── Per-module nav definitions ────────────────────────────────────────────────
@@ -35,6 +36,7 @@ import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { salesNavItems } from "./sidebars/SalesSidebar";
 import { recordsNavItems } from "./sidebars/RecordsSidebar";
 import { civilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
+import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar ──────────────────────────────────────────────────────────────
@@ -109,6 +111,13 @@ const MODULE_HEADER: Record<
     color: "#0891b2",
     from: "from-cyan-600/30",
     to: "to-cyan-600/0",
+  },
+  "sales-automation": {
+    label: "Sales Automation",
+    icon: Megaphone,
+    color: "#f59e0b",
+    from: "from-amber-500/30",
+    to: "to-amber-500/0",
   },
   admin: {
     label: "Admin",
@@ -299,6 +308,9 @@ export const AppSidebar = () => {
         break;
       case "civilworkdpr":
         raw = civilWorkDprNavItems;
+        break;
+      case "sales-automation":
+        raw = salesAutomationNavItems;
         break;
       case "admin":
         raw = buildAdminNavItems(pendingApprovalCount);

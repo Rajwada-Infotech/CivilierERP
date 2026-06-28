@@ -202,6 +202,17 @@ const ALL_ROUTES = [
   { path: "/api/followup-communicator", file: "./routes/followupCommunicator" },
   { path: "/api/followup-audit-log", file: "./routes/followupAuditLog" },
   { path: "/api/followup-escalation", file: "./routes/followupEscalation" },
+  { path: "/api/sa/social-media", file: "./routes/saSocialMedia" },
+  { path: "/api/sa/campaigns", file: "./routes/saCampaigns" },
+  { path: "/api/sa/ads", file: "./routes/saAds" },
+  { path: "/api/sa/leads", file: "./routes/saLeads" },
+  { path: "/api/sa/lead-distribution", file: "./routes/saLeadDistribution" },
+  { path: "/api/sa/inquiry", file: "./routes/saInquiry" },
+  { path: "/api/sa/site-visits", file: "./routes/saSiteVisits" },
+  { path: "/api/sa/marketing-invoices", file: "./routes/saMarketingInvoices" },
+  { path: "/api/sa/dashboard", file: "./routes/saDashboard" },
+  { path: "/api/sa/reports", file: "./routes/saReports" },
+  { path: "/api/sa/distribution-rules", file: "./routes/saDistributionRules" },
 ];
 
 // ─── createApp ───────────────────────────────────────────────────────────────
