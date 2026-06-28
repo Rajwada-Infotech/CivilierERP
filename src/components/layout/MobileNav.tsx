@@ -41,7 +41,8 @@ import {
   DoorOpen,
 } from "lucide-react";
 
-import { useModule, MODULE_DASHBOARD_ROUTES } from "@/contexts/ModuleContext";
+import { useModule } from "@/contexts/ModuleContext";
+import { MODULE_DASHBOARD_ROUTES } from "@/contexts/module.utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";

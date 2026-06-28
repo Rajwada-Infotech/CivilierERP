@@ -14,11 +14,8 @@ import {
   Archive,
   Pickaxe,
 } from "lucide-react";
-import {
-  useModule,
-  MODULE_DASHBOARD_ROUTES,
-  Module,
-} from "@/contexts/ModuleContext";
+import { useModule } from "@/contexts/ModuleContext";
+import { MODULE_DASHBOARD_ROUTES, Module } from "@/contexts/module.utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./layoutContexts";
 import { useTheme } from "@/contexts/ThemeContext";
