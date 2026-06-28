@@ -3,8 +3,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { DashboardBackground } from "@/components/DashboardBackground";
 import { useTask } from "@/contexts/TaskContext";
+import {
+  GlassShell,
+  GlassCard,
+  GlassSection,
+  GlassCardSkeleton,
+} from "@/components/dashboard/GlassShell";
 import {
   ArrowUpRight,
   ArrowDownRight,
@@ -28,6 +33,9 @@ import {
   PhoneCall,
   Scale,
 } from "lucide-react";
+
+const ACCENT = "#6366f1"; // indigo — matches Follow-Up's ModuleStrip color
+const SECONDARY = "#8b5cf6"; // violet bloom
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -67,73 +75,6 @@ function StatusBadge({
     >
       {status || "—"}
     </span>
-  );
-}
-
-// ─── KPI Card ─────────────────────────────────────────────────────────────────
-
-function KPICard({
-  label,
-  value,
-  sub,
-  icon: Icon,
-  iconColor = "text-indigo-600",
-  iconBg = "bg-indigo-500/10",
-  borderL = "border-l-indigo-500",
-  trend,
-  onClick,
-  urgent,
-}: {
-  label: string;
-  value: string | number;
-  sub: string;
-  icon: React.ElementType;
-  iconColor?: string;
-  iconBg?: string;
-  borderL?: string;
-  trend?: "up" | "down" | "neutral";
-  onClick?: () => void;
-  urgent?: boolean;
-}) {
-  return (
-    <div
-      onClick={onClick}
-      className={`rounded-xl border bg-card p-5 flex flex-col gap-3 transition-all duration-200 border-l-2 ${borderL} ${
-        onClick ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5" : ""
-      } ${urgent ? "border-red-400/40" : "border-border hover:border-primary/20"}`}
-    >
-      <div className="flex items-start justify-between">
-        <div className={`p-2 rounded-lg ${iconBg}`}>
-          <Icon size={18} className={iconColor} />
-        </div>
-        {trend && (
-          <span
-            className={`text-[10px] font-medium flex items-center gap-0.5 ${
-              trend === "up"
-                ? "text-emerald-600"
-                : trend === "down"
-                  ? "text-red-500"
-                  : "text-muted-foreground"
-            }`}
-          >
-            {trend === "up" ? (
-              <ArrowUpRight size={12} />
-            ) : trend === "down" ? (
-              <ArrowDownRight size={12} />
-            ) : null}
-          </span>
-        )}
-      </div>
-      <div>
-        <p className="text-2xl font-heading font-bold text-foreground leading-none">
-          {value}
-        </p>
-        <p className="text-xs text-muted-foreground mt-1">{label}</p>
-        {sub && (
-          <p className="text-[10px] text-muted-foreground/70 mt-0.5">{sub}</p>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -754,155 +695,122 @@ export default function FollowupDashboard() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Follow-Up"]} />
-      <div className="relative p-6 space-y-8">
-        <DashboardBackground />
-
-        {/* Header */}
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Follow-Up Dashboard
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Sales pipeline, agreements, closures and construction across all projects
-            </p>
-          </div>
+      <GlassShell
+        title="Follow-Up Overview"
+        subtitle="Sales pipeline, agreements, closures and construction across all projects"
+        icon={HandshakeIcon}
+        accentColor={ACCENT}
+        secondaryColor={SECONDARY}
+        action={
           <button
             onClick={() => refetch()}
             disabled={isFetching}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border transition-colors disabled:opacity-50"
+            style={{ borderColor: `${ACCENT}4d`, color: ACCENT }}
           >
-            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+            <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
             Refresh
           </button>
-        </div>
-
+        }
+      >
         {/* ── KPI Row — Sales Pipeline ── */}
-        <div>
-          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Sales Pipeline
-          </p>
+        <GlassSection title="Sales Pipeline" icon={Users} accentColor={ACCENT}>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <KPICard
+            <GlassCard
               label="Applications"
               value={fmtNum(applications.length)}
               sub={`${applications.filter((a) => a.Status === "New" || a.Status === "Qualified").length} active`}
               icon={Users}
-              iconColor="text-indigo-600"
-              iconBg="bg-indigo-500/10"
-              borderL="border-l-indigo-500"
+              accentColor={ACCENT}
               onClick={() => navigate("/followup/sales/applications")}
             />
-            <KPICard
+            <GlassCard
               label="Confirmed Bookings"
               value={fmtNum(confirmedBookings)}
               sub={`${bookings.length} total bookings`}
               icon={CalendarCheck}
-              iconColor="text-sky-600"
-              iconBg="bg-sky-500/10"
-              borderL="border-l-sky-500"
+              accentColor="#0ea5e9"
               trend={confirmedBookings > 0 ? "up" : "neutral"}
               onClick={() => navigate("/followup/sales/bookings")}
             />
-            <KPICard
+            <GlassCard
               label="Unit Selections"
               value={fmtNum(unitSelections.length)}
               sub={`${unitSelections.filter((u) => u.Status === "Reserved").length} reserved`}
               icon={Home}
-              iconColor="text-teal-600"
-              iconBg="bg-teal-500/10"
-              borderL="border-l-teal-500"
+              accentColor="#14b8a6"
               onClick={() => navigate("/followup/sales/unit-selection")}
             />
-            <KPICard
+            <GlassCard
               label="Active Agreements"
               value={fmtNum(activeAgreements)}
               sub={`${agreements.length} total`}
               icon={HandshakeIcon}
-              iconColor="text-violet-600"
-              iconBg="bg-violet-500/10"
-              borderL="border-l-violet-500"
+              accentColor={SECONDARY}
               trend={activeAgreements > 0 ? "up" : "neutral"}
               onClick={() => navigate("/followup/agreement/agreements")}
             />
-            <KPICard
+            <GlassCard
               label="Pending NOCs"
               value={fmtNum(pendingNOCs)}
               sub={`${nocs.length} total NOCs`}
               icon={ClipboardCheck}
-              iconColor="text-amber-600"
-              iconBg="bg-amber-500/10"
-              borderL="border-l-amber-500"
+              accentColor="#f59e0b"
               trend={pendingNOCs > 0 ? "down" : "neutral"}
-              urgent={pendingNOCs > 0}
               onClick={() => navigate("/followup/closure/noc")}
             />
-            <KPICard
+            <GlassCard
               label="Upcoming Handovers"
               value={fmtNum(scheduledHandovers)}
               sub={`${handovers.length} total`}
               icon={Banknote}
-              iconColor="text-cyan-600"
-              iconBg="bg-cyan-500/10"
-              borderL="border-l-cyan-500"
+              accentColor="#06b6d4"
               trend={scheduledHandovers > 0 ? "up" : "neutral"}
               onClick={() => navigate("/followup/closure/handover")}
             />
           </div>
-        </div>
+        </GlassSection>
 
         {/* ── KPI Row 2 — Tasks ── */}
-        <div>
-          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Tasks
-          </p>
+        <GlassSection title="Tasks" icon={ListTodo} accentColor={ACCENT}>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <KPICard
+            <GlassCard
               label="Overdue Tasks"
               value={fmtNum(overdueTasks.length)}
               sub={`${fmtNum(pendingTasks.length)} still pending`}
               icon={AlertCircle}
-              iconColor="text-red-600"
-              iconBg="bg-red-500/10"
-              borderL="border-l-red-500"
+              accentColor="#ef4444"
               trend={overdueTasks.length > 0 ? "down" : "neutral"}
-              urgent={overdueTasks.length > 0}
               onClick={() => navigate("/followup/follow-ups/tasks")}
             />
-            <KPICard
+            <GlassCard
               label="Due Soon"
               value={fmtNum(dueSoonTasks.length)}
               sub="Tasks due within 3 days"
               icon={Clock}
-              iconColor="text-amber-600"
-              iconBg="bg-amber-500/10"
-              borderL="border-l-amber-500"
+              accentColor="#f59e0b"
               trend={dueSoonTasks.length > 0 ? "down" : "neutral"}
               onClick={() => navigate("/followup/follow-ups/tasks")}
             />
-            <KPICard
+            <GlassCard
               label="Completed Tasks"
               value={fmtNum(completedTasks.length)}
               sub={`${fmtNum(followupTasks.length)} total`}
               icon={CheckCircle2}
-              iconColor="text-emerald-600"
-              iconBg="bg-emerald-500/10"
-              borderL="border-l-emerald-500"
+              accentColor="#10b981"
               trend="up"
               onClick={() => navigate("/followup/follow-ups/tasks")}
             />
-            <KPICard
+            <GlassCard
               label="Construction Updates"
               value={fmtNum(constructions.length)}
               sub="Site progress entries"
               icon={HardHat}
-              iconColor="text-orange-600"
-              iconBg="bg-orange-500/10"
-              borderL="border-l-orange-500"
+              accentColor="#f97316"
               onClick={() => navigate("/followup/construction/updates")}
             />
           </div>
-        </div>
+        </GlassSection>
 
         {/* ── New panels row: Milestone Tracker + Legal Pending + Possession Pipeline ── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -1259,13 +1167,8 @@ export default function FollowupDashboard() {
         </div>
 
         {/* ── Quick Actions ── */}
-        <div className="rounded-xl border border-border bg-card p-5">
-          <SectionHeader
-            icon={BarChart3}
-            title="Quick Actions"
-            iconColor="text-indigo-600"
-          />
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 mt-3">
+        <GlassSection title="Quick Actions" icon={BarChart3} accentColor={ACCENT}>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
             {[
               {
                 label: "Applications",
@@ -1361,8 +1264,8 @@ export default function FollowupDashboard() {
               </button>
             ))}
           </div>
-        </div>
-      </div>
+        </GlassSection>
+      </GlassShell>
     </>
   );
 }

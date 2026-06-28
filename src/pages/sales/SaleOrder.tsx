@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SalesShell } from "@/components/sales/SalesShell";
 import {
   ShoppingCart,
   ArrowLeftRight,
@@ -1104,18 +1105,11 @@ export default function SaleOrder() {
     <>
       <Breadcrumbs items={["Dashboard", "Sales Module", "Sale Order"]} />
 
-      <div className="p-6 space-y-5">
-        {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-              <ShoppingCart size={20} className="text-violet-600" />
-              Sale Order
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Transfer items between company projects with a fixed sale rate
-            </p>
-          </div>
+      <SalesShell
+        title="Sale Order"
+        subtitle="Transfer items between company projects with a fixed sale rate"
+        icon={ShoppingCart}
+        action={
           <div className="flex items-center gap-1 p-1 rounded-xl bg-muted border border-border">
             {rights.canCreate && (
               <button
@@ -1140,8 +1134,8 @@ export default function SaleOrder() {
               <ClipboardList size={14} /> History
             </button>
           </div>
-        </div>
-
+        }
+      >
         {activeTab === "history" && <SaleOrderHistory />}
 
         {activeTab === "create" && (
@@ -1385,7 +1379,7 @@ export default function SaleOrder() {
             )}
           </div>
         )}
-      </div>
+      </SalesShell>
     </>
   );
 }
