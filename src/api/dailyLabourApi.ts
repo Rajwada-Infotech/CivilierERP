@@ -35,6 +35,7 @@ export interface DailyLabourEntry {
   unitName: string | null;
   roomId: number | null;
   roomName: string | null;
+  floor: string | null;
   shift: string | null;
   attendanceStatus: string | null;
   remarks: string | null;
