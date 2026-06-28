@@ -1,6 +1,6 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-const BASE = "/api/activity-dependency";
+const BASE = "/api/work-progress";
 
 async function handleResponse<T = unknown>(res: Response): Promise<T> {
   let data: any = null;
@@ -16,14 +16,15 @@ async function handleResponse<T = unknown>(res: Response): Promise<T> {
   return data as T;
 }
 
-export interface ActivityDependency {
+export interface WorkProgress {
   id: number;
-  activityId: number;
+  allocationId: number;
+  projectId: number | null;
+  projectName: string | null;
+  activityId: number | null;
   activityName: string | null;
-  parentActivityId: number | null;
-  parentActivityName: string | null;
-  dependentActivityId: number | null;
-  dependentActivityName: string | null;
+  contractorId: number | null;
+  contractorName: string | null;
   workDescription: string | null;
   quantityPlanned: number | null;
   quantityCompleted: number | null;
@@ -36,17 +37,18 @@ export interface ActivityDependency {
   actualEndDate: string | null;
   currentStatus: string | null;
   remarks: string | null;
-  projectId: number | null;
+  reviewStatus: "Pending" | "Approved" | "Rejected";
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  reviewRemarks: string | null;
   createdBy: string | null;
   createdAt: string | null;
   updatedBy: string | null;
   updatedAt: string | null;
 }
 
-export interface ActivityDependencyPayload {
-  activityId: number;
-  parentActivityId?: number | null;
-  dependentActivityId?: number | null;
+export interface WorkProgressPayload {
+  allocationId: number;
   workDescription?: string | null;
   quantityPlanned?: number | null;
   quantityCompleted?: number | null;
@@ -57,19 +59,28 @@ export interface ActivityDependencyPayload {
   actualEndDate?: string | null;
   currentStatus?: string | null;
   remarks?: string | null;
-  projectId?: number | null;
 }
 
-export const getActivityDependencies = async (
-  activityId?: number,
-): Promise<ActivityDependency[]> => {
-  const qs = activityId ? `?activityId=${activityId}` : "";
+export interface ReviewPayload {
+  reviewedBy: string;
+  reviewStatus: "Approved" | "Rejected";
+  reviewRemarks?: string | null;
+}
+
+export const getWorkProgress = async (filters?: {
+  projectId?: number;
+  allocationId?: number;
+}): Promise<WorkProgress[]> => {
+  const params = new URLSearchParams();
+  if (filters?.projectId) params.set("projectId", String(filters.projectId));
+  if (filters?.allocationId) params.set("allocationId", String(filters.allocationId));
+  const qs = params.toString() ? `?${params.toString()}` : "";
   const res = await fetchWithAuth(`${BASE}${qs}`);
-  return handleResponse<ActivityDependency[]>(res);
+  return handleResponse<WorkProgress[]>(res);
 };
 
-export const addActivityDependency = async (
-  payload: ActivityDependencyPayload,
+export const addWorkProgress = async (
+  payload: WorkProgressPayload,
 ): Promise<{ success: boolean; id: number }> => {
   const res = await fetchWithAuth(BASE, {
     method: "POST",
@@ -79,9 +90,9 @@ export const addActivityDependency = async (
   return handleResponse(res);
 };
 
-export const updateActivityDependency = async (
+export const updateWorkProgress = async (
   id: number,
-  payload: ActivityDependencyPayload,
+  payload: WorkProgressPayload,
 ): Promise<{ success: boolean }> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
@@ -91,7 +102,19 @@ export const updateActivityDependency = async (
   return handleResponse(res);
 };
 
-export const deleteActivityDependency = async (
+export const reviewWorkProgress = async (
+  id: number,
+  payload: ReviewPayload,
+): Promise<{ success: boolean }> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/review`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse(res);
+};
+
+export const deleteWorkProgress = async (
   id: number,
 ): Promise<{ success: boolean }> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });

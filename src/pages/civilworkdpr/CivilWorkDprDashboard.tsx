@@ -1,46 +1,95 @@
 import React from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { DashboardBackground } from "@/components/DashboardBackground";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Pickaxe,
   ClipboardList,
-  Hammer,
-  Users,
+  HardHat,
+  Users2,
   RefreshCw,
   ArrowUpRight,
   AlertCircle,
   CheckCircle2,
   Clock,
-  Wrench,
+  GitBranch,
   BarChart3,
+  Sparkles,
 } from "lucide-react";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface DashboardData {
+  activities: { totalCount: number; activeCount: number };
+  allocations: {
+    totalCount: number;
+    projectCount: number;
+    workerCount: number;
+    todayCount: number;
+    newCount: number;
+  };
+  progress: {
+    totalCount: number;
+    pendingReviewCount: number;
+    approvedCount: number;
+    rejectedCount: number;
+    todayCount: number;
+  };
+  labour: {
+    skilledToday: number;
+    unskilledToday: number;
+    totalToday: number;
+    crewsToday: number;
+  };
+  recentProgress: {
+    Id: number;
+    ActivityName: string | null;
+    ContractorName: string | null;
+    ProjectName: string | null;
+    PercentageProgress: number;
+    CurrentStatus: string | null;
+    ReviewStatus: "Pending" | "Approved" | "Rejected";
+    CreatedAt: string;
+  }[];
+  statusBreakdown: { Status: string; Count: number }[];
+  asOf: string;
+}
+
+const EMPTY_DATA: DashboardData = {
+  activities: { totalCount: 0, activeCount: 0 },
+  allocations: { totalCount: 0, projectCount: 0, workerCount: 0, todayCount: 0, newCount: 0 },
+  progress: { totalCount: 0, pendingReviewCount: 0, approvedCount: 0, rejectedCount: 0, todayCount: 0 },
+  labour: { skilledToday: 0, unskilledToday: 0, totalToday: 0, crewsToday: 0 },
+  recentProgress: [],
+  statusBreakdown: [],
+  asOf: "",
+};
+
 const fmtNum = (n: number) => new Intl.NumberFormat("en-IN").format(n ?? 0);
 
-// ─── Status badge ─────────────────────────────────────────────────────────────
+const reviewColors: Record<string, string> = {
+  Approved: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
+  Rejected: "bg-red-500/10 text-red-600 border-red-400/20",
+  Pending: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+};
+
 const statusColors: Record<string, string> = {
   Completed: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
   "In Progress": "bg-blue-500/10 text-blue-600 border-blue-400/20",
-  Pending: "bg-amber-500/10 text-amber-600 border-amber-400/20",
-  Draft: "bg-muted text-muted-foreground border-border",
+  "Not Started": "bg-muted text-muted-foreground border-border",
+  "On Hold": "bg-amber-500/10 text-amber-600 border-amber-400/20",
 };
 
-function StatusBadge({ status }: { status: string }) {
-  const cls =
-    statusColors[status] ?? "bg-muted text-muted-foreground border-border";
+function Badge({ label, map }: { label: string; map: Record<string, string> }) {
+  const cls = map[label] ?? "bg-muted text-muted-foreground border-border";
   return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}
-    >
-      {status || "Draft"}
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}>
+      {label}
     </span>
   );
 }
 
-// ─── Stat Card ────────────────────────────────────────────────────────────────
 function StatCard({
   label,
   value,
@@ -64,9 +113,7 @@ function StatCard({
     <div
       onClick={onClick}
       className={`rounded-xl border border-border bg-card p-4 sm:p-5 flex flex-col gap-3 transition-all duration-200 border-l-2 ${borderL} ${
-        onClick
-          ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5 hover:border-primary/20"
-          : ""
+        onClick ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5 hover:border-primary/20" : ""
       }`}
     >
       <div className="flex items-start justify-between">
@@ -75,19 +122,14 @@ function StatCard({
         </div>
       </div>
       <div>
-        <p className="text-xl sm:text-2xl font-heading font-bold text-foreground leading-none">
-          {value}
-        </p>
+        <p className="text-xl sm:text-2xl font-heading font-bold text-foreground leading-none">{value}</p>
         <p className="text-xs text-muted-foreground mt-1">{label}</p>
-        {sub && (
-          <p className="text-[10px] text-muted-foreground/70 mt-0.5">{sub}</p>
-        )}
+        {sub && <p className="text-[10px] text-muted-foreground/70 mt-0.5">{sub}</p>}
       </div>
     </div>
   );
 }
 
-// ─── Section Header ───────────────────────────────────────────────────────────
 function SectionHeader({
   icon: Icon,
   title,
@@ -106,19 +148,12 @@ function SectionHeader({
       <div className="flex items-center gap-2 min-w-0">
         <Icon size={16} className="text-cyan-600 shrink-0" />
         <div className="min-w-0">
-          <p className="text-sm font-heading font-semibold text-foreground truncate">
-            {title}
-          </p>
-          {sub && (
-            <p className="text-[10px] text-muted-foreground truncate">{sub}</p>
-          )}
+          <p className="text-sm font-heading font-semibold text-foreground truncate">{title}</p>
+          {sub && <p className="text-[10px] text-muted-foreground truncate">{sub}</p>}
         </div>
       </div>
       {action && onAction && (
-        <button
-          onClick={onAction}
-          className="text-[10px] text-primary hover:underline flex items-center gap-0.5 shrink-0"
-        >
+        <button onClick={onAction} className="text-[10px] text-primary hover:underline flex items-center gap-0.5 shrink-0">
           {action} <ArrowUpRight size={10} />
         </button>
       )}
@@ -126,7 +161,6 @@ function SectionHeader({
   );
 }
 
-// ─── Empty State ──────────────────────────────────────────────────────────────
 function EmptyState({ label }: { label: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground">
@@ -136,32 +170,21 @@ function EmptyState({ label }: { label: string }) {
   );
 }
 
-// ─── Status Breakdown ─────────────────────────────────────────────────────────
-function StatusBreakdown({
-  data,
-  label,
-}: {
-  data: { status: string; count: number }[];
-  label: string;
-}) {
-  if (!data?.length)
-    return <p className="text-xs text-muted-foreground py-2">No {label} yet</p>;
-  const total = data.reduce((s, r) => s + r.count, 0);
+function StatusBreakdown({ data }: { data: { Status: string; Count: number }[] }) {
+  if (!data?.length) return <p className="text-xs text-muted-foreground py-2">No progress entries yet</p>;
+  const total = data.reduce((s, r) => s + r.Count, 0);
   return (
     <div className="space-y-2 mt-3">
       {data.map((row) => {
-        const pct = total > 0 ? Math.round((row.count / total) * 100) : 0;
+        const pct = total > 0 ? Math.round((row.Count / total) * 100) : 0;
         return (
-          <div key={row.status}>
+          <div key={row.Status}>
             <div className="flex justify-between text-[10px] text-muted-foreground mb-0.5">
-              <span>{row.status || "Draft"}</span>
-              <span className="font-medium text-foreground">{row.count}</span>
+              <span>{row.Status}</span>
+              <span className="font-medium text-foreground">{row.Count}</span>
             </div>
             <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                className="h-full rounded-full bg-cyan-500"
-                style={{ width: `${pct}%` }}
-              />
+              <div className="h-full rounded-full bg-cyan-500" style={{ width: `${pct}%` }} />
             </div>
           </div>
         );
@@ -170,31 +193,38 @@ function StatusBreakdown({
   );
 }
 
-// ─── Mock placeholder data (no backend endpoint wired up yet) ────────────────
-const MOCK_TASKS = [
-  { id: "IW-0001", title: "Site fencing repair", status: "In Progress" },
-  { id: "IW-0002", title: "Internal audit walk-through", status: "Pending" },
-  { id: "IW-0003", title: "Tool inventory recount", status: "Completed" },
-  { id: "IW-0004", title: "Storeroom reorganization", status: "Draft" },
-];
-
-const MOCK_STATUS_BREAKDOWN = [
-  { status: "Completed", count: 6 },
-  { status: "In Progress", count: 3 },
-  { status: "Pending", count: 4 },
-  { status: "Draft", count: 2 },
-];
+const timeAgo = (iso: string) => {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+};
 
 // ─── Dashboard component ──────────────────────────────────────────────────────
 export default function CivilWorkDprDashboard() {
-  const rights = usePageRights("civilworkdpr-dashboard");
   const navigate = useNavigate();
-  const [isFetching, setIsFetching] = React.useState(false);
 
-  const handleRefresh = () => {
-    setIsFetching(true);
-    setTimeout(() => setIsFetching(false), 600);
-  };
+  const {
+    data: rawData,
+    isFetching,
+    refetch,
+  } = useQuery<DashboardData>({
+    queryKey: ["civilWorkDprDashboard"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/civilworkdpr-dashboard");
+      if (!res.ok) throw new Error("Failed to fetch dashboard data");
+      return res.json();
+    },
+    // "Realtime": poll every 10s so review queue / progress counts stay
+    // fresh without the user manually refreshing.
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: false,
+  });
+
+  const data = rawData ?? EMPTY_DATA;
 
   return (
     <>
@@ -212,13 +242,10 @@ export default function CivilWorkDprDashboard() {
               <h1 className="text-lg sm:text-xl font-heading font-bold text-foreground truncate">
                 Civil Work DPR
               </h1>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Internal operations workspace
-              </p>
             </div>
           </div>
           <button
-            onClick={handleRefresh}
+            onClick={() => refetch()}
             disabled={isFetching}
             className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50 shrink-0"
           >
@@ -227,86 +254,57 @@ export default function CivilWorkDprDashboard() {
           </button>
         </div>
 
-        {/* Placeholder notice */}
-        <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/5 px-4 py-3 flex items-center gap-2 text-xs text-muted-foreground">
-          <AlertCircle size={14} className="shrink-0 text-cyan-500" />
-          <span>
-            This is a placeholder dashboard with sample data — it'll connect to
-            real data once Civil Work DPR pages are built out.
-          </span>
-        </div>
-
         {/* KPI Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
           <StatCard
-            label="Open Tasks"
-            value={fmtNum(7)}
-            sub="3 in progress"
+            label="Active Activities"
+            value={fmtNum(data.activities.activeCount)}
+            sub={`${data.activities.totalCount} total`}
             icon={ClipboardList}
             iconColor="text-cyan-600"
             iconBg="bg-cyan-500/10"
             borderL="border-l-cyan-500"
+            onClick={() => navigate("/masters/activity")}
           />
           <StatCard
-            label="Completed"
-            value={fmtNum(6)}
-            sub="This month"
-            icon={CheckCircle2}
-            iconColor="text-emerald-600"
-            iconBg="bg-emerald-500/10"
-            borderL="border-l-emerald-500"
-          />
-          <StatCard
-            label="Team Members"
-            value={fmtNum(5)}
-            sub="Assigned to module"
-            icon={Users}
+            label="Workers Assigned"
+            value={fmtNum(data.allocations.workerCount)}
+            sub={`${data.allocations.totalCount} allocations · ${data.allocations.projectCount} projects`}
+            icon={HardHat}
             iconColor="text-blue-600"
             iconBg="bg-blue-500/10"
             borderL="border-l-blue-500"
+            onClick={() => navigate("/civilworkdpr/contractor-register")}
           />
           <StatCard
             label="Pending Review"
-            value={fmtNum(4)}
-            sub="Awaiting sign-off"
+            value={fmtNum(data.progress.pendingReviewCount)}
+            sub="Awaiting engineer sign-off"
             icon={Clock}
             iconColor="text-amber-600"
             iconBg="bg-amber-500/10"
             borderL="border-l-amber-500"
+            onClick={() => navigate("/civilworkdpr/dependency")}
+          />
+          <StatCard
+            label="Labour on Site Today"
+            value={fmtNum(data.labour.totalToday)}
+            sub={`${data.labour.skilledToday} skilled · ${data.labour.unskilledToday} unskilled`}
+            icon={Users2}
+            iconColor="text-emerald-600"
+            iconBg="bg-emerald-500/10"
+            borderL="border-l-emerald-500"
+            onClick={() => navigate("/civilworkdpr/contractor-register")}
           />
         </div>
 
         {/* Secondary metric strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            {
-              label: "Tools Logged",
-              value: fmtNum(18),
-              icon: Wrench,
-              color: "text-cyan-600",
-              borderL: "border-l-cyan-500",
-            },
-            {
-              label: "Active Sites",
-              value: fmtNum(2),
-              icon: Hammer,
-              color: "text-orange-600",
-              borderL: "border-l-orange-500",
-            },
-            {
-              label: "Drafts",
-              value: fmtNum(2),
-              icon: ClipboardList,
-              color: "text-muted-foreground",
-              borderL: "border-l-muted",
-            },
-            {
-              label: "Overdue",
-              value: fmtNum(0),
-              icon: AlertCircle,
-              color: "text-red-500",
-              borderL: "border-l-red-500",
-            },
+            { label: "New Allocations Today", value: fmtNum(data.allocations.todayCount), icon: Sparkles, color: "text-cyan-600", borderL: "border-l-cyan-500" },
+            { label: "Unacknowledged", value: fmtNum(data.allocations.newCount), icon: AlertCircle, color: "text-amber-600", borderL: "border-l-amber-500" },
+            { label: "Progress Logged Today", value: fmtNum(data.progress.todayCount), icon: GitBranch, color: "text-blue-600", borderL: "border-l-blue-500" },
+            { label: "Approved Entries", value: fmtNum(data.progress.approvedCount), icon: CheckCircle2, color: "text-emerald-600", borderL: "border-l-emerald-500" },
           ].map((s) => (
             <div
               key={s.label}
@@ -314,12 +312,8 @@ export default function CivilWorkDprDashboard() {
             >
               <s.icon size={18} className={`${s.color} shrink-0`} />
               <div className="min-w-0">
-                <p className="text-[11px] sm:text-xs text-muted-foreground truncate">
-                  {s.label}
-                </p>
-                <p className="text-sm font-heading font-bold text-foreground">
-                  {s.value}
-                </p>
+                <p className="text-[11px] sm:text-xs text-muted-foreground truncate">{s.label}</p>
+                <p className="text-sm font-heading font-bold text-foreground">{s.value}</p>
               </div>
             </div>
           ))}
@@ -331,30 +325,30 @@ export default function CivilWorkDprDashboard() {
             <div className="p-4 border-b border-border">
               <SectionHeader
                 icon={ClipboardList}
-                title="Recent Activity"
-                sub="Last 4 entries"
+                title="Recent Progress"
+                sub="Last 8 logged updates"
                 action="View all"
-                onAction={() => navigate("/civilworkdpr")}
+                onAction={() => navigate("/civilworkdpr/dependency")}
               />
             </div>
-            {!MOCK_TASKS.length ? (
-              <EmptyState label="No activity yet" />
+            {!data.recentProgress.length ? (
+              <EmptyState label="No progress logged yet" />
             ) : (
               <div className="divide-y divide-border">
-                {MOCK_TASKS.map((t) => (
-                  <div
-                    key={t.id}
-                    className="flex items-center justify-between gap-3 px-4 py-3"
-                  >
+                {data.recentProgress.map((p) => (
+                  <div key={p.Id} className="flex items-center justify-between gap-3 px-4 py-3">
                     <div className="min-w-0">
-                      <p className="font-mono text-[11px] text-primary">
-                        {t.id}
+                      <p className="text-xs font-medium text-foreground truncate max-w-[160px] sm:max-w-[220px]">
+                        {p.ActivityName || "—"} · {p.ContractorName || "—"}
                       </p>
-                      <p className="text-xs text-foreground truncate max-w-[160px] sm:max-w-[220px]">
-                        {t.title}
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {p.ProjectName || "—"} · {p.PercentageProgress}% · {timeAgo(p.CreatedAt)}
                       </p>
                     </div>
-                    <StatusBadge status={t.status} />
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <Badge label={p.CurrentStatus || "Not Started"} map={statusColors} />
+                      <Badge label={p.ReviewStatus} map={reviewColors} />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -362,8 +356,8 @@ export default function CivilWorkDprDashboard() {
           </div>
 
           <div className="rounded-xl border border-border bg-card p-5">
-            <SectionHeader icon={BarChart3} title="Task Status Breakdown" />
-            <StatusBreakdown data={MOCK_STATUS_BREAKDOWN} label="tasks" />
+            <SectionHeader icon={BarChart3} title="Progress Status Breakdown" />
+            <StatusBreakdown data={data.statusBreakdown} />
           </div>
         </div>
 
@@ -372,36 +366,16 @@ export default function CivilWorkDprDashboard() {
           <SectionHeader icon={Pickaxe} title="Quick Actions" />
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-3">
             {[
-              {
-                label: "Dashboard",
-                icon: Pickaxe,
-                path: "/civilworkdpr",
-                color: "text-cyan-600",
-                bg: "bg-cyan-500/10",
-              },
-              {
-                label: "Tasks",
-                icon: ClipboardList,
-                path: "/civilworkdpr",
-                color: "text-blue-600",
-                bg: "bg-blue-500/10",
-              },
-              {
-                label: "Tools",
-                icon: Wrench,
-                path: "/civilworkdpr",
-                color: "text-orange-600",
-                bg: "bg-orange-500/10",
-              },
+              { label: "Activity Master", icon: ClipboardList, path: "/masters/activity", color: "text-orange-600", bg: "bg-orange-500/10" },
+              { label: "Dependency", icon: GitBranch, path: "/civilworkdpr/dependency", color: "text-cyan-600", bg: "bg-cyan-500/10" },
+              { label: "Contractor Register", icon: HardHat, path: "/civilworkdpr/contractor-register", color: "text-blue-600", bg: "bg-blue-500/10" },
             ].map(({ label, icon: Icon, path, color, bg }) => (
               <button
                 key={label}
                 onClick={() => navigate(path)}
                 className="flex flex-col items-center gap-2 py-4 px-3 rounded-xl border border-border hover:bg-muted hover:border-primary/20 transition-all duration-150 active:scale-95 group"
               >
-                <div
-                  className={`w-9 h-9 rounded-lg ${bg} flex items-center justify-center group-hover:scale-110 transition-transform`}
-                >
+                <div className={`w-9 h-9 rounded-lg ${bg} flex items-center justify-center group-hover:scale-110 transition-transform`}>
                   <Icon size={16} className={color} />
                 </div>
                 <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
