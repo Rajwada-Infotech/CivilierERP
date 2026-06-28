@@ -37,7 +37,6 @@ import {
   Ruler,
   Activity,
   Pickaxe,
-  GitBranch,
   DoorOpen,
 } from "lucide-react";
 
@@ -61,7 +60,7 @@ import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
 import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { salesNavItems } from "./sidebars/SalesSidebar";
 import { recordsNavItems } from "./sidebars/RecordsSidebar";
-import { insideWorkNavItems } from "./sidebars/InsideWorkSidebar";
+import { civilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import type {
   NavItem as DesktopNavItem,
   SubItem as DesktopSubItem,
@@ -153,13 +152,13 @@ const MODULE_META: Record<
     label: "Records",
     route: MODULE_DASHBOARD_ROUTES.records,
   },
-  insidework: {
+  civilworkdpr: {
     h: 192,
     s: 91,
     l: 36,
     icon: Pickaxe,
-    label: "Inside Work",
-    route: MODULE_DASHBOARD_ROUTES.insidework,
+    label: "Civil Work DPR",
+    route: MODULE_DASHBOARD_ROUTES.civilworkdpr,
   },
   admin: {
     h: 217,
@@ -322,7 +321,7 @@ const followupSetupItems: SetupItem[] = [
 const engineeringSetupItems: SetupItem[] = [
   {
     icon: Activity,
-    label: "Activity",
+    label: "Activity Master",
     path: "/masters/activity",
     color: "text-green-400",
   },
@@ -373,11 +372,13 @@ const adminSetupItems: SetupItem[] = [
   },
 ];
 
-const insideworkSetupItems: SetupItem[] = [
+// Activity Master is the shared Engineering master (no separate Civil Work
+// DPR-specific one) — this just gives quick access to it from this module.
+const civilWorkDprSetupItems: SetupItem[] = [
   {
-    icon: GitBranch,
-    label: "Dependency",
-    path: "/insidework/setup/dependency",
+    icon: ClipboardList,
+    label: "Activity Master",
+    path: "/masters/activity",
     color: "text-cyan-500",
   },
 ];
@@ -438,10 +439,10 @@ export const MobileNav: React.FC = () => {
         label: "Engineering",
         available: true,
       };
-    if (activeModule === "insidework")
+    if (activeModule === "civilworkdpr")
       return {
-        items: insideworkSetupItems,
-        label: "Inside Work",
+        items: civilWorkDprSetupItems,
+        label: "Civil Work DPR",
         available: true,
       };
     if (activeModule === "finance")
@@ -516,8 +517,8 @@ export const MobileNav: React.FC = () => {
         return adaptItems(salesNavItems as DesktopNavItem[]);
       case "records":
         return adaptItems(recordsNavItems as DesktopNavItem[]);
-      case "insidework":
-        return adaptItems(insideWorkNavItems as DesktopNavItem[]);
+      case "civilworkdpr":
+        return adaptItems(civilWorkDprNavItems as DesktopNavItem[]);
       default:
         return [];
     }

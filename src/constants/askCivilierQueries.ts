@@ -611,7 +611,7 @@ export const MODULE_QUERIES: Record<NonNullable<Module>, SuggestedQuery[]> = {
     },
   ],
   records: [],
-  insidework: [],
+  civilworkdpr: [],
 };
 
 // ─── Final fallback ─────────────────────────────────────────────────────
@@ -707,7 +707,7 @@ const MODULE_LABELS: Record<NonNullable<Module>, string> = {
   ticket: "Tickets",
   sales: "Sales",
   records: "Records",
-  insidework: "Inside Work",
+  civilworkdpr: "Civil Work DPR",
   admin: "Admin",
 };
 

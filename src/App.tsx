@@ -105,14 +105,14 @@ const Transactions = lazy(() => import("./pages/finance/Transactions"));
 const Payment = lazy(() => import("./pages/finance/Payment"));
 const Brs = lazy(() => import("./pages/finance/Brs"));
 const Records = lazy(() => import("./pages/records/Records"));
-const InsideWorkDashboard = lazy(
-  () => import("./pages/insidework/InsideWorkDashboard"),
+const CivilWorkDprDashboard = lazy(
+  () => import("./pages/civilworkdpr/CivilWorkDprDashboard"),
 );
-const DependencyMaster = lazy(
-  () => import("./pages/insidework/DependencyMaster"),
+const DependencyTracker = lazy(
+  () => import("./pages/civilworkdpr/DependencyTracker"),
 );
-const InsideWorkActivity = lazy(
-  () => import("./pages/insidework/InsideWorkActivity"),
+const ContractorRegister = lazy(
+  () => import("./pages/civilworkdpr/ContractorRegister"),
 );
 const ReceivedPayment = lazy(() => import("./pages/finance/ReceivedPayment"));
 const TrialBalance = lazy(() => import("./pages/finance/TrialBalance"));
@@ -653,26 +653,26 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/insidework"
+        path="/civilworkdpr"
         element={
-          <ProtectedRoute pageKey="insidework-dashboard">
-            <InsideWorkDashboard />
+          <ProtectedRoute pageKey="civilworkdpr-dashboard">
+            <CivilWorkDprDashboard />
           </ProtectedRoute>
         }
       />
       <Route
-        path="/insidework/setup/dependency"
+        path="/civilworkdpr/dependency"
         element={
-          <ProtectedRoute pageKey="dependency-master">
-            <DependencyMaster />
+          <ProtectedRoute pageKey="civilworkdpr-dependency">
+            <DependencyTracker />
           </ProtectedRoute>
         }
       />
       <Route
-        path="/insidework/activity"
+        path="/civilworkdpr/contractor-register"
         element={
-          <ProtectedRoute pageKey="insidework-activity">
-            <InsideWorkActivity />
+          <ProtectedRoute pageKey="civilworkdpr-contractor-register">
+            <ContractorRegister />
           </ProtectedRoute>
         }
       />
