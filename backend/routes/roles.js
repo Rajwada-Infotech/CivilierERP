@@ -339,7 +339,11 @@ router.get("/:roleId/rights", authMiddleware, async (req, res) => {
 });
 
 // SET ROLE RIGHTS
-router.post("/:roleId/rights", authMiddleware, async (req, res) => {
+router.post(
+  "/:roleId/rights",
+  authMiddleware,
+  checkPermission("Rights", "Menu", "CanEdit"),
+  async (req, res) => {
   try {
     const roleId = parseInt(req.params.roleId);
     const { pagePermissions } = req.body;

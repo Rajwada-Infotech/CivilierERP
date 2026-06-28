@@ -187,7 +187,7 @@ async function getRolePagePermissions(roleId) {
   if (!roleId) return [];
   const pool = getPool();
   const result = await pool.request().input("RoleId", sql.Int, roleId).query(`
-      SELECT Module, SubModule, CanView, CanAdd, CanEdit, CanDelete
+      SELECT Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPrint, CanExport
       FROM dbo.RoleRights
       WHERE RoleId = @RoleId
     `);
@@ -199,6 +199,8 @@ async function getRolePagePermissions(roleId) {
     if (row.CanAdd) actions.push("create");
     if (row.CanEdit) actions.push("edit");
     if (row.CanDelete) actions.push("delete");
+    if (row.CanPrint) actions.push("print");
+    if (row.CanExport) actions.push("export");
     if (actions.length === 0) continue;
 
     for (const page of getCandidatePageKeys(row.Module, row.SubModule)) {

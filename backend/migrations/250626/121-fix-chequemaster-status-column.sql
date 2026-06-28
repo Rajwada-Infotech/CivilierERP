@@ -2,44 +2,50 @@
 -- 121-fix-chequemaster-status-column.sql
 --
 -- Converts ChequeMaster.Status from nvarchar to BIT.
--- Run each statement individually in SSMS if batching fails.
+-- IDEMPOTENT: safe to re-run. If Status is already BIT (or a prior
+-- partial run left a Status_bit column behind), each step guards
+-- itself and the migration becomes a no-op instead of erroring.
 -- ============================================================
 
-USE Civilier;
-
--- Step 1: Add temp BIT column (defaults all rows to 1 = active)
-ALTER TABLE dbo.ChequeMaster ADD Status_bit BIT NOT NULL DEFAULT 1;
+-- Step 0: If a previous failed run left an orphan Status_bit column,
+-- drop it (with its default constraint) so we start clean.
+IF COL_LENGTH('dbo.ChequeMaster', 'Status_bit') IS NOT NULL
+BEGIN
+  DECLARE @df sysname;
+  SELECT @df = dc.name
+  FROM sys.default_constraints dc
+  JOIN sys.columns c ON c.default_object_id = dc.object_id
+  WHERE c.object_id = OBJECT_ID('dbo.ChequeMaster')
+    AND c.name = 'Status_bit';
+  IF @df IS NOT NULL
+    EXEC('ALTER TABLE dbo.ChequeMaster DROP CONSTRAINT ' + @df);
+  ALTER TABLE dbo.ChequeMaster DROP COLUMN Status_bit;
+END
 GO
 
--- Step 2: Backfill from old nvarchar values
-UPDATE dbo.ChequeMaster
-SET Status_bit = CASE WHEN Status IN ('0', 'Inactive') THEN 0 ELSE 1 END;
+-- Only do the conversion if Status is NOT already BIT.
+IF EXISTS (
+  SELECT 1 FROM sys.columns c
+  JOIN sys.types t ON c.user_type_id = t.user_type_id
+  WHERE c.object_id = OBJECT_ID('dbo.ChequeMaster')
+    AND c.name = 'Status'
+    AND t.name <> 'bit'
+)
+BEGIN
+  ALTER TABLE dbo.ChequeMaster ADD Status_bit BIT NOT NULL DEFAULT 1;
+  EXEC('UPDATE dbo.ChequeMaster SET Status_bit = CASE WHEN Status IN (''0'', ''Inactive'') THEN 0 ELSE 1 END');
+  IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = 'DF_ChequeMaster_Status')
+    ALTER TABLE dbo.ChequeMaster DROP CONSTRAINT DF_ChequeMaster_Status;
+  IF EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('dbo.ChequeMaster') AND name = 'IX_ChequeMaster_CId_Covering')
+    DROP INDEX IX_ChequeMaster_CId_Covering ON dbo.ChequeMaster;
+  ALTER TABLE dbo.ChequeMaster DROP COLUMN Status;
+  EXEC sp_rename 'dbo.ChequeMaster.Status_bit', 'Status', 'COLUMN';
+END
 GO
 
--- Step 3a: Drop default constraint on old Status column
-ALTER TABLE dbo.ChequeMaster DROP CONSTRAINT DF_ChequeMaster_Status;
+-- Ensure the covering index exists on the (now BIT) Status column.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('dbo.ChequeMaster') AND name = 'IX_ChequeMaster_CId_Covering')
+  CREATE INDEX IX_ChequeMaster_CId_Covering
+  ON dbo.ChequeMaster (CId)
+  INCLUDE (Status, BankId, ChequeLotNumber, ChequeStartNumber, ChequeEndNumber, TotalCheques);
 GO
-
--- Step 3b: Drop index dependent on old Status column
-DROP INDEX IX_ChequeMaster_CId_Covering ON dbo.ChequeMaster;
-GO
-
--- Step 3c: Drop the old nvarchar Status column
-ALTER TABLE dbo.ChequeMaster DROP COLUMN Status;
-GO
-
--- Step 4: Rename temp column to Status
-EXEC sp_rename 'dbo.ChequeMaster.Status_bit', 'Status', 'COLUMN';
-GO
-
--- Step 5: Re-create the covering index on the new BIT column
-CREATE INDEX IX_ChequeMaster_CId_Covering
-ON dbo.ChequeMaster (CId)
-INCLUDE (Status, BankId, ChequeLotNumber, ChequeStartNumber, ChequeEndNumber, TotalCheques);
-GO
-
--- Verify
-SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
-FROM INFORMATION_SCHEMA.COLUMNS
-WHERE TABLE_NAME = 'ChequeMaster'
-ORDER BY ORDINAL_POSITION;

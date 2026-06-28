@@ -5,6 +5,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { requirePageRight } = require("../middleware/requirePageRight");
 
 let accountHeadColumnMetaPromise = null;
 
@@ -225,7 +226,7 @@ router.get("/:id", cache("general-ledger-detail", 180), async (req, res) => {
 
 // ── POST / ────────────────────────────────────────────────────────────────────
 // Creates a new GL ledger head. LHeadName is required; all other fields are optional.
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("general-ledger", "create"), async (req, res) => {
   const { LHeadName, LHeadCode, LBelongsTo, LHeadStatus, IsSystemGenerated } = req.body;
 
   if (!LHeadName || !String(LHeadName).trim()) {
@@ -320,7 +321,7 @@ router.post("/", async (req, res) => {
 
 // ── PUT /:id ──────────────────────────────────────────────────────────────────
 // Updates an existing GL ledger head. LHeadType is always preserved as 'GL'.
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePageRight("general-ledger", "edit"), async (req, res) => {
   const numericId = parseInt(req.params.id, 10);
   if (!Number.isFinite(numericId) || numericId <= 0) {
     return res.status(400).json({ error: "Invalid record id" });
@@ -405,7 +406,7 @@ router.put("/:id", async (req, res) => {
 // Hard-deletes a GL ledger head. Scoped to LHeadType = 'GL' as a safety guard
 // so this route can never accidentally delete non-GL account heads.
 // System-generated ledgers (IsSystemGenerated = 1) can only be deleted by super_admin.
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("general-ledger", "delete"), async (req, res) => {
   const numericId = parseInt(req.params.id, 10);
   if (!Number.isFinite(numericId) || numericId <= 0) {
     return res.status(400).json({ error: "Invalid record id" });
