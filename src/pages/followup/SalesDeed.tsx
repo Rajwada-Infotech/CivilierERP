@@ -1262,7 +1262,7 @@ export function SalesDeedPage() {
                               </button>
                               {openMenuId === deed.Id && (
                                 <div className="sd-menu">
-                                  <button
+                                  {rights.canEdit && (<button
                                     className="sd-menu-item"
                                     onClick={() => {
                                       openEdit(deed);
@@ -1270,7 +1270,7 @@ export function SalesDeedPage() {
                                     }}
                                   >
                                     <Pencil size={13} /> Edit
-                                  </button>
+                                  </button>)}
                                   <button
                                     className="sd-menu-item"
                                     onClick={() => {

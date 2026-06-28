@@ -1,3 +1,4 @@
+const allowRoles = require("../middleware/role");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -78,7 +79,7 @@ router.get("/blocks", async (req, res) => {
 });
 
 // POST — add unit
-router.post("/", async (req, res) => {
+router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const { ProjectId, BlockId, UnitName, IsActive } = req.body;
   const createdBy = req.user?.userId || null;
   try {
@@ -103,7 +104,7 @@ router.post("/", async (req, res) => {
 });
 
 // PUT — update unit
-router.put("/:id", async (req, res) => {
+router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const { id } = req.params;
   const { ProjectId, BlockId, UnitName, IsActive } = req.body;
   const updatedBy = req.user?.userId || null;
@@ -136,7 +137,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // DELETE
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });

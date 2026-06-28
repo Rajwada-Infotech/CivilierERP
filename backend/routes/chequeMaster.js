@@ -3,6 +3,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { validateBody } = require("../middleware/validateRequest");
@@ -89,7 +90,7 @@ router.get("/", cache("cheque-master", 300), async (req, res) => {
 });
 
 // POST - Create cheque lot
-router.post("/", validateBody(chequeMasterCreateSchema), async (req, res) => {
+router.post("/", requirePageRight("cheque-master", "create"), validateBody(chequeMasterCreateSchema), async (req, res) => {
   const {
     CompanyId,
     BankId,
@@ -166,7 +167,7 @@ router.post("/", validateBody(chequeMasterCreateSchema), async (req, res) => {
 });
 
 // PUT - Update cheque lot
-router.put("/:id", validateBody(chequeMasterUpdateSchema), async (req, res) => {
+router.put("/:id", requirePageRight("cheque-master", "edit"), validateBody(chequeMasterUpdateSchema), async (req, res) => {
   const {
     CompanyId,
     BankId,
@@ -238,7 +239,7 @@ router.put("/:id", validateBody(chequeMasterUpdateSchema), async (req, res) => {
 });
 
 // DELETE - Remove cheque lot
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("cheque-master", "delete"), async (req, res) => {
   try {
     const pool = getPool();
     await pool

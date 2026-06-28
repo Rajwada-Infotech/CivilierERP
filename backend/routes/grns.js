@@ -2,6 +2,7 @@ const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
 const { grnBodySchema } = require("../validation/financialRouteSchemas");
@@ -503,7 +504,11 @@ router.get("/", cache("grns", 300), async (req, res) => {
       LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
       LEFT JOIN dbo.enterprise co ON co.id = p.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = p.ProjectId
-      LEFT JOIN dbo.FinYear fyGrn ON grn.GRNDate >= fyGrn.FStartDate AND grn.GRNDate <= fyGrn.FEndDate
+      LEFT JOIN dbo.FinYear fyGrn ON fyGrn.FId = (
+        SELECT TOP 1 fy.FId FROM dbo.FinYear fy
+        WHERE grn.GRNDate >= fy.FStartDate AND grn.GRNDate <= fy.FEndDate
+        ORDER BY fy.FId
+      )
       LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = grn.DocTypeId
       WHERE (@finYear IS NULL OR (
         grn.DocYear IS NOT NULL AND (
@@ -636,7 +641,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST - Create GRN + Stock Ledger Entries
-router.post("/", validateBody(grnBodySchema), async (req, res) => {
+router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodySchema), async (req, res) => {
   const {
     grnNo,
     grnDate,
@@ -901,7 +906,7 @@ router.post("/", validateBody(grnBodySchema), async (req, res) => {
 });
 
 // PUT - Update GRN
-router.put("/:id", validateBody(grnBodySchema), async (req, res) => {
+router.put("/:id", requirePageRight("grn-master", "edit"), validateBody(grnBodySchema), async (req, res) => {
   try {
     await guardEdit("goods-receipt", req.params.id);
   } catch (err) {
@@ -1118,7 +1123,7 @@ router.get("/:id/can-delete", async (req, res) => {
 });
 
 // DELETE
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("grn-master", "delete"), async (req, res) => {
   const grnId = parseInt(req.params.id, 10);
   const pool = await getPool();
 
@@ -1236,7 +1241,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 // ── PUT /:id/submit — Draft/Partially Received → Pending ──────────────────────
-router.put("/:id/submit", async (req, res) => {
+router.put("/:id/submit", requirePageRight("grn-master", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
@@ -1561,7 +1566,7 @@ router.get("/:id/pending-items", async (req, res) => {
 // The caller may pass { remarks, supplierId } in the request body to optionally
 // attach a supplier and free-text note.  All other fields are derived from the
 // transfer.
-router.post("/from-transfer/:transferId", async (req, res) => {
+router.post("/from-transfer/:transferId", requirePageRight("grn-master", "create"), async (req, res) => {
   const transferId = parseInt(req.params.transferId, 10);
   if (isNaN(transferId)) {
     return res.status(400).json({ error: "Invalid transferId" });

@@ -6,6 +6,7 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
 const { paymentBodySchema } = require("../validation/financialRouteSchemas");
@@ -346,7 +347,7 @@ router.get("/cheque-numbers/:lotId", async (req, res) => {
 // ── POST /deduct-cheque — validate cheque number selection (no longer auto-assigns) ──
 // TotalCheques is a COMPUTED column on ChequeMaster — cannot be updated directly.
 // Usage is tracked via NewPayment.PChequeNo records instead.
-router.post("/deduct-cheque", async (req, res) => {
+router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (req, res) => {
   const { lotId, chequeNo } = req.body;
   if (!lotId) return res.status(400).json({ error: "lotId is required" });
   if (!chequeNo) return res.status(400).json({ error: "chequeNo is required" });
@@ -409,7 +410,7 @@ router.post("/deduct-cheque", async (req, res) => {
 });
 
 // ── POST — Create payment ─────────────────────────────────────────────────────
-router.post("/", validateBody(paymentBodySchema), async (req, res) => {
+router.post("/", requirePageRight("new-payment", "create"), validateBody(paymentBodySchema), async (req, res) => {
   const {
     PPaymentName,
     PMode,
@@ -569,7 +570,7 @@ router.post("/", validateBody(paymentBodySchema), async (req, res) => {
 });
 
 // ── PUT /:id — Update payment ─────────────────────────────────────────────────
-router.put("/:id", validateBody(paymentBodySchema), async (req, res) => {
+router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(paymentBodySchema), async (req, res) => {
   const { id } = req.params;
   const {
     PPaymentName,
@@ -701,7 +702,7 @@ router.put("/:id", validateBody(paymentBodySchema), async (req, res) => {
 });
 
 // ── DELETE /:id ───────────────────────────────────────────────────────────────
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res) => {
   const { id } = req.params;
   try {
     const pool = getPool();
@@ -718,7 +719,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 // ── PUT /:id/submit — Draft → Pending ─────────────────────────────────────────
-router.put("/:id/submit", async (req, res) => {
+router.put("/:id/submit", requirePageRight("new-payment", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);

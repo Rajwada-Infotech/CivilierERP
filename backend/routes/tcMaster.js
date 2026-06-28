@@ -3,6 +3,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
 const { getPool, sql } = require("../db");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 
@@ -29,7 +30,7 @@ router.get("/", cache("tc-master", 300), async (req, res) => {
 });
 
 // POST — create new T&C record
-router.post("/", async (req, res) => {
+router.post("/", requirePageRight("t-c-master", "create"), async (req, res) => {
   const { Name, TermsAndCondition, Remarks, isActive } = req.body;
   const createdBy = req.user?.userId || null;
 
@@ -61,7 +62,7 @@ router.post("/", async (req, res) => {
 });
 
 // PUT — update existing T&C record
-router.put("/:id", async (req, res) => {
+router.put("/:id", requirePageRight("t-c-master", "edit"), async (req, res) => {
   const { Name, TermsAndCondition, Remarks, isActive } = req.body;
   const updatedBy = req.user?.userId || null;
 
@@ -98,7 +99,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // DELETE — remove T&C record
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requirePageRight("t-c-master", "delete"), async (req, res) => {
   try {
     const pool = getPool();
     await pool

@@ -33,7 +33,13 @@ interface AuthContextType {
   login: (
     email: string,
     password: string,
-  ) => Promise<{ success: boolean; error?: string; role?: UserRole; userId?: string }>;
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    role?: UserRole;
+    userId?: string;
+    name?: string;
+  }>;
   logout: () => void;
   addUser: (user: Omit<AppUser, "id"> & { password: string }) => void;
   deleteUser: (id: string) => Promise<void>;
@@ -183,7 +189,9 @@ export const AuthProvider = ({
     const fetchRights = () => {
       const token = localStorage.getItem("token");
       if (!token) return;
-      fetch("/api/user-rights/my", { headers: { Authorization: `Bearer ${token}` } })
+      fetch("/api/user-rights/my", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
         .then((r) => (r.ok ? r.json() : null))
         .then((result) => {
           if (!result?.rightsJson || !Array.isArray(result.rightsJson)) return;
@@ -242,8 +250,15 @@ export const AuthProvider = ({
             headers: { Authorization: `Bearer ${data.token}` },
           });
           const rightsData = rightsRes.ok ? await rightsRes.json() : null;
-          if (rightsData?.rightsJson && Array.isArray(rightsData.rightsJson) && rightsData.rightsJson.length > 0) {
-            const updated = { ...userWithInitials, pagePermissions: rightsData.rightsJson };
+          if (
+            rightsData?.rightsJson &&
+            Array.isArray(rightsData.rightsJson) &&
+            rightsData.rightsJson.length > 0
+          ) {
+            const updated = {
+              ...userWithInitials,
+              pagePermissions: rightsData.rightsJson,
+            };
             localStorage.setItem("user", JSON.stringify(updated));
             setCurrentUser(updated);
           } else {
@@ -265,10 +280,15 @@ export const AuthProvider = ({
           name: data.user.name,
           email: data.user.email,
           role: data.user.role,
-        })
+        }),
       ).catch(() => {});
 
-      return { success: true, role: data.user.role, userId: String(data.user.id) };
+      return {
+        success: true,
+        role: data.user.role,
+        userId: String(data.user.id),
+        name: data.user.name,
+      };
     } catch (err: any) {
       return {
         success: false,
