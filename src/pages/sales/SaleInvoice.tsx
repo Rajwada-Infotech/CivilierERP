@@ -260,7 +260,7 @@ function CollectPaymentModal({
       RPDepositBankName: dummyBank?.BName ?? "Dummy Bank",
       RPTransactionID: null,
       RPCheckNumber: null,
-      RPRemarks: `[SaleInvoicePayment] ${remarks}`.trim(),
+      RPRemarks: `[SalePayment] ${remarks}`.trim(),
       RPStatus: "Draft",
       RPFinYear: activeFinYear || null,
       RPDocTypeId: null,
