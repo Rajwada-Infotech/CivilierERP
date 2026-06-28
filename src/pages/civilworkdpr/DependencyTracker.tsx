@@ -9,13 +9,13 @@ import {
   X,
   Loader2,
   Save,
-  RotateCcw,
   ThumbsUp,
   ThumbsDown,
   HardHat,
   UserPlus,
   Building2,
   ClipboardList,
+  Plus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -155,6 +155,14 @@ const DependencyTracker: React.FC = () => {
 
   const activeProjectLabel = (projects as any[]).find((p) => p.id === activeProjectId)?.label as string | undefined;
 
+  // Worker count per project — shown on each project chip so you can see
+  // which projects actually have activity going on before switching tabs.
+  const workerCountByProject = new Map<number, number>();
+  for (const a of allocations) {
+    if (a.projectId == null) continue;
+    workerCountByProject.set(a.projectId, (workerCountByProject.get(a.projectId) || 0) + 1);
+  }
+
   const allocationsForProject = allocations.filter(
     (a) => a.projectId === activeProjectId,
   );
@@ -192,44 +200,22 @@ const DependencyTracker: React.FC = () => {
   const [form, setFormState] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
-  const [saving, setSaving] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
-  // ── Assign Worker dialog — creates a ContractorAllocation directly from
-  // this page, so an Activity can pick up additional workers without going
-  // through Contractor Register first.
-  const [assignOpen, setAssignOpen] = useState(false);
+  // ── Single "Add" dialog — covers both flows:
+  //   "new"      → pick Activity + Contractor (creates the allocation) and
+  //                log its first progress entry, all in one submit.
+  //   "progress" → log/edit progress for an *existing* worker — the
+  //                Activity/Contractor are already fixed, so the dialog
+  //                just shows (fetches) them as read-only labels instead
+  //                of pickers.
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogMode, setDialogMode] = useState<"new" | "progress">("new");
   const [assignActivityId, setAssignActivityId] = useState("");
   const [assignContractorId, setAssignContractorId] = useState("");
-  const [assignSaving, setAssignSaving] = useState(false);
-
-  const resetAssignForm = () => {
-    setAssignActivityId("");
-    setAssignContractorId("");
-  };
-
-  const handleAssignWorker = async () => {
-    if (!assignActivityId || !assignContractorId) {
-      toast.error("Activity and Contractor are required");
-      return;
-    }
-    setAssignSaving(true);
-    try {
-      await addContractorAllocation({
-        contractorId: Number(assignContractorId),
-        activityId: Number(assignActivityId),
-        projectId: activeProjectId,
-      });
-      toast.success("Worker assigned to activity ✓");
-      await queryClient.invalidateQueries({ queryKey: ["contractorAllocations"] });
-      setAssignOpen(false);
-      resetAssignForm();
-    } catch (err: any) {
-      toast.error("Failed to assign worker: " + err.message);
-    } finally {
-      setAssignSaving(false);
-    }
-  };
+  const [logLabel, setLogLabel] = useState<{ activityName: string; contractorName: string } | null>(null);
+  const [dialogSaving, setDialogSaving] = useState(false);
+  const [contractorAutoFilled, setContractorAutoFilled] = useState(false);
 
   const set = useCallback(
     (key: keyof typeof EMPTY_FORM, val: unknown) => {
@@ -239,40 +225,55 @@ const DependencyTracker: React.FC = () => {
     [errors],
   );
 
-  const validate = () => {
-    const errs: Record<string, boolean> = {};
-    if (!form.allocationId) errs.allocationId = true;
-    setErrors(errs);
-    return Object.keys(errs).length === 0;
-  };
-
-  const resetForm = () => {
+  const resetDialog = () => {
     setFormState(EMPTY_FORM);
     setEditingId(null);
     setErrors({});
+    setAssignActivityId("");
+    setAssignContractorId("");
+    setLogLabel(null);
+    setContractorAutoFilled(false);
   };
 
-  const handleSave = async () => {
-    if (!validate()) return;
-    setSaving(true);
-    try {
-      if (editingId) {
-        await updateWorkProgress(editingId, form);
-        toast.success("Progress updated — sent back for review ✓");
-      } else {
-        await addWorkProgress(form);
-        toast.success("Progress logged — pending engineer review ✓");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["workProgress"] });
-      resetForm();
-    } catch (err: any) {
-      toast.error("Save failed: " + err.message);
-    } finally {
-      setSaving(false);
+  const openAddDialog = () => {
+    resetDialog();
+    setDialogMode("new");
+    setDialogOpen(true);
+  };
+
+  // When an Activity already has a worker linked to it (via Contractor
+  // Register / a prior Add here), suggest that same contractor — still
+  // changeable, since an Activity can have several workers.
+  const handleActivityPick = (activityId: string) => {
+    setAssignActivityId(activityId);
+    const linked = allocations.find((a) => String(a.activityId) === activityId && a.projectId === activeProjectId);
+    if (linked) {
+      setAssignContractorId(String(linked.contractorId));
+      setContractorAutoFilled(true);
+    } else {
+      setContractorAutoFilled(false);
     }
   };
 
-  const handleEdit = (row: WorkProgress) => {
+  const handleContractorPick = (contractorId: string) => {
+    setAssignContractorId(contractorId);
+    setContractorAutoFilled(false);
+  };
+
+  const openLogDialog = (allocation: { id: number; activityName: string | null; contractorName: string | null }) => {
+    resetDialog();
+    setDialogMode("progress");
+    setFormState((p) => ({ ...p, allocationId: allocation.id }));
+    setLogLabel({
+      activityName: allocation.activityName || "—",
+      contractorName: allocation.contractorName || "—",
+    });
+    setDialogOpen(true);
+  };
+
+  const openEditDialog = (row: WorkProgress) => {
+    resetDialog();
+    setDialogMode("progress");
     setFormState({
       allocationId: row.allocationId,
       workDescription: row.workDescription || "",
@@ -287,7 +288,59 @@ const DependencyTracker: React.FC = () => {
       remarks: row.remarks || "",
     });
     setEditingId(row.id);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setLogLabel({ activityName: row.activityName || "—", contractorName: row.contractorName || "—" });
+    setDialogOpen(true);
+  };
+
+  const handleDialogSave = async () => {
+    if (dialogMode === "new") {
+      if (!assignActivityId || !assignContractorId) {
+        toast.error("Activity and Contractor are required");
+        return;
+      }
+      setDialogSaving(true);
+      try {
+        const created = await addContractorAllocation({
+          contractorId: Number(assignContractorId),
+          activityId: Number(assignActivityId),
+          projectId: activeProjectId,
+        });
+        await addWorkProgress({ ...form, allocationId: created.id });
+        toast.success("Worker assigned and progress logged ✓");
+        await queryClient.invalidateQueries({ queryKey: ["contractorAllocations"] });
+        await queryClient.invalidateQueries({ queryKey: ["workProgress"] });
+        setDialogOpen(false);
+        resetDialog();
+      } catch (err: any) {
+        toast.error("Failed to add: " + err.message);
+      } finally {
+        setDialogSaving(false);
+      }
+      return;
+    }
+
+    // dialogMode === "progress"
+    if (!form.allocationId) {
+      setErrors({ allocationId: true });
+      return;
+    }
+    setDialogSaving(true);
+    try {
+      if (editingId) {
+        await updateWorkProgress(editingId, form);
+        toast.success("Progress updated — sent back for review ✓");
+      } else {
+        await addWorkProgress(form);
+        toast.success("Progress logged — pending engineer review ✓");
+      }
+      await queryClient.invalidateQueries({ queryKey: ["workProgress"] });
+      setDialogOpen(false);
+      resetDialog();
+    } catch (err: any) {
+      toast.error("Save failed: " + err.message);
+    } finally {
+      setDialogSaving(false);
+    }
   };
 
   const handleDelete = async (id: number) => {
@@ -419,7 +472,7 @@ const DependencyTracker: React.FC = () => {
                   </button>
                 )}
                 {rights.canEdit && (
-                  <button onClick={() => handleEdit(r)} className="p-1 rounded hover:bg-primary/10 text-primary">
+                  <button onClick={() => openEditDialog(r)} className="p-1 rounded hover:bg-primary/10 text-primary">
                     <Edit2 size={15} />
                   </button>
                 )}
@@ -452,28 +505,44 @@ const DependencyTracker: React.FC = () => {
         icon={GitBranch}
       >
         {/* ── Project selector — every project; assign the first worker right here ── */}
-        <div className="rounded-xl border border-border bg-muted/30 p-3">
-          <div className="flex items-center gap-1.5 mb-2.5">
-            <Building2 size={12} className="text-muted-foreground" />
-            <span className="text-[10px] font-heading font-semibold uppercase tracking-wider text-muted-foreground">
-              Project
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
-            {projects.map((p: any) => (
+        <div className="flex items-center gap-1.5 mb-0.5">
+          <Building2 size={12} className="text-muted-foreground" />
+          <span className="text-[11px] font-heading font-semibold uppercase tracking-wider text-muted-foreground">
+            Project
+          </span>
+        </div>
+        <div className="flex items-center gap-2.5 overflow-x-auto scrollbar-none pb-1">
+          {projects.map((p: any) => {
+            const isActive = activeProjectId === p.id;
+            const workerCount = workerCountByProject.get(p.id) || 0;
+            return (
               <button
                 key={p.id}
                 onClick={() => setActiveProjectId(p.id)}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors border ${
-                  activeProjectId === p.id
-                    ? "bg-cyan-600 border-cyan-600 text-white shadow-sm"
-                    : "bg-background border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                className={`group flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border text-left whitespace-nowrap transition-all shrink-0 ${
+                  isActive
+                    ? "bg-gradient-to-br from-cyan-500 to-emerald-500 border-cyan-500 text-white shadow-md shadow-cyan-500/20"
+                    : "bg-card border-border hover:border-cyan-500/40 hover:bg-muted/50"
                 }`}
               >
-                {p.label}
+                <div
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                    isActive ? "bg-white/20" : "bg-cyan-500/10"
+                  }`}
+                >
+                  <Building2 size={13} className={isActive ? "text-white" : "text-cyan-600"} />
+                </div>
+                <div className="min-w-0">
+                  <p className={`text-xs font-heading font-semibold truncate ${isActive ? "text-white" : "text-foreground"}`}>
+                    {p.label}
+                  </p>
+                  <p className={`text-[10px] truncate ${isActive ? "text-white/75" : "text-muted-foreground"}`}>
+                    {workerCount} worker{workerCount === 1 ? "" : "s"}
+                  </p>
+                </div>
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
 
         {activeProjectId === null ? (
@@ -490,10 +559,10 @@ const DependencyTracker: React.FC = () => {
               </h2>
               {rights.canCreate && (
                 <button
-                  onClick={() => setAssignOpen(true)}
+                  onClick={openAddDialog}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-cyan-500/30 text-cyan-600 hover:bg-cyan-500/10"
                 >
-                  <UserPlus size={13} /> Assign Worker
+                  <Plus size={13} /> Add
                 </button>
               )}
             </div>
@@ -539,11 +608,7 @@ const DependencyTracker: React.FC = () => {
                             )}
                             {rights.canCreate && (
                               <button
-                                onClick={() => {
-                                  resetForm();
-                                  setFormState((p) => ({ ...p, allocationId: a.id }));
-                                  window.scrollTo({ top: 0, behavior: "smooth" });
-                                }}
+                                onClick={() => openLogDialog(a)}
                                 className="px-2.5 py-1 rounded-lg text-[11px] font-medium border border-cyan-500/30 text-cyan-600 hover:bg-cyan-500/10 shrink-0 whitespace-nowrap"
                               >
                                 Log Progress
@@ -557,122 +622,6 @@ const DependencyTracker: React.FC = () => {
                 ))
               )}
             </div>
-
-            {/* ── Form ── */}
-            {rights.canCreate && (
-              <div className="rounded-xl border border-border bg-card p-6">
-                <h2 className="text-base font-heading font-semibold mb-4">
-                  {editingId ? "Edit Progress Entry" : "Log Progress"}
-                </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <Field label="Allocation (Activity · Contractor)" required error={errors.allocationId}>
-                    <select
-                      value={form.allocationId || ""}
-                      onChange={(e) => set("allocationId", Number(e.target.value))}
-                      className={inputCls(errors.allocationId)}
-                    >
-                      <option value="">Select allocation…</option>
-                      {allocationsForProject.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.activityName} · {a.contractorName}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Unit">
-                    <input
-                      type="text"
-                      value={form.unit || ""}
-                      onChange={(e) => set("unit", e.target.value)}
-                      className={inputCls()}
-                      placeholder="e.g. Cum, Sqm"
-                    />
-                  </Field>
-                  <Field label="Current Status">
-                    <select
-                      value={form.currentStatus || ""}
-                      onChange={(e) => set("currentStatus", e.target.value)}
-                      className={inputCls()}
-                    >
-                      {STATUS_OPTIONS.map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <div className="sm:col-span-2 lg:col-span-3">
-                    <Field label="Work Description">
-                      <input
-                        type="text"
-                        value={form.workDescription || ""}
-                        onChange={(e) => set("workDescription", e.target.value)}
-                        className={inputCls()}
-                      />
-                    </Field>
-                  </div>
-                  <Field label="Quantity Planned">
-                    <input
-                      type="number"
-                      value={form.quantityPlanned ?? ""}
-                      onChange={(e) => set("quantityPlanned", e.target.value ? Number(e.target.value) : null)}
-                      className={inputCls()}
-                    />
-                  </Field>
-                  <Field label="Quantity Completed">
-                    <input
-                      type="number"
-                      value={form.quantityCompleted ?? ""}
-                      onChange={(e) => set("quantityCompleted", e.target.value ? Number(e.target.value) : null)}
-                      className={inputCls()}
-                    />
-                  </Field>
-                  <Field label="Planned Start Date">
-                    <input type="date" value={form.plannedStartDate || ""} onChange={(e) => set("plannedStartDate", e.target.value)} className={inputCls()} />
-                  </Field>
-                  <Field label="Planned End Date">
-                    <input type="date" value={form.plannedEndDate || ""} onChange={(e) => set("plannedEndDate", e.target.value)} className={inputCls()} />
-                  </Field>
-                  <Field label="Actual Start Date">
-                    <input type="date" value={form.actualStartDate || ""} onChange={(e) => set("actualStartDate", e.target.value)} className={inputCls()} />
-                  </Field>
-                  <Field label="Actual End Date">
-                    <input type="date" value={form.actualEndDate || ""} onChange={(e) => set("actualEndDate", e.target.value)} className={inputCls()} />
-                  </Field>
-                  <div className="sm:col-span-2 lg:col-span-3">
-                    <Field label="Remarks">
-                      <textarea
-                        value={form.remarks || ""}
-                        onChange={(e) => set("remarks", e.target.value)}
-                        className={inputCls()}
-                        rows={2}
-                      />
-                    </Field>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border justify-end">
-                  <button
-                    onClick={resetForm}
-                    className="px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
-                  >
-                    <RotateCcw size={12} /> Reset
-                  </button>
-                  <button
-                    onClick={handleSave}
-                    disabled={saving}
-                    className="px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-500 text-white disabled:opacity-40 flex items-center gap-2"
-                  >
-                    {saving ? (
-                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    ) : editingId ? (
-                      <Check size={14} />
-                    ) : (
-                      <Save size={14} />
-                    )}
-                    {saving ? "Saving…" : editingId ? "Update" : "Log Progress"}
-                  </button>
-                </div>
-              </div>
-            )}
 
             {/* ── History & review table ── */}
             <div className="rounded-xl border border-border bg-card p-4">
@@ -733,80 +682,210 @@ const DependencyTracker: React.FC = () => {
           </DialogContent>
         </Dialog>
 
-        {/* ── Assign Worker dialog ── */}
-        <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
-          <DialogContent className="max-w-sm overflow-hidden p-0">
-            {/* Header band */}
-            <div className="relative px-6 pt-6 pb-5 bg-cyan-500/[0.06] border-b border-cyan-500/15">
-              <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-cyan-500 to-transparent" />
+        {/* ── Add / Log Progress dialog ──
+             "new"      → pick Activity + Contractor, then fill in the first
+                          progress entry — both happen as one record.
+             "progress" → Activity/Contractor are already fixed for this
+                          worker, so they're just shown (fetched), not pickers. */}
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogContent className="max-w-4xl overflow-hidden p-0 gap-0">
+            <div className="relative px-8 pt-7 pb-6 bg-gradient-to-br from-cyan-500/[0.08] via-cyan-500/[0.03] to-transparent border-b border-cyan-500/15">
+              <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-cyan-500/60 via-cyan-500 to-emerald-500/60" />
               <DialogHeader>
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-cyan-500/15 border border-cyan-500/30">
-                    <UserPlus size={16} className="text-cyan-500" />
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 bg-cyan-500/15 border border-cyan-500/30">
+                    <UserPlus size={20} className="text-cyan-500" />
                   </div>
                   <div className="text-left">
-                    <DialogTitle className="font-heading text-base">Assign Worker</DialogTitle>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                      {activeProjectLabel
-                        ? `Adding a worker to an activity on ${activeProjectLabel}`
-                        : "Pick the activity and contractor to assign"}
+                    <DialogTitle className="font-heading text-xl">
+                      {dialogMode === "new" ? "Add Worker & Progress" : editingId ? "Edit Progress Entry" : "Log Progress"}
+                    </DialogTitle>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {dialogMode === "new"
+                        ? activeProjectLabel
+                          ? `Assign a worker to an activity on ${activeProjectLabel} and log their progress`
+                          : "Pick the activity and contractor, then log their progress"
+                        : `${logLabel?.activityName} · ${logLabel?.contractorName}`}
                     </p>
                   </div>
                 </div>
               </DialogHeader>
             </div>
 
-            <div className="space-y-4 px-6 py-5">
-              <Field label="Activity" required>
-                <Select value={assignActivityId} onValueChange={setAssignActivityId}>
-                  <SelectTrigger className={selectTriggerCls}>
+            <div className="px-8 py-7 space-y-7">
+              {/* ── Assignment ── */}
+              <div>
+                <div className="flex items-center gap-2 mb-3.5">
+                  <div className="h-px flex-1 bg-border" />
+                  <span className="text-[11px] font-heading font-semibold uppercase tracking-wider text-cyan-600 px-2">
+                    Assignment
+                  </span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+                {dialogMode === "new" ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <Field label="Activity" required>
+                      <Select value={assignActivityId} onValueChange={handleActivityPick}>
+                        <SelectTrigger className={selectTriggerCls}>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <ClipboardList size={14} className="text-muted-foreground shrink-0" />
+                            <SelectValue placeholder="Select activity…" />
+                          </div>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {activityOptions.map((a) => (
+                            <SelectItem key={a.id} value={String(a.id)}>{a.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="Contractor / Worker" required>
+                      <Select value={assignContractorId} onValueChange={handleContractorPick}>
+                        <SelectTrigger className={selectTriggerCls}>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <HardHat size={14} className="text-muted-foreground shrink-0" />
+                            <SelectValue placeholder="Select contractor…" />
+                          </div>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {contractorOptions.map((c) => (
+                            <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {contractorAutoFilled && (
+                        <p className="text-[10px] text-emerald-600 flex items-center gap-1 mt-0.5">
+                          <Check size={10} /> Auto-filled from this activity's existing allocation — change if needed
+                        </p>
+                      )}
+                    </Field>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-6 px-4 py-3.5 rounded-xl bg-muted/40 border border-border">
                     <div className="flex items-center gap-2 min-w-0">
-                      <ClipboardList size={13} className="text-muted-foreground shrink-0" />
-                      <SelectValue placeholder="Select activity…" />
+                      <div className="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center shrink-0">
+                        <ClipboardList size={14} className="text-cyan-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Activity</p>
+                        <p className="text-sm font-medium text-foreground truncate">{logLabel?.activityName}</p>
+                      </div>
                     </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activityOptions.map((a) => (
-                      <SelectItem key={a.id} value={String(a.id)}>{a.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Contractor / Worker" required>
-                <Select value={assignContractorId} onValueChange={setAssignContractorId}>
-                  <SelectTrigger className={selectTriggerCls}>
                     <div className="flex items-center gap-2 min-w-0">
-                      <HardHat size={13} className="text-muted-foreground shrink-0" />
-                      <SelectValue placeholder="Select contractor…" />
+                      <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
+                        <HardHat size={14} className="text-blue-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Contractor</p>
+                        <p className="text-sm font-medium text-foreground truncate">{logLabel?.contractorName}</p>
+                      </div>
                     </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {contractorOptions.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Progress details ── */}
+              <div>
+                <div className="flex items-center gap-2 mb-3.5">
+                  <div className="h-px flex-1 bg-border" />
+                  <span className="text-[11px] font-heading font-semibold uppercase tracking-wider text-cyan-600 px-2">
+                    Progress Details
+                  </span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  <div className="sm:col-span-2 lg:col-span-3">
+                    <Field label="Work Description">
+                      <input
+                        type="text"
+                        value={form.workDescription || ""}
+                        onChange={(e) => set("workDescription", e.target.value)}
+                        className={inputCls()}
+                      />
+                    </Field>
+                  </div>
+                  <Field label="Unit">
+                    <input
+                      type="text"
+                      value={form.unit || ""}
+                      onChange={(e) => set("unit", e.target.value)}
+                      className={inputCls()}
+                      placeholder="e.g. Cum, Sqm"
+                    />
+                  </Field>
+                  <Field label="Quantity Planned">
+                    <input
+                      type="number"
+                      value={form.quantityPlanned ?? ""}
+                      onChange={(e) => set("quantityPlanned", e.target.value ? Number(e.target.value) : null)}
+                      className={inputCls()}
+                    />
+                  </Field>
+                  <Field label="Quantity Completed">
+                    <input
+                      type="number"
+                      value={form.quantityCompleted ?? ""}
+                      onChange={(e) => set("quantityCompleted", e.target.value ? Number(e.target.value) : null)}
+                      className={inputCls()}
+                    />
+                  </Field>
+                  <Field label="Current Status">
+                    <select
+                      value={form.currentStatus || ""}
+                      onChange={(e) => set("currentStatus", e.target.value)}
+                      className={inputCls()}
+                    >
+                      {STATUS_OPTIONS.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Planned Start Date">
+                    <input type="date" value={form.plannedStartDate || ""} onChange={(e) => set("plannedStartDate", e.target.value)} className={inputCls()} />
+                  </Field>
+                  <Field label="Planned End Date">
+                    <input type="date" value={form.plannedEndDate || ""} onChange={(e) => set("plannedEndDate", e.target.value)} className={inputCls()} />
+                  </Field>
+                  <Field label="Actual Start Date">
+                    <input type="date" value={form.actualStartDate || ""} onChange={(e) => set("actualStartDate", e.target.value)} className={inputCls()} />
+                  </Field>
+                  <Field label="Actual End Date">
+                    <input type="date" value={form.actualEndDate || ""} onChange={(e) => set("actualEndDate", e.target.value)} className={inputCls()} />
+                  </Field>
+                  <div className="sm:col-span-2 lg:col-span-3">
+                    <Field label="Remarks">
+                      <textarea
+                        value={form.remarks || ""}
+                        onChange={(e) => set("remarks", e.target.value)}
+                        className={inputCls()}
+                        rows={3}
+                      />
+                    </Field>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <DialogFooter className="px-6 pb-6 pt-0">
+            <DialogFooter className="px-8 py-5 border-t border-border bg-muted/20">
               <button
-                onClick={() => setAssignOpen(false)}
-                className="px-3.5 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-colors"
+                onClick={() => setDialogOpen(false)}
+                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:bg-muted transition-colors"
               >
                 Cancel
               </button>
               <button
-                onClick={handleAssignWorker}
-                disabled={assignSaving}
-                className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-500 text-white disabled:opacity-40 flex items-center gap-1.5 transition-opacity"
+                onClick={handleDialogSave}
+                disabled={dialogSaving}
+                className="px-6 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-500 text-white disabled:opacity-40 flex items-center gap-2 transition-opacity shadow-sm"
               >
-                {assignSaving ? (
-                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                {dialogSaving ? (
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : dialogMode === "new" ? (
+                  <Plus size={14} />
                 ) : (
-                  <UserPlus size={12} />
+                  <Save size={14} />
                 )}
-                {assignSaving ? "Assigning…" : "Assign Worker"}
+                {dialogSaving ? "Saving…" : dialogMode === "new" ? "Add" : editingId ? "Update" : "Log Progress"}
               </button>
             </DialogFooter>
           </DialogContent>

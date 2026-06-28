@@ -14,12 +14,22 @@ const cleanStr = (v, len = 500) => {
 const SELECT_COLUMNS = `
   dl.EntryId               AS id,
   dl.AllocationId          AS allocationId,
+  ca.ProjectId             AS projectId,
+  pr.name                  AS projectName,
   ahm.LHeadName            AS contractorName,
   act.activity_name         AS activityName,
   dl.EntryDate              AS entryDate,
   dl.SkilledLabourCount    AS skilledLabourCount,
   dl.UnskilledLabourCount  AS unskilledLabourCount,
   dl.SkilledLabourCount + dl.UnskilledLabourCount AS totalLabourPresent,
+  dl.SkilledLabourNames    AS skilledLabourNames,
+  dl.UnskilledLabourNames  AS unskilledLabourNames,
+  dl.BlockId                AS blockId,
+  bl.BlockName              AS blockName,
+  dl.UnitId                 AS unitId,
+  un.UnitName                AS unitName,
+  dl.RoomId                  AS roomId,
+  rm.RoomName                AS roomName,
   dl.Shift                 AS shift,
   dl.AttendanceStatus      AS attendanceStatus,
   dl.Remarks               AS remarks,
@@ -32,8 +42,12 @@ const SELECT_COLUMNS = `
 const JOINS = `
   FROM dbo.DailyLabourEntry dl
   LEFT JOIN dbo.ContractorAllocation ca ON ca.AllocationId = dl.AllocationId
+  LEFT JOIN dbo.enterprise pr ON pr.id = ca.ProjectId
   LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = ca.ContractorLHeadId
   LEFT JOIN dbo.ActivityMaster act ON act.id = ca.ActivityId
+  LEFT JOIN dbo.BlockMaster bl ON bl.Id = dl.BlockId
+  LEFT JOIN dbo.UnitMaster un ON un.Id = dl.UnitId
+  LEFT JOIN dbo.RoomMaster rm ON rm.Id = dl.RoomId
 `;
 
 // ─── GET / — optionally filtered by allocationId / date range ────────────────
@@ -67,6 +81,8 @@ router.get("/", authMiddleware, async (req, res) => {
 router.post("/", authMiddleware, requirePageRight("civilworkdpr-contractor-register", "create"), async (req, res) => {
   const {
     allocationId, entryDate, skilledLabourCount, unskilledLabourCount,
+    skilledLabourNames, unskilledLabourNames,
+    blockId, unitId, roomId,
     shift, attendanceStatus, remarks,
   } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
@@ -81,17 +97,24 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-contractor-regis
       .input("entryDate", sql.Date, entryDate)
       .input("skilled", sql.Int, skilledLabourCount || 0)
       .input("unskilled", sql.Int, unskilledLabourCount || 0)
+      .input("skilledNames", sql.NVarChar(sql.MAX), cleanStr(skilledLabourNames, 4000))
+      .input("unskilledNames", sql.NVarChar(sql.MAX), cleanStr(unskilledLabourNames, 4000))
+      .input("blockId", sql.Int, blockId || null)
+      .input("unitId", sql.Int, unitId || null)
+      .input("roomId", sql.Int, roomId || null)
       .input("shift", sql.NVarChar, cleanStr(shift, 20))
       .input("attendanceStatus", sql.NVarChar, cleanStr(attendanceStatus, 20))
       .input("remarks", sql.NVarChar, cleanStr(remarks))
       .input("createdBy", sql.NVarChar, actor)
       .query(`
         INSERT INTO dbo.DailyLabourEntry
-          (AllocationId, EntryDate, SkilledLabourCount, UnskilledLabourCount, Shift,
+          (AllocationId, EntryDate, SkilledLabourCount, UnskilledLabourCount,
+           SkilledLabourNames, UnskilledLabourNames, BlockId, UnitId, RoomId, Shift,
            AttendanceStatus, Remarks, CreatedBy, CreatedAt)
         OUTPUT INSERTED.EntryId AS id
         VALUES
-          (@allocationId, @entryDate, @skilled, @unskilled, @shift,
+          (@allocationId, @entryDate, @skilled, @unskilled,
+           @skilledNames, @unskilledNames, @blockId, @unitId, @roomId, @shift,
            @attendanceStatus, @remarks, @createdBy, GETDATE())
       `);
     res.status(201).json({ success: true, id: result.recordset[0].id });
@@ -107,7 +130,10 @@ router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-reg
   if (isNaN(entryId)) return res.status(400).json({ error: "Invalid ID" });
 
   const {
-    entryDate, skilledLabourCount, unskilledLabourCount, shift, attendanceStatus, remarks,
+    entryDate, skilledLabourCount, unskilledLabourCount,
+    skilledLabourNames, unskilledLabourNames,
+    blockId, unitId, roomId,
+    shift, attendanceStatus, remarks,
   } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
 
@@ -125,6 +151,11 @@ router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-reg
       .input("entryDate", sql.Date, entryDate)
       .input("skilled", sql.Int, skilledLabourCount || 0)
       .input("unskilled", sql.Int, unskilledLabourCount || 0)
+      .input("skilledNames", sql.NVarChar(sql.MAX), cleanStr(skilledLabourNames, 4000))
+      .input("unskilledNames", sql.NVarChar(sql.MAX), cleanStr(unskilledLabourNames, 4000))
+      .input("blockId", sql.Int, blockId || null)
+      .input("unitId", sql.Int, unitId || null)
+      .input("roomId", sql.Int, roomId || null)
       .input("shift", sql.NVarChar, cleanStr(shift, 20))
       .input("attendanceStatus", sql.NVarChar, cleanStr(attendanceStatus, 20))
       .input("remarks", sql.NVarChar, cleanStr(remarks))
@@ -132,7 +163,10 @@ router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-reg
       .query(`
         UPDATE dbo.DailyLabourEntry SET
           EntryDate = @entryDate, SkilledLabourCount = @skilled,
-          UnskilledLabourCount = @unskilled, Shift = @shift,
+          UnskilledLabourCount = @unskilled,
+          SkilledLabourNames = @skilledNames, UnskilledLabourNames = @unskilledNames,
+          BlockId = @blockId, UnitId = @unitId, RoomId = @roomId,
+          Shift = @shift,
           AttendanceStatus = @attendanceStatus, Remarks = @remarks,
           UpdatedBy = @updatedBy, UpdatedAt = GETDATE()
         WHERE EntryId = @id
