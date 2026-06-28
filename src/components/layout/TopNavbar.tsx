@@ -342,7 +342,7 @@ const engineeringSetupItems = [
 const civilWorkDprSetupItems = [
   {
     icon: ClipboardList,
-    label: "Activity Master",
+    label: "Activity",
     path: "/masters/activity",
     color: "text-cyan-500",
     pageKey: "activity-master",

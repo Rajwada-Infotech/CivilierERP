@@ -19,12 +19,22 @@ async function handleResponse<T = unknown>(res: Response): Promise<T> {
 export interface DailyLabourEntry {
   id: number;
   allocationId: number;
+  projectId: number | null;
+  projectName: string | null;
   contractorName: string | null;
   activityName: string | null;
   entryDate: string;
   skilledLabourCount: number;
   unskilledLabourCount: number;
   totalLabourPresent: number;
+  skilledLabourNames: string | null;
+  unskilledLabourNames: string | null;
+  blockId: number | null;
+  blockName: string | null;
+  unitId: number | null;
+  unitName: string | null;
+  roomId: number | null;
+  roomName: string | null;
   shift: string | null;
   attendanceStatus: string | null;
   remarks: string | null;
@@ -39,6 +49,11 @@ export interface DailyLabourPayload {
   entryDate: string;
   skilledLabourCount: number;
   unskilledLabourCount: number;
+  skilledLabourNames?: string | null;
+  unskilledLabourNames?: string | null;
+  blockId?: number | null;
+  unitId?: number | null;
+  roomId?: number | null;
   shift?: string | null;
   attendanceStatus?: string | null;
   remarks?: string | null;

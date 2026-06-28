@@ -15,6 +15,16 @@ import {
   ThumbsUp,
   ThumbsDown,
   Users2,
+  Building2,
+  LayoutGrid,
+  Home,
+  DoorClosed,
+  Eye,
+  Printer,
+  CheckCircle2,
+  XCircle,
+  UserPlus2,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -30,7 +40,7 @@ import {
   type ContractorAllocationPayload,
 } from "@/api/contractorAllocationApi";
 import { getActivities, type DbActivity } from "@/api/activityMasterApi";
-import { getEnterpriseOptions } from "@/api/enterpriseApi";
+import { getEnterprisesByType } from "@/api/enterpriseApi";
 import { getUsers } from "@/api/userApi";
 import {
   getDailyLabourEntries,
@@ -40,6 +50,12 @@ import {
   type DailyLabourEntry,
   type DailyLabourPayload,
 } from "@/api/dailyLabourApi";
+import {
+  getLocationProjects,
+  getLocationBlocks,
+  getLocationUnits,
+  getLocationRooms,
+} from "@/api/locationMasterApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
@@ -79,6 +95,29 @@ const Field = ({
   </div>
 );
 
+// Native <select> with a consistent custom chevron — the browser's own
+// dropdown arrow renders inconsistently across the many selects on this
+// page, so it's hidden (appearance-none) in favor of one fixed icon.
+const NativeSelect = React.forwardRef<
+  HTMLSelectElement,
+  React.SelectHTMLAttributes<HTMLSelectElement> & { wrapperClassName?: string }
+>(({ className, wrapperClassName, children, ...props }, ref) => (
+  <div className={`relative ${wrapperClassName || ""}`}>
+    <select
+      ref={ref}
+      {...props}
+      className={`${className || ""} appearance-none pr-9 disabled:opacity-50 disabled:cursor-not-allowed`}
+    >
+      {children}
+    </select>
+    <ChevronDown
+      size={14}
+      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+    />
+  </div>
+));
+NativeSelect.displayName = "NativeSelect";
+
 const approvalColors: Record<string, string> = {
   Approved: "bg-emerald-500/10 text-emerald-600",
   Rejected: "bg-red-500/10 text-red-600",
@@ -103,6 +142,11 @@ const EMPTY_LABOUR_FORM: DailyLabourPayload = {
   entryDate: "",
   skilledLabourCount: 0,
   unskilledLabourCount: 0,
+  skilledLabourNames: "",
+  unskilledLabourNames: "",
+  blockId: null,
+  unitId: null,
+  roomId: null,
   shift: "Day",
   attendanceStatus: "Present",
   remarks: "",
@@ -127,12 +171,20 @@ const ContractorRegister: React.FC = () => {
   });
   const activities = rawActivities
     .filter((a: DbActivity) => a.activity_type === 1 && a.is_active !== false)
-    .map((a: DbActivity) => ({ id: a.id, name: a.activity_name }));
+    .map((a: DbActivity) => ({ id: a.id, name: a.activity_name, description: a.short_description }));
+  // Full project records (not just {id,label}) — needed so picking a
+  // project can auto-fill its address into Site Location below.
   const { data: projects = [] } = useQuery({
-    queryKey: ["projectOptionsCivilDpr"],
-    queryFn: () => getEnterpriseOptions(undefined, "P"),
+    queryKey: ["projectsFullCivilDpr"],
+    queryFn: () => getEnterprisesByType("P"),
     staleTime: 5 * 60 * 1000,
   });
+
+  const projectSiteLocation = (projectId: number | null) => {
+    const p = projects.find((pr) => pr.id === projectId);
+    if (!p) return "";
+    return [p.address, p.city, p.state].filter(Boolean).join(", ");
+  };
   const { data: users = [] } = useQuery({
     queryKey: ["usersForEngineerApproval"],
     queryFn: getUsers,
@@ -281,6 +333,84 @@ const ContractorRegister: React.FC = () => {
   const [labourSaving, setLabourSaving] = useState(false);
   const [labourDeleteConfirmId, setLabourDeleteConfirmId] = useState<number | null>(null);
 
+  // ── Location cascade (Project → Block → Unit → Room), sourced from the
+  // Follow-up module's masters — purely to scope which allocation/site this
+  // day's attendance was recorded for; persisted as block/unit/roomId.
+  const [labourProjectId, setLabourProjectId] = useState<number | "">("");
+
+  const { data: locationProjects = [] } = useQuery({
+    queryKey: ["locationProjects"],
+    queryFn: getLocationProjects,
+    enabled: tab === "labour",
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: locationBlocks = [] } = useQuery({
+    queryKey: ["locationBlocks", labourProjectId],
+    queryFn: () => getLocationBlocks(Number(labourProjectId)),
+    enabled: tab === "labour" && !!labourProjectId,
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: locationUnits = [] } = useQuery({
+    queryKey: ["locationUnits", labourProjectId],
+    queryFn: () => getLocationUnits(Number(labourProjectId)),
+    enabled: tab === "labour" && !!labourProjectId,
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: locationRoomsAll = [] } = useQuery({
+    queryKey: ["locationRooms"],
+    queryFn: getLocationRooms,
+    enabled: tab === "labour",
+    staleTime: 5 * 60 * 1000,
+  });
+  const locationRooms = locationRoomsAll.filter((r) => r.UnitId === labourForm.unitId);
+
+  const allocationsForLabourProject = labourProjectId
+    ? allocations.filter((a) => a.projectId === labourProjectId)
+    : allocations;
+
+  // ── Attendance is per-activity, not a shared roster ────────────────────
+  // An Activity (allocation) and its attendance are the same thing here —
+  // each allocation added gets its OWN worker roster. Adding a second
+  // activity does not duplicate or carry over names from the first; saving
+  // creates one DailyLabourEntry per allocation, each with its own list.
+  type RosterRow = { name: string; type: "Skilled" | "Unskilled"; present: boolean };
+
+  const [selectedAllocationIds, setSelectedAllocationIds] = useState<number[]>([]);
+  const [pendingAllocationId, setPendingAllocationId] = useState("");
+  const [allocationRosters, setAllocationRosters] = useState<Record<number, RosterRow[]>>({});
+  const [pendingWorkerByAlloc, setPendingWorkerByAlloc] = useState<
+    Record<number, { name: string; type: RosterRow["type"] }>
+  >({});
+
+  const getRoster = (allocationId: number) => allocationRosters[allocationId] || [];
+  const getPendingWorker = (allocationId: number) =>
+    pendingWorkerByAlloc[allocationId] || { name: "", type: "Skilled" as RosterRow["type"] };
+
+  const addAllocation = () => {
+    if (!pendingAllocationId) return;
+    const id = Number(pendingAllocationId);
+    if (!selectedAllocationIds.includes(id)) {
+      setSelectedAllocationIds((prev) => [...prev, id]);
+      setAllocationRosters((prev) => ({ ...prev, [id]: prev[id] || [] }));
+      setPendingWorkerByAlloc((prev) => ({ ...prev, [id]: prev[id] || { name: "", type: "Skilled" } }));
+      if (labourErrors.allocationId) setLabourErrors((p) => ({ ...p, allocationId: false }));
+    }
+    setPendingAllocationId("");
+  };
+  const removeAllocation = (id: number) => {
+    setSelectedAllocationIds((prev) => prev.filter((a) => a !== id));
+    setAllocationRosters((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setPendingWorkerByAlloc((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
   const setLabour = useCallback(
     (key: keyof typeof EMPTY_LABOUR_FORM, val: unknown) => {
       setLabourForm((p) => ({ ...p, [key]: val }));
@@ -291,7 +421,7 @@ const ContractorRegister: React.FC = () => {
 
   const validateLabour = () => {
     const errs: Record<string, boolean> = {};
-    if (!labourForm.allocationId) errs.allocationId = true;
+    if (selectedAllocationIds.length === 0) errs.allocationId = true;
     if (!labourForm.entryDate) errs.entryDate = true;
     setLabourErrors(errs);
     return Object.keys(errs).length === 0;
@@ -301,18 +431,96 @@ const ContractorRegister: React.FC = () => {
     setLabourForm(EMPTY_LABOUR_FORM);
     setLabourEditingId(null);
     setLabourErrors({});
+    setLabourProjectId("");
+    setSelectedAllocationIds([]);
+    setPendingAllocationId("");
+    setAllocationRosters({});
+    setPendingWorkerByAlloc({});
   };
+
+  const parseNames = (raw: string | null | undefined, type: "Skilled" | "Unskilled"): RosterRow[] => {
+    if (!raw) return [];
+    return raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const m = entry.match(/^(.*)\(([PA])\)\s*$/);
+        return m
+          ? { name: m[1].trim(), type, present: m[2] === "P" }
+          : { name: entry, type, present: true };
+      });
+  };
+
+  const removeRosterRow = (allocationId: number, i: number) =>
+    setAllocationRosters((prev) => ({
+      ...prev,
+      [allocationId]: (prev[allocationId] || []).filter((_, idx) => idx !== i),
+    }));
+  const updateRosterRow = (allocationId: number, i: number, patch: Partial<RosterRow>) =>
+    setAllocationRosters((prev) => ({
+      ...prev,
+      [allocationId]: (prev[allocationId] || []).map((row, idx) => (idx === i ? { ...row, ...patch } : row)),
+    }));
+
+  const setPendingWorkerName = (allocationId: number, name: string) =>
+    setPendingWorkerByAlloc((prev) => ({ ...prev, [allocationId]: { ...getPendingWorker(allocationId), name } }));
+  const setPendingWorkerType = (allocationId: number, type: RosterRow["type"]) =>
+    setPendingWorkerByAlloc((prev) => ({ ...prev, [allocationId]: { ...getPendingWorker(allocationId), type } }));
+
+  const addWorker = (allocationId: number) => {
+    const pending = getPendingWorker(allocationId);
+    if (!pending.name.trim()) return;
+    setAllocationRosters((prev) => ({
+      ...prev,
+      [allocationId]: [...(prev[allocationId] || []), { name: pending.name.trim(), type: pending.type, present: true }],
+    }));
+    setPendingWorkerByAlloc((prev) => ({ ...prev, [allocationId]: { name: "", type: pending.type } }));
+  };
+
+  const presentCountFor = (allocationId: number) => getRoster(allocationId).filter((r) => r.present).length;
+
+  const encodeRoster = (allocationId: number, type: "Skilled" | "Unskilled") =>
+    getRoster(allocationId)
+      .filter((r) => r.type === type && r.name.trim())
+      .map((r) => `${r.name.trim()} (${r.present ? "P" : "A"})`)
+      .join(", ") || null;
 
   const handleSaveLabour = async () => {
     if (!validateLabour()) return;
     setLabourSaving(true);
     try {
       if (labourEditingId) {
-        await updateDailyLabourEntry(labourEditingId, labourForm);
+        const allocationId = selectedAllocationIds[0];
+        const roster = getRoster(allocationId);
+        await updateDailyLabourEntry(labourEditingId, {
+          ...labourForm,
+          allocationId,
+          skilledLabourCount: roster.filter((r) => r.type === "Skilled" && r.present).length,
+          unskilledLabourCount: roster.filter((r) => r.type === "Unskilled" && r.present).length,
+          skilledLabourNames: encodeRoster(allocationId, "Skilled"),
+          unskilledLabourNames: encodeRoster(allocationId, "Unskilled"),
+        });
         toast.success("Labour entry updated ✓");
       } else {
-        await addDailyLabourEntry(labourForm);
-        toast.success("Labour entry recorded ✓");
+        await Promise.all(
+          selectedAllocationIds.map((allocationId) => {
+            const roster = getRoster(allocationId);
+            return addDailyLabourEntry({
+              ...labourForm,
+              allocationId,
+              skilledLabourCount: roster.filter((r) => r.type === "Skilled" && r.present).length,
+              unskilledLabourCount: roster.filter((r) => r.type === "Unskilled" && r.present).length,
+              skilledLabourNames: encodeRoster(allocationId, "Skilled"),
+              unskilledLabourNames: encodeRoster(allocationId, "Unskilled"),
+            });
+          }),
+        );
+        toast.success(
+          selectedAllocationIds.length > 1
+            ? `Logged attendance for ${selectedAllocationIds.length} activities ✓`
+            : "Labour entry recorded ✓",
+        );
       }
       await queryClient.invalidateQueries({ queryKey: ["dailyLabourEntries"] });
       resetLabourForm();
@@ -329,10 +537,24 @@ const ContractorRegister: React.FC = () => {
       entryDate: row.entryDate?.slice(0, 10) || "",
       skilledLabourCount: row.skilledLabourCount,
       unskilledLabourCount: row.unskilledLabourCount,
+      skilledLabourNames: row.skilledLabourNames || "",
+      unskilledLabourNames: row.unskilledLabourNames || "",
+      blockId: row.blockId,
+      unitId: row.unitId,
+      roomId: row.roomId,
       shift: row.shift || "Day",
       attendanceStatus: row.attendanceStatus || "Present",
       remarks: row.remarks || "",
     });
+    setLabourProjectId(row.projectId || "");
+    setSelectedAllocationIds([row.allocationId]);
+    setAllocationRosters({
+      [row.allocationId]: [
+        ...parseNames(row.skilledLabourNames, "Skilled"),
+        ...parseNames(row.unskilledLabourNames, "Unskilled"),
+      ],
+    });
+    setPendingWorkerByAlloc({ [row.allocationId]: { name: "", type: "Skilled" } });
     setLabourEditingId(row.id);
   };
 
@@ -345,6 +567,53 @@ const ContractorRegister: React.FC = () => {
       toast.error("Delete failed: " + err.message);
     }
     setLabourDeleteConfirmId(null);
+  };
+
+  // ── View / Print attendance register ────────────────────────────────────
+  const [printTarget, setPrintTarget] = useState<DailyLabourEntry | null>(null);
+
+  const printAttendance = (row: DailyLabourEntry) => {
+    const rows = [...parseNames(row.skilledLabourNames, "Skilled"), ...parseNames(row.unskilledLabourNames, "Unskilled")];
+    const win = window.open("", "_blank");
+    if (!win) return;
+    const location = [row.blockName, row.unitName, row.roomName].filter(Boolean).join(" / ") || "—";
+    win.document.write(`
+      <html>
+        <head>
+          <title>Attendance Register — ${row.entryDate?.slice(0, 10)}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
+            h1 { font-size: 18px; margin-bottom: 4px; }
+            p.meta { font-size: 12px; color: #555; margin: 2px 0; }
+            table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+            th, td { border: 1px solid #ccc; padding: 6px 10px; font-size: 13px; text-align: left; }
+            th { background: #f2f2f2; }
+            .present { color: #047857; font-weight: 600; }
+            .absent { color: #b91c1c; font-weight: 600; }
+          </style>
+        </head>
+        <body>
+          <h1>Daily Labour Attendance Register</h1>
+          <p class="meta"><b>Date:</b> ${row.entryDate?.slice(0, 10)} &nbsp; <b>Shift:</b> ${row.shift || "—"}</p>
+          <p class="meta"><b>Project:</b> ${row.projectName || "—"} &nbsp; <b>Location:</b> ${location}</p>
+          <p class="meta"><b>Activity:</b> ${row.activityName || "—"} &nbsp; <b>Contractor:</b> ${row.contractorName || "—"}</p>
+          <table>
+            <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Status</th></tr></thead>
+            <tbody>
+              ${rows
+                .map(
+                  (r, i) =>
+                    `<tr><td>${i + 1}</td><td>${r.name}</td><td>${r.type}</td><td class="${r.present ? "present" : "absent"}">${r.present ? "Present" : "Absent"}</td></tr>`,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `);
+    win.document.close();
+    win.focus();
+    win.print();
   };
 
   // ── Columns ───────────────────────────────────────────────────────────────
@@ -446,6 +715,21 @@ const ContractorRegister: React.FC = () => {
     { accessorKey: "skilledLabourCount", header: "Skilled" },
     { accessorKey: "unskilledLabourCount", header: "Unskilled" },
     { accessorKey: "totalLabourPresent", header: "Total" },
+    {
+      id: "attendanceNames",
+      header: "Names",
+      cell: ({ row }) => {
+        const names = [row.original.skilledLabourNames, row.original.unskilledLabourNames]
+          .filter(Boolean)
+          .join(", ");
+        if (!names) return <span className="text-muted-foreground">—</span>;
+        return (
+          <span className="text-xs truncate max-w-[200px] inline-block" title={names}>
+            {names}
+          </span>
+        );
+      },
+    },
     { accessorKey: "shift", header: "Shift", cell: ({ row }) => row.original.shift || "—" },
     {
       accessorKey: "attendanceStatus",
@@ -471,6 +755,12 @@ const ContractorRegister: React.FC = () => {
               </>
             ) : (
               <>
+                <button onClick={() => setPrintTarget(row.original)} title="View register" className="p-1 rounded hover:bg-cyan-500/10 text-cyan-600">
+                  <Eye size={15} />
+                </button>
+                <button onClick={() => printAttendance(row.original)} title="Print register" className="p-1 rounded hover:bg-cyan-500/10 text-cyan-600">
+                  <Printer size={15} />
+                </button>
                 {rights.canEdit && (
                   <button onClick={() => handleEditLabour(row.original)} className="p-1 rounded hover:bg-primary/10 text-primary">
                     <Edit2 size={15} />
@@ -523,8 +813,46 @@ const ContractorRegister: React.FC = () => {
                   {allocEditingId ? "Edit Allocation" : "Allocate Contractor"}
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <Field label="Project">
+                    <NativeSelect
+                      value={allocForm.projectId ?? ""}
+                      onChange={(e) => {
+                        const projectId = e.target.value ? Number(e.target.value) : null;
+                        setAlloc("projectId", projectId);
+                        // Site Location is derived from the project's address —
+                        // stays editable after, in case the actual work site differs.
+                        setAlloc("siteLocation", projectSiteLocation(projectId));
+                      }}
+                      className={inputCls()}
+                    >
+                      <option value="">None</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                  <Field label="Activity" required error={allocErrors.activityId}>
+                    <NativeSelect
+                      value={allocForm.activityId || ""}
+                      onChange={(e) => {
+                        const activityId = e.target.value ? Number(e.target.value) : null;
+                        setAlloc("activityId", activityId);
+                        // Pre-fill Work Description from the Activity Master's
+                        // own description when it has one; otherwise clear it
+                        // so the user can type their own for this activity.
+                        const activity = activities.find((a) => a.id === activityId);
+                        setAlloc("workDescription", activity?.description || "");
+                      }}
+                      className={inputCls(allocErrors.activityId)}
+                    >
+                      <option value="">Select activity…</option>
+                      {activities.map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </NativeSelect>
+                  </Field>
                   <Field label="Contractor" required error={allocErrors.contractorId}>
-                    <select
+                    <NativeSelect
                       value={allocForm.contractorId || ""}
                       onChange={(e) => setAlloc("contractorId", Number(e.target.value))}
                       className={inputCls(allocErrors.contractorId)}
@@ -533,31 +861,7 @@ const ContractorRegister: React.FC = () => {
                       {contractors.map((c) => (
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
-                    </select>
-                  </Field>
-                  <Field label="Activity" required error={allocErrors.activityId}>
-                    <select
-                      value={allocForm.activityId || ""}
-                      onChange={(e) => setAlloc("activityId", Number(e.target.value))}
-                      className={inputCls(allocErrors.activityId)}
-                    >
-                      <option value="">Select activity…</option>
-                      {activities.map((a) => (
-                        <option key={a.id} value={a.id}>{a.name}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Assigned Project">
-                    <select
-                      value={allocForm.projectId ?? ""}
-                      onChange={(e) => setAlloc("projectId", e.target.value ? Number(e.target.value) : null)}
-                      className={inputCls()}
-                    >
-                      <option value="">None</option>
-                      {projects.map((p: any) => (
-                        <option key={p.id} value={p.id}>{p.label}</option>
-                      ))}
-                    </select>
+                    </NativeSelect>
                   </Field>
                   <div className="sm:col-span-2 lg:col-span-3">
                     <Field label="Work Description">
@@ -579,7 +883,7 @@ const ContractorRegister: React.FC = () => {
                     <input type="date" value={allocForm.expectedCompletionDate || ""} onChange={(e) => setAlloc("expectedCompletionDate", e.target.value)} className={inputCls()} />
                   </Field>
                   <Field label="Current Status">
-                    <select
+                    <NativeSelect
                       value={allocForm.currentStatus || ""}
                       onChange={(e) => setAlloc("currentStatus", e.target.value)}
                       className={inputCls()}
@@ -587,7 +891,7 @@ const ContractorRegister: React.FC = () => {
                       {ALLOC_STATUS_OPTIONS.map((s) => (
                         <option key={s} value={s}>{s}</option>
                       ))}
-                    </select>
+                    </NativeSelect>
                   </Field>
                   <Field label="Site Location">
                     <input
@@ -644,59 +948,271 @@ const ContractorRegister: React.FC = () => {
                 <h2 className="text-base font-heading font-semibold mb-4">
                   {labourEditingId ? "Edit Labour Entry" : "Record Daily Labour"}
                 </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <Field label="Allocation" required error={labourErrors.allocationId}>
-                    <select
-                      value={labourForm.allocationId || ""}
-                      onChange={(e) => setLabour("allocationId", Number(e.target.value))}
-                      className={inputCls(labourErrors.allocationId)}
-                    >
-                      <option value="">Select allocation…</option>
-                      {allocations.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.contractorName} — {a.activityName}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Date" required error={labourErrors.entryDate}>
-                    <input type="date" value={labourForm.entryDate} onChange={(e) => setLabour("entryDate", e.target.value)} className={inputCls(labourErrors.entryDate)} />
-                  </Field>
-                  <Field label="Shift">
-                    <select value={labourForm.shift || ""} onChange={(e) => setLabour("shift", e.target.value)} className={inputCls()}>
-                      {SHIFT_OPTIONS.map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Skilled Labour Count">
-                    <input
-                      type="number"
-                      value={labourForm.skilledLabourCount}
-                      onChange={(e) => setLabour("skilledLabourCount", Number(e.target.value) || 0)}
-                      className={inputCls()}
-                    />
-                  </Field>
-                  <Field label="Unskilled Labour Count">
-                    <input
-                      type="number"
-                      value={labourForm.unskilledLabourCount}
-                      onChange={(e) => setLabour("unskilledLabourCount", Number(e.target.value) || 0)}
-                      className={inputCls()}
-                    />
-                  </Field>
-                  <Field label="Attendance Status">
-                    <select value={labourForm.attendanceStatus || ""} onChange={(e) => setLabour("attendanceStatus", e.target.value)} className={inputCls()}>
-                      {ATTENDANCE_OPTIONS.map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <div className="sm:col-span-2 lg:col-span-3">
-                    <Field label="Remarks">
-                      <textarea value={labourForm.remarks || ""} onChange={(e) => setLabour("remarks", e.target.value)} className={inputCls()} rows={2} />
+
+                {/* ── Location — Project → Block → Unit → Room (Follow-up masters) ── */}
+                <div className="rounded-lg border border-border bg-muted/30 p-4 mb-4">
+                  <div className="flex items-center gap-1.5 mb-3">
+                    <Building2 size={13} className="text-cyan-600" />
+                    <span className="text-xs font-heading font-semibold text-foreground">Location</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <Field label="Project">
+                      <NativeSelect
+                        value={labourProjectId}
+                        onChange={(e) => {
+                          const id = e.target.value ? Number(e.target.value) : "";
+                          setLabourProjectId(id);
+                          setLabour("allocationId", 0);
+                          setLabour("blockId", null);
+                          setLabour("unitId", null);
+                          setLabour("roomId", null);
+                        }}
+                        className={inputCls()}
+                      >
+                        <option value="">All projects</option>
+                        {locationProjects.map((p) => (
+                          <option key={p.Id} value={p.Id}>{p.Name}</option>
+                        ))}
+                      </NativeSelect>
+                    </Field>
+                    <Field label="Block">
+                      <NativeSelect
+                        value={labourForm.blockId ?? ""}
+                        onChange={(e) => setLabour("blockId", e.target.value ? Number(e.target.value) : null)}
+                        className={inputCls()}
+                        disabled={!labourProjectId}
+                      >
+                        <option value="">{labourProjectId ? "Select block…" : "Pick a project first"}</option>
+                        {locationBlocks.map((b) => (
+                          <option key={b.Id} value={b.Id}>{b.Name}</option>
+                        ))}
+                      </NativeSelect>
+                    </Field>
+                    <Field label="Unit">
+                      <NativeSelect
+                        value={labourForm.unitId ?? ""}
+                        onChange={(e) => setLabour("unitId", e.target.value ? Number(e.target.value) : null)}
+                        className={inputCls()}
+                        disabled={!labourProjectId}
+                      >
+                        <option value="">{labourProjectId ? "Select unit…" : "Pick a project first"}</option>
+                        {locationUnits.map((u) => (
+                          <option key={u.Id} value={u.Id}>{u.Name}{u.BlockName ? ` (${u.BlockName})` : ""}</option>
+                        ))}
+                      </NativeSelect>
+                    </Field>
+                    <Field label="Room">
+                      <NativeSelect
+                        value={labourForm.roomId ?? ""}
+                        onChange={(e) => setLabour("roomId", e.target.value ? Number(e.target.value) : null)}
+                        className={inputCls()}
+                        disabled={!labourForm.unitId}
+                      >
+                        <option value="">{labourForm.unitId ? "Select room…" : "Pick a unit first"}</option>
+                        {locationRooms.map((r) => (
+                          <option key={r.Id} value={r.Id}>{r.RoomName}</option>
+                        ))}
+                      </NativeSelect>
                     </Field>
                   </div>
+                </div>
+
+                <div className="space-y-5">
+                  {/* ── Activities — addable list, since a crew may work several
+                       activities in one day. Saving logs the same attendance
+                       against every activity picked here. ── */}
+                  <div className={`rounded-lg border ${labourErrors.allocationId ? "border-destructive" : "border-border"} bg-muted/30 p-4 space-y-3`}>
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <HardHat size={13} className="text-cyan-600" />
+                        <span className="text-xs font-heading font-semibold text-foreground">
+                          Activities <span className="text-destructive">*</span>
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 font-mono">
+                          {selectedAllocationIds.length} selected
+                        </span>
+                      </div>
+                      {!labourEditingId && (
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+                          <NativeSelect
+                            value={pendingAllocationId}
+                            onChange={(e) => setPendingAllocationId(e.target.value)}
+                            className={`${inputCls()} w-full`}
+                            wrapperClassName="w-full sm:w-56 min-w-0"
+                          >
+                            <option value="">Select activity…</option>
+                            {allocationsForLabourProject
+                              .filter((a) => !selectedAllocationIds.includes(a.id))
+                              .map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.activityName} — {a.contractorName}
+                                </option>
+                              ))}
+                          </NativeSelect>
+                          <button
+                            type="button"
+                            onClick={addAllocation}
+                            disabled={!pendingAllocationId}
+                            className="inline-flex items-center justify-center gap-1 px-2.5 py-2 rounded-lg text-[11px] font-medium border border-cyan-500/30 text-cyan-600 hover:bg-cyan-500/10 disabled:opacity-40 whitespace-nowrap shrink-0"
+                          >
+                            <Plus size={12} /> Add Allocation
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {selectedAllocationIds.length === 0 && (
+                      <p className="text-xs text-muted-foreground py-1">
+                        No activities added yet — pick one and click "Add Allocation".
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="Date" required error={labourErrors.entryDate}>
+                      <input type="date" value={labourForm.entryDate} onChange={(e) => setLabour("entryDate", e.target.value)} className={inputCls(labourErrors.entryDate)} />
+                    </Field>
+                    <Field label="Shift">
+                      <NativeSelect value={labourForm.shift || ""} onChange={(e) => setLabour("shift", e.target.value)} className={inputCls()}>
+                        {SHIFT_OPTIONS.map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </NativeSelect>
+                    </Field>
+                  </div>
+
+                  {/* ── One attendance register per activity — an Activity IS its
+                       attendance, so each gets its own independent worker list
+                       (no shared names across activities). ── */}
+                  {selectedAllocationIds.map((allocationId) => {
+                    const a = allocations.find((x) => x.id === allocationId);
+                    const roster = getRoster(allocationId);
+                    const pending = getPendingWorker(allocationId);
+                    const present = presentCountFor(allocationId);
+                    return (
+                      <div key={allocationId} className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <Users2 size={13} className="text-cyan-600 shrink-0" />
+                            <span className="text-xs font-heading font-semibold text-foreground truncate">
+                              {a ? `${a.activityName} — ${a.contractorName}` : `Allocation #${allocationId}`}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 font-mono shrink-0">
+                              {present} present / {roster.length} total
+                            </span>
+                          </div>
+                          {!labourEditingId && (
+                            <button
+                              type="button"
+                              onClick={() => removeAllocation(allocationId)}
+                              className="p-1 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive shrink-0"
+                              title="Remove this activity"
+                            >
+                              <X size={14} />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Type a name, pick Skilled/Unskilled, click Add Worker (or hit Enter) */}
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                          <input
+                            type="text"
+                            value={pending.name}
+                            placeholder="Type worker's name…"
+                            onChange={(e) => setPendingWorkerName(allocationId, e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                addWorker(allocationId);
+                              }
+                            }}
+                            className={`${inputCls()} w-full sm:flex-1 min-w-0`}
+                          />
+                          <div className="flex items-center gap-2 shrink-0">
+                            <NativeSelect
+                              value={pending.type}
+                              onChange={(e) => setPendingWorkerType(allocationId, e.target.value as RosterRow["type"])}
+                              className={`${inputCls()} w-full`}
+                              wrapperClassName="w-28 sm:w-32 shrink-0"
+                            >
+                              <option value="Skilled">Skilled</option>
+                              <option value="Unskilled">Unskilled</option>
+                            </NativeSelect>
+                            <button
+                              type="button"
+                              onClick={() => addWorker(allocationId)}
+                              disabled={!pending.name.trim()}
+                              className="inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg text-[11px] font-medium border border-cyan-500/30 text-cyan-600 hover:bg-cyan-500/10 disabled:opacity-40 shrink-0 whitespace-nowrap flex-1 sm:flex-initial"
+                            >
+                              <UserPlus2 size={12} /> Add Worker
+                            </button>
+                          </div>
+                        </div>
+
+                        {roster.length === 0 ? (
+                          <p className="text-xs text-muted-foreground py-1">No workers added yet — type a name above and click "Add Worker".</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {roster.map((r, i) => (
+                              <div key={i} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-2 sm:p-0 rounded-lg sm:rounded-none bg-card sm:bg-transparent border border-border sm:border-0">
+                                <input
+                                  type="text"
+                                  value={r.name}
+                                  placeholder="Worker name"
+                                  onChange={(e) => updateRosterRow(allocationId, i, { name: e.target.value })}
+                                  className={`${inputCls()} w-full sm:flex-1 min-w-0`}
+                                />
+                                <div className="flex items-center gap-2">
+                                  <NativeSelect
+                                    value={r.type}
+                                    onChange={(e) => updateRosterRow(allocationId, i, { type: e.target.value as RosterRow["type"] })}
+                                    className={`${inputCls()} w-full`}
+                                    wrapperClassName="flex-1 sm:flex-initial sm:w-32 min-w-0 shrink-0"
+                                  >
+                                    <option value="Skilled">Skilled</option>
+                                    <option value="Unskilled">Unskilled</option>
+                                  </NativeSelect>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateRosterRow(allocationId, i, { present: !r.present })}
+                                    className={`inline-flex items-center justify-center gap-1 px-2.5 py-2 rounded-lg text-xs font-medium border shrink-0 whitespace-nowrap w-[104px] ${
+                                      r.present
+                                        ? "border-emerald-500/30 text-emerald-600 bg-emerald-500/10"
+                                        : "border-red-500/30 text-red-600 bg-red-500/10"
+                                    }`}
+                                  >
+                                    {r.present ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+                                    {r.present ? "Present" : "Absent"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeRosterRow(allocationId, i)}
+                                    className="p-2 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive shrink-0"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="Attendance Status">
+                      <NativeSelect value={labourForm.attendanceStatus || ""} onChange={(e) => setLabour("attendanceStatus", e.target.value)} className={inputCls()}>
+                        {ATTENDANCE_OPTIONS.map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </NativeSelect>
+                    </Field>
+                  </div>
+
+                  <Field label="Remarks">
+                    <textarea value={labourForm.remarks || ""} onChange={(e) => setLabour("remarks", e.target.value)} className={inputCls()} rows={2} />
+                  </Field>
                 </div>
                 <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border justify-end">
                   <button onClick={resetLabourForm} className="px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted flex items-center gap-1.5">
@@ -708,7 +1224,7 @@ const ContractorRegister: React.FC = () => {
                     className="px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-500 text-white disabled:opacity-40 flex items-center gap-2"
                   >
                     {labourSaving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : labourEditingId ? <Check size={14} /> : <Plus size={14} />}
-                    {labourSaving ? "Saving…" : labourEditingId ? "Update" : "Add Entry"}
+                    {labourSaving ? "Saving…" : labourEditingId ? "Update" : "Save for This Day"}
                   </button>
                 </div>
               </div>
@@ -740,12 +1256,12 @@ const ContractorRegister: React.FC = () => {
                 Allocation: <span className="font-medium text-foreground">{approveTarget?.contractorName} — {approveTarget?.activityName}</span>
               </p>
               <Field label="Engineer Name" required>
-                <select value={approveEngineer} onChange={(e) => setApproveEngineer(e.target.value)} className={inputCls()}>
+                <NativeSelect value={approveEngineer} onChange={(e) => setApproveEngineer(e.target.value)} className={inputCls()}>
                   <option value="">Select engineer…</option>
                   {users.map((u) => (
                     <option key={u.id} value={u.name}>{u.name}</option>
                   ))}
-                </select>
+                </NativeSelect>
               </Field>
               <Field label="Approval Remarks">
                 <textarea value={approveRemarks} onChange={(e) => setApproveRemarks(e.target.value)} className={inputCls()} rows={2} />
@@ -765,6 +1281,59 @@ const ContractorRegister: React.FC = () => {
                 className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold bg-emerald-600 text-white flex items-center gap-1.5 disabled:opacity-40"
               >
                 <ThumbsUp size={12} /> Approve
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ── View attendance register ── */}
+        <Dialog open={!!printTarget} onOpenChange={(open) => !open && setPrintTarget(null)}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="font-heading text-base">
+                Attendance — {printTarget?.entryDate?.slice(0, 10)}
+              </DialogTitle>
+            </DialogHeader>
+            {printTarget && (
+              <div className="space-y-3 pt-1">
+                <p className="text-xs text-muted-foreground">
+                  {printTarget.activityName || "—"} · {printTarget.contractorName || "—"}
+                  {[printTarget.blockName, printTarget.unitName, printTarget.roomName].filter(Boolean).length > 0 && (
+                    <> — {[printTarget.blockName, printTarget.unitName, printTarget.roomName].filter(Boolean).join(" / ")}</>
+                  )}
+                </p>
+                <div className="rounded-lg border border-border divide-y divide-border max-h-80 overflow-y-auto">
+                  {[...parseNames(printTarget.skilledLabourNames, "Skilled"), ...parseNames(printTarget.unskilledLabourNames, "Unskilled")].map((r, i) => (
+                    <div key={i} className="flex items-center justify-between px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="text-sm text-foreground truncate">{r.name}</p>
+                        <p className="text-[10px] text-muted-foreground">{r.type}</p>
+                      </div>
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                          r.present ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-600"
+                        }`}
+                      >
+                        {r.present ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
+                        {r.present ? "Present" : "Absent"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <button
+                onClick={() => setPrintTarget(null)}
+                className="px-3.5 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => printTarget && printAttendance(printTarget)}
+                className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-500 text-white flex items-center gap-1.5"
+              >
+                <Printer size={12} /> Print
               </button>
             </DialogFooter>
           </DialogContent>

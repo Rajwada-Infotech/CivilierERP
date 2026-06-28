@@ -377,7 +377,7 @@ const adminSetupItems: SetupItem[] = [
 const civilWorkDprSetupItems: SetupItem[] = [
   {
     icon: ClipboardList,
-    label: "Activity Master",
+    label: "Activity",
     path: "/masters/activity",
     color: "text-cyan-500",
   },

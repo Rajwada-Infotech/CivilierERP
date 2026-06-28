@@ -1,4 +1,4 @@
--- Migration 134: Rework "Dependency" into real Work Progress tracking
+-- Migration 133: Rework "Dependency" into real Work Progress tracking
 --
 -- The real workflow: a Project has several Activities in progress at once,
 -- each one allocated to a Contractor (dbo.ContractorAllocation already
