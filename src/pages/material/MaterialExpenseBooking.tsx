@@ -148,7 +148,7 @@ function DateField({
         <button
           type="button"
           disabled={disabled}
-          className={`${inputCls} pl-8 flex items-center text-left disabled:opacity-60 disabled:cursor-not-allowed`}
+          className={`${inputCls} relative pl-8 flex items-center text-left disabled:opacity-60 disabled:cursor-not-allowed`}
         >
           <CalendarDays
             size={13}
@@ -2573,8 +2573,8 @@ export default function MaterialExpenseBooking() {
               {/* ── 0. Booking Information ─────────────────────────────── */}
               <div className="space-y-4">
                 <SectionHeader label="Booking Information" />
-                {/* Row 1: Company | Project / Site */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Row 1: Company | Project / Site | Financial Year */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <Field label="Company" required>
                     <Select
                       value={form.companyId ? String(form.companyId) : ""}
@@ -2642,6 +2642,30 @@ export default function MaterialExpenseBooking() {
                       </SelectContent>
                     </Select>
                   </Field>
+                  <Field
+                    label="Financial Year"
+                    hint={
+                      selectedTod
+                        ? "Changing year updates the booking reference number"
+                        : undefined
+                    }
+                  >
+                    <Select
+                      value={form.financialYear}
+                      onValueChange={(val) => set("financialYear", val)}
+                    >
+                      <SelectTrigger className={selectTriggerCls}>
+                        <SelectValue placeholder="Select year…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activeFinYears.map((fy) => (
+                          <SelectItem key={fy.id} value={fy.year}>
+                            {fy.year}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
                 </div>
                 {/* Row 2: Supplier / Vendor (full width) */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2688,7 +2712,7 @@ export default function MaterialExpenseBooking() {
                     )}
                   </Field>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Booking Date" required>
                     <DateField
                       value={form.bookingDate}
@@ -2713,30 +2737,6 @@ export default function MaterialExpenseBooking() {
                         set("dueDate", val);
                       }}
                     />
-                  </Field>
-                  <Field
-                    label="Financial Year"
-                    hint={
-                      selectedTod
-                        ? "Changing year updates the booking reference number"
-                        : undefined
-                    }
-                  >
-                    <Select
-                      value={form.financialYear}
-                      onValueChange={(val) => set("financialYear", val)}
-                    >
-                      <SelectTrigger className={selectTriggerCls}>
-                        <SelectValue placeholder="Select year…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {activeFinYears.map((fy) => (
-                          <SelectItem key={fy.id} value={fy.year}>
-                            {fy.year}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                   </Field>
                 </div>
               </div>

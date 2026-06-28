@@ -94,6 +94,7 @@ const ALL_ROUTES = [
   { path: "/api/purchase-orders", file: "./routes/purchaseOrders" },
   { path: "/api/customer-sale-orders", file: "./routes/customerSaleOrders" },
   { path: "/api/sale-invoices", file: "./routes/saleInvoices" },
+  { path: "/api/sales-dashboard", file: "./routes/salesDashboard" },
   { path: "/api/tenants", file: "./routes/tenants" },
   { path: "/api/work-orders", file: "./routes/workOrder" },
   { path: "/api/user-profile", file: "./routes/userProfile" },

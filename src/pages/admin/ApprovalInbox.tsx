@@ -49,6 +49,7 @@ interface InboxItem {
   LastModified: string | null;
   // expense-booking only — null for all other modules
   GrnTotalAmount: number | null;
+  GrnBasicAmount: number | null;
   BillingTermsData: string | null;
   // goods-receipt (transfer GRNs) — null for non-transfer GRNs
   SourceTransferDocNo: string | null;
@@ -207,7 +208,11 @@ function getEffectiveAmount(item: InboxItem): number | null {
     } catch {
       /* ignore malformed JSON */
     }
-    return computeGrnNetWithTerms(item.GrnTotalAmount, terms);
+    return computeGrnNetWithTerms(
+      item.GrnTotalAmount,
+      terms,
+      item.GrnBasicAmount ?? undefined,
+    );
   }
   return item.Amount;
 }
