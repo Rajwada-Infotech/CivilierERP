@@ -826,6 +826,8 @@ const AccountGroupMaster: React.FC = () => {
                         activeEditId={editingId}
                         allGroups={allGroups}
                         onView={setViewRecord}
+                        canEdit={rights.canEdit}
+                        canDelete={rights.canDelete}
                       />
                     ))
                   )}

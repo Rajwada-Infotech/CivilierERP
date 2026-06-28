@@ -20,7 +20,6 @@ import {
 import {
   getDeviceFingerprint,
   getDeviceInfo,
-  generateUUID,
 } from "@/utils/deviceFingerprint";
 
 import {
