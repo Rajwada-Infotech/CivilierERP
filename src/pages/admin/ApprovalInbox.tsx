@@ -27,6 +27,8 @@ import {
   ShoppingCart,
   Building2,
   Car,
+  ChevronDown,
+  SlidersHorizontal,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -219,59 +221,22 @@ function getEffectiveAmount(item: InboxItem): number | null {
 
 // ─── Module filter tab ────────────────────────────────────────────────────────
 
-const MODULE_TAB_COLORS: Record<string, { inactive: string; active: string }> =
-  {
-    "purchase-orders": {
-      inactive:
-        "border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20",
-      active: "bg-blue-500 text-white border-blue-500 font-semibold",
-    },
-    "work-orders": {
-      inactive:
-        "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20",
-      active: "bg-amber-500 text-white border-amber-500 font-semibold",
-    },
-    payments: {
-      inactive:
-        "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20",
-      active: "bg-emerald-500 text-white border-emerald-500 font-semibold",
-    },
-    "goods-receipt": {
-      inactive:
-        "border-violet-500/30 bg-violet-500/10 text-violet-600 dark:text-violet-400 hover:bg-violet-500/20",
-      active: "bg-violet-500 text-white border-violet-500 font-semibold",
-    },
-    "expense-booking": {
-      inactive:
-        "border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20",
-      active: "bg-rose-500 text-white border-rose-500 font-semibold",
-    },
-    "received-payment": {
-      inactive:
-        "border-teal-500/30 bg-teal-500/10 text-teal-600 dark:text-teal-400 hover:bg-teal-500/20",
-      active: "bg-teal-500 text-white border-teal-500 font-semibold",
-    },
-    "work-done": {
-      inactive:
-        "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-600/20",
-      active: "bg-emerald-600 text-white border-emerald-600 font-semibold",
-    },
-    boq: {
-      inactive:
-        "border-indigo-500/30 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20",
-      active: "bg-indigo-500 text-white border-indigo-500 font-semibold",
-    },
-    "material-requests": {
-      inactive:
-        "border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-400 hover:bg-orange-500/20",
-      active: "bg-orange-500 text-white border-orange-500 font-semibold",
-    },
-    "material-issues": {
-      inactive:
-        "border-cyan-500/30 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20",
-      active: "bg-cyan-500 text-white border-cyan-500 font-semibold",
-    },
-  };
+// Each module keeps a single identity color, used only as a small accent
+// (icon + count badge) when inactive, and as the solid fill once selected —
+// avoids the "wall of pastel pills" look of having every tab fully colored
+// all the time.
+const MODULE_TAB_COLORS: Record<string, { icon: string; active: string }> = {
+  "purchase-orders": { icon: "text-blue-500", active: "bg-blue-500 border-blue-500" },
+  "work-orders": { icon: "text-amber-500", active: "bg-amber-500 border-amber-500" },
+  payments: { icon: "text-emerald-500", active: "bg-emerald-500 border-emerald-500" },
+  "goods-receipt": { icon: "text-violet-500", active: "bg-violet-500 border-violet-500" },
+  "expense-booking": { icon: "text-rose-500", active: "bg-rose-500 border-rose-500" },
+  "received-payment": { icon: "text-teal-500", active: "bg-teal-500 border-teal-500" },
+  "work-done": { icon: "text-emerald-600", active: "bg-emerald-600 border-emerald-600" },
+  boq: { icon: "text-indigo-500", active: "bg-indigo-500 border-indigo-500" },
+  "material-requests": { icon: "text-orange-500", active: "bg-orange-500 border-orange-500" },
+  "material-issues": { icon: "text-cyan-500", active: "bg-cyan-500 border-cyan-500" },
+};
 
 const ModuleTab: React.FC<{
   module: string | null;
@@ -282,28 +247,26 @@ const ModuleTab: React.FC<{
   onClick: () => void;
 }> = ({ module, label, icon: Icon, count, active, onClick }) => {
   const colors = module ? MODULE_TAB_COLORS[module] : null;
-  const activeClass = colors
-    ? colors.active
-    : "gradient-accent text-white border-transparent font-semibold";
-  const inactiveClass = colors
-    ? colors.inactive
-    : "border-border bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground";
 
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-all whitespace-nowrap ${
-        active ? activeClass : inactiveClass
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-medium transition-all whitespace-nowrap ${
+        active
+          ? `${colors?.active ?? "bg-primary border-primary"} text-white shadow-sm`
+          : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
       }`}
     >
-      {Icon && <Icon size={12} />}
+      {Icon && (
+        <Icon size={12} className={active ? "text-white" : colors?.icon} />
+      )}
       <span>{label}</span>
       {count > 0 && (
         <span
           className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
             active
               ? "bg-white/20 text-white"
-              : "bg-muted/60 text-muted-foreground"
+              : "bg-muted text-foreground/70"
           }`}
         >
           {count}
@@ -547,6 +510,7 @@ const InboxRow: React.FC<{
 const ApprovalInbox: React.FC = () => {
   const queryClient = useQueryClient();
   const [activeModule, setActiveModule] = useState<string | null>(null);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
 
   const {
     data: allItems = [],
@@ -618,35 +582,55 @@ const ApprovalInbox: React.FC = () => {
           </button>
         </div>
 
-        {/* Module filter tabs — scrollable on mobile */}
-        <div
-          className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none [&::-webkit-scrollbar]:hidden"
-          style={{ scrollbarWidth: "none" }}
-        >
-          <ModuleTab
-            module={null}
-            label="All"
-            icon={ClipboardCheck}
-            count={totalCount}
-            active={activeModule === null}
-            onClick={() => setActiveModule(null)}
-          />
-          {ALL_MODULES.map((mod) => {
-            const cfg = MODULE_CONFIG[mod];
-            return (
+        {/* Module filter — collapsible so the full module list doesn't
+            spill across multiple lines by default; expand to see/pick all. */}
+        <div className="rounded-xl border border-border bg-muted/30 overflow-hidden">
+          <button
+            onClick={() => setFiltersExpanded((v) => !v)}
+            className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <SlidersHorizontal size={12} />
+              Filter by module
+              {activeModule && (
+                <span className="text-[10px] font-semibold text-primary">
+                  · {MODULE_CONFIG[activeModule]?.label}
+                </span>
+              )}
+            </span>
+            <ChevronDown
+              size={14}
+              className={`transition-transform ${filtersExpanded ? "rotate-180" : ""}`}
+            />
+          </button>
+          {filtersExpanded && (
+            <div className="flex items-center gap-1.5 flex-wrap p-1.5 pt-0">
               <ModuleTab
-                key={mod}
-                module={mod}
-                label={cfg.label}
-                icon={cfg.icon}
-                count={countFor(mod)}
-                active={activeModule === mod}
-                onClick={() =>
-                  setActiveModule(activeModule === mod ? null : mod)
-                }
+                module={null}
+                label="All"
+                icon={ClipboardCheck}
+                count={totalCount}
+                active={activeModule === null}
+                onClick={() => setActiveModule(null)}
               />
-            );
-          })}
+              {ALL_MODULES.map((mod) => {
+                const cfg = MODULE_CONFIG[mod];
+                return (
+                  <ModuleTab
+                    key={mod}
+                    module={mod}
+                    label={cfg.label}
+                    icon={cfg.icon}
+                    count={countFor(mod)}
+                    active={activeModule === mod}
+                    onClick={() =>
+                      setActiveModule(activeModule === mod ? null : mod)
+                    }
+                  />
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Content */}
