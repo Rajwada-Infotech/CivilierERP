@@ -16,6 +16,7 @@ export type Module =
   | "sales"
   | "records"
   | "insidework"
+  | "sales-automation"
   | "admin"
   | null;
 
@@ -29,6 +30,7 @@ export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
   sales: "/sales/sale-order",
   records: "/records",
   insidework: "/insidework",
+  "sales-automation": "/sales-automation/social-media",
   admin: "/admin/dashboard",
 };
 
@@ -73,6 +75,8 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
                   ? "🗄️ Records"
                   : activeModule === "insidework"
                     ? "⛏️ Inside Work"
+                    : activeModule === "sales-automation"
+                      ? "📣 Sales Automation"
                     : activeModule === "admin"
                       ? "🔧 Admin"
                       : "No Module Selected";
@@ -119,6 +123,7 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
       "sales",
       "records",
       "insidework",
+      "sales-automation",
       "admin",
     ];
 
@@ -137,6 +142,9 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     } else if (pathname.startsWith("/ticket")) {
       setActiveModuleState("ticket");
       localStorage.setItem("activeModule", "ticket");
+    } else if (pathname.startsWith("/sales-automation")) {
+      setActiveModuleState("sales-automation");
+      localStorage.setItem("activeModule", "sales-automation");
     } else if (pathname.startsWith("/sales")) {
       setActiveModuleState("sales");
       localStorage.setItem("activeModule", "sales");
