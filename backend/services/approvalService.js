@@ -4,6 +4,21 @@
 // writes to ApprovalAuditLog, and updates the record status.
 
 const { getPool, sql } = require("../db");
+const {
+  postGRNApproval,
+  postExpenseBookingApproval,
+  postPaymentApproval,
+} = require("./generalLedger");
+
+// Module slug → general ledger poster, called once a record reaches full
+// approval (last workflow level). Modules not listed here don't post to the
+// ledger (e.g. material requests/issues have no financial impact).
+const GL_POSTERS = {
+  "goods-receipt": postGRNApproval,
+  grn: postGRNApproval,
+  "expense-booking": postExpenseBookingApproval,
+  payments: postPaymentApproval,
+};
 
 // Map module slug → { table, pkCol, statusCol }
 const MODULE_MAP = {
@@ -327,6 +342,21 @@ async function transition(
     if (nextLevel >= totalLevels) {
       // All levels done — fully approved
       await setRecordStatus(module, id, "Approved");
+
+      const poster = GL_POSTERS[module];
+      if (poster) {
+        try {
+          await poster(getPool(), id, userEmail);
+        } catch (glErr) {
+          // Ledger posting must never block the approval itself — log loudly
+          // and let it be reconciled manually. The record is still Approved.
+          console.error(
+            `[generalLedger] posting failed for ${module} #${id}:`,
+            glErr.message,
+          );
+        }
+      }
+
       return { newStatus: "Approved", level: nextLevel, totalLevels };
     } else {
       // More levels required — stays Pending

@@ -11,6 +11,7 @@ const {
 const { cache, localVersionCache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
+const { postReceivedPaymentApproval } = require("../services/generalLedger");
 
 router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
 
@@ -576,6 +577,16 @@ router.put("/:id/approve", async (req, res) => {
         SET RPStatus='Approved', RPApprovedBy=@by, RPApprovedAt=GETDATE()
         WHERE RPPaymentID=@id
       `);
+
+    try {
+      await postReceivedPaymentApproval(pool, parseInt(id, 10), actor);
+    } catch (glErr) {
+      // Ledger posting must never block the approval itself.
+      console.error(
+        `[generalLedger] posting failed for received-payment #${id}:`,
+        glErr.message,
+      );
+    }
 
     await invalidateReceivedPaymentWorkflowCaches();
     res.json({ success: true });
