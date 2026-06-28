@@ -13,6 +13,7 @@ import {
   Wrench,
   Archive,
   Pickaxe,
+  Megaphone,
 } from "lucide-react";
 import {
   useModule,
@@ -99,6 +100,15 @@ const MODULES = [
     bg: "rgba(8,145,178,0.22)",
     ringRgb: "8,145,178",
   },
+  {
+    id: "sales-automation" as Module,
+    icon: Megaphone,
+    label: "Sales Automation",
+    desc: "Campaigns, leads & bookings",
+    color: "#f59e0b",
+    bg: "rgba(245,158,11,0.22)",
+    ringRgb: "245,158,11",
+  },
 ];
 
 const ADMIN_MODULE = {
@@ -147,6 +157,7 @@ export const ModuleStrip: React.FC = () => {
     ticket:      ["ticket-dashboard", "tickets"],
     sales:       ["sale-order", "sale-invoice", "sales-payment"],
     insidework:  ["insidework-dashboard"],
+    "sales-automation": ["sa-social-media", "sa-campaigns", "sa-ads", "sa-leads", "sa-lead-distribution", "sa-inquiry", "sa-site-visits", "sa-marketing-invoices"],
   };
 
   const userHasModuleAccess = (moduleId: string): boolean => {

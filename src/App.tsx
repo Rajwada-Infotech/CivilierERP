@@ -326,6 +326,18 @@ const AgreementWorkflowPage = lazy(
   () => import("./pages/followup/AgreementWorkflow"),
 );
 const DocumentVaultPage = lazy(() => import("./pages/followup/DocumentVault"));
+const SaSocialMediaMaster = lazy(() => import("./pages/SalesAutomation/SaSocialMediaMaster"));
+const SaCampaignMaster = lazy(() => import("./pages/SalesAutomation/SaCampaignMaster"));
+const SaAdMaster = lazy(() => import("./pages/SalesAutomation/SaAdMaster"));
+const SaLeadManagement = lazy(() => import("./pages/SalesAutomation/SaLeadManagement"));
+const SaLeadDistribution = lazy(() => import("./pages/SalesAutomation/SaLeadDistribution"));
+const SaInquiryDashboard = lazy(() => import("./pages/SalesAutomation/SaInquiryDashboard"));
+const SaSiteVisits = lazy(() => import("./pages/SalesAutomation/SaSiteVisits"));
+const SaMarketingInvoices = lazy(() => import("./pages/SalesAutomation/SaMarketingInvoices"));
+const SaMarketingDashboard = lazy(() => import("./pages/SalesAutomation/SaMarketingDashboard"));
+const SaSalesDashboard = lazy(() => import("./pages/SalesAutomation/SaSalesDashboard"));
+const SaTeamLeadDashboard = lazy(() => import("./pages/SalesAutomation/SaTeamLeadDashboard"));
+const SaReports = lazy(() => import("./pages/SalesAutomation/SaReports"));
 const CommunicatorPage = lazy(() => import("./pages/followup/Communicator"));
 const ApplicantsPipelinePage = lazy(() =>
   import("./pages/followup/FollowupPipelinePage").then((module) => ({
@@ -1806,6 +1818,18 @@ function AppRoutes() {
 
       {/* MAINTENANCE & 404 */}
       <Route path="/maintenance" element={<Maintenance />} />
+      <Route path="/sales-automation/social-media" element={<ProtectedRoute pageKey="sa-social-media"><SaSocialMediaMaster /></ProtectedRoute>} />
+      <Route path="/sales-automation/campaigns" element={<ProtectedRoute pageKey="sa-campaigns"><SaCampaignMaster /></ProtectedRoute>} />
+      <Route path="/sales-automation/ads" element={<ProtectedRoute pageKey="sa-ads"><SaAdMaster /></ProtectedRoute>} />
+      <Route path="/sales-automation/leads" element={<ProtectedRoute pageKey="sa-leads"><SaLeadManagement /></ProtectedRoute>} />
+      <Route path="/sales-automation/distribution" element={<ProtectedRoute pageKey="sa-lead-distribution"><SaLeadDistribution /></ProtectedRoute>} />
+      <Route path="/sales-automation/inquiry" element={<ProtectedRoute pageKey="sa-inquiry"><SaInquiryDashboard /></ProtectedRoute>} />
+      <Route path="/sales-automation/site-visits" element={<ProtectedRoute pageKey="sa-site-visits"><SaSiteVisits /></ProtectedRoute>} />
+      <Route path="/sales-automation/invoices" element={<ProtectedRoute pageKey="sa-marketing-invoices"><SaMarketingInvoices /></ProtectedRoute>} />
+      <Route path="/sales-automation/dashboard/marketing" element={<ProtectedRoute pageKey="sa-campaigns"><SaMarketingDashboard /></ProtectedRoute>} />
+      <Route path="/sales-automation/dashboard/sales" element={<ProtectedRoute pageKey="sa-leads"><SaSalesDashboard /></ProtectedRoute>} />
+      <Route path="/sales-automation/dashboard/team-lead" element={<ProtectedRoute pageKey="sa-lead-distribution"><SaTeamLeadDashboard /></ProtectedRoute>} />
+      <Route path="/sales-automation/reports" element={<ProtectedRoute pageKey="sa-leads"><SaReports /></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
