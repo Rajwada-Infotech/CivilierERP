@@ -975,8 +975,9 @@ export default function GRN() {
   const createMutation = useMutation({
     mutationFn: grnApi.addGRN,
     onSuccess: async (res) => {
-      queryClient.invalidateQueries({ queryKey: ["grns"] });
       setPage(1);
+      await queryClient.invalidateQueries({ queryKey: ["grns"] });
+      await queryClient.refetchQueries({ queryKey: ["grns"], type: "all" });
       const generated = res?.grnNo || "";
       setFormData(buildEmptyForm());
       setEditingId(null);
@@ -992,8 +993,9 @@ export default function GRN() {
     mutationFn: (payload: GRNFormDataPayload) =>
       grnApi.updateGRN(editingId!, payload),
     onSuccess: async () => {
-      queryClient.invalidateQueries({ queryKey: ["grns"] });
       setPage(1);
+      await queryClient.invalidateQueries({ queryKey: ["grns"] });
+      await queryClient.refetchQueries({ queryKey: ["grns"], type: "all" });
       setFormData(buildEmptyForm());
       setEditingId(null);
       setShowForm(false);
@@ -1005,9 +1007,10 @@ export default function GRN() {
 
   deleteMutation = useMutation({
     mutationFn: grnApi.deleteGRN,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["grns"] });
+    onSuccess: async () => {
       setPage(1);
+      await queryClient.invalidateQueries({ queryKey: ["grns"] });
+      await queryClient.refetchQueries({ queryKey: ["grns"], type: "all" });
       toast.success("GRN deleted");
     },
     onError: (err: any) => toast.error(err.message || "Failed to delete GRN"),
@@ -2229,11 +2232,17 @@ export default function GRN() {
             );
             const subtotalInclGST = subtotal + gstTotal;
             return (
-              <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+              <div className="grn-print-overlay fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
                 <style>{`
                   @media print {
                     body > * { display: none !important; }
-                    .grn-print-modal { display: block !important; position: static !important; background: white !important; box-shadow: none !important; max-height: none !important; overflow: visible !important; border: none !important; border-radius: 0 !important; }
+                    /* The overlay itself is a body > * child — its own
+                       display:none would hide .grn-print-modal regardless
+                       of the modal's own display override, since a child
+                       can't un-hide a hidden ancestor. Un-hide the overlay
+                       too, stripped of its backdrop/centering styles. */
+                    body > .grn-print-overlay { display: block !important; position: static !important; background: none !important; backdrop-filter: none !important; padding: 0 !important; }
+                    .grn-print-modal { display: block !important; position: static !important; background: white !important; box-shadow: none !important; max-height: none !important; overflow: visible !important; border: none !important; border-radius: 0 !important; max-width: none !important; width: 100% !important; }
                     .grn-print-modal .sticky { position: static !important; }
                   }
                 `}</style>

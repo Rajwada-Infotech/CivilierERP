@@ -180,6 +180,7 @@ const StockTransfer = lazy(() => import("./pages/material/StockTransfer"));
 const SaleOrder = lazy(() => import("./pages/sales/SaleOrder"));
 const SalesPayment = lazy(() => import("./pages/sales/Payment"));
 const SaleInvoice = lazy(() => import("./pages/sales/SaleInvoice"));
+const SalesDashboard = lazy(() => import("./pages/sales/SalesDashboard"));
 const EnterpriseMasterPage = lazy(
   () => import("./pages/admin/masters/EnterpriseMaster"),
 );
@@ -1245,6 +1246,14 @@ function AppRoutes() {
       />
 
       {/* SALES */}
+      <Route
+        path="/sales"
+        element={
+          <ProtectedRoute pageKey="sales-dashboard">
+            <SalesDashboard />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/sales/sale-order"
         element={

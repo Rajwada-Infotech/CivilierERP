@@ -30,6 +30,20 @@ import {
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format, parseISO } from "date-fns";
+import {
   Plus,
   Edit,
   Trash2,
@@ -104,6 +118,63 @@ const inputCls =
 
 const selectCls =
   "w-full text-sm rounded-lg border border-border px-3 py-2.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
+
+const selectTriggerCls =
+  "w-full h-auto text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground hover:border-emerald-500/40 focus:ring-2 focus:ring-emerald-500/30 transition";
+
+// ─── Smooth date picker (popover calendar) ───────────────────────────────────
+// Replaces native <input type="date"> — avoids the inconsistent, unstyled
+// browser date-segment UI (e.g. "dd-----yyyy" placeholders) across browsers.
+function DateField({
+  value,
+  onChange,
+  min,
+  placeholder = "Select date…",
+  disabled,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  min?: string;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const parsed = value ? parseISO(value) : undefined;
+  const minDate = min ? parseISO(min) : undefined;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className={`${inputCls} relative pl-8 flex items-center text-left disabled:opacity-60 disabled:cursor-not-allowed`}
+        >
+          <CalendarDays
+            size={13}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+          <span className={parsed ? "text-foreground" : "text-muted-foreground/40"}>
+            {parsed ? format(parsed, "dd MMM yyyy") : placeholder}
+          </span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-auto p-0">
+        <Calendar
+          mode="single"
+          selected={parsed}
+          disabled={minDate ? { before: minDate } : undefined}
+          onSelect={(date) => {
+            if (!date) return;
+            onChange(format(date, "yyyy-MM-dd"));
+            setOpen(false);
+          }}
+          initialFocus
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 async function apiFetch(url: string, opts?: RequestInit, timeoutMs = 25000) {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -558,15 +629,23 @@ function DocSelectorPanel({
 
   const q = search.toLowerCase();
 
+  // FinYear labels are free text (e.g. "FY 2026-2027", "2026-2027", "26-27")
+  // so exact-string comparisons routinely miss real matches. Extract the
+  // 2-digit year tokens from both sides and compare those instead.
+  const yearTokens = (str?: string): string[] =>
+    (str?.match(/\d{2,4}/g) || []).map((s) => s.slice(-2));
+
   const inFinYear = (docNo?: string, recFinYear?: string) => {
     if (!filterFinYear) return true;
-    if (recFinYear) return recFinYear === filterFinYear;
+    const filterYears = yearTokens(filterFinYear);
+    if (!filterYears.length) return true;
+    if (recFinYear) {
+      const recYears = yearTokens(recFinYear);
+      return recYears.some((y) => filterYears.includes(y));
+    }
     if (!docNo) return true;
-    if (docNo.includes(filterFinYear)) return true;
-    const [startYearStr, endYearStr] = filterFinYear.split("-");
-    if (startYearStr && docNo.includes(`-${startYearStr}-`)) return true;
-    if (endYearStr && docNo.includes(`-${endYearStr}-`)) return true;
-    return false;
+    const docYears = yearTokens(docNo);
+    return docYears.some((y) => filterYears.includes(y));
   };
 
   const filteredPO = poList.filter((p) => {
@@ -2494,38 +2573,32 @@ export default function MaterialExpenseBooking() {
               {/* ── 0. Booking Information ─────────────────────────────── */}
               <div className="space-y-4">
                 <SectionHeader label="Booking Information" />
-                {/* Row 1: Company | Project / Site */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Row 1: Company | Project / Site | Financial Year */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <Field label="Company" required>
-                    <div className="relative">
-                      <select
-                        value={form.companyId ? String(form.companyId) : ""}
-                        onChange={(e) =>
-                          set(
-                            "companyId",
-                            e.target.value
-                              ? parseInt(e.target.value, 10)
-                              : null,
-                          )
-                        }
-                        className={selectCls}
-                      >
-                        <option value="">
-                          {companyOptions.length === 0
-                            ? "No companies found"
-                            : "Select company…"}
-                        </option>
+                    <Select
+                      value={form.companyId ? String(form.companyId) : ""}
+                      onValueChange={(val) =>
+                        set("companyId", val ? parseInt(val, 10) : null)
+                      }
+                    >
+                      <SelectTrigger className={selectTriggerCls}>
+                        <SelectValue
+                          placeholder={
+                            companyOptions.length === 0
+                              ? "No companies found"
+                              : "Select company…"
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
                         {companyOptions.map((c) => (
-                          <option key={c.id} value={String(c.id)}>
+                          <SelectItem key={c.id} value={String(c.id)}>
                             {c.label}
-                          </option>
+                          </SelectItem>
                         ))}
-                      </select>
-                      <ChevronDown
-                        size={13}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                      />
-                    </div>
+                      </SelectContent>
+                    </Select>
                   </Field>
                   <Field
                     label="Project / Site"
@@ -2535,39 +2608,63 @@ export default function MaterialExpenseBooking() {
                         : undefined
                     }
                   >
-                    <div className="relative">
-                      <select
-                        value={form.projectSite || ""}
-                        onChange={(e) =>
-                          set("projectSite", e.target.value || "")
-                        }
-                        className={selectCls}
-                      >
-                        <option value="">
-                          {filteredProjectOptions.length === 0 &&
-                          !form.projectSite
-                            ? "No projects found"
-                            : "Select project…"}
-                        </option>
+                    <Select
+                      value={form.projectSite || ""}
+                      onValueChange={(val) => set("projectSite", val || "")}
+                    >
+                      <SelectTrigger className={selectTriggerCls}>
+                        <SelectValue
+                          placeholder={
+                            filteredProjectOptions.length === 0 &&
+                            !form.projectSite
+                              ? "No projects found"
+                              : "Select project…"
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
                         {form.projectSite &&
                           !filteredProjectOptions.some(
                             (p) => String(p.id) === form.projectSite,
                           ) && (
-                            <option key="__current__" value={form.projectSite}>
+                            <SelectItem
+                              key="__current__"
+                              value={form.projectSite}
+                            >
                               {form.projectName || form.projectSite}
-                            </option>
+                            </SelectItem>
                           )}
                         {filteredProjectOptions.map((p) => (
-                          <option key={p.id} value={String(p.id)}>
+                          <SelectItem key={p.id} value={String(p.id)}>
                             {p.label}
-                          </option>
+                          </SelectItem>
                         ))}
-                      </select>
-                      <ChevronDown
-                        size={13}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                      />
-                    </div>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field
+                    label="Financial Year"
+                    hint={
+                      selectedTod
+                        ? "Changing year updates the booking reference number"
+                        : undefined
+                    }
+                  >
+                    <Select
+                      value={form.financialYear}
+                      onValueChange={(val) => set("financialYear", val)}
+                    >
+                      <SelectTrigger className={selectTriggerCls}>
+                        <SelectValue placeholder="Select year…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activeFinYears.map((fy) => (
+                          <SelectItem key={fy.id} value={fy.year}>
+                            {fy.year}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Field>
                 </div>
                 {/* Row 2: Supplier / Vendor (full width) */}
@@ -2594,103 +2691,52 @@ export default function MaterialExpenseBooking() {
                         />
                       </div>
                     ) : (
-                      <div className="relative">
-                        <select
-                          value={form.supplier || ""}
-                          onChange={(e) =>
-                            set(
-                              "supplier",
-                              e.target.value === "__none__"
-                                ? ""
-                                : e.target.value,
-                            )
-                          }
-                          className={selectCls}
-                        >
-                          <option value="__none__">— None —</option>
+                      <Select
+                        value={form.supplier || "__none__"}
+                        onValueChange={(val) =>
+                          set("supplier", val === "__none__" ? "" : val)
+                        }
+                      >
+                        <SelectTrigger className={selectTriggerCls}>
+                          <SelectValue placeholder="— None —" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">— None —</SelectItem>
                           {supplierHeads.map((s) => (
-                            <option key={s.id} value={s.label}>
+                            <SelectItem key={s.id} value={s.label}>
                               {s.label}
-                            </option>
+                            </SelectItem>
                           ))}
-                        </select>
-                        <ChevronDown
-                          size={13}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                        />
-                      </div>
+                        </SelectContent>
+                      </Select>
                     )}
                   </Field>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Booking Date" required>
-                    <div className="relative">
-                      <CalendarDays
-                        size={13}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                      />
-                      <input
-                        type="date"
-                        value={form.bookingDate}
-                        onChange={(e) => set("bookingDate", e.target.value)}
-                        className={`${inputCls} pl-8`}
-                      />
-                    </div>
+                    <DateField
+                      value={form.bookingDate}
+                      onChange={(val) => set("bookingDate", val)}
+                    />
                   </Field>
                   <Field label="Due Date">
-                    <div className="relative">
-                      <CalendarDays
-                        size={13}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                      />
-                      <input
-                        type="date"
-                        value={form.dueDate}
-                        min={form.bookingDate || undefined}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (
-                            form.bookingDate &&
-                            val &&
-                            val < form.bookingDate
-                          ) {
-                            toast.error(
-                              "Due date cannot be before the booking date.",
-                            );
-                            return;
-                          }
-                          set("dueDate", val);
-                        }}
-                        className={`${inputCls} pl-8`}
-                      />
-                    </div>
-                  </Field>
-                  <Field
-                    label="Financial Year"
-                    hint={
-                      selectedTod
-                        ? "Changing year updates the booking reference number"
-                        : undefined
-                    }
-                  >
-                    <div className="relative">
-                      <select
-                        value={form.financialYear}
-                        onChange={(e) => set("financialYear", e.target.value)}
-                        className={selectCls}
-                      >
-                        <option value="">Select year…</option>
-                        {activeFinYears.map((fy) => (
-                          <option key={fy.id} value={fy.year}>
-                            {fy.year}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown
-                        size={13}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                      />
-                    </div>
+                    <DateField
+                      value={form.dueDate}
+                      min={form.bookingDate || undefined}
+                      onChange={(val) => {
+                        if (
+                          form.bookingDate &&
+                          val &&
+                          val < form.bookingDate
+                        ) {
+                          toast.error(
+                            "Due date cannot be before the booking date.",
+                          );
+                          return;
+                        }
+                        set("dueDate", val);
+                      }}
+                    />
                   </Field>
                 </div>
               </div>

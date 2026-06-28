@@ -504,7 +504,11 @@ router.get("/", cache("grns", 300), async (req, res) => {
       LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
       LEFT JOIN dbo.enterprise co ON co.id = p.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = p.ProjectId
-      LEFT JOIN dbo.FinYear fyGrn ON grn.GRNDate >= fyGrn.FStartDate AND grn.GRNDate <= fyGrn.FEndDate
+      LEFT JOIN dbo.FinYear fyGrn ON fyGrn.FId = (
+        SELECT TOP 1 fy.FId FROM dbo.FinYear fy
+        WHERE grn.GRNDate >= fy.FStartDate AND grn.GRNDate <= fy.FEndDate
+        ORDER BY fy.FId
+      )
       LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = grn.DocTypeId
       WHERE (@finYear IS NULL OR (
         grn.DocYear IS NOT NULL AND (
