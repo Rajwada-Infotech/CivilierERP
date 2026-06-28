@@ -13,21 +13,25 @@ function isSaAdmin(req) {
   return ["super_admin", "sa", "dba", "admin"].includes(role);
 }
 
-function scopedLeadPredicate(alias = "l") {
-  return `(${alias}.AssignedTeamLeadId = @ActorUserId OR ${alias}.AssignedSalespersonId = @ActorUserId OR ${alias}.CreatedBy = @ActorUserId)`;
+function isSaTeamLead(req) {
+  return normalizeRole(req.user?.role) === "sales_team_lead";
 }
 
-function addActorInput(request, req) {
-  const id = actorId(req);
-  if (id) request.input("ActorUserId", id);
-  return id;
+function isSalesPerson(req) {
+  return normalizeRole(req.user?.role) === "sales_person";
 }
 
 function applyLeadScope(request, req, alias = "l") {
   if (isSaAdmin(req)) return "1=1";
-  const id = addActorInput(request, req);
+  const id = actorId(req);
   if (!id) return "1=0";
-  return scopedLeadPredicate(alias);
+  request.input("ActorUserId", id);
+  if (isSaTeamLead(req)) {
+    // Team lead sees all leads assigned to them OR any of their salespersons
+    return `(${alias}.AssignedTeamLeadId = @ActorUserId OR ${alias}.AssignedSalespersonId IN (SELECT MemberUserId FROM dbo.SaSalesTeam WHERE TeamLeadUserId = @ActorUserId AND IsActive = 1))`;
+  }
+  // Sales person sees only their own assigned leads
+  return `${alias}.AssignedSalespersonId = @ActorUserId`;
 }
 
-module.exports = { actorId, isSaAdmin, normalizeRole, applyLeadScope, addActorInput, scopedLeadPredicate };
+module.exports = { actorId, isSaAdmin, isSaTeamLead, isSalesPerson, applyLeadScope };
