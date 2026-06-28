@@ -1195,7 +1195,7 @@ interface FormModalProps {
   uoms: UomOption[];
   itemOptions: ItemOption[];
   activityOptions: ActivityOption[];
-  finYears: { id?: number | string; year: string; status?: string }[];
+  finYears: { id?: number | string; year: string; status?: string; locked?: boolean }[];
   activeFinYear?: string;
   onClose: () => void;
   onSaved: () => void;

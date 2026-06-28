@@ -64,15 +64,14 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
       `),
 
       // ── Cheques (ChequeMaster) ──────────────────────────────────────────────
-      // Status is now BIT (1=active, 0=inactive) after migration 121.
-      // The old nvarchar 'Pending'/'Draft'/'Cleared' states never existed
-      // in data — we now report active vs inactive lot counts instead.
+      // Status is BIT (1 = active/issued, 0 = inactive) after migration 121.
+      // The old nvarchar 'Pending'/'Draft'/'Cleared' states never existed in
+      // data — we report active vs inactive lot counts instead.
       pool.request().query(`
         SELECT
-          COUNT(*)                                  AS TotalCount,
-          COUNT(CASE WHEN Status = 1 THEN 1 END)   AS PendingCount,
-          COUNT(CASE WHEN Status = 1 THEN 1 END)   AS DraftCount,
-          COUNT(CASE WHEN Status = 0 THEN 1 END)   AS ClearedCount
+          COUNT(*)                                      AS TotalCount,
+          COUNT(CASE WHEN Status = 1 THEN 1 END)        AS ActiveCount,
+          COUNT(CASE WHEN Status = 0 OR Status IS NULL THEN 1 END) AS InactiveCount
         FROM dbo.ChequeMaster
       `),
 
@@ -172,9 +171,8 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
       },
       cheques: {
         totalCount: ch.TotalCount,
-        pendingCount: ch.PendingCount,
-        draftCount: ch.DraftCount,
-        clearedCount: ch.ClearedCount,
+        activeCount: ch.ActiveCount,
+        inactiveCount: ch.InactiveCount,
       },
       cards: {
         totalCount: cd.TotalCount,

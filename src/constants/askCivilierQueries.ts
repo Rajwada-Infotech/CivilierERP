@@ -610,6 +610,8 @@ export const MODULE_QUERIES: Record<NonNullable<Module>, SuggestedQuery[]> = {
       accent: "#f59e0b",
     },
   ],
+  records: [],
+  insidework: [],
 };
 
 // ─── Final fallback ─────────────────────────────────────────────────────
@@ -704,6 +706,8 @@ const MODULE_LABELS: Record<NonNullable<Module>, string> = {
   engineering: "Engineering",
   ticket: "Tickets",
   sales: "Sales",
+  records: "Records",
+  insidework: "Inside Work",
   admin: "Admin",
 };
 

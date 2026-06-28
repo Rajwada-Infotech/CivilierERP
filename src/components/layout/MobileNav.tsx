@@ -455,8 +455,8 @@ export const MobileNav: React.FC = () => {
     return {
       label: child.label,
       path: child.path,
-      icon: child.icon,
       count: child.badge,
+      pageKey: child.pageKey,
     };
   };
 

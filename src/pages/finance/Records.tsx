@@ -1,3 +1,9 @@
+// ?? PARKED / NOT ROUTED — superseded by src/pages/records/Records.tsx
+// This file is excluded from the build in tsconfig.app.json. It targets an
+// older transaction-shaped records model (entryType/amount/mode/attachFile)
+// that no longer exists; the live records system uses the file-attachment
+// UnifiedRecord shape. Kept for reference. To revive: wire to a transaction
+// records source and remove the tsconfig exclude.
 import React, { useMemo, useRef, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
