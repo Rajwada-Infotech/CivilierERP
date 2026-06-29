@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Megaphone, TrendingUp, IndianRupee, Target, Award } from "lucide-react";
+import { MonthlyLeadTrend } from "@/components/sa/MonthlyLeadTrend";
 
 async function fetchMarketingDashboard(): Promise<any> {
   const res = await fetchWithAuth("/api/sa/dashboard/marketing");
@@ -45,10 +46,12 @@ const SaMarketingDashboard: React.FC = () => {
           <StatCard icon={IndianRupee} label="Marketing Spend" value={`₹${(data?.marketingSpend ?? 0).toLocaleString()}`} />
           <StatCard icon={IndianRupee} label="Cost Per Lead" value={`₹${data?.costPerLead ?? 0}`} />
           <StatCard icon={IndianRupee} label="Invoices Paid" value={`₹${(data?.invoicedPaid ?? 0).toLocaleString()}`} />
-          <StatCard icon={IndianRupee} label="Revenue Generated" value={`â‚¹${(data?.revenueGenerated ?? 0).toLocaleString()}`} />
+          <StatCard icon={IndianRupee} label="Revenue Generated" value={`₹${(data?.revenueGenerated ?? 0).toLocaleString()}`} />
           <StatCard icon={TrendingUp} label="ROI" value={`${data?.roi ?? 0}%`} />
           <StatCard icon={Award} label="Bookings Generated" value={data?.bookingsGenerated ?? 0} />
         </div>
+
+        <MonthlyLeadTrend />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="rounded-lg border border-border p-4">

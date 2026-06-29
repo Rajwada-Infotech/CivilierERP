@@ -1,12 +1,17 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
+router.use(authMiddleware);
+
 function dateRangeFilter(req, column) {
+  // Validate date format before interpolating to prevent SQL injection
+  const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
   const clauses = [];
-  if (req.query.from) clauses.push(`${column} >= '${req.query.from}'`);
-  if (req.query.to) clauses.push(`${column} <= '${req.query.to}'`);
+  if (req.query.from && ISO_DATE.test(req.query.from)) clauses.push(`${column} >= '${req.query.from}'`);
+  if (req.query.to && ISO_DATE.test(req.query.to)) clauses.push(`${column} <= '${req.query.to}'`);
   return clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 }
 
@@ -167,6 +172,8 @@ router.get("/cost-per-lead", requirePageRight("sa-campaigns", "view"), async (re
 router.get("/sales-performance", requirePageRight("sa-leads", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const filter = dateRangeFilter(req, "l.CreatedAt");
+    const whereClause = filter ? filter.replace("WHERE ", "AND ") : "";
     const r = await pool.request().query(`
       SELECT u.id AS UserId, u.name AS SalespersonName,
         COUNT(DISTINCT l.Id) AS LeadsHandled,
@@ -174,7 +181,7 @@ router.get("/sales-performance", requirePageRight("sa-leads", "view"), async (re
         COUNT(DISTINCT v.Id) AS SiteVisits,
         SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings
       FROM dbo.Users u
-      INNER JOIN dbo.SaLead l ON l.AssignedSalespersonId = u.id
+      INNER JOIN dbo.SaLead l ON l.AssignedSalespersonId = u.id AND l.IsActive = 1 ${whereClause}
       LEFT JOIN dbo.SaInquiryCall c ON c.SalespersonId = u.id
       LEFT JOIN dbo.SaSiteVisit v ON v.ExecutiveId = u.id
       GROUP BY u.id, u.name
@@ -188,6 +195,8 @@ router.get("/sales-performance", requirePageRight("sa-leads", "view"), async (re
 router.get("/team-leader-performance", requirePageRight("sa-lead-distribution", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const filter = dateRangeFilter(req, "l.CreatedAt");
+    const whereClause = filter ? filter.replace("WHERE ", "AND ") : "";
     const r = await pool.request().query(`
       SELECT u.id AS UserId, u.name AS TeamLeadName,
         COUNT(DISTINCT l.Id) AS LeadsReceived,
@@ -195,7 +204,7 @@ router.get("/team-leader-performance", requirePageRight("sa-lead-distribution", 
         SUM(CASE WHEN l.AssignedSalespersonId IS NULL THEN 1 ELSE 0 END) AS PendingDistribution,
         SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS TeamBookings
       FROM dbo.Users u
-      INNER JOIN dbo.SaLead l ON l.AssignedTeamLeadId = u.id
+      INNER JOIN dbo.SaLead l ON l.AssignedTeamLeadId = u.id AND l.IsActive = 1 ${whereClause}
       GROUP BY u.id, u.name
       ORDER BY TeamBookings DESC
     `);
@@ -226,10 +235,12 @@ router.get("/executive-performance", requirePageRight("sa-site-visits", "view"),
 router.get("/inquiry-status", requirePageRight("sa-inquiry", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const filter = dateRangeFilter(req, "l.CreatedAt");
+    const extra = filter ? filter.replace("WHERE ", "AND ") : "";
     const r = await pool.request().query(`
       SELECT l.Status, COUNT(*) AS Cnt
       FROM dbo.SaLead l
-      WHERE l.IsActive = 1
+      WHERE l.IsActive = 1 ${extra}
       GROUP BY l.Status
     `);
     res.json(r.recordset);

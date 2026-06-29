@@ -91,6 +91,9 @@ function initSocket(httpServer) {
       "Socket connected"
     );
 
+    // Each user automatically joins their personal room for targeted emits.
+    if (userId) socket.join(`user:${userId}`);
+
     // Ticket admins watch ticket/activity broadcasts.
     if (isTicketAdmin(role)) {
       socket.join("activity-watchers");

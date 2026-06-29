@@ -1,5 +1,14 @@
 ﻿const { getEffectivePagePermissions } = require("./permissions");
 
+// Pages the marketing_head role can fully administer.
+// Uses prefix-matching for all SA pages plus explicit Sales page keys.
+const MARKETING_HEAD_SA_PREFIX = "sa-";
+const MARKETING_HEAD_SALES_PAGES = new Set(["sale-order", "sale-invoice", "sales-payment"]);
+
+function isMarketingHeadAllowed(pageKey) {
+  return pageKey.startsWith(MARKETING_HEAD_SA_PREFIX) || MARKETING_HEAD_SALES_PAGES.has(pageKey);
+}
+
 /**
  * Authorization middleware keyed directly on the `page` slug stored in
  * dbo.UserPageRightsJson (e.g. "financial-year-master", "item-master") and,
@@ -27,6 +36,11 @@ function requirePageRight(pageKey, action) {
       const role = (req.user?.role || "").toLowerCase();
       const SUPERUSER_ROLES = new Set(["super_admin", "sa", "dba", "admin"]);
       if (SUPERUSER_ROLES.has(role)) return next();
+
+      // marketing_head: full admin access scoped to Sales Automation + Sales pages only
+      if (role === "marketing_head" && isMarketingHeadAllowed(String(pageKey).toLowerCase())) {
+        return next();
+      }
 
       const userId = req.user?.userId ?? req.user?.id;
       const roleId = req.user?.roleId;
