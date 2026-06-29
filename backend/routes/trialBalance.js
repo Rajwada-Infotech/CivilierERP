@@ -5,21 +5,22 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 60, validate: false }));
 const { getPool, sql } = require("../db");
 
 /**
- * GET /api/trial-balance?from=YYYY-MM-DD&to=YYYY-MM-DD
+ * GET /api/trial-balance?from=YYYY-MM-DD&to=YYYY-MM-DD&companyId=&projectId=
  *
  * Returns account groups (tree) with all linked entities and their
  * debit / credit totals for the given date range.
  *
- * Column mapping (verified against live routes):
- *   AccountHeadMaster: LHeadId, LHeadName, LHeadType (S/C/B/A/GL), LBelongsTo→AGId, BankOpeningBalance
- *   ExpenseBooking   : EDocDate, ECreatedAt, ENetAmount/EAmount, EName, ESourceType, ESourceId,
- *                       ECompanyId (int), EProjectName (varchar — holds project id as text, no EProjectId column)
- *   NewPayment       : PDate, PAmount, PBankID→LHeadId(B), PExpenseRef, Status,
- *                       PCompany / PProject (varchar — hold ids as text, no PCompanyId/PProjectId columns)
- *   PurchaseOrders   : PODate, TotalAmount, SupplierID→LHeadId(S), Status, CompanyId, ProjectId (int)
- *   ReceivedPayment  : RPDocDate, RPAmount, RPDepositBankId→LHeadId(B), RPReceivedFrom, RPStatus,
- *                       RPCompanyId, RPProjectId (int)
- *   GoodsReceiptNotes: GRNId, SupplierID→LHeadId(S)
+ * Reads straight off dbo.GeneralLedgerEntry — every approved GRN, Expense
+ * Booking, Payment Made, and Received Payment posts a balanced double-entry
+ * voucher there (see backend/services/generalLedger.js). This replaced the
+ * old approach of re-deriving balances by scanning each source document
+ * table per account type, which couldn't guarantee Dr = Cr and left GL
+ * accounts permanently at zero.
+ *
+ * Ledger posting started 2026-06-28 — there is no historical backfill, so
+ * opening balances before that date are 0 except for Banks, which keep their
+ * manually-entered AccountHeadMaster.BankOpeningBalance as a true starting
+ * cash balance (the ledger has no way to know that figure on its own).
  */
 router.get("/", async (req, res) => {
   try {
@@ -72,189 +73,69 @@ router.get("/", async (req, res) => {
     }
 
     // ── 2. Entity-level totals (one row per AccountHeadMaster entry) ─────────
+    // Type-agnostic now — the ledger doesn't care whether the head is a
+    // Supplier, Contractor, Bank, Customer, or GL account, so one query
+    // covers all five (the old version needed a 5-branch UNION ALL, one
+    // bespoke set of rules per type, because it scanned source documents).
     const headsRes = await pool
       .request()
       .input("from", sql.Date, from)
       .input("to", sql.Date, to)
       .input("companyId", sql.Int, companyId)
       .input("projectId", sql.Int, projectId).query(`
-        /* ── Suppliers (S) ──────────────────────────────────────────────────
-           credit = approved PurchaseOrders
-           debit  = approved NewPayments linked via ExpenseBooking → GRN      */
         SELECT
-          ahm.LHeadId   AS id,
-          ahm.LHeadName AS name,
-          ahm.LHeadType AS [type],
+          ahm.LHeadId    AS id,
+          ahm.LHeadName  AS name,
+          ahm.LHeadType  AS [type],
           ahm.LBelongsTo AS groupId,
 
           ISNULL((
-            SELECT SUM(np.PAmount)
-            FROM dbo.NewPayment np
-            JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
-            JOIN dbo.GoodsReceiptNotes grn
-              ON grn.GRNId = eb.ESourceId AND eb.ESourceType = 'GRN'
-            WHERE grn.SupplierID = ahm.LHeadId
-              AND np.Status IN ('Approved','Completed')
-              AND CAST(np.PDate AS DATE) < @from
-              AND (@companyId IS NULL OR TRY_CAST(np.PCompany AS INT) = @companyId)
-              AND (@projectId IS NULL OR TRY_CAST(np.PProject AS INT) = @projectId)
+            SELECT SUM(gle.DebitAmount)
+            FROM dbo.GeneralLedgerEntry gle
+            WHERE gle.LHeadId = ahm.LHeadId
+              AND gle.IsReversed = 0
+              AND gle.VoucherDate < @from
+              AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+              AND (@projectId IS NULL OR gle.ProjectId = @projectId)
           ), 0) AS opening_debit,
 
           ISNULL((
-            SELECT SUM(po.TotalAmount)
-            FROM dbo.PurchaseOrders po
-            WHERE po.SupplierID = ahm.LHeadId
-              AND po.Status IN ('Approved','Completed')
-              AND CAST(po.PODate AS DATE) < @from
-              AND (@companyId IS NULL OR po.CompanyId = @companyId)
-              AND (@projectId IS NULL OR po.ProjectId = @projectId)
-          ), 0) AS opening_credit,
+            SELECT SUM(gle.CreditAmount)
+            FROM dbo.GeneralLedgerEntry gle
+            WHERE gle.LHeadId = ahm.LHeadId
+              AND gle.IsReversed = 0
+              AND gle.VoucherDate < @from
+              AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+              AND (@projectId IS NULL OR gle.ProjectId = @projectId)
+          ), 0)
+          -- Banks keep their manually-entered opening cash balance — the
+          -- ledger only knows postings from 2026-06-28 onward, it has no
+          -- way to derive what was actually in the bank before that.
+          + CASE WHEN ahm.LHeadType = 'B' THEN ISNULL(ahm.BankOpeningBalance, 0) ELSE 0 END
+            AS opening_credit,
 
           ISNULL((
-            SELECT SUM(np.PAmount)
-            FROM dbo.NewPayment np
-            JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
-            JOIN dbo.GoodsReceiptNotes grn
-              ON grn.GRNId = eb.ESourceId AND eb.ESourceType = 'GRN'
-            WHERE grn.SupplierID = ahm.LHeadId
-              AND np.Status IN ('Approved','Completed')
-              AND CAST(np.PDate AS DATE) BETWEEN @from AND @to
-              AND (@companyId IS NULL OR TRY_CAST(np.PCompany AS INT) = @companyId)
-              AND (@projectId IS NULL OR TRY_CAST(np.PProject AS INT) = @projectId)
+            SELECT SUM(gle.DebitAmount)
+            FROM dbo.GeneralLedgerEntry gle
+            WHERE gle.LHeadId = ahm.LHeadId
+              AND gle.IsReversed = 0
+              AND gle.VoucherDate BETWEEN @from AND @to
+              AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+              AND (@projectId IS NULL OR gle.ProjectId = @projectId)
           ), 0) AS txn_debit,
 
           ISNULL((
-            SELECT SUM(po.TotalAmount)
-            FROM dbo.PurchaseOrders po
-            WHERE po.SupplierID = ahm.LHeadId
-              AND po.Status IN ('Approved','Completed')
-              AND CAST(po.PODate AS DATE) BETWEEN @from AND @to
-              AND (@companyId IS NULL OR po.CompanyId = @companyId)
-              AND (@projectId IS NULL OR po.ProjectId = @projectId)
+            SELECT SUM(gle.CreditAmount)
+            FROM dbo.GeneralLedgerEntry gle
+            WHERE gle.LHeadId = ahm.LHeadId
+              AND gle.IsReversed = 0
+              AND gle.VoucherDate BETWEEN @from AND @to
+              AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+              AND (@projectId IS NULL OR gle.ProjectId = @projectId)
           ), 0) AS txn_credit
 
         FROM dbo.AccountHeadMaster ahm
-        WHERE ahm.LHeadType = 'S' AND ahm.LBelongsTo IS NOT NULL
-
-        UNION ALL
-
-        /* ── Contractors (C) ────────────────────────────────────────────────
-           credit = ExpenseBooking (WO / WORK_DONE type) matched by EName
-           debit  = NewPayments against those expense bookings              */
-        SELECT
-          ahm.LHeadId, ahm.LHeadName, ahm.LHeadType, ahm.LBelongsTo,
-
-          ISNULL((
-            SELECT SUM(np.PAmount)
-            FROM dbo.NewPayment np
-            JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
-            WHERE eb.EName = ahm.LHeadName
-              AND eb.ESourceType IN ('WO_PO','WORK_DONE','PO')
-              AND np.Status IN ('Approved','Completed')
-              AND CAST(np.PDate AS DATE) < @from
-              AND (@companyId IS NULL OR TRY_CAST(np.PCompany AS INT) = @companyId)
-              AND (@projectId IS NULL OR TRY_CAST(np.PProject AS INT) = @projectId)
-          ), 0),
-
-          ISNULL((
-            SELECT SUM(ISNULL(eb.ENetAmount, eb.EAmount))
-            FROM dbo.ExpenseBooking eb
-            WHERE eb.EName = ahm.LHeadName
-              AND eb.ESourceType IN ('WO_PO','WORK_DONE','PO')
-              AND CAST(eb.ECreatedAt AS DATE) < @from
-              AND (@companyId IS NULL OR eb.ECompanyId = @companyId)
-              AND (@projectId IS NULL OR TRY_CAST(eb.EProjectName AS INT) = @projectId)
-          ), 0),
-
-          ISNULL((
-            SELECT SUM(np.PAmount)
-            FROM dbo.NewPayment np
-            JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
-            WHERE eb.EName = ahm.LHeadName
-              AND eb.ESourceType IN ('WO_PO','WORK_DONE','PO')
-              AND np.Status IN ('Approved','Completed')
-              AND CAST(np.PDate AS DATE) BETWEEN @from AND @to
-              AND (@companyId IS NULL OR TRY_CAST(np.PCompany AS INT) = @companyId)
-              AND (@projectId IS NULL OR TRY_CAST(np.PProject AS INT) = @projectId)
-          ), 0),
-
-          ISNULL((
-            SELECT SUM(ISNULL(eb.ENetAmount, eb.EAmount))
-            FROM dbo.ExpenseBooking eb
-            WHERE eb.EName = ahm.LHeadName
-              AND eb.ESourceType IN ('WO_PO','WORK_DONE','PO')
-              AND CAST(eb.ECreatedAt AS DATE) BETWEEN @from AND @to
-              AND (@companyId IS NULL OR eb.ECompanyId = @companyId)
-              AND (@projectId IS NULL OR TRY_CAST(eb.EProjectName AS INT) = @projectId)
-          ), 0)
-
-        FROM dbo.AccountHeadMaster ahm
-        WHERE ahm.LHeadType = 'C' AND ahm.LBelongsTo IS NOT NULL
-
-        UNION ALL
-
-        /* ── Banks (B) ──────────────────────────────────────────────────────
-           Banks live in AccountHeadMaster (LHeadType='B').
-           PBankID in NewPayment = LHeadId. RPDepositBankId in ReceivedPayment = LHeadId.
-           opening credit = BankOpeningBalance column on AccountHeadMaster     */
-        SELECT
-          ahm.LHeadId, ahm.LHeadName, ahm.LHeadType, ahm.LBelongsTo,
-
-          0 AS opening_debit,
-
-          ISNULL(ahm.BankOpeningBalance, 0) AS opening_credit,
-
-          ISNULL((
-            SELECT SUM(np.PAmount)
-            FROM dbo.NewPayment np
-            WHERE np.PBankID = ahm.LHeadId
-              AND np.Status IN ('Approved','Completed')
-              AND CAST(np.PDate AS DATE) BETWEEN @from AND @to
-              AND (@companyId IS NULL OR TRY_CAST(np.PCompany AS INT) = @companyId)
-              AND (@projectId IS NULL OR TRY_CAST(np.PProject AS INT) = @projectId)
-          ), 0) AS txn_debit,
-
-          ISNULL((
-            SELECT SUM(rp.RPAmount)
-            FROM dbo.ReceivedPayment rp
-            WHERE rp.RPDepositBankId = ahm.LHeadId
-              AND rp.RPStatus IN ('Approved','Completed')
-              AND CAST(rp.RPDocDate AS DATE) BETWEEN @from AND @to
-              AND (@companyId IS NULL OR rp.RPCompanyId = @companyId)
-              AND (@projectId IS NULL OR rp.RPProjectId = @projectId)
-          ), 0) AS txn_credit
-
-        FROM dbo.AccountHeadMaster ahm
-        WHERE ahm.LHeadType = 'B' AND ahm.LBelongsTo IS NOT NULL
-
-        UNION ALL
-
-        /* ── Customers (A) ──────────────────────────────────────────────────
-           credit = ReceivedPayments (rent / sale receipts)                */
-        SELECT
-          ahm.LHeadId, ahm.LHeadName, ahm.LHeadType, ahm.LBelongsTo,
-          0, 0, 0,
-          ISNULL((
-            SELECT SUM(rp.RPAmount)
-            FROM dbo.ReceivedPayment rp
-            WHERE (rp.RPReceivedFrom = ahm.LHeadName
-                OR rp.RPCustomerName = ahm.LHeadName)
-              AND rp.RPStatus IN ('Approved','Completed')
-              AND CAST(rp.RPDocDate AS DATE) BETWEEN @from AND @to
-              AND (@companyId IS NULL OR rp.RPCompanyId = @companyId)
-              AND (@projectId IS NULL OR rp.RPProjectId = @projectId)
-          ), 0)
-        FROM dbo.AccountHeadMaster ahm
-        WHERE ahm.LHeadType = 'A' AND ahm.LBelongsTo IS NOT NULL
-
-        UNION ALL
-
-        /* ── General Ledger (GL) — no automatic transaction source yet ─────*/
-        SELECT
-          ahm.LHeadId, ahm.LHeadName, ahm.LHeadType, ahm.LBelongsTo,
-          0, 0, 0, 0
-        FROM dbo.AccountHeadMaster ahm
-        WHERE ahm.LHeadType = 'GL' AND ahm.LBelongsTo IS NOT NULL
+        WHERE ahm.LBelongsTo IS NOT NULL
       `);
 
     const heads = headsRes.recordset;
@@ -382,6 +263,99 @@ router.get("/", async (req, res) => {
     });
   } catch (err) {
     console.error("[trial-balance] error:", err.message, err.stack);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/trial-balance/:lheadId/transactions?from=&to=&companyId=&projectId=
+ *
+ * Drill-down — every GeneralLedgerEntry posted against one AccountHeadMaster
+ * entity (ledger), within the same filter window as the main report. Entries
+ * sourced from a Payment (SourceType = 'NewPayment') are enriched with the
+ * payment's docNo/mode/expenseRef so the frontend can link straight through
+ * to Finance → Payments → that receipt (Level 3 of the drill-down).
+ */
+router.get("/:lheadId/transactions", async (req, res) => {
+  const lheadId = parseInt(req.params.lheadId, 10);
+  if (!Number.isFinite(lheadId)) {
+    return res.status(400).json({ error: "Invalid ledger id" });
+  }
+
+  try {
+    const pool = getPool();
+
+    const now = new Date();
+    const fyYear =
+      now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    const from = req.query.from || `${fyYear}-04-01`;
+    const to = req.query.to || `${fyYear + 1}-03-31`;
+    const companyId = req.query.companyId
+      ? parseInt(req.query.companyId, 10)
+      : null;
+    const projectId = req.query.projectId
+      ? parseInt(req.query.projectId, 10)
+      : null;
+
+    const headRes = await pool
+      .request()
+      .input("LHeadId", sql.Int, lheadId)
+      .query(
+        `SELECT LHeadId AS id, LHeadName AS name, LHeadType AS [type] FROM dbo.AccountHeadMaster WHERE LHeadId = @LHeadId`,
+      );
+    if (!headRes.recordset.length) {
+      return res.status(404).json({ error: "Ledger entity not found" });
+    }
+
+    const entriesRes = await pool
+      .request()
+      .input("LHeadId", sql.Int, lheadId)
+      .input("from", sql.Date, from)
+      .input("to", sql.Date, to)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId).query(`
+        SELECT
+          gle.EntryId, gle.VoucherNo, gle.VoucherDate,
+          gle.DebitAmount, gle.CreditAmount, gle.Narration,
+          gle.SourceType, gle.SourceId,
+          np.PPaymentID, np.DocNo AS PaymentDocNo, np.PMode AS PaymentMode,
+          np.PExpenseRef, np.Status AS PaymentStatus,
+          eb.EVendorInvoiceNo
+        FROM dbo.GeneralLedgerEntry gle
+        LEFT JOIN dbo.NewPayment np
+          ON gle.SourceType = 'NewPayment' AND np.PPaymentID = gle.SourceId
+        LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+        WHERE gle.LHeadId = @LHeadId
+          AND gle.IsReversed = 0
+          AND gle.VoucherDate >= @from AND gle.VoucherDate <= @to
+          AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+          AND (@projectId IS NULL OR gle.ProjectId = @projectId)
+        ORDER BY gle.VoucherDate DESC, gle.EntryId DESC
+      `);
+
+    const transactions = entriesRes.recordset.map((r) => ({
+      entryId: r.EntryId,
+      voucherNo: r.VoucherNo,
+      date: r.VoucherDate ? String(r.VoucherDate).slice(0, 10) : null,
+      debit: Number(r.DebitAmount) || 0,
+      credit: Number(r.CreditAmount) || 0,
+      narration: r.Narration,
+      sourceType: r.SourceType,
+      sourceId: r.SourceId,
+      invoiceNo: r.EVendorInvoiceNo || null,
+      payment: r.PPaymentID
+        ? {
+            id: r.PPaymentID,
+            docNo: r.PaymentDocNo,
+            mode: r.PaymentMode,
+            status: r.PaymentStatus,
+          }
+        : null,
+    }));
+
+    res.json({ entity: headRes.recordset[0], from, to, transactions });
+  } catch (err) {
+    console.error("[trial-balance] transactions error:", err.message, err.stack);
     res.status(500).json({ error: err.message });
   }
 });

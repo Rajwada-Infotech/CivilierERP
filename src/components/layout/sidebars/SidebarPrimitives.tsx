@@ -27,6 +27,10 @@ export interface NavItem {
   pageKey?: string;
   children?: SubItem[];
   sections?: SubSection[];
+  /** Marks the module's primary dashboard/landing entry — rendered larger
+   *  and set apart from the rest of the list, regardless of its label
+   *  (e.g. "Proceeding", "Control Center", "All Records"). */
+  isDashboard?: boolean;
 }
 
 // ─── NavButton ────────────────────────────────────────────────────────────────
@@ -43,10 +47,37 @@ export const NavButton = ({
   accentColor?: string;
 }) => {
   const navigate = useNavigate();
+
+  if (item.isDashboard) {
+    return (
+      <button
+        onClick={() => item.path && navigate(item.path)}
+        className={`w-full flex items-center gap-3 px-3.5 py-3 mb-2 rounded-xl text-[15px] font-semibold transition-colors border ${
+          isActive
+            ? accentColor
+              ? ""
+              : "bg-primary/15 text-primary border-primary/20"
+            : "text-sidebar-foreground border-sidebar-border/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        } ${collapsed ? "justify-center" : ""}`}
+        style={
+          accentColor
+            ? isActive
+              ? { background: `${accentColor}26`, color: accentColor, borderColor: `${accentColor}40` }
+              : { background: `${accentColor}12`, borderColor: `${accentColor}26` }
+            : undefined
+        }
+        title={collapsed ? item.label : undefined}
+      >
+        <item.icon size={22} className="shrink-0" />
+        {!collapsed && <span className="truncate">{item.label}</span>}
+      </button>
+    );
+  }
+
   return (
     <button
       onClick={() => item.path && navigate(item.path)}
-      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
         isActive
           ? accentColor
             ? "font-medium"
@@ -109,7 +140,7 @@ export const NavGroup = ({
     <div>
       <button
         onClick={handleClick}
-        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
           hasActiveChild
             ? accentColor
               ? ""
@@ -225,7 +256,7 @@ export const SidebarNav = ({
 }) => {
   const location = useLocation();
   return (
-    <>
+    <div className="space-y-1.5">
       {items.map((item) =>
         item.children || item.sections ? (
           <NavGroup
@@ -257,6 +288,6 @@ export const SidebarNav = ({
           />
         ),
       )}
-    </>
+    </div>
   );
 };

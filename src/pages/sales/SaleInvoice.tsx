@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SalesShell } from "@/components/sales/SalesShell";
 import {
   Receipt,
   FileText,
@@ -260,7 +261,7 @@ function CollectPaymentModal({
       RPDepositBankName: dummyBank?.BName ?? "Dummy Bank",
       RPTransactionID: null,
       RPCheckNumber: null,
-      RPRemarks: `[SaleInvoicePayment] ${remarks}`.trim(),
+      RPRemarks: `[SalePayment] ${remarks}`.trim(),
       RPStatus: "Draft",
       RPFinYear: activeFinYear || null,
       RPDocTypeId: null,
@@ -900,18 +901,11 @@ export default function SaleInvoice() {
     <>
       <Breadcrumbs items={["Dashboard", "Sales Module", "Sale Invoice"]} />
 
-      <div className="p-6 space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-              <Receipt size={20} className="text-violet-600" />
-              Sale Invoice
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Generate invoices from approved sale orders and collect cash
-              payment against them
-            </p>
-          </div>
+      <SalesShell
+        title="Sale Invoice"
+        subtitle="Generate invoices from approved sale orders and collect cash payment against them"
+        icon={Receipt}
+        action={
           <div className="flex items-center gap-1 p-1 rounded-xl bg-muted border border-border">
             {rights.canCreate && (
               <button
@@ -936,8 +930,8 @@ export default function SaleInvoice() {
               <ClipboardList size={14} /> History
             </button>
           </div>
-        </div>
-
+        }
+      >
         {!dummyBank && (
           <div className="px-4 py-3 rounded-lg bg-amber-500/10 text-amber-700 border border-amber-500/20 flex items-center gap-2 text-sm">
             <AlertCircle size={15} /> No "Dummy Bank" account found in Bank
@@ -950,7 +944,7 @@ export default function SaleInvoice() {
         {activeTab === "history" && (
           <SaleInvoiceHistory dummyBank={dummyBank} />
         )}
-      </div>
+      </SalesShell>
     </>
   );
 }

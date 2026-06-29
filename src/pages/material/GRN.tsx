@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
@@ -629,7 +630,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
     cell: ({ row }) => {
       const grn = row.original;
       return (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-end gap-2">
           <button
             onClick={() => onView(grn)}
             className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
@@ -738,6 +739,7 @@ export default function GRN() {
   const rights = usePageRights("grn-master");
   _canDelete = rights.canDelete;
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { finYears } = useFinYear();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -975,8 +977,9 @@ export default function GRN() {
   const createMutation = useMutation({
     mutationFn: grnApi.addGRN,
     onSuccess: async (res) => {
-      queryClient.invalidateQueries({ queryKey: ["grns"] });
       setPage(1);
+      await queryClient.invalidateQueries({ queryKey: ["grns"] });
+      await queryClient.refetchQueries({ queryKey: ["grns"], type: "all" });
       const generated = res?.grnNo || "";
       setFormData(buildEmptyForm());
       setEditingId(null);
@@ -992,8 +995,9 @@ export default function GRN() {
     mutationFn: (payload: GRNFormDataPayload) =>
       grnApi.updateGRN(editingId!, payload),
     onSuccess: async () => {
-      queryClient.invalidateQueries({ queryKey: ["grns"] });
       setPage(1);
+      await queryClient.invalidateQueries({ queryKey: ["grns"] });
+      await queryClient.refetchQueries({ queryKey: ["grns"], type: "all" });
       setFormData(buildEmptyForm());
       setEditingId(null);
       setShowForm(false);
@@ -1005,9 +1009,10 @@ export default function GRN() {
 
   deleteMutation = useMutation({
     mutationFn: grnApi.deleteGRN,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["grns"] });
+    onSuccess: async () => {
       setPage(1);
+      await queryClient.invalidateQueries({ queryKey: ["grns"] });
+      await queryClient.refetchQueries({ queryKey: ["grns"], type: "all" });
       toast.success("GRN deleted");
     },
     onError: (err: any) => toast.error(err.message || "Failed to delete GRN"),
@@ -1300,6 +1305,17 @@ export default function GRN() {
       setViewingGrn(grn);
     }
   };
+
+  // Deep-link support — Linked Documents panels navigate here as
+  // /material/grn?view=<GRNID> to open this exact GRN.
+  useEffect(() => {
+    const viewId = searchParams.get("view");
+    if (!viewId) return;
+    onView({ GRNID: Number(viewId) });
+    searchParams.delete("view");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   onEdit = async (grn: any) => {
     let fullGrn = grn;
@@ -2229,11 +2245,17 @@ export default function GRN() {
             );
             const subtotalInclGST = subtotal + gstTotal;
             return (
-              <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+              <div className="grn-print-overlay fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
                 <style>{`
                   @media print {
                     body > * { display: none !important; }
-                    .grn-print-modal { display: block !important; position: static !important; background: white !important; box-shadow: none !important; max-height: none !important; overflow: visible !important; border: none !important; border-radius: 0 !important; }
+                    /* The overlay itself is a body > * child — its own
+                       display:none would hide .grn-print-modal regardless
+                       of the modal's own display override, since a child
+                       can't un-hide a hidden ancestor. Un-hide the overlay
+                       too, stripped of its backdrop/centering styles. */
+                    body > .grn-print-overlay { display: block !important; position: static !important; background: none !important; backdrop-filter: none !important; padding: 0 !important; }
+                    .grn-print-modal { display: block !important; position: static !important; background: white !important; box-shadow: none !important; max-height: none !important; overflow: visible !important; border: none !important; border-radius: 0 !important; max-width: none !important; width: 100% !important; }
                     .grn-print-modal .sticky { position: static !important; }
                   }
                 `}</style>
@@ -2369,6 +2391,8 @@ export default function GRN() {
                           </div>
                         ))}
                       </div>
+
+                      <DocumentChainPanel docType="grn" id={viewingGrn.GRNID} />
 
                       {/* Items */}
                       <div>

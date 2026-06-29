@@ -6,9 +6,11 @@ const logger = require("../logger");
 const { getPool, sql } = require("../db");
 
 // NULL placeholders so every UNION ALL branch has the same column count.
-// Only the expense-booking branch populates GrnTotalAmount and BillingTermsData.
+// Only the expense-booking branch populates GrnTotalAmount, GrnBasicAmount,
+// and BillingTermsData.
 const NULL_EXTRA = `
   CAST(NULL AS DECIMAL(18,2)) AS GrnTotalAmount,
+  CAST(NULL AS DECIMAL(18,2)) AS GrnBasicAmount,
   CAST(NULL AS NVARCHAR(MAX)) AS BillingTermsData,
   CAST(NULL AS NVARCHAR(100)) AS SourceTransferDocNo,
   CAST(NULL AS NVARCHAR(255)) AS FromGodownName,
@@ -130,6 +132,7 @@ router.get("/", async (req, res) => {
           s.LHeadName                               AS SupplierName,
           grn.TotalAmount                           AS Amount,
           CAST(NULL AS DECIMAL(18,2))               AS GrnTotalAmount,
+          CAST(NULL AS DECIMAL(18,2))               AS GrnBasicAmount,
           CAST(NULL AS NVARCHAR(MAX))               AS BillingTermsData,
           grn.SourceTransferDocNo                   AS SourceTransferDocNo,
           fg.GodownName                             AS FromGodownName,
@@ -199,6 +202,11 @@ router.get("/", async (req, res) => {
             THEN grn_eb.TotalAmount
             ELSE NULL
           END                      AS GrnTotalAmount,
+          -- Stored basic/taxable amount (pre-GST) — required by
+          -- computeGrnNetWithTerms to correctly recompute GST after
+          -- pre-GST billing terms shift the base. Without this the frontend
+          -- defaults to a base of 0 and the recomputed net collapses to ₹0.
+          eb.EAmount               AS GrnBasicAmount,
           -- Billing terms JSON so the frontend can apply them on top of GrnTotalAmount.
           eb.EBillingTermsData     AS BillingTermsData,
           CAST(NULL AS NVARCHAR(100)) AS SourceTransferDocNo,
@@ -371,6 +379,7 @@ router.get("/", async (req, res) => {
           tc.name                                      AS SupplierName,
           so.TotalAmount                               AS Amount,
           CAST(NULL AS DECIMAL(18,2))                  AS GrnTotalAmount,
+          CAST(NULL AS DECIMAL(18,2))                  AS GrnBasicAmount,
           CAST(NULL AS NVARCHAR(MAX))                  AS BillingTermsData,
           CAST(NULL AS NVARCHAR(100))                  AS SourceTransferDocNo,
           fg.GodownName                                 AS FromGodownName,

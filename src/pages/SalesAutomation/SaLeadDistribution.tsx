@@ -319,7 +319,7 @@ const SaLeadDistribution: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">L{r.Level}</span>
                         <span className="text-sm font-medium text-foreground">{r.ScopeType === "Global" ? "Global" : r.ScopeType === "Campaign" ? `Campaign: ${r.ScopeCampaignName || r.ScopeId}` : `Team Lead: ${r.ScopeTeamLeadName || r.ScopeId}`}</span>
-                        <span className="text-xs text-muted-foreground">� {r.Method}</span>
+                        <span className="text-xs text-muted-foreground">· {r.Method}</span>
                       </div>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${r.IsActive ? "bg-green-500/10 text-green-600" : "bg-muted text-muted-foreground"}`}>{r.IsActive ? "Active" : "Inactive"}</span>
                     </div>

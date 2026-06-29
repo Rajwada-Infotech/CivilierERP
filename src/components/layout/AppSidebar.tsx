@@ -35,14 +35,14 @@ import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
 import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { salesNavItems } from "./sidebars/SalesSidebar";
 import { recordsNavItems } from "./sidebars/RecordsSidebar";
-import { insideWorkNavItems } from "./sidebars/InsideWorkSidebar";
+import { civilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar ──────────────────────────────────────────────────────────────
 const userNavItems: NavItem[] = [
   { label: "My Profile", icon: User, path: "/user/profile" },
-  { label: "Dashboard", icon: BarChart3, path: "/home" },
+  { label: "Dashboard", icon: BarChart3, path: "/home", isDashboard: true },
 ];
 
 // ── Module header metadata ────────────────────────────────────────────────────
@@ -105,8 +105,8 @@ const MODULE_HEADER: Record<
     from: "from-amber-500/30",
     to: "to-amber-500/0",
   },
-  insidework: {
-    label: "Inside Work",
+  civilworkdpr: {
+    label: "Civil Work DPR",
     icon: Pickaxe,
     color: "#0891b2",
     from: "from-cyan-600/30",
@@ -311,8 +311,8 @@ export const AppSidebar = () => {
       case "records":
         raw = recordsNavItems;
         break;
-      case "insidework":
-        raw = insideWorkNavItems;
+      case "civilworkdpr":
+        raw = civilWorkDprNavItems;
         break;
       case "sales-automation":
         raw = salesAutomationNavItems;
@@ -441,7 +441,7 @@ export const AppSidebar = () => {
           initial={{ opacity: 0, x: -8 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.2, ease: "easeOut", delay: 0.06 }}
-          className="relative z-10 flex-1 overflow-y-auto p-2 space-y-0.5"
+          className="relative z-10 flex-1 overflow-y-auto p-2"
         >
           <SidebarNav
             items={getNavItems()}

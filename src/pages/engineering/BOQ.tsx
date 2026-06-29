@@ -325,6 +325,9 @@ interface LineEditorProps {
   onChange: (rows: any[]) => void;
   readOnly?: boolean;
   onTabChange?: (tab: "items" | "activities") => void;
+  // Activity mode only — fired with the chosen activity's id so the parent
+  // can auto-fetch and merge its linked items into the Items tab.
+  onActivitySelected?: (activityId: string) => void;
 }
 
 const LineEditor: React.FC<LineEditorProps> = ({
@@ -338,6 +341,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
   onChange,
   readOnly,
   onTabChange,
+  onActivitySelected,
 }) => {
   const isItem = mode === "item";
 
@@ -648,6 +652,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
                                     },
                               ),
                             );
+                            onActivitySelected?.(sel.id);
                           }}
                         >
                           <SelectTrigger className="h-8 text-xs border-border/60 focus:ring-1 focus:ring-primary/40 w-full">
@@ -1244,6 +1249,43 @@ const FormModal: React.FC<FormModalProps> = ({
     set("ProjectId", "");
   };
 
+  // When an Activity line is added, auto-fetch the items linked to that
+  // activity (Activity Master → "Add Item") and merge any not already on
+  // the Items tab — quantity/rate are left blank for the user to fill in.
+  const handleActivitySelected = async (activityId: string) => {
+    try {
+      const linked = await apiFetch(`/activity-items?activityId=${activityId}`);
+      const linkedList: any[] = Array.isArray(linked) ? linked : [];
+      if (linkedList.length === 0) return;
+
+      setItems((prev) => {
+        const existingIds = new Set(prev.map((it) => it.itemId));
+        const newRows = linkedList
+          .filter((li) => !existingIds.has(li.itemId))
+          .map((li) => ({
+            _key: uid(),
+            itemId: li.itemId,
+            itemName: li.itemName,
+            itemCode: li.itemCode || "",
+            description: "",
+            quantity: "",
+            uomName: li.uom || "",
+            rate: "",
+            tax: "18",
+            amount: 0,
+          }));
+        if (newRows.length === 0) return prev;
+        toast.success(
+          `${newRows.length} item${newRows.length > 1 ? "s" : ""} auto-added from this activity`,
+        );
+        return [...prev, ...newRows];
+      });
+    } catch (err) {
+      // Non-fatal — activity selection itself still succeeds either way.
+      console.warn("Failed to auto-fetch activity items:", err);
+    }
+  };
+
   // Filter projects to only those belonging to the selected company.
   // If no company selected, show all projects.
   const filteredProjects = form.CompanyId
@@ -1661,6 +1703,7 @@ const FormModal: React.FC<FormModalProps> = ({
                 lineTab === "items" ? (setItems as any) : (setActivities as any)
               }
               onTabChange={setLineTab}
+              onActivitySelected={handleActivitySelected}
             />
           </div>
         </div>

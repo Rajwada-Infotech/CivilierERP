@@ -74,6 +74,17 @@ export const getPayments = async (
   return res.json();
 };
 
+// Fetch a single payment by PPaymentID — used by the Trial Balance drill-down
+// (Level 3: clicking a transaction opens this exact payment receipt).
+export const getPaymentById = async (id: number) => {
+  const res = await fetchWithAuth(`${BASE_URL}?id=${id}&limit=1`);
+  if (!res.ok)
+    throw new Error(await parseError(res, `GET failed: ${res.status}`));
+  const data = await res.json();
+  const rows = Array.isArray(data) ? data : data?.data ?? data?.rows ?? [];
+  return rows[0] ?? null;
+};
+
 export const addPayment = async (data: PaymentPayload) => {
   const res = await fetchWithAuth(BASE_URL, {
     method: "POST",

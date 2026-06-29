@@ -15,11 +15,8 @@ import {
   Pickaxe,
   Megaphone,
 } from "lucide-react";
-import {
-  useModule,
-  MODULE_DASHBOARD_ROUTES,
-  Module,
-} from "@/contexts/ModuleContext";
+import { useModule } from "@/contexts/ModuleContext";
+import { MODULE_DASHBOARD_ROUTES, Module } from "@/contexts/module.utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./layoutContexts";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -83,6 +80,15 @@ const MODULES = [
     ringRgb: "168,85,247",
   },
   {
+    id: "civilworkdpr" as Module,
+    icon: Pickaxe,
+    label: "Civil Work DPR",
+    desc: "Internal operations workspace",
+    color: "#0891b2",
+    bg: "rgba(8,145,178,0.22)",
+    ringRgb: "8,145,178",
+  },
+  {
     id: "records" as Module,
     icon: Archive,
     label: "Records",
@@ -90,15 +96,6 @@ const MODULES = [
     color: "#f59e0b",
     bg: "rgba(245,158,11,0.22)",
     ringRgb: "245,158,11",
-  },
-  {
-    id: "insidework" as Module,
-    icon: Pickaxe,
-    label: "Inside Work",
-    desc: "Internal operations workspace",
-    color: "#0891b2",
-    bg: "rgba(8,145,178,0.22)",
-    ringRgb: "8,145,178",
   },
   {
     id: "sales-automation" as Module,
@@ -156,7 +153,7 @@ export const ModuleStrip: React.FC = () => {
     engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
     ticket:      ["ticket-dashboard", "tickets"],
     sales:       ["sale-order", "sale-invoice", "sales-payment"],
-    insidework:  ["insidework-dashboard"],
+    civilworkdpr: ["civilworkdpr-dashboard"],
     "sales-automation": ["sa-social-media", "sa-campaigns", "sa-ads", "sa-leads", "sa-lead-distribution", "sa-inquiry", "sa-site-visits", "sa-marketing-invoices"],
   };
 
@@ -249,21 +246,27 @@ export const ModuleStrip: React.FC = () => {
             />
           </AnimatePresence>
 
-          {/* ── Logo / Sparkle section ─────────────────────────────────────── */}
+          {/* ── Logo / Refresh button ──────────────────────────────────────── */}
           <div className="relative z-10 flex justify-center items-center pt-5 pb-5">
-            <motion.div
+            <motion.button
+              type="button"
+              title="Refresh"
+              onClick={() => window.location.reload()}
               animate={{ rotate: [0, 8, -8, 0], scale: [1, 1.08, 1] }}
               transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+              whileHover={{ scale: 1.15 }}
+              whileTap={{ scale: 0.9, rotate: 180 }}
+              className="cursor-pointer rounded-full"
             >
               <img
                 src="/loader.gif"
-                alt="CivilierERP"
+                alt="Refresh"
                 width={50}
                 height={50}
-                className="object-contain select-none pointer-events-none"
+                className="object-contain select-none"
                 draggable={false}
               />
-            </motion.div>
+            </motion.button>
           </div>
 
           {/* Divider below logo */}

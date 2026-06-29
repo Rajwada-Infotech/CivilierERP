@@ -122,7 +122,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     const now = new Date();
     const userEmail = req.user?.email || null;
 
-    await pool
+    const insertResult = await pool
       .request()
       .input("activity_name", sql.NVarChar(255), activity_name.trim())
       .input("short_description", sql.NVarChar(255), short_description || null)
@@ -137,13 +137,17 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
         INSERT INTO dbo.ActivityMaster
           (activity_name, short_description, activity_type, group_id,
            is_active, created_by, created_datetime, belongsTo, hsn_code)
+        OUTPUT INSERTED.id AS id
         VALUES
           (@activity_name, @short_description, @activity_type, @group_id,
            @is_active, @created_by, @created_datetime, @belongsTo, @hsn_code)
       `);
 
     await bumpCacheVersion("activity-master");
-    res.status(201).json({ message: "Activity added successfully" });
+    res.status(201).json({
+      message: "Activity added successfully",
+      id: insertResult.recordset[0].id,
+    });
   } catch (err) {
     console.error("[POST /activity-master]", err);
     res.status(500).json({ error: err.message });

@@ -25,11 +25,11 @@ import {
   AlertCircle,
   Edit,
   FileText,
-  ArrowRight,
   Wallet,
   Printer,
 } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { parseJsonArray } from "@/utils/parseJsonArray";
 import {
   computeBreakdown,
@@ -305,9 +305,9 @@ export function ExpenseBookingPreviewModal({
           }
         `}</style>
         <DialogHeader>
-          <DialogTitle>Expense Booking Preview</DialogTitle>
+          <DialogTitle>Invoice Preview</DialogTitle>
           <DialogDescription>
-            Details for booking {previewRecord?.bookingReference}
+            Details for invoice {previewRecord?.bookingReference}
           </DialogDescription>
         </DialogHeader>
 
@@ -524,7 +524,10 @@ export function ExpenseBookingPreviewModal({
                     </table>
                   </div>
                 </div>
-                {/* Cumulative GST summary — recomputes GST when pre-GST terms adjust the base */}
+                {/* Cumulative GST summary — recomputes GST when pre-GST terms adjust the base.
+                Row order mirrors how the amount is actually derived: pre-GST terms
+                adjust the base BEFORE tax, so they render before CGST/SGST/Gross;
+                post-GST terms adjust the gross AFTER tax, so they render after it. */}
                 {(() => {
                   const origBase = grnBreakdown.totals.totalBase;
                   const origCGST = grnBreakdown.totals.totalCGST;
@@ -538,16 +541,22 @@ export function ExpenseBookingPreviewModal({
                   const preTerms = billingTerms.filter(
                     (t: any) => t.appliedOn !== "post-gst",
                   );
+                  const postTerms = billingTerms.filter(
+                    (t: any) => t.appliedOn === "post-gst",
+                  );
 
-                  // Compute adjusted taxable base
+                  // Running base after pre-GST terms, captured per-term for display
+                  const preTermRows: { term: any; base: number; amt: number }[] =
+                    [];
                   let taxableBase = origBase;
                   for (const t of preTerms) {
-                    const a =
+                    const amt =
                       t.type === "percentage"
                         ? (taxableBase * (t.value ?? 0)) / 100
                         : (t.value ?? 0);
-                    if (t.deductionType === "Addition") taxableBase += a;
-                    else taxableBase = Math.max(0, taxableBase - a);
+                    preTermRows.push({ term: t, base: taxableBase, amt });
+                    if (t.deductionType === "Addition") taxableBase += amt;
+                    else taxableBase = Math.max(0, taxableBase - amt);
                   }
 
                   const hasPreTerms = preTerms.length > 0;
@@ -560,6 +569,55 @@ export function ExpenseBookingPreviewModal({
                   const displayGross = hasPreTerms
                     ? taxableBase + displayCGST + displaySGST
                     : origGross;
+
+                  // Running gross after post-GST terms, captured per-term for display
+                  const postTermRows: { term: any; base: number; amt: number }[] =
+                    [];
+                  let runGross = displayGross;
+                  for (const t of postTerms) {
+                    const amt =
+                      t.type === "percentage"
+                        ? (runGross * (t.value ?? 0)) / 100
+                        : (t.value ?? 0);
+                    postTermRows.push({ term: t, base: runGross, amt });
+                    if (t.deductionType === "Addition") runGross += amt;
+                    else runGross = Math.max(0, runGross - amt);
+                  }
+
+                  const renderTermRow = (
+                    row: { term: any; amt: number },
+                    isPreGst: boolean,
+                    i: number,
+                  ) => {
+                    const { term: t, amt } = row;
+                    const isAdd = t.deductionType === "Addition";
+                    return (
+                      <div
+                        key={t._key ?? t.masterTermId ?? `${isPreGst}-${i}`}
+                        className={`flex items-center justify-between px-4 py-2.5 ${isAdd ? "bg-emerald-500/5" : "bg-red-500/5"}`}
+                      >
+                        <p
+                          className={`text-xs flex items-center gap-1.5 ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
+                        >
+                          <TrendingUp size={10} />
+                          {t.masterTermName || `Term ${i + 1}`}
+                          <span className="font-mono text-[10px] opacity-70">
+                            {t.type === "percentage"
+                              ? `${t.value ?? 0}%`
+                              : `₹${fmt(t.value ?? 0)}`}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground/60">
+                            ({isPreGst ? "pre-GST" : "post-GST"})
+                          </span>
+                        </p>
+                        <p
+                          className={`font-mono text-sm font-semibold ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}
+                        >
+                          {isAdd ? "+ " : "− "}₹{fmt(amt)}
+                        </p>
+                      </div>
+                    );
+                  };
 
                   return (
                     <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-sm">
@@ -574,6 +632,7 @@ export function ExpenseBookingPreviewModal({
                           ₹{fmt(origBase)}
                         </p>
                       </div>
+                      {preTermRows.map((row, i) => renderTermRow(row, true, i))}
                       {displayCGST > 0 && (
                         <div className="flex items-center justify-between px-4 py-2.5">
                           <div>
@@ -615,104 +674,7 @@ export function ExpenseBookingPreviewModal({
                           ₹{fmt(displayGross)}
                         </p>
                       </div>
-                      {/* Billing term rows — rendered with correct pre/post-GST base.
-                      Pre-GST terms apply sequentially on the base amount.
-                      Post-GST terms apply sequentially on the gross (base + recalculated GST). */}
-                      {billingTerms.map((t: any, i: number) => {
-                        const origBase = grnBreakdown.totals.totalBase;
-                        const origCGST = grnBreakdown.totals.totalCGST;
-                        const origSGST = grnBreakdown.totals.totalSGST;
-                        const origGross = grnBreakdown.totals.totalInclGST;
-                        const effectiveCGSTRate =
-                          origBase > 0 ? (origCGST / origBase) * 100 : 0;
-                        const effectiveSGSTRate =
-                          origBase > 0 ? (origSGST / origBase) * 100 : 0;
-
-                        const isPreGst = t.appliedOn !== "post-gst";
-                        const preTerms = billingTerms.filter(
-                          (_t: any) => _t.appliedOn !== "post-gst",
-                        );
-                        const postTerms = billingTerms.filter(
-                          (_t: any) => _t.appliedOn === "post-gst",
-                        );
-
-                        let base: number;
-                        if (isPreGst) {
-                          // Running base after previous pre-GST terms
-                          let running = origBase;
-                          for (let j = 0; j < preTerms.indexOf(t); j++) {
-                            const prev = preTerms[j];
-                            const a =
-                              prev.type === "percentage"
-                                ? (running * (prev.value ?? 0)) / 100
-                                : (prev.value ?? 0);
-                            if (prev.deductionType === "Addition") running += a;
-                            else running = Math.max(0, running - a);
-                          }
-                          base = running;
-                        } else {
-                          // Running gross after all pre-GST terms + previous post-GST terms
-                          let runBase = origBase;
-                          for (const pt of preTerms) {
-                            const a =
-                              pt.type === "percentage"
-                                ? (runBase * (pt.value ?? 0)) / 100
-                                : (pt.value ?? 0);
-                            if (pt.deductionType === "Addition") runBase += a;
-                            else runBase = Math.max(0, runBase - a);
-                          }
-                          const adjGross =
-                            preTerms.length > 0
-                              ? runBase +
-                                (runBase * effectiveCGSTRate) / 100 +
-                                (runBase * effectiveSGSTRate) / 100
-                              : origGross;
-                          let runGross = adjGross;
-                          for (let j = 0; j < postTerms.indexOf(t); j++) {
-                            const prev = postTerms[j];
-                            const a =
-                              prev.type === "percentage"
-                                ? (runGross * (prev.value ?? 0)) / 100
-                                : (prev.value ?? 0);
-                            if (prev.deductionType === "Addition")
-                              runGross += a;
-                            else runGross = Math.max(0, runGross - a);
-                          }
-                          base = runGross;
-                        }
-
-                        const amt =
-                          t.type === "percentage"
-                            ? (base * (t.value ?? 0)) / 100
-                            : (t.value ?? 0);
-                        const isAdd = t.deductionType === "Addition";
-                        return (
-                          <div
-                            key={t._key ?? t.masterTermId ?? i}
-                            className={`flex items-center justify-between px-4 py-2.5 ${isAdd ? "bg-emerald-500/5" : "bg-red-500/5"}`}
-                          >
-                            <p
-                              className={`text-xs flex items-center gap-1.5 ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
-                            >
-                              <TrendingUp size={10} />
-                              {t.masterTermName || `Term ${i + 1}`}
-                              <span className="font-mono text-[10px] opacity-70">
-                                {t.type === "percentage"
-                                  ? `${t.value ?? 0}%`
-                                  : `₹${fmt(t.value ?? 0)}`}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground/60">
-                                ({isPreGst ? "pre-GST" : "post-GST"})
-                              </span>
-                            </p>
-                            <p
-                              className={`font-mono text-sm font-semibold ${isAdd ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}
-                            >
-                              {isAdd ? "+ " : "− "}₹{fmt(amt)}
-                            </p>
-                          </div>
-                        );
-                      })}
+                      {postTermRows.map((row, i) => renderTermRow(row, false, i))}
                     </div>
                   );
                 })()}
@@ -1140,94 +1102,23 @@ export function ExpenseBookingPreviewModal({
             </div>
           )}
 
-          {/* ── Section 7b: Traceability Chain ── */}
-          <div className="border-t border-border/60 pt-4">
-            <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-              <ArrowRight
-                size={10}
-                className="text-emerald-600 dark:text-emerald-400"
-              />{" "}
-              Document Chain
-            </p>
-            <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-              {previewRecord.workDoneRef && (
-                <>
-                  <span className="bg-violet-500/10 border border-violet-500/20 text-violet-700 dark:text-violet-400 px-2.5 py-1.5 rounded-lg font-mono font-semibold">
-                    WD: {previewRecord.workDoneRef}
-                  </span>
-                  <ArrowRight
-                    size={10}
-                    className="text-muted-foreground shrink-0"
-                  />
-                </>
-              )}
-              {(previewRecord.purchaseOrderId ||
-                previewRecord.eSourceType === "PO" ||
-                previewRecord.eSourceType === "WO_PO") && (
-                <>
-                  <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 px-2.5 py-1.5 rounded-lg font-mono font-semibold">
-                    {previewRecord.eSourceType === "WO_PO" ? "WO_PO" : "PO"}
-                    {previewRecord.purchaseOrderId
-                      ? ` #${previewRecord.purchaseOrderId}`
-                      : ""}
-                  </span>
-                  <ArrowRight
-                    size={10}
-                    className="text-muted-foreground shrink-0"
-                  />
-                </>
-              )}
-              {previewRecord.eSourceType === "GRN" &&
-                previewRecord.eSourceId && (
-                  <>
-                    <span className="bg-teal-500/10 border border-teal-500/20 text-teal-700 dark:text-teal-400 px-2.5 py-1.5 rounded-lg font-mono font-semibold">
-                      {previewRecord.sourceDocNo ||
-                        `GRN #${previewRecord.eSourceId}`}
-                    </span>
-                    <ArrowRight
-                      size={10}
-                      className="text-muted-foreground shrink-0"
-                    />
-                  </>
-                )}
-              {previewRecord.bookingReference && (
-                <>
-                  <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-2.5 py-1.5 rounded-lg font-mono font-semibold">
-                    {previewRecord.bookingReference}
-                  </span>
-                  {previewRecord.billStatus && (
-                    <ArrowRight
-                      size={10}
-                      className="text-muted-foreground shrink-0"
-                    />
-                  )}
-                </>
-              )}
-              {previewRecord.billStatus && (
-                <span
-                  className={`px-2.5 py-1.5 rounded-lg font-semibold border ${
-                    previewRecord.billStatus === "Paid"
-                      ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
-                      : previewRecord.billStatus === "Partially Paid"
-                        ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
-                        : "bg-muted border-border text-muted-foreground"
-                  }`}
-                >
-                  {previewRecord.billStatus}
-                </span>
-              )}
-              {!previewRecord.workDoneRef &&
-                !previewRecord.purchaseOrderId &&
-                previewRecord.eSourceType !== "GRN" &&
-                previewRecord.eSourceType !== "PO" &&
-                previewRecord.eSourceType !== "WO_PO" &&
-                !previewRecord.billStatus && (
-                  <span className="text-muted-foreground italic">
-                    No chain data yet
-                  </span>
-                )}
+          {/* ── Section 7b: Traceability Chain — clickable Linked Documents ── */}
+          <DocumentChainPanel docType="expense" id={previewRecord.id ? Number(previewRecord.id) : null} />
+          {previewRecord.billStatus && (
+            <div className="flex items-center gap-1.5 text-[10px] -mt-2">
+              <span
+                className={`px-2.5 py-1.5 rounded-lg font-semibold border ${
+                  previewRecord.billStatus === "Paid"
+                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+                    : previewRecord.billStatus === "Partially Paid"
+                      ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                      : "bg-muted border-border text-muted-foreground"
+                }`}
+              >
+                {previewRecord.billStatus}
+              </span>
             </div>
-          </div>
+          )}
 
           {/* ── Section 8: Billing Terms ── */}
           {billingTerms.length > 0 && (

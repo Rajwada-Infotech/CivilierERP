@@ -6,33 +6,14 @@ import React, {
   useEffect,
 } from "react";
 import { useLocation } from "react-router-dom";
+import { MODULE_DASHBOARD_ROUTES } from "@/contexts/module.utils";
+import type { Module } from "@/contexts/module.utils";
 
-export type Module =
-  | "finance"
-  | "material"
-  | "followup"
-  | "engineering"
-  | "ticket"
-  | "sales"
-  | "records"
-  | "insidework"
-  | "sales-automation"
-  | "admin"
-  | null;
-
-// Single source of truth for module dashboard routes
-export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
-  finance: "/finance",
-  material: "/material",
-  followup: "/followup",
-  engineering: "/engineering",
-  ticket: "/ticket",
-  sales: "/sales/sale-order",
-  records: "/records",
-  insidework: "/insidework",
-  "sales-automation": "/sales-automation/social-media",
-  admin: "/admin/dashboard",
-};
+// Module/MODULE_DASHBOARD_ROUTES now live in module.utils.ts and are NOT
+// re-exported here — this file only exports components/hooks. Mixing
+// component and non-component exports in one file breaks Vite Fast Refresh
+// (forces a full reload on every edit instead of hot-patching). Import the
+// type/constant directly from "@/contexts/module.utils" instead.
 
 interface ModuleContextType {
   activeModule: Module;
@@ -73,8 +54,8 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
                 ? "🛒 Sales"
                 : activeModule === "records"
                   ? "🗄️ Records"
-                  : activeModule === "insidework"
-                    ? "⛏️ Inside Work"
+                  : activeModule === "civilworkdpr"
+                    ? "⛏️ Civil Work DPR"
                     : activeModule === "sales-automation"
                       ? "📣 Sales Automation"
                     : activeModule === "admin"
@@ -122,7 +103,7 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
       "ticket",
       "sales",
       "records",
-      "insidework",
+      "civilworkdpr",
       "sales-automation",
       "admin",
     ];
@@ -151,9 +132,9 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     } else if (pathname.startsWith("/records")) {
       setActiveModuleState("records");
       localStorage.setItem("activeModule", "records");
-    } else if (pathname.startsWith("/insidework")) {
-      setActiveModuleState("insidework");
-      localStorage.setItem("activeModule", "insidework");
+    } else if (pathname.startsWith("/civilworkdpr")) {
+      setActiveModuleState("civilworkdpr");
+      localStorage.setItem("activeModule", "civilworkdpr");
     } else if (pathname.startsWith("/finance") || pathname === "/finance") {
       setActiveModuleState("finance");
       localStorage.setItem("activeModule", "finance");
