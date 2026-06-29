@@ -931,12 +931,12 @@ export default function HomePage() {
               <button
                 onClick={() => refetch()}
                 disabled={isFetching}
-                className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors disabled:opacity-40"
+                className="group p-1.5 rounded-lg hover:bg-muted/50 transition-all duration-200 active:scale-90 disabled:opacity-40"
                 title="Refresh"
               >
                 <RefreshCw
                   size={12}
-                  className={`text-muted-foreground/40 ${isFetching ? "animate-spin" : ""}`}
+                  className={`text-muted-foreground/40 transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`}
                 />
               </button>
             </div>

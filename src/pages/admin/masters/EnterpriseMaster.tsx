@@ -16,6 +16,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import {
   getEnterprises,
   addEnterprise,
@@ -654,32 +655,22 @@ export default function EnterpriseMaster() {
         items={["Dashboard", "Admin", "Masters", "Enterprise Master"]}
       />
 
-      {/* Header */}
-      <div className="relative space-y-6 mt-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
-              <Building2 size={20} className="text-blue-500" />
-            </div>
-            <div>
-              <h1 className="text-xl font-heading font-semibold text-foreground">
-                Enterprise Master
-              </h1>
-              <p className="text-xs text-muted-foreground">
-                Manage enterprises, companies and business units
-              </p>
-            </div>
-          </div>
-          {!showForm && rights.canCreate && (
+      <AdminShell
+        title="Enterprise Master"
+        subtitle="Manage enterprises, companies and business units"
+        icon={Building2}
+        action={
+          !showForm &&
+          rights.canCreate && (
             <button
               onClick={openNew}
               className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
             >
               <Plus size={16} /> Add Enterprise
             </button>
-          )}
-        </div>
-
+          )
+        }
+      >
         {/* Table */}
         {!showForm && (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -957,8 +948,7 @@ export default function EnterpriseMaster() {
             </div>
           </div>
         )}
-      </div>
-      {/* end space-y-6 mt-6 */}
+      </AdminShell>
     </>
   );
 }

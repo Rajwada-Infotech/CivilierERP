@@ -453,6 +453,18 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     ),
   },
   {
+    id: "CompanyProject",
+    header: "Company / Project",
+    cell: ({ row }) => (
+      <div className="flex flex-col gap-0.5">
+        <span className="text-xs">{row.original.CompanyName || "—"}</span>
+        <span className="text-[10px] text-muted-foreground">
+          {row.original.ProjectName || "—"}
+        </span>
+      </div>
+    ),
+  },
+  {
     accessorKey: "EntryTime",
     header: "Entry Time",
     cell: ({ getValue }) => {

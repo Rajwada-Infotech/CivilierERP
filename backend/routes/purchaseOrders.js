@@ -67,16 +67,47 @@ const computeSubtotal = (items) => {
   }, 0);
 };
 
-// Resolve a FinYear.FId from its FName label (e.g. "2026-2027").
+// Resolve a FinYear.FId from its FName label (e.g. "2026-2027", "FY 2026-27",
+// "AY24-25"). The label is whatever the frontend's Financial Year dropdown
+// happens to display, and that name is free-text — it can contain any
+// letters/spacing the Financial Year master allows — so an exact
+// byte-for-byte string match silently failed (and left fy_id NULL, with the
+// rest of the PO still saving "successfully") for anything that wasn't a
+// perfect match. This now falls back to a trimmed/case-insensitive compare,
+// then to matching on the two embedded year numbers, so any naming
+// convention resolves correctly.
 // Returns null if no label was supplied or no matching row exists.
 const resolveFyId = async (pool, finYearLabel) => {
   if (!finYearLabel) return null;
+  const label = String(finYearLabel).trim();
+  if (!label) return null;
   try {
-    const r = await pool
+    const exact = await pool
       .request()
-      .input("FName", sql.NVarChar, finYearLabel)
-      .query("SELECT FId FROM dbo.FinYear WHERE FName = @FName");
-    return r.recordset[0]?.FId ?? null;
+      .input("FName", sql.NVarChar, label)
+      .query(
+        "SELECT FId FROM dbo.FinYear WHERE LTRIM(RTRIM(FName)) = @FName",
+      );
+    if (exact.recordset[0]?.FId) return exact.recordset[0].FId;
+
+    const digits = label.match(/\d+/g) ?? [];
+    if (digits.length >= 1) {
+      const startYear = Number(digits[0].length <= 2 ? `20${digits[0]}` : digits[0]);
+      const endYear =
+        digits.length >= 2
+          ? Number(digits[1].length <= 2 ? `20${digits[1]}` : digits[1])
+          : startYear + 1;
+      const byYear = await pool
+        .request()
+        .input("StartYear", sql.Int, startYear)
+        .input("EndYear", sql.Int, endYear)
+        .query(
+          `SELECT FId FROM dbo.FinYear
+           WHERE YEAR(FStartDate) = @StartYear AND YEAR(FEndDate) = @EndYear`,
+        );
+      if (byYear.recordset[0]?.FId) return byYear.recordset[0].FId;
+    }
+    return null;
   } catch {
     return null;
   }

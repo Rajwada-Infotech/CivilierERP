@@ -147,15 +147,24 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
                   <ModuleStrip />
                 </motion.div>
 
-                {/* ── Nav panel — only on module pages, not home ── */}
+                {/* ── Nav panel — only on module pages, not home.
+                    Stays mounted across collapse/expand toggles (only the
+                    isHome-driven mount/unmount tears it down) so collapsing
+                    is a pure transform/opacity animation rather than a full
+                    remount of AppSidebar's hooks (approval polling,
+                    reminders, etc.) — that remount cost was the source of
+                    the laggy/clunky open-close feel. ── */}
                 <AnimatePresence>
-                  {!isHome && !sidebarCollapsed && (
+                  {!isHome && (
                     <motion.div
                       key="nav-panel"
                       initial={{ x: -NAV_W, opacity: 0 }}
-                      animate={{ x: 0, opacity: 1 }}
+                      animate={{
+                        x: sidebarCollapsed ? -NAV_W : 0,
+                        opacity: sidebarCollapsed ? 0 : 1,
+                      }}
                       exit={{ x: -NAV_W, opacity: 0 }}
-                      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                      transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
                       style={{
                         position: "fixed",
                         top: 56,
@@ -163,6 +172,8 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
                         bottom: 0,
                         width: NAV_W,
                         zIndex: 40,
+                        pointerEvents: sidebarCollapsed ? "none" : "auto",
+                        willChange: "transform, opacity",
                       }}
                     >
                       <AppSidebar />
@@ -178,7 +189,8 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
               className={`pt-14 min-h-screen ${isMobile ? "pb-16" : ""}`}
               style={{
                 marginLeft: mainML,
-                transition: "margin-left 300ms cubic-bezier(0.16, 1, 0.3, 1)",
+                transition: "margin-left 250ms cubic-bezier(0.4, 0, 0.2, 1)",
+                contain: "layout",
               }}
             >
               {/* Page-curve wrapper: 8px top gap + rounded-tl to mirror strip/sidebar shape */}

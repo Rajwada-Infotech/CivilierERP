@@ -16,6 +16,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { getWidgetCatalog, type WidgetCatalogItem } from "@/api/widgetsApi";
 
 // ── Widget definitions — must match Widgets.tsx widgetItems exactly ───────────
@@ -173,21 +174,12 @@ export default function WidgetsRights() {
     <>
       <Breadcrumbs items={["Admin", "Rights", "Widgets Rights"]} />
 
-      <div className="relative space-y-6 mt-6">
-
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <Puzzle size={22} className="text-primary" />
-              <h1 className="text-xl font-heading font-bold text-foreground">Widgets Rights</h1>
-            </div>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Control which dashboard widgets each user can access. Changes take effect on next login.
-            </p>
-          </div>
-
-          {selectedUser && (
+      <AdminShell
+        title="Widgets Rights"
+        subtitle="Control which dashboard widgets each user can access. Changes take effect on next login."
+        icon={Puzzle}
+        action={
+          selectedUser && (
             <button
               onClick={handleSave}
               disabled={saveStatus === "saving"}
@@ -209,9 +201,9 @@ export default function WidgetsRights() {
                 <><Save size={14} /> Save Changes</>
               )}
             </button>
-          )}
-        </div>
-
+          )
+        }
+      >
         {/* User selector */}
         <div className="bg-card border border-border rounded-xl p-4 space-y-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
@@ -460,7 +452,7 @@ export default function WidgetsRights() {
             </p>
           </div>
         )}
-      </div>
+      </AdminShell>
     </>
   );
 }

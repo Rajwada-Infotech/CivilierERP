@@ -43,6 +43,7 @@ import {
   type DocType,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { useFinYear } from "@/contexts/FinYearContext";
+import { toShortFinYear } from "@/utils/finYear";
 import { Badge } from "@/components/ui/badge";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { MaterialShell } from "@/components/material/MaterialShell";
@@ -209,17 +210,6 @@ export default function MaterialRequest() {
     queryFn: mrApi.getMRFinYears,
     staleTime: 5 * 60_000,
   });
-  // Convert a FName like "2026-2027", "2025-26", or already "26-27" → "26-27"
-  const toShortFinYear = (name: string): string => {
-    const parts = name.split("-");
-    if (parts.length === 2) {
-      const start = parts[0].trim().slice(-2); // last 2 digits
-      const end = parts[1].trim().slice(-2);
-      return `${start}-${end}`;
-    }
-    return name;
-  };
-
   // Prefer the fin year the user has selected in the form; fall back to context active year
   const selectedFY = (finYears as any[]).find(
     (fy) => String(fy.id) === String(header.finYearId),

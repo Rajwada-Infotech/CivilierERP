@@ -284,10 +284,10 @@ const FinanceDashboard = () => {
           <button
             onClick={() => refetch()}
             disabled={isFetching}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors disabled:opacity-50"
+            className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-all duration-200 active:scale-90 disabled:opacity-50"
             style={{ color: "#818cf8" }}
           >
-            <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
+            <RefreshCw size={12} className={`transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`} />
             Refresh
           </button>
         }

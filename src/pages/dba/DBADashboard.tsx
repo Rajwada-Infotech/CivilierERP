@@ -2,7 +2,7 @@ import { useState, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { DashboardBackground } from "@/components/DashboardBackground";
+import { DbaShell } from "@/components/dba/DbaShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -265,26 +265,19 @@ export default function DBADashboard() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      <DashboardBackground />
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       <Breadcrumbs items={["DBA", "Database Console"]} />
 
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="p-2 bg-emerald-500/10 rounded-lg">
-          <Database className="text-emerald-500" size={22} />
-        </div>
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">DBA Console</h1>
-          <p className="text-sm text-muted-foreground">
-            Database access · Table browser · Query runner
-          </p>
-        </div>
-        <Badge className="ml-auto bg-emerald-500/15 text-emerald-600 border-emerald-500/30 text-xs px-3">
-          <Database size={10} className="mr-1" /> DBA
-        </Badge>
-      </div>
-
+      <DbaShell
+        title="DBA Console"
+        subtitle="Database access · Table browser · Query runner"
+        icon={Database}
+        action={
+          <Badge className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30 text-xs px-3">
+            <Database size={10} className="mr-1" /> DBA
+          </Badge>
+        }
+      >
       {/* Stats strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {[
@@ -861,6 +854,7 @@ export default function DBADashboard() {
           </CardContent>
         </Card>
       )}
+      </DbaShell>
 
       {/* Dangerous Query Confirm */}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>

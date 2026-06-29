@@ -13,6 +13,7 @@ import React, { useState, useRef, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Calendar,
@@ -1304,22 +1305,12 @@ export default function DailyProgressReport() {
 
   return (
     <div className="flex flex-col gap-6 pb-10">
-      {/* Header */}
-      <div>
-        <Breadcrumbs items={["Engineering", "Daily Progress Report"]} />
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-              <ClipboardList size={22} className="text-primary" />
-              Daily Progress Report
-            </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              BOQ · Work Orders · Work Done — documents created on a selected
-              date
-            </p>
-          </div>
-
-          {/* Controls */}
+      <Breadcrumbs items={["Engineering", "Daily Progress Report"]} />
+      <EngineeringShell
+        title="Daily Progress Report"
+        subtitle="BOQ · Work Orders · Work Done — documents created on a selected date"
+        icon={ClipboardList}
+        action={
           <div className="flex items-center gap-2 flex-wrap">
             {/* Date Picker */}
             <div className="relative flex items-center">
@@ -1338,11 +1329,11 @@ export default function DailyProgressReport() {
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-muted transition-colors disabled:opacity-60"
+              className="group flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-muted transition-all duration-200 active:scale-90 disabled:opacity-60"
             >
               <RefreshCw
                 size={13}
-                className={isFetching ? "animate-spin" : ""}
+                className={`transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`}
               />
               Refresh
             </button>
@@ -1369,9 +1360,8 @@ export default function DailyProgressReport() {
               </button>
             )}
           </div>
-        </div>
-      </div>
-
+        }
+      >
       {/* Loading */}
       {isLoading && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -1479,6 +1469,7 @@ export default function DailyProgressReport() {
           </div>
         </>
       )}
+      </EngineeringShell>
 
       {/* Hidden print area */}
       <div style={{ display: "none" }}>

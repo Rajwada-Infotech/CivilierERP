@@ -24,6 +24,7 @@ const cleanStr = (v, len = 300) => {
 router.get("/workers", authMiddleware, async (req, res) => {
   try {
     const pool = await getPool();
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const contractorId = req.query.contractorId ? parseInt(req.query.contractorId, 10) : null;
     const activityId = req.query.activityId ? parseInt(req.query.activityId, 10) : null;
@@ -32,8 +33,14 @@ router.get("/workers", authMiddleware, async (req, res) => {
     const pageSize = req.query.pageSize ? Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10))) : 20;
     const offset = (page - 1) * pageSize;
 
+    // Company isn't a column on ContractorAllocation — it's the parent of
+    // whichever Project the allocation belongs to, so it's filtered via the
+    // Project's own company_id rather than a direct join condition.
     const baseWhere = `
       WHERE (@projectId IS NULL OR ca.ProjectId = @projectId)
+        AND (@companyId IS NULL OR ca.ProjectId IN (
+              SELECT id FROM dbo.enterprise WHERE company_id = @companyId
+            ))
         AND (@contractorId IS NULL OR w.ContractorLHeadId = @contractorId)
         AND (@activityId IS NULL OR ca.ActivityId = @activityId)
         AND (@search IS NULL OR w.Name LIKE @search)
@@ -41,6 +48,7 @@ router.get("/workers", authMiddleware, async (req, res) => {
 
     const request = () =>
       pool.request()
+        .input("companyId", sql.Int, companyId)
         .input("projectId", sql.Int, projectId)
         .input("contractorId", sql.Int, contractorId)
         .input("activityId", sql.Int, activityId)

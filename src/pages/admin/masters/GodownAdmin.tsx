@@ -15,6 +15,7 @@ import {
   formatCompanyLocation,
 } from "@/api/companyMasterApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -364,24 +365,12 @@ export default function GodownAdmin() {
         items={[{ label: "Admin" }, { label: "Masters" }, { label: "Godowns" }]}
       />
 
-      <div className="relative space-y-6 mt-6">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <Warehouse className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <h1 className="text-xl font-heading font-bold text-foreground leading-none">
-                Godowns
-              </h1>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Manage warehouse and storage locations across companies and
-                projects
-              </p>
-            </div>
-          </div>
-          {rights.canCreate && (
+      <AdminShell
+        title="Godowns"
+        subtitle="Manage warehouse and storage locations across companies and projects"
+        icon={Warehouse}
+        action={
+          rights.canCreate && (
             <button
               onClick={openAdd}
               className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition"
@@ -389,9 +378,9 @@ export default function GodownAdmin() {
               <Plus className="h-4 w-4" />
               Add Godown
             </button>
-          )}
-        </div>
-
+          )
+        }
+      >
         {/* Stats strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {stats.map((s) => (
@@ -588,7 +577,7 @@ export default function GodownAdmin() {
             )}
           </CardContent>
         </Card>
-      </div>
+      </AdminShell>
 
       {/* Add / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(o) => !o && closeDialog()}>

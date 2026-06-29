@@ -16,6 +16,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { toast } from "sonner";
 import {
   getUsersForRights,
@@ -386,23 +387,12 @@ export default function MenuRights() {
     <>
       <Breadcrumbs items={[{ label: "Admin" }, { label: "Menu Rights" }]} />
 
-      <div className="relative space-y-6 mt-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <ShieldCheck size={24} className="text-primary" />
-              <h1 className="text-xl font-heading font-bold text-foreground">
-                Menu Rights
-              </h1>
-            </div>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Configure per-user page and action permissions
-            </p>
-          </div>
-
-          {/* Preset buttons */}
-          {selectedUser && (
+      <AdminShell
+        title="Menu Rights"
+        subtitle="Configure per-user page and action permissions"
+        icon={ShieldCheck}
+        action={
+          selectedUser && (
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-muted-foreground">
                 Quick presets:
@@ -417,9 +407,9 @@ export default function MenuRights() {
                 </button>
               ))}
             </div>
-          )}
-        </div>
-
+          )
+        }
+      >
         {/* ── User Selector Card ───────────────────────────────────────────── */}
         <div
           className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm p-5 relative"
@@ -806,7 +796,7 @@ export default function MenuRights() {
             </div>
           </div>
         )}
-      </div>
+      </AdminShell>
     </>
   );
 }

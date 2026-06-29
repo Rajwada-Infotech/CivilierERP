@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -550,38 +551,32 @@ const ApprovalInbox: React.FC = () => {
     <>
       <Breadcrumbs items={["Approvals", "Inbox"]} />
 
-      <div className="relative space-y-4 mt-6">
-        {/* Page header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-                <Inbox className="text-primary" /> Approval Inbox
-              </h1>
-              {totalCount > 0 && (
-                <span className="bg-red-500 text-white text-[11px] font-bold min-w-[22px] h-[22px] flex items-center justify-center rounded-full leading-none">
-                  {totalCount}
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground mt-0.5 hidden sm:block">
-              All records awaiting your approval across every module
-            </p>
+      <AdminShell
+        title="Approval Inbox"
+        subtitle="All records awaiting your approval across every module"
+        icon={Inbox}
+        action={
+          <div className="flex items-center gap-2">
+            {totalCount > 0 && (
+              <span className="bg-red-500 text-white text-[11px] font-bold min-w-[22px] h-[22px] flex items-center justify-center rounded-full leading-none">
+                {totalCount}
+              </span>
+            )}
+            <button
+              onClick={() => refetch()}
+              disabled={isRefetching}
+              className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-all duration-200 active:scale-90 disabled:opacity-50 shrink-0"
+              title="Refresh"
+            >
+              <RefreshCw
+                size={13}
+                className={`transition-transform duration-500 ${isRefetching ? "animate-spin" : "group-hover:rotate-180"}`}
+              />
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
           </div>
-          <button
-            onClick={() => refetch()}
-            disabled={isRefetching}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50 shrink-0"
-            title="Refresh"
-          >
-            <RefreshCw
-              size={13}
-              className={isRefetching ? "animate-spin" : ""}
-            />
-            <span className="hidden sm:inline">Refresh</span>
-          </button>
-        </div>
-
+        }
+      >
         {/* Module filter — collapsible so the full module list doesn't
             spill across multiple lines by default; expand to see/pick all. */}
         <div className="rounded-xl border border-border bg-muted/30 overflow-hidden">
@@ -712,7 +707,7 @@ const ApprovalInbox: React.FC = () => {
             </>
           )}
         </div>
-      </div>
+      </AdminShell>
     </>
   );
 };

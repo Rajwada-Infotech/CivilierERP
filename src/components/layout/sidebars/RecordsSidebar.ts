@@ -1,4 +1,4 @@
-import { Archive } from "lucide-react";
+import { Archive } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const recordsNavItems: NavItem[] = [

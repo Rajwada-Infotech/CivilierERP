@@ -583,6 +583,22 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
       );
     },
   },
+  // ── Company / Project ────────────────────────────────────────────────────
+  {
+    id: "CompanyProject",
+    header: "Company / Project",
+    cell: ({ row }) => {
+      const grn = row.original;
+      return (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xs">{grn.CompanyName || "—"}</span>
+          <span className="text-[10px] text-muted-foreground">
+            {grn.ProjectName || "—"}
+          </span>
+        </div>
+      );
+    },
+  },
   // ── Date ─────────────────────────────────────────────────────────────────
   {
     accessorKey: "GRNDate",
@@ -2343,6 +2359,14 @@ export default function GRN() {
                           {
                             label: "Purchase Order",
                             value: viewingGrn.PONumber || "—",
+                          },
+                          {
+                            label: "Company",
+                            value: viewingGrn.CompanyName || "—",
+                          },
+                          {
+                            label: "Project",
+                            value: viewingGrn.ProjectName || "—",
                           },
                           ...(viewingGrn.SourceMRDocNo
                             ? [

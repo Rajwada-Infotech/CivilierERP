@@ -413,7 +413,6 @@ export default function Stock() {
   const [selectedCompany, setSelectedCompany] = useState<number | null>(null);
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
   const [selectedGodownId, setSelectedGodownId] = useState<number | null>(null);
-  const autoSelected = React.useRef(false);
 
   // ── Load data ─────────────────────────────────────────────────────────────
   const { data: godownsData, isLoading: godownsLoading } = useQuery({
@@ -422,21 +421,6 @@ export default function Stock() {
     staleTime: 120_000,
   });
   const godowns: Godown[] = godownsData?.data ?? [];
-
-  // Auto-select first godown on load
-  React.useEffect(() => {
-    if (
-      !autoSelected.current &&
-      godowns.length > 0 &&
-      selectedGodownId === null
-    ) {
-      const firstProject = godowns[0] ?? null;
-      if (firstProject) {
-        setSelectedGodownId(firstProject.GodownID);
-        autoSelected.current = true;
-      }
-    }
-  }, [godowns]);
 
   const { data: companiesData } = useQuery({
     queryKey: ["enterprises-companies"],

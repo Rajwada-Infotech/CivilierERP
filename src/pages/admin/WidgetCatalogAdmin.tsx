@@ -12,6 +12,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -240,35 +241,33 @@ export default function WidgetCatalogAdmin() {
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
       <Breadcrumbs items={["Admin", "Masters", "Widget Catalog"]} />
 
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Puzzle size={22} className="text-primary" />
-            <h1 className="text-xl font-heading font-bold text-foreground">Widget catalog</h1>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Master list of all dashboard widgets. Changes here affect what appears in Widgets Rights.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs gap-1"
-            onClick={() => refetch()}
-            disabled={isFetching}
-          >
-            <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} /> Refresh
-          </Button>
-          {rights.canCreate && (
-            <Button size="sm" className="h-8 text-xs gap-1" onClick={() => setAddOpen(true)}>
-              <Plus size={12} /> Add widget
+      <AdminShell
+        title="Widget catalog"
+        subtitle="Master list of all dashboard widgets. Changes here affect what appears in Widgets Rights."
+        icon={Puzzle}
+        action={
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs gap-1 group"
+              onClick={() => refetch()}
+              disabled={isFetching}
+            >
+              <RefreshCw
+                size={12}
+                className={`transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`}
+              />
+              Refresh
             </Button>
-          )}
-        </div>
-      </div>
-
+            {rights.canCreate && (
+              <Button size="sm" className="h-8 text-xs gap-1" onClick={() => setAddOpen(true)}>
+                <Plus size={12} /> Add widget
+              </Button>
+            )}
+          </div>
+        }
+      >
       {/* Summary pills */}
       <div className="flex flex-wrap gap-2 text-xs">
         <Badge variant="outline" className="gap-1">
@@ -395,6 +394,7 @@ export default function WidgetCatalogAdmin() {
           )}
         </CardContent>
       </Card>
+      </AdminShell>
 
       {/* Add dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>

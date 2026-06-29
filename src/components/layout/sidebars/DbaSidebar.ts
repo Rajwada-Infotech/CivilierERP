@@ -1,19 +1,11 @@
-import {
-  Database,
-  Terminal,
-  HeartPulse,
-  ShieldCheck,
-  Megaphone,
-  Receipt,
-  BellRing,
-} from "lucide-react";
+import { Data, Code, Activity, ShieldTick, Volume, Receipt21, Notification } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const dbaNavItems: NavItem[] = [
-  { label: "DB Console", icon: Database, path: "/dba", isDashboard: true },
+  { label: "DB Console", icon: Data, path: "/dba", isDashboard: true },
   {
     label: "Migrations",
-    icon: Terminal,
+    icon: Code,
     children: [
       { label: "Overview", path: "/dba" },
       { label: "Control Panel", path: "/dba/control-panel" },
@@ -21,12 +13,12 @@ export const dbaNavItems: NavItem[] = [
   },
   {
     label: "DB Health",
-    icon: HeartPulse,
+    icon: Activity,
     children: [{ label: "System Metrics", path: "/admin/metrics" }],
   },
   {
     label: "Role Master",
-    icon: ShieldCheck,
+    icon: ShieldTick,
     children: [
       { label: "Roles", path: "/admin/masters/role-master" },
       { label: "Manage Users", path: "/users" },
@@ -34,17 +26,17 @@ export const dbaNavItems: NavItem[] = [
   },
   {
     label: "Ads",
-    icon: Megaphone,
+    icon: Volume,
     children: [{ label: "Campaigns", path: "/dba/ads" }],
   },
   {
     label: "Logs",
-    icon: Receipt,
+    icon: Receipt21,
     children: [{ label: "Payment Logs", path: "/dba/payment-logs" }],
   },
   {
     label: "Reminders",
-    icon: BellRing,
+    icon: Notification,
     children: [{ label: "Payment Reminders", path: "/dba/reminders" }],
   },
 ];

@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
+import { getSystemGeneratedLedgers } from "@/api/generalLedgerApi";
 import { parseJsonArray } from "@/utils/parseJsonArray";
 import {
   computeBreakdown,
@@ -86,6 +87,29 @@ export function ExpenseBookingPreviewModal({
   // Billing terms fetched from master (used when EBillingTermsData is empty
   // but the record has a billingTermId pointing to the master)
   const [masterBillingTerms, setMasterBillingTerms] = useState<any[]>([]);
+
+  const [previewTab, setPreviewTab] = useState<"details" | "posting">(
+    "details",
+  );
+  const [systemLedgers, setSystemLedgers] = useState<
+    { id: number; label: string; code: string | null }[]
+  >([]);
+  useEffect(() => {
+    getSystemGeneratedLedgers()
+      .then((data) => setSystemLedgers(data))
+      .catch(() => setSystemLedgers([]));
+  }, []);
+  const ebExpenseLedger = systemLedgers.find((d) =>
+    d.label.toLowerCase().includes("expense"),
+  );
+  const ebPurchaseLedger = systemLedgers.find((d) =>
+    d.label.toLowerCase().includes("purchase"),
+  );
+  const ebSupplierLedger = systemLedgers.find(
+    (d) =>
+      d.label.toLowerCase().includes("supplier") ||
+      d.label.toLowerCase().includes("creditor"),
+  );
 
   useEffect(() => {
     setGrnBreakdown(null);
@@ -311,6 +335,140 @@ export function ExpenseBookingPreviewModal({
           </DialogDescription>
         </DialogHeader>
 
+        {/* ── Tab bar ── */}
+        <div className="flex items-center gap-1 px-4 sm:px-6 pt-1 border-b border-border bg-card expense-preview-print-hide">
+          {(["details", "posting"] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setPreviewTab(tab)}
+              className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition-colors capitalize
+                ${
+                  previewTab === tab
+                    ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5"
+                    : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                }`}
+            >
+              {tab === "details" ? (
+                <FileText size={12} />
+              ) : (
+                <Wallet size={12} />
+              )}
+              {tab === "details" ? "Details" : "Posting"}
+            </button>
+          ))}
+        </div>
+
+        {previewTab === "posting" && (
+          <div className="px-4 sm:px-6 py-4 sm:py-5 space-y-4">
+            {/* Header row */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Wallet size={14} className="text-emerald-600" />
+                <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                  Journal Entry — Invoice Posting
+                </span>
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 font-medium">
+                Coming Soon
+              </span>
+            </div>
+
+            {/* Debit / Credit stub table */}
+            <div className="rounded-xl border border-border overflow-hidden">
+              <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
+                <span>Account</span>
+                <span className="text-center">Cost Centre</span>
+                <span className="text-right">Debit (₹)</span>
+                <span className="text-right">Credit (₹)</span>
+              </div>
+
+              {(
+                [
+                  {
+                    key: "expense",
+                    label: "Expense / Purchase A/c",
+                    side: "debit",
+                    ledger: ebExpenseLedger ?? ebPurchaseLedger,
+                  },
+                  {
+                    key: "supplier",
+                    label: "Supplier / Creditor A/c",
+                    side: "credit",
+                    ledger: ebSupplierLedger,
+                  },
+                ] as {
+                  key: string;
+                  label: string;
+                  side: "debit" | "credit";
+                  ledger: { id: number; label: string; code: string | null } | undefined;
+                }[]
+              ).map((row) => (
+                <div
+                  key={row.key}
+                  className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 border-b border-border/50 last:border-b-0 items-center gap-1 sm:gap-2"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                        row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"
+                      }`}
+                    />
+                    {row.ledger ? (
+                      <span
+                        className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0"
+                        title={`${row.ledger.label}${row.ledger.code ? ` (${row.ledger.code})` : ""}`}
+                      >
+                        {row.ledger.label}
+                        {row.ledger.code ? ` (${row.ledger.code})` : ""}
+                      </span>
+                    ) : (
+                      <span className="text-[11px] sm:text-xs text-muted-foreground italic break-words min-w-0">
+                        {row.label} — not configured
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs text-muted-foreground text-center">—</span>
+                  <span className="text-xs text-right text-muted-foreground font-mono">
+                    {row.side === "debit" ? "—" : ""}
+                  </span>
+                  <span className="text-xs text-right text-muted-foreground font-mono">
+                    {row.side === "credit" ? "—" : ""}
+                  </span>
+                </div>
+              ))}
+
+              <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
+                <span className="uppercase tracking-widest text-muted-foreground text-[10px]">
+                  Total
+                </span>
+                <span />
+                <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">
+                  —
+                </span>
+                <span className="text-right text-rose-600 dark:text-rose-400 font-mono">
+                  —
+                </span>
+              </div>
+            </div>
+
+            {/* Info note */}
+            <div className="flex items-start gap-2.5 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3">
+              <AlertCircle
+                size={13}
+                className="text-muted-foreground mt-0.5 flex-shrink-0"
+              />
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Posting entries will be auto-generated from the invoice's line
+                items, GST rates, and the mapped chart of accounts once the
+                accounting module is wired up. The debit / credit split shown
+                above represents the expected journal structure.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {previewTab === "details" && (
         <div className="px-4 sm:px-6 py-4 sm:py-5 space-y-5">
           {/* ── Section 1: Booking Info ── */}
           <div>
@@ -1223,6 +1381,7 @@ export function ExpenseBookingPreviewModal({
             </div>
           </div>
         </div>
+        )}
 
         <div className="border-t border-border px-4 sm:px-6 py-3 flex flex-col-reverse sm:flex-row items-center justify-between gap-2 bg-muted/10">
           <p className="text-[10px] text-muted-foreground expense-preview-print-hide">

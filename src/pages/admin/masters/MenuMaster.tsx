@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, CheckCircle2, LayoutList, X, Search } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -164,32 +165,32 @@ const MenuMasterPage: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Admin", "Setup", "Menu Master"]} />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Menu Master
-      </h1>
-
-      {/* Toolbar */}
-      <div className="flex items-center justify-between gap-3 mb-4">
-        <div className="relative w-64">
-          <Search
-            size={14}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            placeholder="Search menus..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-8 h-8 text-sm"
-          />
-        </div>
-        {rights.canCreate && (
-          <Button onClick={openCreate} size="sm" className="gap-1.5">
-            <Plus size={15} />
-            New Menu Entry
-          </Button>
-        )}
-      </div>
-
+      <AdminShell
+        title="Menu Master"
+        icon={LayoutList}
+        action={
+          <div className="flex items-center gap-3">
+            <div className="relative w-64">
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                placeholder="Search menus..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-8 h-8 text-sm"
+              />
+            </div>
+            {rights.canCreate && (
+              <Button onClick={openCreate} size="sm" className="gap-1.5">
+                <Plus size={15} />
+                New Menu Entry
+              </Button>
+            )}
+          </div>
+        }
+      >
       {/* Table */}
       <div className="border rounded-xl bg-card overflow-hidden shadow-sm">
         <Table>
@@ -256,6 +257,7 @@ const MenuMasterPage: React.FC = () => {
           </TableBody>
         </Table>
       </div>
+      </AdminShell>
 
       {/* Create / Edit Dialog */}
       {(rights.canCreate || rights.canEdit) && <Dialog open={dialogOpen} onOpenChange={(v) => !v && closeDialog()}>

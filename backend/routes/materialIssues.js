@@ -108,7 +108,8 @@ router.get("/godowns", authenticateToken, async (req, res) => {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT GodownID AS id, GodownName AS name, GodownCode AS code,
-             ShortDesc AS shortDesc, IsMain AS isMain
+             ShortDesc AS shortDesc, IsMain AS isMain,
+             EnterpriseID AS companyId, ProjectID AS projectId
       FROM   dbo.Godowns
       WHERE  IsDeleted = 0
       ORDER  BY IsMain DESC, GodownName

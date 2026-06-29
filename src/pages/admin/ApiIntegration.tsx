@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import {
   getCommunicatorConfig,
   saveCommunicatorConfig,
@@ -199,48 +200,40 @@ export default function ApiIntegration() {
   const isSaving = persistApis.isPending;
   const activeCount = apis.filter((a) => a.status === "active").length;
 
+  const headerAction = (
+    <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 text-xs font-body text-muted-foreground">
+        <span className="px-2.5 py-1 rounded-full bg-muted border border-border">
+          {apis.length} total
+        </span>
+        <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+          {activeCount} active
+        </span>
+      </div>
+      <button
+        onClick={() => queryClient.invalidateQueries({ queryKey: QUERY_KEY })}
+        disabled={isFetching}
+        className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-all duration-200 active:scale-90 disabled:opacity-50"
+        title="Refresh"
+      >
+        <RefreshCw
+          size={13}
+          className={`transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`}
+        />
+        Refresh
+      </button>
+    </div>
+  );
+
   return (
     <>
       <Breadcrumbs items={["Admin", "API Integration"]} />
-      <div className="space-y-8 mt-6">
-
-        {/* ── Page header ─────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
-              <Link2 size={17} className="text-primary" />
-            </div>
-            <div>
-              <h1 className="text-xl font-heading font-bold text-foreground">
-                API Integration
-              </h1>
-              <p className="text-xs font-body text-muted-foreground mt-0.5">
-                Manage external API connections persisted via communicator config
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 text-xs font-body text-muted-foreground">
-              <span className="px-2.5 py-1 rounded-full bg-muted border border-border">
-                {apis.length} total
-              </span>
-              <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-                {activeCount} active
-              </span>
-            </div>
-            {/* Refresh button — ApprovalInbox style */}
-            <button
-              onClick={() => queryClient.invalidateQueries({ queryKey: QUERY_KEY })}
-              disabled={isFetching}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
-              title="Refresh"
-            >
-              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
-              Refresh
-            </button>
-          </div>
-        </div>
-
+      <AdminShell
+        title="API Integration"
+        subtitle="Manage external API connections persisted via communicator config"
+        icon={Link2}
+        action={headerAction}
+      >
         {/* ── Add New API card ─────────────────────────────────────────── */}
         <div className="rounded-2xl border border-border bg-card overflow-hidden">
           <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
@@ -494,7 +487,7 @@ export default function ApiIntegration() {
             </div>
           )}
         </div>
-      </div>
+      </AdminShell>
     </>
   );
 }

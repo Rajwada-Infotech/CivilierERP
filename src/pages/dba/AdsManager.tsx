@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DbaShell } from "@/components/dba/DbaShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -374,29 +375,23 @@ export default function AdsManager() {
       : "0.00";
 
   return (
-    <div className="p-4 md:p-6 space-y-5 max-w-[1400px] mx-auto">
+    <div className="max-w-[1400px] mx-auto">
       <Breadcrumbs items={[{ label: "DBA Console" }, { label: "Ads" }]} />
 
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-            <Megaphone size={20} className="text-violet-500" />
-            Ads Manager
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            All campaigns managed exclusively by DBA — tenants contact us to get
-            started
-          </p>
-        </div>
-        <Button
-          size="sm"
-          className="gap-1.5 text-xs bg-violet-600 hover:bg-violet-700"
-          onClick={() => setCreateOpen(true)}
-        >
-          <Plus size={13} /> New Campaign
-        </Button>
-      </div>
-
+      <DbaShell
+        title="Ads Manager"
+        subtitle="All campaigns managed exclusively by DBA — tenants contact us to get started"
+        icon={Megaphone}
+        action={
+          <Button
+            size="sm"
+            className="gap-1.5 text-xs bg-violet-600 hover:bg-violet-700"
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus size={13} /> New Campaign
+          </Button>
+        }
+      >
       <div className="flex items-start gap-3 bg-violet-500/8 border border-violet-500/20 rounded-lg p-3">
         <Info size={15} className="text-violet-500 shrink-0 mt-0.5" />
         <p className="text-[11px] text-muted-foreground">
@@ -807,6 +802,7 @@ export default function AdsManager() {
           </Card>
         </div>
       )}
+      </DbaShell>
 
       {/* Detail Dialog */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>

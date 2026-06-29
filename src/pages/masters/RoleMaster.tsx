@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -18,6 +19,7 @@ import {
   Search,
   Eye,
   XCircle,
+  Shield,
 } from "lucide-react";
 import {
   getRoles,
@@ -307,10 +309,7 @@ const RoleMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Masters", "Role Master"]} />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Role Master
-      </h1>
-
+      <AdminShell title="Role Master" icon={Shield}>
       <div className="space-y-5">
         {/* ── Form ── */}
         {rights.canCreate && (
@@ -472,6 +471,7 @@ const RoleMaster: React.FC = () => {
           </div>
         </div>
       </div>
+      </AdminShell>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
