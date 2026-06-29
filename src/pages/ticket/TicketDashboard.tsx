@@ -7,8 +7,13 @@ import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
 import { unwrapTicketList } from "@/lib/ticketListResponse";
 import { useTicketSync } from "@/hooks/useTicketSync";
 import { useAuth } from "@/contexts/AuthContext";
-import { DashboardBackground } from "@/components/DashboardBackground";
 import { toast } from "sonner";
+import {
+  GlassShell,
+  GlassCard,
+  GlassSection,
+  GlassCardSkeleton,
+} from "@/components/dashboard/GlassShell";
 import {
   AlertCircle,
   ArrowDownRight,
@@ -44,6 +49,9 @@ interface Ticket {
   created_at?: string;
 }
 
+const ACCENT = "#ec4899"; // pink — matches Ticket's ModuleStrip color
+const SECONDARY = "#8b5cf6"; // violet bloom
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const fmtDate = (d?: string | null) =>
@@ -56,79 +64,6 @@ const fmtDate = (d?: string | null) =>
     : "—";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-
-function StatCard({
-  label,
-  value,
-  sub,
-  icon: Icon,
-  iconColor = "text-emerald-600",
-  iconBg = "bg-emerald-500/10",
-  borderL = "border-l-emerald-500",
-  trend,
-  onClick,
-}: {
-  label: string;
-  value: string | number;
-  sub: string;
-  icon: React.ElementType;
-  iconColor?: string;
-  iconBg?: string;
-  borderL?: string;
-  trend?: "up" | "down" | "neutral";
-  onClick?: () => void;
-}) {
-  return (
-    <div
-      onClick={onClick}
-      className={`rounded-2xl border border-border bg-card p-5 flex flex-col gap-4 transition-all duration-200 border-l-2 ${borderL} ${
-        onClick
-          ? "cursor-pointer hover:shadow-lg hover:-translate-y-0.5 hover:border-primary/20"
-          : ""
-      }`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground leading-tight">
-          {label}
-        </span>
-        <div
-          className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center`}
-        >
-          <Icon size={15} className={iconColor} />
-        </div>
-      </div>
-      <div>
-        <div className="text-3xl font-bold font-heading text-foreground leading-none">
-          {value}
-        </div>
-        <div className="flex items-center gap-1 mt-1">
-          {trend === "up" && (
-            <ArrowUpRight size={12} className="text-emerald-500" />
-          )}
-          {trend === "down" && (
-            <ArrowDownRight size={12} className="text-red-500" />
-          )}
-          <span className="text-[11px] text-muted-foreground leading-tight">
-            {sub}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StatSkeleton() {
-  return (
-    <div className="rounded-xl border border-border bg-card p-5 animate-pulse">
-      <div className="flex items-center justify-between mb-3">
-        <div className="h-3 w-24 bg-muted rounded" />
-        <div className="w-8 h-8 bg-muted rounded-lg" />
-      </div>
-      <div className="h-7 w-20 bg-muted rounded mb-2" />
-      <div className="h-3 w-32 bg-muted rounded" />
-    </div>
-  );
-}
 
 function SectionHeader({
   icon: Icon,
@@ -361,19 +296,13 @@ export default function TicketDashboard() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Tickets"]} />
-      <div className="relative p-6 space-y-8">
-        <DashboardBackground />
-
-        {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
-              Ticket Overview
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Track, manage and resolve support tickets across all projects
-            </p>
-          </div>
+      <GlassShell
+        title="Ticket Overview"
+        subtitle="Track, manage and resolve support tickets across all projects"
+        icon={MessageSquare}
+        accentColor={ACCENT}
+        secondaryColor={SECONDARY}
+        action={
           <div className="flex items-center gap-2">
             <button
               onClick={() => navigate("/ticket/create")}
@@ -385,17 +314,15 @@ export default function TicketDashboard() {
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border transition-colors disabled:opacity-50"
+              style={{ borderColor: `${ACCENT}4d`, color: ACCENT }}
             >
-              <RefreshCw
-                size={13}
-                className={isFetching ? "animate-spin" : ""}
-              />
+              <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
               Refresh
             </button>
           </div>
-        </div>
-
+        }
+      >
         {/* ── Error banner ────────────────────────────────────────────────── */}
         {isError && !tickets.length && (
           <div className="px-4 py-3 rounded-lg bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
@@ -407,105 +334,79 @@ export default function TicketDashboard() {
         )}
 
         {/* ── Stat cards ──────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {isLoading ? (
-            Array.from({ length: 4 }).map((_, i) => <StatSkeleton key={i} />)
-          ) : (
-            <>
-              <StatCard
-                label="Total Tickets"
-                value={stats.total}
-                sub={`${stats.resolvedPct}% resolved`}
-                icon={MessageSquare}
-                iconColor="text-violet-600"
-                iconBg="bg-violet-500/10"
-                borderL="border-l-violet-500"
-                trend="neutral"
-                onClick={() => navigate("/ticket/my-tickets")}
-              />
-              <StatCard
-                label="Pending"
-                value={stats.pending + stats.inProgress}
-                sub={`${stats.urgent} urgent · ${stats.high} high priority`}
-                icon={Clock}
-                iconColor="text-amber-600"
-                iconBg="bg-amber-500/10"
-                borderL="border-l-amber-500"
-                trend={
-                  stats.pending + stats.inProgress > 0 ? "down" : "neutral"
-                }
-                onClick={() => navigate("/ticket/pending")}
-              />
-              <StatCard
-                label="Resolved"
-                value={stats.resolved}
-                sub={`${stats.resolvedPct}% of all tickets`}
-                icon={CheckCircle2}
-                iconColor="text-emerald-600"
-                iconBg="bg-emerald-500/10"
-                borderL="border-l-emerald-500"
-                trend="up"
-                onClick={() => navigate("/ticket/resolved")}
-              />
-              <StatCard
-                label="Urgent / High"
-                value={stats.urgent + stats.high}
-                sub={`${stats.urgent} urgent · ${stats.high} high`}
-                icon={Flame}
-                iconColor="text-red-600"
-                iconBg="bg-red-500/10"
-                borderL="border-l-red-500"
-                trend={stats.urgent + stats.high > 0 ? "down" : "neutral"}
-                onClick={() => navigate("/ticket/pending")}
-              />
-            </>
-          )}
-        </div>
+        <GlassSection title="Overview" icon={MessageSquare} accentColor={ACCENT}>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {isLoading
+              ? Array.from({ length: 4 }).map((_, i) => <GlassCardSkeleton key={i} />)
+              : [
+                  {
+                    label: "Total Tickets",
+                    value: stats.total,
+                    sub: `${stats.resolvedPct}% resolved`,
+                    icon: MessageSquare,
+                    accentColor: SECONDARY,
+                    onClick: () => navigate("/ticket/my-tickets"),
+                  },
+                  {
+                    label: "Pending",
+                    value: stats.pending + stats.inProgress,
+                    sub: `${stats.urgent} urgent · ${stats.high} high priority`,
+                    icon: Clock,
+                    accentColor: "#f59e0b",
+                    trend: (stats.pending + stats.inProgress > 0 ? "down" : "neutral") as const,
+                    onClick: () => navigate("/ticket/pending"),
+                  },
+                  {
+                    label: "Resolved",
+                    value: stats.resolved,
+                    sub: `${stats.resolvedPct}% of all tickets`,
+                    icon: CheckCircle2,
+                    accentColor: "#10b981",
+                    trend: "up" as const,
+                    onClick: () => navigate("/ticket/resolved"),
+                  },
+                  {
+                    label: "Urgent / High",
+                    value: stats.urgent + stats.high,
+                    sub: `${stats.urgent} urgent · ${stats.high} high`,
+                    icon: Flame,
+                    accentColor: "#ef4444",
+                    trend: (stats.urgent + stats.high > 0 ? "down" : "neutral") as const,
+                    onClick: () => navigate("/ticket/pending"),
+                  },
+                ].map((s) => <GlassCard key={s.label} {...s} />)}
+          </div>
+        </GlassSection>
 
         {/* ── Priority breakdown + Resolution rate ────────────────────────── */}
         {!isLoading && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {/* Resolution rate pill */}
-            <div className="rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4 border-l-2 border-l-emerald-500">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center shrink-0">
-                <CheckCircle2 size={18} className="text-emerald-600" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Resolution Rate</p>
-                <p className="text-lg font-heading font-bold text-foreground leading-tight mt-0.5">
-                  {stats.resolvedPct}%
-                </p>
-              </div>
+          <GlassSection title="At a Glance" icon={BarChart3} accentColor={ACCENT}>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <GlassCard
+                label="Resolution Rate"
+                value={`${stats.resolvedPct}%`}
+                icon={CheckCircle2}
+                accentColor="#10b981"
+              />
+              <GlassCard
+                label="Open Tickets"
+                value={stats.pending + stats.inProgress}
+                icon={Clock}
+                accentColor="#f59e0b"
+              />
+              <GlassCard
+                label="Critical (Urgent + High)"
+                value={stats.urgent + stats.high}
+                icon={ShieldAlert}
+                accentColor="#ef4444"
+              />
             </div>
-            <div className="rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4 border-l-2 border-l-amber-500">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
-                <Clock size={18} className="text-amber-600" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Open Tickets</p>
-                <p className="text-lg font-heading font-bold text-foreground leading-tight mt-0.5">
-                  {stats.pending + stats.inProgress}
-                </p>
-              </div>
-            </div>
-            <div className="rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4 border-l-2 border-l-red-500">
-              <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center shrink-0">
-                <ShieldAlert size={18} className="text-red-600" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">
-                  Critical (Urgent + High)
-                </p>
-                <p className="text-lg font-heading font-bold text-foreground leading-tight mt-0.5">
-                  {stats.urgent + stats.high}
-                </p>
-              </div>
-            </div>
-          </div>
+          </GlassSection>
         )}
 
         {/* ── Pending + Resolved tables ───────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <GlassSection title="Recent Activity" icon={Clock} accentColor={ACCENT}>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Pending tickets */}
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="px-5 py-4 border-b border-border">
@@ -610,9 +511,11 @@ export default function TicketDashboard() {
             )}
           </div>
         </div>
+        </GlassSection>
 
         {/* ── Priority breakdown + Quick actions ─────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <GlassSection title="Breakdown & Actions" icon={Tag} accentColor={ACCENT}>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Priority breakdown */}
           <div className="rounded-xl border border-border bg-card p-5">
             <SectionHeader
@@ -781,7 +684,8 @@ export default function TicketDashboard() {
             </div>
           </div>
         </div>
-      </div>
+        </GlassSection>
+      </GlassShell>
     </>
   );
 }

@@ -42,7 +42,6 @@ import {
   ClipboardList,
   Ruler,
   SlidersHorizontal,
-  GitBranch,
   DoorOpen,
   Megaphone,
   UsersRound,
@@ -112,7 +111,7 @@ const MODULE_GLOW_RGB: Record<string, string> = {
   ticket: "236,72,153",
   sales: "168,85,247",
   records: "245,158,11",
-  insidework: "8,145,178",
+  civilworkdpr: "8,145,178",
   admin: "59,130,246",
 };
 
@@ -125,7 +124,7 @@ const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
   ticket: { h: 330, s: 81, l: 60 }, // #ec4899 pink
   sales: { h: 271, s: 91, l: 65 }, // #a855f7 purple
   records: { h: 38, s: 92, l: 50 }, // #f59e0b amber
-  insidework: { h: 192, s: 91, l: 36 }, // #0891b2 cyan/teal
+  civilworkdpr: { h: 192, s: 91, l: 36 }, // #0891b2 cyan/teal
   admin: { h: 217, s: 91, l: 60 }, // #3b82f6 blue
 };
 
@@ -334,19 +333,22 @@ const followupSetupItems = [
 const engineeringSetupItems = [
   {
     icon: Activity,
-    label: "Activity",
+    label: "Activity Master",
     path: "/masters/activity",
     color: "text-orange-400",
+    pageKey: "activity-master",
   },
 ];
 
-const insideworkSetupItems = [
+// Activity Master is the shared Engineering master (no separate Civil Work
+// DPR-specific one) — this just gives quick access to it from this module.
+const civilWorkDprSetupItems = [
   {
-    icon: GitBranch,
-    label: "Dependency",
-    path: "/insidework/setup/dependency",
+    icon: ClipboardList,
+    label: "Activity",
+    path: "/masters/activity",
     color: "text-cyan-500",
-    pageKey: "dependency-master",
+    pageKey: "activity-master",
   },
 ];
 
@@ -829,11 +831,11 @@ export const TopNavbar = () => {
         colorStyle: makeColorStyle("engineering"),
         available: true,
       };
-    if (activeModule === "insidework")
+    if (activeModule === "civilworkdpr")
       return {
-        items: filterSetupItems(insideworkSetupItems),
-        label: "Inside Work",
-        colorStyle: makeColorStyle("insidework"),
+        items: filterSetupItems(civilWorkDprSetupItems),
+        label: "Civil Work DPR",
+        colorStyle: makeColorStyle("civilworkdpr"),
         available: true,
       };
     if (activeModule === "finance")

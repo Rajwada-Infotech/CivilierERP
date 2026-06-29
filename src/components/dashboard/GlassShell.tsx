@@ -1,37 +1,41 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { Pickaxe } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
 
-interface InsideWorkShellProps {
+// Generic, color-parameterized version of FinanceShell/MaterialShell —
+// those two are pixel-identical aside from hardcoded color constants, so
+// every other module's dashboard should use this instead of copy-pasting
+// a third near-duplicate. Pass `accentColor` (and optionally
+// `secondaryColor` for the bottom-right bloom) to theme it per module.
+
+interface GlassShellProps {
   title: string;
   subtitle?: string;
-  icon?: React.ElementType;
+  icon: React.ElementType;
   action?: React.ReactNode;
   children: React.ReactNode;
+  accentColor: string;
+  secondaryColor?: string;
 }
 
-/**
- * Shared glass-themed wrapper for all Inside Work module pages.
- * Provides ambient cyan glow, frosted header band, and consistent layout.
- * Mirrors MaterialShell / FinanceShell, recolored to the Inside Work
- * module's cyan accent (#0891b2 — matches MODULE_COLORS.insidework in
- * TopNavbar.tsx).
- */
-export const InsideWorkShell: React.FC<InsideWorkShellProps> = ({
+/** Shared glass-themed wrapper for module dashboards. */
+export const GlassShell: React.FC<GlassShellProps> = ({
   title,
   subtitle,
   icon: PageIcon,
   action,
   children,
+  accentColor,
+  secondaryColor,
 }) => {
   const { theme } = useTheme();
   const isDark = theme !== "light";
+  const secondary = secondaryColor || accentColor;
 
   const glassCard = isDark
     ? {
-        background: "rgba(8, 20, 24, 0.45)",
-        border: "1px solid rgba(8,145,178,0.18)",
+        background: "rgba(15, 17, 26, 0.45)",
+        border: `1px solid ${accentColor}2e`,
         backdropFilter: "blur(20px) saturate(160%)",
         WebkitBackdropFilter: "blur(20px) saturate(160%)",
         boxShadow:
@@ -39,42 +43,38 @@ export const InsideWorkShell: React.FC<InsideWorkShellProps> = ({
       }
     : {
         background: "rgba(255,255,255,0.72)",
-        border: "1px solid rgba(8,145,178,0.20)",
+        border: `1px solid ${accentColor}33`,
         backdropFilter: "blur(20px) saturate(180%)",
         WebkitBackdropFilter: "blur(20px) saturate(180%)",
-        boxShadow:
-          "0 8px 32px rgba(8,145,178,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
+        boxShadow: `0 8px 32px ${accentColor}14, inset 0 1px 0 rgba(255,255,255,0.9)`,
       };
 
   return (
     <div className="relative min-h-full p-4 space-y-5">
       {/* ── Ambient background orbs ─────────────────────────────────────── */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden z-0">
-        {/* Top-left cyan bloom */}
         <div
           className="absolute -top-24 -left-24 w-96 h-96 rounded-full"
           style={{
             background: isDark
-              ? "radial-gradient(circle, rgba(8,145,178,0.10) 0%, transparent 70%)"
-              : "radial-gradient(circle, rgba(8,145,178,0.07) 0%, transparent 70%)",
+              ? `radial-gradient(circle, ${accentColor}1f 0%, transparent 70%)`
+              : `radial-gradient(circle, ${accentColor}14 0%, transparent 70%)`,
           }}
         />
-        {/* Bottom-right teal bloom */}
         <div
           className="absolute -bottom-32 -right-32 w-80 h-80 rounded-full"
           style={{
             background: isDark
-              ? "radial-gradient(circle, rgba(20,184,166,0.08) 0%, transparent 70%)"
-              : "radial-gradient(circle, rgba(20,184,166,0.05) 0%, transparent 70%)",
+              ? `radial-gradient(circle, ${secondary}17 0%, transparent 70%)`
+              : `radial-gradient(circle, ${secondary}0f 0%, transparent 70%)`,
           }}
         />
-        {/* Center faint glow */}
         <div
           className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[600px] h-48 rounded-full"
           style={{
             background: isDark
-              ? "radial-gradient(ellipse, rgba(8,145,178,0.04) 0%, transparent 70%)"
-              : "radial-gradient(ellipse, rgba(8,145,178,0.03) 0%, transparent 70%)",
+              ? `radial-gradient(ellipse, ${accentColor}0d 0%, transparent 70%)`
+              : `radial-gradient(ellipse, ${accentColor}0a 0%, transparent 70%)`,
           }}
         />
       </div>
@@ -87,44 +87,33 @@ export const InsideWorkShell: React.FC<InsideWorkShellProps> = ({
         className="relative z-30 rounded-2xl px-5 py-4"
         style={glassCard}
       >
-        {/* Inner top gradient */}
         <div
           className="absolute inset-0 pointer-events-none rounded-2xl"
           style={{
-            background:
-              "linear-gradient(135deg, rgba(8,145,178,0.10) 0%, transparent 60%)",
+            background: `linear-gradient(135deg, ${accentColor}1f 0%, transparent 60%)`,
           }}
         />
-        {/* Left accent stripe */}
         <div
           className="absolute left-0 top-0 bottom-0 w-0.5 rounded-l-2xl"
           style={{
-            background:
-              "linear-gradient(to bottom, transparent 10%, #0891b2 30%, #0891b2 70%, transparent 90%)",
+            background: `linear-gradient(to bottom, transparent 10%, ${accentColor} 30%, ${accentColor} 70%, transparent 90%)`,
           }}
         />
 
         <div className="relative z-10 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
           <div className="flex items-center gap-3">
-            {/* Icon badge */}
             <div
               className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
               style={{
-                background: "rgba(8,145,178,0.18)",
-                border: "1px solid rgba(8,145,178,0.35)",
-                boxShadow: "0 0 12px rgba(8,145,178,0.2)",
+                background: `${accentColor}2e`,
+                border: `1px solid ${accentColor}59`,
+                boxShadow: `0 0 12px ${accentColor}33`,
               }}
             >
-              {PageIcon
-                ? <PageIcon size={16} style={{ color: "#22d3ee" }} />
-                : <Pickaxe size={16} style={{ color: "#22d3ee" }} />
-              }
+              <PageIcon size={16} style={{ color: accentColor }} />
             </div>
             <div>
-              <h1
-                className="text-base font-heading font-bold"
-                style={{ color: isDark ? "#cffafe" : "#083344" }}
-              >
+              <h1 className="text-base font-heading font-bold text-foreground">
                 {title}
               </h1>
               {subtitle && (
@@ -144,8 +133,8 @@ export const InsideWorkShell: React.FC<InsideWorkShellProps> = ({
   );
 };
 
-/** Glass-styled stat card for Inside Work pages */
-export const InsideWorkGlassCard: React.FC<{
+/** Glass-styled stat card — generic version of FinanceGlassCard/MaterialGlassCard */
+export const GlassCard: React.FC<{
   label: string;
   value: React.ReactNode;
   sub?: string;
@@ -159,7 +148,7 @@ export const InsideWorkGlassCard: React.FC<{
   value,
   sub,
   icon: Icon,
-  accentColor = "#0891b2",
+  accentColor = "#6366f1",
   onClick,
   trend,
   children,
@@ -174,30 +163,25 @@ export const InsideWorkGlassCard: React.FC<{
       onClick={onClick}
       className={`relative rounded-xl overflow-hidden ${onClick ? "cursor-pointer" : ""}`}
       style={{
-        background: isDark
-          ? `rgba(8,20,24,0.5)`
-          : `rgba(255,255,255,0.75)`,
+        background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.75)",
         border: `1px solid ${accentColor}28`,
         backdropFilter: "blur(16px) saturate(150%)",
         WebkitBackdropFilter: "blur(16px) saturate(150%)",
         boxShadow: isDark
-          ? `0 4px 20px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)`
-          : `0 4px 20px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9)`,
+          ? "0 4px 20px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
+          : "0 4px 20px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
       }}
     >
-      {/* Top gradient tint */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           background: `linear-gradient(135deg, ${accentColor}10 0%, transparent 60%)`,
         }}
       />
-      {/* Left accent bar */}
       <div
         className="absolute left-0 top-3 bottom-3 w-0.5 rounded-full"
         style={{ background: accentColor }}
       />
-      {/* Subtle inner glow at top */}
       <div
         className="absolute top-0 left-0 right-0 h-px"
         style={{
@@ -233,12 +217,8 @@ export const InsideWorkGlassCard: React.FC<{
 
         {sub && (
           <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
-            {trend === "up" && (
-              <span style={{ color: "#0891b2" }}>↑</span>
-            )}
-            {trend === "down" && (
-              <span style={{ color: "#ef4444" }}>↓</span>
-            )}
+            {trend === "up" && <span style={{ color: "#10b981" }}>↑</span>}
+            {trend === "down" && <span style={{ color: "#ef4444" }}>↓</span>}
             {sub}
           </p>
         )}
@@ -247,3 +227,56 @@ export const InsideWorkGlassCard: React.FC<{
     </motion.div>
   );
 };
+
+/** Glass section divider with label — generic version of finance/material's GlassSection */
+export const GlassSection: React.FC<{
+  title: string;
+  icon?: React.ElementType;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+  accentColor?: string;
+}> = ({ title, icon: Icon, action, children, accentColor = "#6366f1" }) => {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {Icon && (
+            <div
+              className="w-6 h-6 rounded-md flex items-center justify-center"
+              style={{
+                background: `${accentColor}18`,
+                border: `1px solid ${accentColor}30`,
+              }}
+            >
+              <Icon size={12} style={{ color: accentColor }} />
+            </div>
+          )}
+          <h2 className="text-xs font-heading font-bold uppercase tracking-widest text-muted-foreground">
+            {title}
+          </h2>
+          <div
+            className="flex-1 h-px ml-1"
+            style={{
+              background: `linear-gradient(90deg, ${accentColor}30, transparent)`,
+              minWidth: 40,
+            }}
+          />
+        </div>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+};
+
+/** Skeleton placeholder matching GlassCard's footprint, for loading states */
+export const GlassCardSkeleton: React.FC = () => (
+  <div className="rounded-xl overflow-hidden border border-border/40 bg-card/40 backdrop-blur-sm p-4">
+    <div className="flex items-start justify-between mb-3">
+      <div className="h-3 w-24 rounded bg-muted/60 animate-pulse" />
+      <div className="h-7 w-7 rounded-lg bg-muted/60 animate-pulse" />
+    </div>
+    <div className="h-7 w-20 mb-2 rounded bg-muted/60 animate-pulse" />
+    <div className="h-3 w-32 rounded bg-muted/60 animate-pulse" />
+  </div>
+);

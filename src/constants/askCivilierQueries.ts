@@ -36,7 +36,7 @@ import {
   History,
   ShelvingUnit,
 } from "lucide-react";
-import type { Module } from "@/contexts/ModuleContext";
+import type { Module } from "@/contexts/module.utils";
 
 export interface SuggestedQuery {
   id: string;
@@ -611,7 +611,7 @@ export const MODULE_QUERIES: Record<NonNullable<Module>, SuggestedQuery[]> = {
     },
   ],
   records: [],
-  insidework: [],
+  civilworkdpr: [],
   "sales-automation": [],
 };
 
@@ -708,7 +708,7 @@ const MODULE_LABELS: Record<NonNullable<Module>, string> = {
   ticket: "Tickets",
   sales: "Sales",
   records: "Records",
-  insidework: "Inside Work",
+  civilworkdpr: "Civil Work DPR",
   "sales-automation": "Sales Automation",
   admin: "Admin",
 };

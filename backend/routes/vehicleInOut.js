@@ -546,11 +546,26 @@ router.delete("/:id", requirePageRight("vehicle-in-out", "delete"), async (req, 
       .request()
       .input("ID", sql.Int, id)
       .query(
-        `SELECT VehicleInOutID FROM dbo.VehicleInOut WHERE VehicleInOutID = @ID`,
+        `SELECT VehicleInOutID, POID FROM dbo.VehicleInOut WHERE VehicleInOutID = @ID`,
       );
 
     if (!check.recordset[0])
       return res.status(404).json({ error: "Not found" });
+
+    // ── Guard: a GRN already exists against this record's PO ───────────────
+    const poId = check.recordset[0].POID;
+    if (poId) {
+      const grnCheck = await pool
+        .request()
+        .input("POID", sql.Int, poId)
+        .query("SELECT COUNT(*) AS cnt FROM dbo.GoodsReceiptNotes WHERE POID = @POID");
+      if (Number(grnCheck.recordset[0]?.cnt) > 0) {
+        return res.status(409).json({
+          error: "has_grn",
+          message: "A GRN has already been created against this Purchase Order. Delete the GRN first, then delete this Vehicle In/Out record.",
+        });
+      }
+    }
 
     await pool
       .request()

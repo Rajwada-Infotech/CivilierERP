@@ -17,7 +17,7 @@
  * This separation is intentional: PDF/Excel don't need renderers, sort fns, etc.
  */
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState } from "react";
 import {
   FileDown,
   FileSpreadsheet,
@@ -25,6 +25,7 @@ import {
   Loader2,
   ChevronDown,
 } from "lucide-react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   exportToCsv,
   exportToXlsx,
@@ -85,20 +86,8 @@ export function ExportMenu({
 }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState<"pdf" | "xlsx" | "csv" | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
 
   const base = filename ?? title.toLowerCase().replace(/\s+/g, "-");
-
-  // Close on outside click
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
 
   async function run(
     format: "pdf" | "xlsx" | "csv",
@@ -156,41 +145,43 @@ export function ExportMenu({
   const isBusy = loading !== null;
 
   return (
-    <div ref={ref} className="relative">
+    <DropdownMenu.Root open={open} onOpenChange={(val) => { if (!disabled && !isBusy) setOpen(val) }}>
       {/* Trigger */}
-      <button
-        onClick={() => !disabled && !isBusy && setOpen((o) => !o)}
-        disabled={disabled || isBusy}
-        className={`
-          inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium
-          transition-colors select-none
-          ${
-            disabled || isBusy
-              ? "opacity-40 cursor-not-allowed border-border text-muted-foreground bg-muted"
-              : "border-border text-foreground bg-card hover:bg-muted cursor-pointer"
-          }
-        `}
-      >
-        {isBusy ? (
-          <Loader2 size={13} className="animate-spin text-muted-foreground" />
-        ) : (
-          <FileDown size={13} />
-        )}
-        Export
-        <ChevronDown
-          size={11}
-          className={`text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
-        />
-      </button>
+      <DropdownMenu.Trigger asChild>
+        <button
+          disabled={disabled || isBusy}
+          className={`
+            inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium
+            transition-colors select-none outline-none
+            ${
+              disabled || isBusy
+                ? "opacity-40 cursor-not-allowed border-border text-muted-foreground bg-muted"
+                : "border-border text-foreground bg-card hover:bg-muted cursor-pointer"
+            }
+          `}
+        >
+          {isBusy ? (
+            <Loader2 size={13} className="animate-spin text-muted-foreground" />
+          ) : (
+            <FileDown size={13} />
+          )}
+          Export
+          <ChevronDown
+            size={11}
+            className={`text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </button>
+      </DropdownMenu.Trigger>
 
       {/* Dropdown */}
-      {open && (
-        <div
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="end"
+          sideOffset={6}
           className="
-            absolute right-0 top-full mt-1.5 z-50
-            w-56 rounded-xl border border-border bg-card shadow-lg
+            z-50 w-56 rounded-xl border border-border bg-card shadow-lg
             overflow-hidden
-            animate-in fade-in slide-in-from-top-1 duration-150
+            animate-in fade-in slide-in-from-top-2 duration-150
           "
         >
           <div className="px-3 py-2 border-b border-border">
@@ -204,40 +195,44 @@ export function ExportMenu({
               const Icon = opt.icon;
               const busy = loading === opt.key;
               return (
-                <button
-                  key={opt.key}
-                  onClick={() => run(opt.key, opt.action)}
-                  disabled={isBusy}
-                  className="
-                    w-full flex items-center gap-3 px-3 py-2.5
-                    text-left transition-colors
-                    hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed
-                  "
-                >
-                  <span
-                    className={`flex items-center justify-center w-7 h-7 rounded-lg bg-muted ${opt.color}`}
+                <DropdownMenu.Item asChild key={opt.key}>
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      run(opt.key, opt.action);
+                    }}
+                    disabled={isBusy}
+                    className="
+                      w-full flex items-center gap-3 px-3 py-2.5
+                      text-left transition-colors outline-none
+                      hover:bg-muted focus:bg-muted disabled:opacity-40 disabled:cursor-not-allowed
+                    "
                   >
-                    {busy ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Icon size={14} />
-                    )}
-                  </span>
-                  <span className="flex flex-col">
-                    <span className="text-xs font-medium text-foreground leading-tight">
-                      {opt.label}
+                    <span
+                      className={`flex items-center justify-center w-7 h-7 rounded-lg bg-muted ${opt.color}`}
+                    >
+                      {busy ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Icon size={14} />
+                      )}
                     </span>
-                    <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">
-                      {opt.desc}
+                    <span className="flex flex-col">
+                      <span className="text-xs font-medium text-foreground leading-tight">
+                        {opt.label}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+                        {opt.desc}
+                      </span>
                     </span>
-                  </span>
-                </button>
+                  </button>
+                </DropdownMenu.Item>
               );
             })}
           </div>
-        </div>
-      )}
-    </div>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }
 

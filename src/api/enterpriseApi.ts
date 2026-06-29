@@ -26,6 +26,8 @@ export interface Enterprise {
   pincode: string | null;
   email: string | null;
   phone_number: string | null;
+  gst_no?: string | null;
+  pan_no?: string | null;
   website: string | null;
   latitude: number | null;
   longitude: number | null;
@@ -51,6 +53,17 @@ async function handle<T>(res: Response): Promise<T> {
 
 export const getEnterprises = async (): Promise<Enterprise[]> => {
   const res = await fetchWithAuth(`${BASE_URL}?business_type=E`);
+  const data = await handle<unknown>(res);
+  return Array.isArray(data) ? (data as Enterprise[]) : [];
+};
+
+// Full records (with address/city/state etc.) filtered by business_type —
+// used where the caller needs more than the slim {id,label} options list,
+// e.g. to auto-fill a site location from a project's address.
+export const getEnterprisesByType = async (
+  businessType: string,
+): Promise<Enterprise[]> => {
+  const res = await fetchWithAuth(`${BASE_URL}?business_type=${businessType}`);
   const data = await handle<unknown>(res);
   return Array.isArray(data) ? (data as Enterprise[]) : [];
 };

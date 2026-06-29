@@ -1789,13 +1789,15 @@ export default function VehicleInOut() {
                 )}
                 {uploading ? "Saving…" : "Capture"}
               </Button>
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => setShowCamera(false)}
-              >
-                Done
-              </Button>
+              {form.attachments.length > 0 && (
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setShowCamera(false)}
+                >
+                  Done
+                </Button>
+              )}
             </div>
           </div>
         </div>

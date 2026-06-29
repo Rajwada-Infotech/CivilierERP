@@ -6,6 +6,9 @@ import {
   GlassSection,
 } from "@/components/finance/FinanceShell";
 import { useRecords, type UnifiedRecord } from "@/hooks/useRecords";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { useTheme } from "@/contexts/ThemeContext";
+import { toast } from "sonner";
 import { format } from "date-fns";
 import {
   Download,
@@ -21,6 +24,7 @@ import {
   FolderLock,
   Search,
   X,
+  Loader2,
 } from "lucide-react";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
@@ -77,26 +81,52 @@ function ModuleBadge({ source, module }: { source: string; module: string }) {
 }
 
 function ActionButtons({ record }: { record: UnifiedRecord }) {
+  const [loading, setLoading] = useState<"preview" | "download" | null>(null);
+
+  const handleAction = async (action: "preview" | "download") => {
+    setLoading(action);
+    try {
+      const res = await fetchWithAuth(record.url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+
+      if (action === "preview") {
+        window.open(objUrl, "_blank");
+        setTimeout(() => URL.revokeObjectURL(objUrl), 60000); // cleanup after a minute
+      } else {
+        const a = document.createElement("a");
+        a.href = objUrl;
+        a.download = record.filename;
+        a.click();
+        URL.revokeObjectURL(objUrl);
+      }
+    } catch (e: any) {
+      toast.error(`Failed to ${action} file: ${e.message}`);
+    } finally {
+      setLoading(null);
+    }
+  };
+
   return (
     <div className="flex items-center gap-1">
-      <a
-        href={record.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+      <button
+        onClick={() => handleAction("preview")}
+        disabled={loading !== null}
+        className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
         title={`Preview ${record.filename}`}
       >
-        <Eye size={15} />
-      </a>
-      <a
-        href={record.url}
-        download={record.filename}
-        className="p-1.5 rounded-md hover:bg-amber-500/10 transition-colors"
+        {loading === "preview" ? <Loader2 size={15} className="animate-spin" /> : <Eye size={15} />}
+      </button>
+      <button
+        onClick={() => handleAction("download")}
+        disabled={loading !== null}
+        className="p-1.5 rounded-md hover:bg-amber-500/10 transition-colors disabled:opacity-50"
         style={{ color: "#f59e0b" }}
         title={`Download ${record.filename}`}
       >
-        <Download size={15} />
-      </a>
+        {loading === "download" ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+      </button>
     </div>
   );
 }
@@ -196,6 +226,8 @@ export default function Records() {
   const { records, loading, error, refreshRecords } = useRecords();
   const [moduleFilter, setModuleFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
 
   const columns = useMemo(() => buildColumns(), []);
 
@@ -355,10 +387,15 @@ export default function Records() {
           <div
             className="rounded-xl overflow-hidden"
             style={{
-              background: "rgba(15,17,26,0.45)",
-              border: "1px solid rgba(245,158,11,0.18)",
+              background: isDark ? "rgba(15,17,26,0.45)" : "rgba(255,255,255,0.72)",
+              border: isDark
+                ? "1px solid rgba(245,158,11,0.18)"
+                : "1px solid rgba(245,158,11,0.22)",
               backdropFilter: "blur(16px)",
               WebkitBackdropFilter: "blur(16px)",
+              boxShadow: isDark
+                ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
+                : "0 4px 24px rgba(245,158,11,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
             }}
           >
             <DataTable

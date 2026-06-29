@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { useModule } from "@/contexts/ModuleContext";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -18,6 +19,9 @@ import {
   Hash,
   Eye,
   XCircle,
+  Plus,
+  Package,
+  Trash2,
 } from "lucide-react";
 import {
   getActivities,
@@ -28,7 +32,20 @@ import {
   type DbActivity,
 } from "@/api/activityMasterApi";
 import { getHsn } from "@/api/hsnApi";
+import { getItems, type DbItem } from "@/api/itemMasterApi";
+import {
+  getActivityItems,
+  addActivityItem,
+  deleteActivityItem,
+} from "@/api/activityItemsApi";
 import { usePageRights } from "@/hooks/usePageRights";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 const StatusBadge = ({ active }: { active: boolean }) => (
@@ -189,11 +206,25 @@ const exportToCSV = (items: DbActivity[], groups: DbActivity[]) => {
 };
 
 // ─── Main Component ───────────────────────────────────────────────────────────
+const MODULE_BREADCRUMB_LABEL: Record<string, string> = {
+  engineering: "Engineering",
+  civilworkdpr: "Civil Work DPR",
+  material: "Material",
+};
+
 const ActivityMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const rights = usePageRights("activity-master");
+  const { activeModule } = useModule();
+  // This master is shared across modules (Engineering's BOQ, Civil Work
+  // DPR's activity tracking, etc.) — the breadcrumb should reflect whichever
+  // module the user actually navigated from, not a single hardcoded one.
+  const moduleBreadcrumb =
+    (activeModule && MODULE_BREADCRUMB_LABEL[activeModule]) || "Masters";
   const [treeSearch, setTreeSearch] = useState("");
   const [viewRecord, setViewRecord] = useState<DbActivity | null>(null);
+  const [addItemOpen, setAddItemOpen] = useState(false);
+  const [pickedItemId, setPickedItemId] = useState("");
 
   const {
     data: dbData,
@@ -205,6 +236,50 @@ const ActivityMaster: React.FC = () => {
     staleTime: 0,
     refetchOnMount: true,
   });
+
+  // Items linked to the activity currently open in the detail drawer.
+  const { data: linkedItems = [] } = useQuery({
+    queryKey: ["activityItems", viewRecord?.id],
+    queryFn: () => getActivityItems(viewRecord!.id),
+    enabled: !!viewRecord && viewRecord.activity_type === 1,
+  });
+
+  // Full item master list, for the "Add Item" picker.
+  const { data: allItems = [] } = useQuery<DbItem[]>({
+    queryKey: ["items-for-activity-link"],
+    queryFn: getItems,
+    enabled: addItemOpen,
+  });
+  const unlinkedItems = allItems.filter(
+    (i) => !linkedItems.some((li) => li.itemId === i.M_Id),
+  );
+
+  const handleAddItem = async () => {
+    if (!viewRecord || !pickedItemId) return;
+    try {
+      await addActivityItem(viewRecord.id, pickedItemId);
+      toast.success("Item linked to activity ✓");
+      await queryClient.invalidateQueries({
+        queryKey: ["activityItems", viewRecord.id],
+      });
+      setAddItemOpen(false);
+      setPickedItemId("");
+    } catch (err: any) {
+      toast.error("Failed to link item: " + err.message);
+    }
+  };
+
+  const handleRemoveItem = async (id: number) => {
+    if (!viewRecord) return;
+    try {
+      await deleteActivityItem(id);
+      await queryClient.invalidateQueries({
+        queryKey: ["activityItems", viewRecord.id],
+      });
+    } catch (err: any) {
+      toast.error("Failed to unlink item: " + err.message);
+    }
+  };
 
   // HSN master for the dropdown
   const { data: hsnRaw = [] } = useQuery({
@@ -259,9 +334,18 @@ const ActivityMaster: React.FC = () => {
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
       try {
-        await addActivity(toPayload(event.record, groupOptions));
+        const payload = toPayload(event.record, groupOptions);
+        const res = await addActivity(payload);
         toast.success("Activity saved!");
         await refetch();
+        // Items can only be linked to an Activity (not a Group) — open its
+        // detail drawer immediately so the "Add Item" button is right there,
+        // instead of making the user hunt for it in the tree below.
+        if (payload.activity_type === 1 && res.id) {
+          const fresh = await getActivities();
+          const created = fresh.find((a) => a.id === res.id);
+          if (created) setViewRecord(created);
+        }
       } catch (err: any) {
         toast.error("Save failed: " + err.message);
       }
@@ -293,7 +377,7 @@ const ActivityMaster: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Material", "Activity Master"]} />
+      <Breadcrumbs items={["Dashboard", moduleBreadcrumb, "Activity Master"]} />
       <div className="flex items-center gap-3 mb-4">
         <Activity className="w-5 h-5 text-primary" />
         <h1 className="text-xl font-heading font-bold text-foreground">
@@ -591,6 +675,56 @@ const ActivityMaster: React.FC = () => {
                   )}
                 </div>
               )}
+              {viewRecord.activity_type === 1 && (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">
+                      Items
+                    </p>
+                    {rights.canEdit && (
+                      <button
+                        onClick={() => setAddItemOpen(true)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-primary/30 text-primary hover:bg-primary/10 transition-colors"
+                      >
+                        <Plus size={11} /> Add Item
+                      </button>
+                    )}
+                  </div>
+                  {linkedItems.length === 0 ? (
+                    <p className="text-muted-foreground italic text-sm">
+                      No items linked yet
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {linkedItems.map((li) => (
+                        <div
+                          key={li.id}
+                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-muted/40 border border-border/50"
+                        >
+                          <Package size={11} className="text-teal-400 shrink-0" />
+                          <span className="text-sm text-foreground flex-1 truncate">
+                            {li.itemName}
+                          </span>
+                          {li.uom && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                              {li.uom}
+                            </span>
+                          )}
+                          {rights.canEdit && (
+                            <button
+                              onClick={() => handleRemoveItem(li.id)}
+                              className="p-0.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                              title="Unlink item"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <div>
                 <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Status
@@ -601,6 +735,55 @@ const ActivityMaster: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* ── Add Item dialog ── */}
+      <Dialog open={addItemOpen} onOpenChange={setAddItemOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-base">
+              Link Item to {viewRecord?.activity_name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1 pt-1">
+            <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wide">
+              Item
+            </label>
+            <select
+              value={pickedItemId}
+              onChange={(e) => setPickedItemId(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            >
+              <option value="">Select item…</option>
+              {unlinkedItems.map((i) => (
+                <option key={i.M_Id} value={i.M_Id}>
+                  {i.M_Name}
+                  {i.M_UOM ? ` (${i.M_UOM})` : ""}
+                </option>
+              ))}
+            </select>
+            {unlinkedItems.length === 0 && (
+              <p className="text-xs text-muted-foreground italic mt-1">
+                All items are already linked to this activity.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => setAddItemOpen(false)}
+              className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleAddItem}
+              disabled={!pickedItemId}
+              className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold bg-primary text-primary-foreground disabled:opacity-40"
+            >
+              Add
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };
