@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getUsers, type User } from "@/api/userApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { PageKey } from "@/contexts/AuthContext";
 import {
   Plus,
@@ -1163,21 +1164,12 @@ export default function ApprovalSetup() {
   return (
     <>
       <Breadcrumbs items={["Admin", "Approval", "Approval Setup"]} />
-
-      <div className="relative space-y-6 mt-6">
-        {/* Page header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-              <ShieldCheck className="text-primary w-5 h-5" />
-              Approval Rules
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1 max-w-lg">
-              Control who needs to approve requests before they go through —
-              like purchase orders, expenses, and more.
-            </p>
-          </div>
-          {mode === "list" && canCreate && (
+      <AdminShell
+        title="Approval Rules"
+        subtitle="Control who needs to approve requests before they go through — like purchase orders, expenses, and more."
+        icon={ShieldCheck}
+        action={
+          mode === "list" && canCreate && (
             <Button
               className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
               onClick={() => {
@@ -1187,9 +1179,9 @@ export default function ApprovalSetup() {
             >
               <Plus className="h-4 w-4" /> New Approval Rule
             </Button>
-          )}
-        </div>
-
+          )
+        }
+      >
         {/* Form */}
         {(mode === "new" || mode === "edit") && (
           <ConfigForm
@@ -1356,7 +1348,7 @@ export default function ApprovalSetup() {
             )}
           </div>
         )}
-      </div>
+      </AdminShell>
     </>
   );
 }

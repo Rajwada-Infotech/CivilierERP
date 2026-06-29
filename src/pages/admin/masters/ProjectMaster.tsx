@@ -2,6 +2,7 @@
 import React, { useMemo, useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import {
   FolderKanban,
   Plus,
@@ -866,32 +867,22 @@ export default function ProjectMaster() {
     <>
       <Breadcrumbs items={["Admin", "Masters", "Project Master"]} />
 
-      <div className="relative space-y-6 mt-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center">
-              <FolderKanban size={20} className="text-indigo-500" />
-            </div>
-            <div>
-              <h1 className="text-xl font-heading font-semibold text-foreground">
-                Project Master
-              </h1>
-              <p className="text-xs text-muted-foreground">
-                Manage projects, timelines and location
-              </p>
-            </div>
-          </div>
-          {!showForm && rights.canCreate && (
+      <AdminShell
+        title="Project Master"
+        subtitle="Manage projects, timelines and location"
+        icon={FolderKanban}
+        action={
+          !showForm &&
+          rights.canCreate && (
             <button
               onClick={openNew}
               className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto flex items-center rounded-lg"
             >
               <Plus size={16} /> Add Project
             </button>
-          )}
-        </div>
-
+          )
+        }
+      >
         {/* Table */}
         {!showForm && (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -1412,8 +1403,7 @@ export default function ProjectMaster() {
             </div>
           </div>
         )}
-      </div>
-      {/* end space-y-6 mt-6 */}
+      </AdminShell>
     </>
   );
 }

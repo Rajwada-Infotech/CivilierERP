@@ -245,6 +245,12 @@ const WhatsAppSetup = lazy(
 const GeneralLedgerMaster = lazy(
   () => import("./pages/masters/GeneralLedgerMaster"),
 );
+const CostCenterMaster = lazy(
+  () => import("./pages/masters/CostCenterMaster"),
+);
+const ProfitCenterMaster = lazy(
+  () => import("./pages/masters/ProfitCenterMaster"),
+);
 
 // New hierarchy pages
 const SuperAdminDashboard = lazy(
@@ -1449,6 +1455,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="general-ledger">
             <GeneralLedgerMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/cost-center"
+        element={
+          <ProtectedRoute pageKey="cost-center">
+            <CostCenterMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/profit-center"
+        element={
+          <ProtectedRoute pageKey="profit-center">
+            <ProfitCenterMaster />
           </ProtectedRoute>
         }
       />

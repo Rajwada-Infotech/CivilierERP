@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { MessageCircle, Save, Loader2 } from "lucide-react";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { usePageRights } from "@/hooks/usePageRights";
 
 // ─── Config shape stored in dbo.CommunicatorConfig.ConfigJson ─────────────────
@@ -62,22 +63,12 @@ export default function WhatsAppSetup() {
   }
 
   return (
-    <div className="p-6 space-y-5 max-w-3xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="p-2 rounded-lg bg-primary/10">
-          <MessageCircle className="h-5 w-5 text-primary" />
-        </div>
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
-            WhatsApp Integration
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            WhatsApp Cloud API or third-party provider settings
-          </p>
-        </div>
-      </div>
-
+    <div className="max-w-3xl mx-auto">
+      <AdminShell
+        title="WhatsApp Integration"
+        subtitle="WhatsApp Cloud API or third-party provider settings"
+        icon={MessageCircle}
+      >
       <Card>
         <CardHeader>
           <CardTitle className="text-base">API &amp; Account Details</CardTitle>
@@ -175,6 +166,7 @@ export default function WhatsAppSetup() {
           )}
         </CardContent>
       </Card>
+      </AdminShell>
     </div>
   );
 }

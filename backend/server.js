@@ -78,6 +78,8 @@ const ALL_ROUTES = [
   { path: "/api/billing-terms", file: "./routes/billingTerms" },
   { path: "/api/card-master", file: "./routes/cardMaster" },
   { path: "/api/cheque-master", file: "./routes/chequeMaster" },
+  { path: "/api/cost-center", file: "./routes/costCenter" },
+  { path: "/api/profit-center", file: "./routes/profitCenter" },
   { path: "/api/document-type", file: "./routes/document-type" },
   { path: "/api/fin-year", file: "./routes/finYear" },
   { path: "/api/general-ledger", file: "./routes/generalLedger" },

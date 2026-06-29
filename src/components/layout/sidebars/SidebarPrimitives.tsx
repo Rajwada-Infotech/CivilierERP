@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowDown2, ArrowUp2 } from "iconsax-react";
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
 
@@ -31,7 +31,107 @@ export interface NavItem {
    *  and set apart from the rest of the list, regardless of its label
    *  (e.g. "Proceeding", "Control Center", "All Records"). */
   isDashboard?: boolean;
+  /** Notification-style count shown as a filled badge next to the label. */
+  badge?: number;
 }
+
+// ─── Shared bits ──────────────────────────────────────────────────────────────
+
+/** Icon, sat inside a soft rounded chip — matches the icon-tile look of the
+ *  reference design rather than a bare glyph. */
+const IconChip = ({
+  icon: Icon,
+  size,
+  active,
+  accentColor,
+  compact,
+}: {
+  icon: React.ElementType;
+  size: number;
+  active: boolean;
+  accentColor?: string;
+  compact?: boolean;
+}) => {
+  const pad = compact ? 6 : 12;
+  return (
+    <span
+      className={`flex items-center justify-center rounded-md shrink-0 transition-colors ${
+        active
+          ? accentColor
+            ? ""
+            : "bg-primary/10 text-primary"
+          : "bg-sidebar-accent/50 text-sidebar-foreground/60"
+      }`}
+      style={{
+        width: size + pad,
+        height: size + pad,
+        ...(active && accentColor
+          ? { background: `${accentColor}18`, color: accentColor }
+          : {}),
+      }}
+    >
+      <Icon size={size} variant={active ? "Bold" : "Linear"} />
+    </span>
+  );
+};
+
+/** Hover tooltip used in the collapsed (icon-only) rail — a small pill that
+ *  flies out to the right of the icon, mirroring the reference design. */
+const RailTooltip = ({
+  label,
+  accentColor,
+}: {
+  label: string;
+  accentColor?: string;
+}) => (
+  <span
+    className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 z-50 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold text-white opacity-0 scale-95 shadow-lg transition-all duration-150 group-hover:opacity-100 group-hover:scale-100"
+    style={{ background: accentColor || "hsl(var(--primary))" }}
+  >
+    {label}
+    <span
+      className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent"
+      style={{ borderRightColor: accentColor || "hsl(var(--primary))" }}
+    />
+  </span>
+);
+
+const Badge = ({ count }: { count: number }) => (
+  <span className="bg-blue-500 text-white text-[10px] font-bold min-w-[20px] h-5 px-1 flex items-center justify-center rounded-full shrink-0">
+    {count}
+  </span>
+);
+
+/** Active-state indicator for a nav label — no background box, just a bold
+ *  weight + an animated underline that smoothly grows in/out from the left
+ *  as the option switches. */
+const NavLabel = ({
+  label,
+  active,
+  accentColor,
+  className = "",
+}: {
+  label: string;
+  active: boolean;
+  accentColor?: string;
+  className?: string;
+}) => (
+  <span className={`relative inline-block min-w-0 max-w-full truncate ${className}`}>
+    <span
+      className={`transition-all duration-200 ease-out ${active ? "font-bold" : "font-normal"}`}
+      style={active && accentColor ? { color: accentColor } : undefined}
+    >
+      {label}
+    </span>
+    <span
+      className="absolute left-0 right-0 -bottom-0.5 h-[2px] rounded-full origin-left transition-transform duration-300 ease-out"
+      style={{
+        transform: active ? "scaleX(1)" : "scaleX(0)",
+        background: accentColor || "hsl(var(--primary))",
+      }}
+    />
+  </span>
+);
 
 // ─── NavButton ────────────────────────────────────────────────────────────────
 
@@ -47,52 +147,38 @@ export const NavButton = ({
   accentColor?: string;
 }) => {
   const navigate = useNavigate();
-
-  if (item.isDashboard) {
-    return (
-      <button
-        onClick={() => item.path && navigate(item.path)}
-        className={`w-full flex items-center gap-3 px-3.5 py-3 mb-2 rounded-xl text-[15px] font-semibold transition-colors border ${
-          isActive
-            ? accentColor
-              ? ""
-              : "bg-primary/15 text-primary border-primary/20"
-            : "text-sidebar-foreground border-sidebar-border/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-        } ${collapsed ? "justify-center" : ""}`}
-        style={
-          accentColor
-            ? isActive
-              ? { background: `${accentColor}26`, color: accentColor, borderColor: `${accentColor}40` }
-              : { background: `${accentColor}12`, borderColor: `${accentColor}26` }
-            : undefined
-        }
-        title={collapsed ? item.label : undefined}
-      >
-        <item.icon size={22} className="shrink-0" />
-        {!collapsed && <span className="truncate">{item.label}</span>}
-      </button>
-    );
-  }
+  const iconSize = item.isDashboard ? 16 : 15;
 
   return (
     <button
       onClick={() => item.path && navigate(item.path)}
-      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+      className={`group relative w-full flex items-center gap-2 rounded-lg transition-all duration-200 ${
+        item.isDashboard
+          ? "px-2.5 py-1.5 mb-1 text-xs font-semibold"
+          : "px-2.5 py-2 text-xs"
+      } ${
         isActive
-          ? accentColor
-            ? "font-medium"
-            : "bg-primary/15 text-primary font-medium"
+          ? ""
           : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
       } ${collapsed ? "justify-center" : ""}`}
-      style={
-        isActive && accentColor
-          ? { background: `${accentColor}26`, color: accentColor }
-          : undefined
-      }
-      title={collapsed ? item.label : undefined}
     >
-      <item.icon size={18} className="shrink-0" />
-      {!collapsed && <span className="truncate">{item.label}</span>}
+      <IconChip
+        icon={item.icon}
+        size={iconSize}
+        active={isActive}
+        accentColor={accentColor}
+        compact={item.isDashboard}
+      />
+      {!collapsed && (
+        <NavLabel
+          label={item.label}
+          active={isActive}
+          accentColor={accentColor}
+          className="flex-1 text-left"
+        />
+      )}
+      {!collapsed && !!item.badge && <Badge count={item.badge} />}
+      {collapsed && <RailTooltip label={item.label} accentColor={accentColor} />}
     </button>
   );
 };
@@ -140,51 +226,52 @@ export const NavGroup = ({
     <div>
       <button
         onClick={handleClick}
-        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+        className={`group relative w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs transition-all duration-200 ${
           hasActiveChild
-            ? accentColor
-              ? ""
-              : "bg-primary/10 text-primary"
+            ? ""
             : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-        }`}
-        style={
-          hasActiveChild && accentColor
-            ? { background: `${accentColor}1A`, color: accentColor }
-            : undefined
-        }
+        } ${collapsed ? "justify-center" : ""}`}
       >
-        <item.icon size={18} className="shrink-0" />
+        <IconChip
+          icon={item.icon}
+          size={15}
+          active={hasActiveChild}
+          accentColor={accentColor}
+        />
         {!collapsed && (
-          <span className="flex-1 text-left truncate">{item.label}</span>
+          <NavLabel
+            label={item.label}
+            active={hasActiveChild}
+            accentColor={accentColor}
+            className="flex-1 text-left"
+          />
         )}
         {!collapsed &&
-          (open ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+          (open ? <ArrowUp2 size={12} /> : <ArrowDown2 size={12} />)}
+        {collapsed && <RailTooltip label={item.label} accentColor={accentColor} />}
       </button>
 
-      {!collapsed && open && (
-        <div className="ml-6 mt-1 space-y-1">
+      <div
+        className={`overflow-hidden transition-all duration-300 ease-out ${
+          !collapsed && open ? "max-h-[1000px] opacity-100" : "max-h-0 opacity-0"
+        }`}
+      >
+        <div className="ml-4 mt-1 space-y-0.5 border-l border-sidebar-border/60 pl-2.5">
           {item.children?.map((child: SubItem) => {
             const childActive = location.pathname === child.path;
             return (
               <button
                 key={child.path}
                 onClick={() => navigate(child.path, child.state ? { state: child.state } : undefined)}
-                className={`w-full flex justify-between items-center text-xs px-2 py-1.5 rounded-md transition-colors ${
+                className={`w-full flex justify-between items-center text-[11px] px-2 py-1 rounded-md transition-all duration-200 ${
                   childActive
-                    ? accentColor
-                      ? "font-medium"
-                      : "bg-primary/15 text-primary font-medium"
+                    ? ""
                     : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 }`}
-                style={
-                  childActive && accentColor
-                    ? { background: `${accentColor}26`, color: accentColor }
-                    : undefined
-                }
               >
-                <span>{child.label}</span>
+                <NavLabel label={child.label} active={childActive} accentColor={accentColor} />
                 {child.badge && (
-                  <span className="bg-red-500 text-white text-[9px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full">
+                  <span className="bg-blue-500 text-white text-[9px] font-bold min-w-[16px] h-[16px] flex items-center justify-center rounded-full">
                     {child.badge}
                   </span>
                 )}
@@ -196,49 +283,46 @@ export const NavGroup = ({
             <div key={section.label}>
               <button
                 onClick={() => toggleSection(section.label)}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[11px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
               >
-                <section.icon size={13} />
+                <section.icon size={12} />
                 <span className="flex-1 text-left truncate font-medium">
                   {section.label}
                 </span>
                 {openSections[section.label] ? (
-                  <ChevronUp size={11} />
+                  <ArrowUp2 size={10} />
                 ) : (
-                  <ChevronDown size={11} />
+                  <ArrowDown2 size={10} />
                 )}
               </button>
-              {openSections[section.label] && (
-                <div className="ml-4 mt-0.5 space-y-0.5">
+              <div
+                className={`overflow-hidden transition-all duration-300 ease-out ${
+                  openSections[section.label] ? "max-h-[1000px] opacity-100" : "max-h-0 opacity-0"
+                }`}
+              >
+                <div className="ml-3.5 mt-0.5 space-y-0.5">
                   {section.items.map((child: SubItem) => {
                     const sChildActive = location.pathname === child.path;
                     return (
                       <button
                         key={child.path}
                         onClick={() => navigate(child.path)}
-                        className={`w-full text-xs px-2 py-1.5 rounded-md ${
+                        className={`w-full text-left text-[11px] px-2 py-1 rounded-md transition-all duration-200 ${
                           sChildActive
-                            ? accentColor
-                              ? "font-medium"
-                              : "bg-primary/15 text-primary font-medium"
+                            ? ""
                             : "text-sidebar-foreground/70 hover:bg-sidebar-accent"
                         }`}
-                        style={
-                          sChildActive && accentColor
-                            ? { background: `${accentColor}26`, color: accentColor }
-                            : undefined
-                        }
                       >
-                        {child.label}
+                        <NavLabel label={child.label} active={sChildActive} accentColor={accentColor} />
                       </button>
                     );
                   })}
                 </div>
-              )}
+              </div>
             </div>
           ))}
         </div>
-      )}
+      </div>
     </div>
   );
 };
@@ -256,7 +340,7 @@ export const SidebarNav = ({
 }) => {
   const location = useLocation();
   return (
-    <div className="space-y-1.5">
+    <div className={collapsed ? "space-y-1.5" : "space-y-1"}>
       {items.map((item) =>
         item.children || item.sections ? (
           <NavGroup

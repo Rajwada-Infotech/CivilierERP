@@ -10,6 +10,7 @@ import {
 
 import { getUsersForRights, getUserPermissions } from "@/api/userApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import {
   ShieldCheck,
   Plus,
@@ -525,29 +526,22 @@ export default function PostApprovalRights() {
     <>
       <Breadcrumbs items={["Admin", "Approval", "Post Approval Rights"]} />
 
-      <div className="relative space-y-8 mt-6">
-      {/* ── Page header ───────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-          <ShieldCheck className="text-primary" /> Post Approval Rights
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Control which users can perform actions after approval workflow
-            completion
-          </p>
-        </div>
-        {rights.canCreate && (
-          <Button
-            onClick={openAssign}
-            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-          >
-            <Plus size={14} />
-            Assign Rights
-          </Button>
-        )}
-      </div>
-
+      <AdminShell
+        title="Post Approval Rights"
+        subtitle="Control which users can perform actions after approval workflow completion"
+        icon={ShieldCheck}
+        action={
+          rights.canCreate && (
+            <Button
+              onClick={openAssign}
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+            >
+              <Plus size={14} />
+              Assign Rights
+            </Button>
+          )
+        }
+      >
       {/* ── Stat pills ────────────────────────────────────────────────── */}
       <div className="flex flex-wrap gap-3 mb-5">
         {[
@@ -811,7 +805,7 @@ export default function PostApprovalRights() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      </div>{/* end relative space-y-8 mt-6 */}
+      </AdminShell>
     </>
   );
 }

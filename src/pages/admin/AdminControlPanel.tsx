@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getUsers, addUser, updateUser, deleteUser } from "@/api/userApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -191,22 +192,16 @@ export default function AdminControlPanel() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       <Breadcrumbs items={["Admin", "Control Panel"]} />
 
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="p-2 bg-blue-500/10 rounded-lg">
-          <Shield className="text-blue-500" size={22} />
-        </div>
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">Admin Control Panel</h1>
-          <p className="text-sm text-muted-foreground">
-            Company-scoped user & database management
-          </p>
-        </div>
-        <Badge className="ml-auto bg-blue-500/15 text-blue-600 border-blue-500/30 text-xs px-3">
-          <Shield size={10} className="mr-1" /> ADMIN
-        </Badge>
-      </div>
-
+      <AdminShell
+        title="Admin Control Panel"
+        subtitle="Company-scoped user & database management"
+        icon={Shield}
+        action={
+          <Badge className="bg-blue-500/15 text-blue-600 border-blue-500/30 text-xs px-3">
+            <Shield size={10} className="mr-1" /> ADMIN
+          </Badge>
+        }
+      >
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {stats.map((s) => (
@@ -487,6 +482,7 @@ export default function AdminControlPanel() {
           </CardContent>
         </Card>
       )}
+      </AdminShell>
 
       {/* ADD USER DIALOG */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>

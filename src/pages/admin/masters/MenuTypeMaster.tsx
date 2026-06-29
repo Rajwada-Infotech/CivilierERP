@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -214,28 +215,25 @@ const MenuTypeMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Admin", "Setup", "Menu Type Master"]} />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Menu Type Master
-      </h1>
-
-      {/* Header bar */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <LayoutList size={16} />
-          <span>
+      <AdminShell
+        title="Menu Type Master"
+        subtitle={
+          <>
             Configure named menu labels — these populate the{" "}
             <span className="text-foreground font-medium">Entry Type</span> dropdown
             in Named Entry Types.
-          </span>
-        </div>
-        {rights.canCreate && (
-          <Button onClick={openCreate} size="sm" className="gap-1.5">
-            <Plus size={15} />
-            New Menu Type
-          </Button>
-        )}
-      </div>
-
+          </>
+        }
+        icon={LayoutList}
+        action={
+          rights.canCreate && (
+            <Button onClick={openCreate} size="sm" className="gap-1.5">
+              <Plus size={15} />
+              New Menu Type
+            </Button>
+          )
+        }
+      >
       {/* Table */}
       <div className="border rounded-xl bg-card overflow-hidden shadow-sm">
         <Table>
@@ -328,6 +326,7 @@ const MenuTypeMaster: React.FC = () => {
           </TableBody>
         </Table>
       </div>
+      </AdminShell>
 
       {/* Create / Edit Dialog */}
       {(rights.canCreate || rights.canEdit) && <Dialog open={dialogOpen} onOpenChange={(v) => !v && closeDialog()}>

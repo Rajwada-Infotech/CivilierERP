@@ -11,8 +11,12 @@ import {
   Package,
   Lock,
   ClipboardList,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { useReminders, formatRelative, formatDate } from "@/hooks/useReminders";
+import { useModule } from "@/contexts/ModuleContext";
+import { getModuleAccent } from "@/lib/moduleColors";
 
 type ReminderMeta = {
   icon: React.ElementType;
@@ -36,6 +40,8 @@ const TYPE_META: Record<string, ReminderMeta> = {
 
 export const ReminderBell = () => {
   const navigate = useNavigate();
+  const { activeModule } = useModule();
+  const accent = getModuleAccent(activeModule);
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("all");
   const { reminders, loading, badgeCount, refresh, isLocked } = useReminders({
@@ -44,6 +50,34 @@ export const ReminderBell = () => {
 
   const bellButtonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateScrollState = useCallback(() => {
+    const el = tabsRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 2);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    // Measure after the open animation mounts the panel.
+    const id = requestAnimationFrame(updateScrollState);
+    const el = tabsRef.current;
+    el?.addEventListener("scroll", updateScrollState);
+    window.addEventListener("resize", updateScrollState);
+    return () => {
+      cancelAnimationFrame(id);
+      el?.removeEventListener("scroll", updateScrollState);
+      window.removeEventListener("resize", updateScrollState);
+    };
+  }, [open, updateScrollState]);
+
+  const scrollTabs = (dir: 1 | -1) => {
+    tabsRef.current?.scrollBy({ left: dir * 120, behavior: "smooth" });
+  };
 
   // Click-outside: close only when clicking outside BOTH the button and the panel
   useEffect(() => {
@@ -71,6 +105,16 @@ export const ReminderBell = () => {
 
   const filtered =
     filter === "all" ? reminders : reminders.filter((r) => r.type === filter);
+
+  // CSS custom properties drive every accent-tinted style below, so the
+  // whole panel re-themes to whichever module the user is currently in
+  // without a single hardcoded color or any mouseenter/leave JS.
+  const accentVars = {
+    "--rb-accent": accent,
+    "--rb-accent-10": `${accent}1A`,
+    "--rb-accent-20": `${accent}33`,
+    "--rb-accent-30": `${accent}4D`,
+  } as React.CSSProperties;
 
   return (
     <div className="relative">
@@ -123,110 +167,201 @@ export const ReminderBell = () => {
       </button>
 
       {open && (
-        <div
-          ref={panelRef}
-          className="absolute right-0 mt-3 w-80 bg-card border rounded-2xl shadow-2xl z-50 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right"
-        >
-          <div className="p-4 border-b flex justify-between items-center bg-muted/20">
-            <span className="text-xs font-bold uppercase tracking-widest text-foreground/70">
-              Reminders
-            </span>
-            <button
-              onClick={() => {
-                if (!isLocked) refresh(true);
-              }}
-              disabled={loading || isLocked}
-              className={`p-1.5 rounded-md transition-all ${isLocked ? "bg-red-50 text-red-400" : "hover:bg-background"}`}
-            >
-              {isLocked ? (
-                <Lock size={14} />
-              ) : (
-                <RefreshCw
-                  size={14}
-                  className={
-                    loading
-                      ? "animate-spin-full text-primary"
-                      : "text-muted-foreground"
-                  }
-                />
-              )}
-            </button>
-          </div>
+        <>
+          {/* Mobile scrim — tapping outside the panel closes it */}
+          <div
+            className="fixed inset-0 z-40 sm:hidden"
+            onClick={() => setOpen(false)}
+          />
 
-          <div className="p-2 flex gap-1 overflow-x-auto border-b bg-muted/5 no-scrollbar">
-            {[
-              "all",
-              "purchase_order",
-              "grn",
-              "cheque",
-              "tds",
-              "emi_installment",
-              "material_request",
-            ].map((t) => (
-              <button
-                key={t}
-                onClick={() => setFilter(t)}
-                className={`px-3 py-1 text-[10px] font-bold rounded-full border transition-all ${filter === t ? "bg-primary text-white border-primary shadow-sm" : "bg-background text-muted-foreground hover:border-muted"}`}
-              >
-                {t === "all" ? "All" : TYPE_META[t]?.label || t.toUpperCase()}
-              </button>
-            ))}
-          </div>
-
-          <div className="overflow-y-auto max-h-[400px] divide-y divide-border/40">
-            {filtered.length === 0 ? (
-              <div className="p-12 text-center text-muted-foreground text-xs font-medium">
-                No alerts today.
-              </div>
-            ) : (
-              filtered.map((r) => (
-                <div
-                  key={r.id}
-                  onClick={() => {
-                    setOpen(false);
-                    navigate(r.path);
-                  }}
-                  className="p-4 hover:bg-muted/50 transition-colors cursor-pointer group"
-                >
-                  <div className="flex gap-3">
-                    <div
-                      className={`mt-1 transition-transform group-hover:scale-110 ${TYPE_META[r.type]?.color}`}
-                    >
-                      {React.createElement(TYPE_META[r.type]?.icon || Package, {
-                        size: 16,
-                      })}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between font-bold text-[11px] items-center">
-                        <span className="truncate pr-2 group-hover:text-primary transition-colors">
-                          {r.title}
-                        </span>
-                        {r.amount && (
-                          <span className="text-emerald-600 shrink-0">
-                            ₹{r.amount.toLocaleString()}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[10px] text-muted-foreground truncate">
-                        {r.subtitle}
-                      </p>
-                      <div className="mt-2.5 flex gap-2 items-center">
-                        <span
-                          className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${r.urgency === "overdue" ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-600"}`}
-                        >
-                          {formatRelative(r.dueDate)}
-                        </span>
-                        <span className="text-[9px] text-muted-foreground/50 font-medium">
-                          {formatDate(r.dueDate)}
-                        </span>
-                      </div>
-                    </div>
+          <div
+            ref={panelRef}
+            style={accentVars}
+            className="fixed sm:absolute left-1/2 sm:left-auto sm:right-0 top-16 sm:top-auto -translate-x-1/2 sm:translate-x-0 sm:mt-3 z-50 w-[min(92vw,320px)] bg-card border border-[var(--rb-accent-20)] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top sm:origin-top-right"
+          >
+            {/* Header — gradient wash + live count, tinted to the active module */}
+            <div className="relative px-4 py-3.5 border-b border-[var(--rb-accent-20)] bg-gradient-to-br from-[var(--rb-accent-10)] via-card to-card overflow-hidden">
+              <div
+                className="absolute -top-10 -right-10 w-32 h-32 rounded-full pointer-events-none"
+                style={{
+                  background: `radial-gradient(circle, ${accent}28 0%, transparent 70%)`,
+                }}
+              />
+              <div className="relative z-10 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-lg border border-[var(--rb-accent-30)] bg-[var(--rb-accent-10)] flex items-center justify-center shrink-0">
+                    <Bell size={13} className="text-[var(--rb-accent)]" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold tracking-wide text-foreground truncate">
+                      Reminders
+                    </p>
+                    <p className="text-[10px] text-muted-foreground truncate">
+                      {reminders.length} pending alert
+                      {reminders.length === 1 ? "" : "s"}
+                    </p>
                   </div>
                 </div>
-              ))
-            )}
+                <button
+                  onClick={() => {
+                    if (!isLocked) refresh(true);
+                  }}
+                  disabled={loading || isLocked}
+                  className={`p-1.5 rounded-lg transition-all active:scale-90 shrink-0 ${
+                    isLocked
+                      ? "bg-red-500/10 text-red-400"
+                      : "text-muted-foreground hover:bg-[var(--rb-accent-10)] hover:text-[var(--rb-accent)]"
+                  }`}
+                >
+                  {isLocked ? (
+                    <Lock size={14} />
+                  ) : (
+                    <RefreshCw
+                      size={14}
+                      className={loading ? "animate-spin-full text-[var(--rb-accent)]" : ""}
+                    />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Filter tabs */}
+            <div className="border-b border-[var(--rb-accent-20)] bg-muted/5 px-2 py-2 flex items-center gap-1.5">
+              {/* Left pointer — own circular chip, dims instead of disappearing
+                  so the row never visually shifts as you scroll */}
+              <button
+                type="button"
+                onClick={() => scrollTabs(-1)}
+                disabled={!canScrollLeft}
+                className={`shrink-0 w-6 h-6 rounded-full border flex items-center justify-center transition-all ${
+                  canScrollLeft
+                    ? "bg-card border-[var(--rb-accent-30)] text-[var(--rb-accent)] hover:bg-[var(--rb-accent-10)] active:scale-90"
+                    : "bg-transparent border-border/40 text-muted-foreground/30 cursor-default"
+                }`}
+              >
+                <ChevronLeft size={13} />
+              </button>
+
+              <div
+                ref={tabsRef}
+                className="flex-1 flex gap-1.5 overflow-x-auto no-scrollbar"
+              >
+                {[
+                  "all",
+                  "purchase_order",
+                  "work_order",
+                  "grn",
+                  "cheque",
+                  "tds",
+                  "emi_installment",
+                  "material_request",
+                ].map((t) => {
+                  const active = filter === t;
+                  return (
+                    <button
+                      key={t}
+                      onClick={() => setFilter(t)}
+                      className={`shrink-0 px-3 py-1.5 text-[10.5px] font-bold rounded-full border transition-all duration-150 ${
+                        active
+                          ? "bg-[var(--rb-accent)] text-white border-[var(--rb-accent)] shadow-sm"
+                          : "bg-background text-muted-foreground border-border hover:border-[var(--rb-accent-30)] hover:text-[var(--rb-accent)]"
+                      }`}
+                    >
+                      {t === "all" ? "All" : TYPE_META[t]?.label || t.toUpperCase()}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Right pointer */}
+              <button
+                type="button"
+                onClick={() => scrollTabs(1)}
+                disabled={!canScrollRight}
+                className={`shrink-0 w-6 h-6 rounded-full border flex items-center justify-center transition-all ${
+                  canScrollRight
+                    ? "bg-card border-[var(--rb-accent-30)] text-[var(--rb-accent)] hover:bg-[var(--rb-accent-10)] active:scale-90"
+                    : "bg-transparent border-border/40 text-muted-foreground/30 cursor-default"
+                }`}
+              >
+                <ChevronRight size={13} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto max-h-[60vh] sm:max-h-[400px]">
+              {filtered.length === 0 ? (
+                <div className="py-12 px-4 text-center">
+                  <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
+                    <Bell size={18} className="text-emerald-500/60" />
+                  </div>
+                  <p className="text-xs font-semibold text-foreground">
+                    All caught up
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    No alerts to show right now.
+                  </p>
+                </div>
+              ) : (
+                <div className="p-2 space-y-1.5">
+                  {filtered.map((r) => {
+                    const meta = TYPE_META[r.type];
+                    const overdue = r.urgency === "overdue";
+                    return (
+                      <div
+                        key={r.id}
+                        onClick={() => {
+                          setOpen(false);
+                          navigate(r.path);
+                        }}
+                        className="group relative flex gap-3 p-3 rounded-xl border border-transparent hover:border-[var(--rb-accent-30)] hover:bg-muted/40 hover:shadow-sm transition-all cursor-pointer"
+                      >
+                        <div
+                          className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-current/10 ${meta?.color ?? "text-muted-foreground"} transition-transform group-hover:scale-110`}
+                        >
+                          {React.createElement(meta?.icon || Package, {
+                            size: 15,
+                          })}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex justify-between gap-2 items-baseline">
+                            <span className="truncate font-bold text-[11px] text-foreground group-hover:text-[var(--rb-accent)] transition-colors">
+                              {r.title}
+                            </span>
+                            {r.amount && (
+                              <span className="text-emerald-600 text-[11px] font-bold shrink-0">
+                                ₹{r.amount.toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                            {r.subtitle}
+                          </p>
+                          <div className="mt-2 flex gap-1.5 items-center flex-wrap">
+                            <span
+                              className={`inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                                overdue
+                                  ? "bg-red-500/10 text-red-600"
+                                  : "bg-amber-500/10 text-amber-600"
+                              }`}
+                            >
+                              <span
+                                className={`w-1 h-1 rounded-full ${overdue ? "bg-red-500" : "bg-amber-500"}`}
+                              />
+                              {formatRelative(r.dueDate)}
+                            </span>
+                            <span className="text-[9px] text-muted-foreground/60 font-medium">
+                              {formatDate(r.dueDate)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   );

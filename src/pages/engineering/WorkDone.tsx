@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -1361,47 +1362,39 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
           { label: "Work Done" },
         ]}
       />
-      <div className="relative space-y-8 mt-6">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            {view === "form" && (
-              <button
-                onClick={closeForm}
-                className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-              >
-                <ArrowLeft size={16} />
-              </button>
-            )}
-            <div>
-              <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-                <span className="p-1.5 rounded-lg bg-orange-500/10 inline-flex shrink-0">
-                  <Hammer size={18} className="text-orange-600" />
-                </span>
-                {view === "form"
-                  ? editRecord
-                    ? `Edit — ${editRecord.DocNo || "Work Done"}`
-                    : "New Work Done Entry"
-                  : "Work Done"}
-              </h1>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {view === "form"
-                  ? "Fill in the document details and work information"
-                  : "Record and certify contractor work completion"}
-              </p>
-            </div>
-          </div>
-
-          {view === "list" && (
+      {view === "form" && (
+        <button
+          onClick={closeForm}
+          className="mb-2 inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-muted transition-colors text-xs text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft size={14} /> Back
+        </button>
+      )}
+      <EngineeringShell
+        title={
+          view === "form"
+            ? editRecord
+              ? `Edit — ${editRecord.DocNo || "Work Done"}`
+              : "New Work Done Entry"
+            : "Work Done"
+        }
+        subtitle={
+          view === "form"
+            ? "Fill in the document details and work information"
+            : "Record and certify contractor work completion"
+        }
+        icon={Hammer}
+        action={
+          view === "list" && (
             <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={() => refetch()}
                 disabled={isFetching}
-                className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+                className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-all duration-200 active:scale-90 disabled:opacity-50"
               >
                 <RefreshCw
                   size={13}
-                  className={isFetching ? "animate-spin" : ""}
+                  className={`transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`}
                 />
                 Refresh
               </button>
@@ -1415,9 +1408,9 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                 </Button>
               )}
             </div>
-          )}
-        </div>
-
+          )
+        }
+      >
         {view === "list" ? (
           <>
             {/* Summary strip */}
@@ -1668,7 +1661,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
             </div>
           </div>
         )}
-      </div>
+      </EngineeringShell>
     </>
   );
 }

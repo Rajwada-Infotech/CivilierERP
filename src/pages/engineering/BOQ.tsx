@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { type DbItem } from "@/api/itemMasterApi";
 import { type DbActivity } from "@/api/activityMasterApi";
@@ -2533,30 +2534,20 @@ export default function BOQ() {
 
       {/* ── List page ── */}
       {!showForm && !viewRecord && (
-        <div className="relative space-y-8 mt-6">
-          {/* Page header */}
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-                <span className="p-1.5 rounded-lg bg-primary/10 inline-flex shrink-0">
-                  <FileText size={18} className="text-primary" />
-                </span>
-                Bill of Quantities
-              </h1>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Manage material items and work activities with structured cost
-                estimation
-              </p>
-            </div>
+        <EngineeringShell
+          title="Bill of Quantities"
+          subtitle="Manage material items and work activities with structured cost estimation"
+          icon={FileText}
+          action={
             <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={() => loadList()}
                 disabled={loading}
-                className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+                className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-all duration-200 active:scale-90 disabled:opacity-50"
               >
                 <RefreshCw
                   size={13}
-                  className={loading ? "animate-spin" : ""}
+                  className={`transition-transform duration-500 ${loading ? "animate-spin" : "group-hover:rotate-180"}`}
                 />
                 Refresh
               </button>
@@ -2572,8 +2563,8 @@ export default function BOQ() {
                 </Button>
               )}
             </div>
-          </div>
-
+          }
+        >
           {/* Stat cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {stats.map((s) => (
@@ -2689,7 +2680,7 @@ export default function BOQ() {
               )}
             </CardContent>
           </Card>
-        </div>
+        </EngineeringShell>
       )}
     </>
   );

@@ -1,18 +1,11 @@
-import {
-  BarChart3,
-  Receipt,
-  ClipboardList,
-  ArrowLeftRight,
-  Repeat2,
-  FilePenLine,
-} from "lucide-react";
+import { Chart2, Receipt21, ClipboardText, ArrowSwapHorizontal, Repeat, Edit2 } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const materialNavItems: NavItem[] = [
-  { label: "Proceeding", icon: BarChart3, path: "/material", pageKey: "material-dashboard", isDashboard: true },
+  { label: "Proceeding", icon: Chart2, path: "/material", pageKey: "material-dashboard", isDashboard: true },
   {
     label: "Transaction",
-    icon: Receipt,
+    icon: Receipt21,
     children: [
       { label: "Material Request", path: "/material/material-request", pageKey: "material-request" },
       { label: "Purchase Order",   path: "/material/purchase-order",   pageKey: "purchase-orders" },
@@ -22,8 +15,8 @@ export const materialNavItems: NavItem[] = [
       { label: "Invoice",          path: "/material/expense-booking",  pageKey: "expense-booking" },
     ],
   },
-  { label: "Stock",          icon: ArrowLeftRight, path: "/material/stock",          pageKey: "stock-ledger" },
-  { label: "Transfer",       icon: Repeat2,        path: "/material/stock-transfer", pageKey: "stock-transfers" },
-  { label: "Debit Note",     icon: ClipboardList,  path: "/material/debit-note",     pageKey: "debit-note" },
-  { label: "Amendment Menu", icon: FilePenLine,    path: "/material/amendment-menu", pageKey: "amendments" },
+  { label: "Stock",          icon: ArrowSwapHorizontal, path: "/material/stock",          pageKey: "stock-ledger" },
+  { label: "Transfer",       icon: Repeat,        path: "/material/stock-transfer", pageKey: "stock-transfers" },
+  { label: "Debit Note",     icon: ClipboardText,  path: "/material/debit-note",     pageKey: "debit-note" },
+  { label: "Amendment", icon: Edit2,    path: "/material/amendment-menu", pageKey: "amendments" },
 ];

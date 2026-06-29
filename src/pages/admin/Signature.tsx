@@ -2,6 +2,7 @@ import React, { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -141,21 +142,11 @@ export default function Signature() {
   return (
     <>
       <Breadcrumbs items={["Admin", "Signatures"]} />
-      <div className="space-y-8 mt-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
-              <PenLine size={17} className="text-primary" />
-            </div>
-            <div>
-              <h1 className="text-xl font-heading font-bold text-foreground">
-                Digital Signatures
-              </h1>
-              <p className="text-xs font-body text-muted-foreground mt-0.5">
-                Manage signatures used for document approvals
-              </p>
-            </div>
-          </div>
+      <AdminShell
+        title="Digital Signatures"
+        subtitle="Manage signatures used for document approvals"
+        icon={PenLine}
+        action={
           <div className="flex items-center gap-2 text-xs font-body text-muted-foreground">
             <span className="px-2.5 py-1 rounded-full bg-muted border border-border">
               {signatures.length} total
@@ -164,8 +155,8 @@ export default function Signature() {
               {activeCount} active
             </span>
           </div>
-        </div>
-
+        }
+      >
         <div className="rounded-2xl border border-border bg-card overflow-hidden">
           <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
             {isEditing ? (
@@ -462,7 +453,7 @@ export default function Signature() {
             </div>
           )}
         </div>
-      </div>
+      </AdminShell>
     </>
   );
 }

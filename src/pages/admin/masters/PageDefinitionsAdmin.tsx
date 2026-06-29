@@ -13,6 +13,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import {
   LayoutGrid,
   Plus,
@@ -346,39 +347,30 @@ export default function PageDefinitionsAdmin() {
         ]}
       />
 
-      <div className="relative space-y-6 mt-6">
-        {/* ── Header ── */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <LayoutGrid className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-heading font-bold text-foreground leading-none">
-                  Page Definitions
-                </h1>
-                {isFetching && !isLoading && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
-                    <RefreshCw size={10} className="animate-spin" /> Syncing…
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Manage which pages appear in Menu Rights without a code deploy
-              </p>
-            </div>
-          </div>
-          {rights.canCreate && (
+      <AdminShell
+        title="Page Definitions"
+        subtitle={
+          <>
+            Manage which pages appear in Menu Rights without a code deploy
+            {isFetching && !isLoading && (
+              <span className="inline-flex items-center gap-1 ml-2 text-[10px] font-medium text-muted-foreground">
+                <RefreshCw size={10} className="animate-spin" /> Syncing…
+              </span>
+            )}
+          </>
+        }
+        icon={LayoutGrid}
+        action={
+          rights.canCreate && (
             <button
               onClick={openAdd}
               className="gradient-accent inline-flex items-center gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 rounded-lg h-auto transition"
             >
               <Plus size={13} /> Add Page
             </button>
-          )}
-        </div>
-
+          )
+        }
+      >
         {/* ── Stats ── */}
         <div className="grid grid-cols-3 gap-3">
           {[
@@ -560,8 +552,7 @@ export default function PageDefinitionsAdmin() {
             </table>
           )}
         </div>
-      </div>
-      {/* end space-y-6 wrapper */}
+      </AdminShell>
 
       {/* ── Add / Edit Drawer ── */}
       {drawerOpen && (

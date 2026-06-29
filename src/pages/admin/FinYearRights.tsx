@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { useFinYear, type FinYear } from "@/contexts/FinYearContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import {
@@ -214,30 +215,23 @@ export default function FinYearRights() {
     <>
       <Breadcrumbs items={["Admin", "Rights", "Fin Year Rights"]} />
 
-      <div className="relative space-y-6 mt-6">
-
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-            <Calendar size={22} className="text-primary" />
-            Financial Year Rights
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Manage financial years, dates, and lock status
-          </p>
-        </div>
-
-        {rights.canCreate && (
-          <button
-            onClick={openAddDialog}
-            disabled={isLoading}
-            className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-50"
-          >
-            <Plus size={15} />
-            New Financial Year
-          </button>
-        )}
-      </div>
+      <AdminShell
+        title="Financial Year Rights"
+        subtitle="Manage financial years, dates, and lock status"
+        icon={Calendar}
+        action={
+          rights.canCreate && (
+            <button
+              onClick={openAddDialog}
+              disabled={isLoading}
+              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-50"
+            >
+              <Plus size={15} />
+              New Financial Year
+            </button>
+          )
+        }
+      >
 
       <Dialog
         open={showDialog}
@@ -531,7 +525,7 @@ export default function FinYearRights() {
         </AlertDialogContent>
       </AlertDialog>
 
-      </div>
+      </AdminShell>
     </>
   );
 }

@@ -84,7 +84,7 @@ async function fetchEmiReminders(): Promise<ReminderItem[]> {
           dueDate: inst.dueDate,
           urgency,
           amount: inst.amount,
-          path: "/material/expense-booking",
+          path: `/material/expense-booking?view=${row.Eid}`,
         });
       }
     }
@@ -124,7 +124,7 @@ async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
           subtitle: `${r.ProjectName || r.CompanyName || "Material Request"} · ${r.Status} · ${r.Priority || "Normal"} priority`,
           dueDate,
           urgency,
-          path: "/material/material-request",
+          path: `/material/material-request?view=${r.MRId}`,
         };
       });
   } catch {
@@ -193,6 +193,35 @@ export async function fetchAllReminders(
     maybeFetch("/api/work-orders", "work_order"),
   ]);
 
+  // PO/GRN reminders are a "this still needs action" nudge — once the
+  // record is Approved, or a payment has already gone out against it (via
+  // a linked Expense Booking with EBillStatus 'Paid'/'Partially Paid'),
+  // there's nothing left to chase, so it should drop off the list instead
+  // of lingering indefinitely.
+  const paidOffSources = new Set<string>();
+  try {
+    const ebRes = await fetchWithAuth("/api/expense-booking?limit=200");
+    if (ebRes.ok) {
+      const ebRaw = await ebRes.json();
+      const ebList: any[] = Array.isArray(ebRaw) ? ebRaw : (ebRaw.data ?? []);
+      for (const eb of ebList) {
+        const billStatus = String(eb.EBillStatus || eb.billStatus || "").toLowerCase();
+        if (billStatus !== "paid" && billStatus !== "partially paid") continue;
+        const sourceType = String(eb.ESourceType || eb.eSourceType || "").toUpperCase();
+        const sourceId = eb.ESourceId ?? eb.eSourceId;
+        if (!sourceId) continue;
+        if (sourceType === "PO" || sourceType === "WO_PO") {
+          paidOffSources.add(`purchase_order-${sourceId}`);
+        } else if (sourceType === "GRN") {
+          paidOffSources.add(`grn-${sourceId}`);
+        }
+      }
+    }
+  } catch {
+    // Best-effort — if this fails, PO/GRN reminders just fall back to the
+    // Status-only check below rather than blocking the whole bell.
+  }
+
   const items: ReminderItem[] = [];
   const process = async (
     res: PromiseSettledResult<Response | null>,
@@ -214,7 +243,19 @@ export async function fetchAllReminders(
         const recordId = obj[idKey];
         if (!d || !recordId) return;
 
+        // PO/GRN: once approved or already paid off, this no longer needs
+        // chasing — skip it instead of letting it linger forever.
+        if (type === "purchase_order" || type === "grn") {
+          const status = String(obj.Status || "").toLowerCase();
+          if (status === "approved") return;
+          if (paidOffSources.has(`${type}-${recordId}`)) return;
+        }
+
         const urgency = classifyUrgency(d);
+
+        // PO/GRN pages support `?view=<id>` deep-linking; cheque/TDS/work
+        // order pages don't yet, so they keep landing on the plain list.
+        const deepLinkable = type === "purchase_order" || type === "grn";
 
         items.push({
           id: `${type}-${recordId}`,
@@ -224,7 +265,7 @@ export async function fetchAllReminders(
           dueDate: d,
           urgency,
           amount: obj.TotalAmount || obj.TDSAmount || obj.Amount,
-          path: `${route}`,
+          path: deepLinkable ? `${route}?view=${recordId}` : route,
         });
       });
     }

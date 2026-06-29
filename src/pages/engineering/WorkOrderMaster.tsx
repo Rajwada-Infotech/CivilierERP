@@ -7,6 +7,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import {
   Plus,
   Trash2,
@@ -4278,22 +4279,11 @@ const WorkOrderMaster: React.FC = () => {
       `}</style>
       <Breadcrumbs items={["Engineering", "Transaction", "Work Order"]} />
 
-      {/* Page header */}
-      <div className="relative space-y-8 mt-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-              <span className="p-1.5 rounded-lg bg-violet-500/10 inline-flex shrink-0">
-                <ClipboardList size={18} className="text-violet-500" />
-              </span>
-              Work Order
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5 hidden sm:block">
-              Create and manage work orders with activity-based cost breakdown
-            </p>
-          </div>
-
-          {/* Tab switcher + action buttons */}
+      <EngineeringShell
+        title="Work Order"
+        subtitle="Create and manage work orders with activity-based cost breakdown"
+        icon={ClipboardList}
+        action={
           <div className="flex items-center gap-2 shrink-0">
             {/* Tab toggle */}
             <div className="flex items-center rounded-lg border border-border bg-muted/30 p-0.5">
@@ -4360,8 +4350,8 @@ const WorkOrderMaster: React.FC = () => {
               </>
             )}
           </div>
-        </div>
-
+        }
+      >
         {/* ── VIEW ALL ── */}
         {viewMode === "list" && (
           <WorkOrdersList
@@ -5062,7 +5052,7 @@ const WorkOrderMaster: React.FC = () => {
             </div>
           </>
         )}
-      </div>
+      </EngineeringShell>
     </>
   );
 };

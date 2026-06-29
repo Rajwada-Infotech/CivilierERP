@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import {
@@ -121,31 +122,25 @@ export default function PasswordReset() {
       <Breadcrumbs
         items={["Dashboard", "Admin", "Security", "Password Reset"]}
       />
-      <div className="relative space-y-6 mt-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-              <Shield size={20} className="text-primary" />
-            </div>
-            <div>
-              <h1 className="text-xl font-heading font-semibold text-foreground">
-                Password Reset
-              </h1>
-              <p className="text-xs text-muted-foreground">
-                Manage and reset user passwords from here
-              </p>
-            </div>
-          </div>
+      <AdminShell
+        title="Password Reset"
+        subtitle="Manage and reset user passwords from here"
+        icon={Shield}
+        action={
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-all duration-200 active:scale-90 disabled:opacity-50"
             title="Refresh"
           >
-            <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
+            <RefreshCw
+              size={13}
+              className={`transition-transform duration-500 ${refreshing ? "animate-spin" : "group-hover:rotate-180"}`}
+            />
             {refreshing ? "Loading…" : "Refresh"}
           </button>
-        </div>
+        }
+      >
 
         {/* Search */}
         <div className="relative max-w-sm">
@@ -239,7 +234,7 @@ export default function PasswordReset() {
             </div>
           ))}
         </div>
-      </div>
+      </AdminShell>
 
       {/* Reset Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

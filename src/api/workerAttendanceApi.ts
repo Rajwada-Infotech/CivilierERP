@@ -61,6 +61,7 @@ export interface MarkAttendancePayload {
 }
 
 export const getWorkers = async (filters?: {
+  companyId?: number;
   projectId?: number;
   contractorId?: number;
   activityId?: number;
@@ -69,6 +70,7 @@ export const getWorkers = async (filters?: {
   pageSize?: number;
 }): Promise<WorkerListResponse> => {
   const params = new URLSearchParams();
+  if (filters?.companyId) params.set("companyId", String(filters.companyId));
   if (filters?.projectId) params.set("projectId", String(filters.projectId));
   if (filters?.contractorId) params.set("contractorId", String(filters.contractorId));
   if (filters?.activityId) params.set("activityId", String(filters.activityId));

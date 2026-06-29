@@ -78,6 +78,7 @@ interface DbPayment {
   PProject: string | null;
   PProjectName?: string | null;
   PCompany: string | null;
+  PSupplierName?: string | null;
   PExpenseRef: string | null;
   DocNo?: string | null;
   ParentDocNo?: string | null;
@@ -194,6 +195,7 @@ interface GRNRef {
 interface PaymentRecord {
   id: string;
   paymentName: string;
+  paidTo: string;
   mode: string;
   amount: number | null;
   date: string;
@@ -589,6 +591,7 @@ function dbToRecord(item: DbPayment): PaymentRecord {
   return {
     id: String(item.PPaymentID),
     paymentName: item.PPaymentName || "",
+    paidTo: item.PSupplierName || "",
     mode: item.PMode || "",
     amount: item.PAmount ?? null,
     date: item.PDate?.slice(0, 10) || "",
@@ -1416,7 +1419,8 @@ function PaymentGRNBadges({ expenseId }: { expenseId: string }) {
 
 const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Doc No", accessor: "docNo" },
-  { header: "Payment Name", accessor: "paymentName" },
+  { header: "Payment Purpose", accessor: "paymentName" },
+  { header: "Paid To", accessor: "paidTo" },
   { header: "Expense Ref", accessor: "expenseRef" },
   { header: "Project", accessor: "project" },
   { header: "Company", accessor: "company" },
@@ -2164,7 +2168,8 @@ const Payment: React.FC = () => {
 
     const paymentRows = [
       field("Payment Ref", rec.docNo || "—"),
-      field("Payment Name", rec.paymentName),
+      field("Payment Purpose", rec.paymentName),
+      field("Paid To", rec.paidTo),
       field("Date", rec.date || "—"),
       field("Mode", rec.mode || "—"),
       field("Bank Account", rec.bankName || null),
@@ -2811,7 +2816,7 @@ const Payment: React.FC = () => {
 
   const validate = (): boolean => {
     if (!form.paymentName.trim()) {
-      toast.error("Payment name is required.");
+      toast.error("Payment purpose is required.");
       return false;
     }
     if (!form.mode) {
@@ -3475,7 +3480,7 @@ const Payment: React.FC = () => {
                   </div>
                 )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field label="Payment Name" required>
+                  <Field label="Payment Purpose" required>
                     <input
                       type="text"
                       value={form.paymentName}
@@ -4583,6 +4588,11 @@ const Payment: React.FC = () => {
                         </span>
                         <ModeBadge mode={rec.mode} />
                       </div>
+                      {rec.paidTo && (
+                        <p className="text-xs text-muted-foreground truncate">
+                          Paid to <span className="text-foreground font-medium">{rec.paidTo}</span>
+                        </p>
+                      )}
                       {rec.docNo && (
                         <span className="inline-block font-mono text-[11px] bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2 py-0.5 rounded-md">
                           {rec.docNo}
@@ -4663,7 +4673,7 @@ const Payment: React.FC = () => {
                     <thead>
                       <tr className="bg-muted/30 border-b border-border">
                         <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
-                          Payment
+                          Payment Purpose
                         </th>
                         <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[14%]">
                           Doc No
@@ -4711,11 +4721,16 @@ const Payment: React.FC = () => {
                           key={rec.id}
                           className="hover:bg-muted/20 transition-colors"
                         >
-                          {/* Payment name + date stacked */}
+                          {/* Payment purpose + paid-to + date stacked */}
                           <td className="px-4 py-2.5">
                             <p className="font-heading font-medium text-foreground text-xs truncate max-w-[180px]">
                               {rec.paymentName || "—"}
                             </p>
+                            {rec.paidTo && (
+                              <p className="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[180px]">
+                                Paid to <span className="text-foreground/80">{rec.paidTo}</span>
+                              </p>
+                            )}
                             <p className="text-[10px] text-muted-foreground mt-0.5">
                               {rec.date || "—"}
                             </p>
@@ -5148,7 +5163,8 @@ const Payment: React.FC = () => {
               {/* Grid of fields */}
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { label: "Payment Name", value: viewingRec.paymentName },
+                  { label: "Payment Purpose", value: viewingRec.paymentName },
+                  { label: "Paid To", value: viewingRec.paidTo || "—" },
                   { label: "Amount", value: formatINR(viewingRec.amount ?? 0) },
                   { label: "Date", value: viewingRec.date || "—" },
                   { label: "Mode", value: viewingRec.mode || "—" },
