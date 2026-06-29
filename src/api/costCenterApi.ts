@@ -8,6 +8,8 @@ export interface CostCenterRow {
   Name: string;
   Description: string | null;
   IsActive: boolean;
+  ProjectId: number | null;
+  ProjectName: string | null;
   GLAccountCount: number;
   GLAccountIds: string | null; // comma-separated LHeadIds
   GLAccountNames: string | null; // comma-separated names, for display
@@ -18,6 +20,7 @@ export interface CostCenterPayload {
   Name: string;
   Description?: string | null;
   IsActive?: boolean;
+  ProjectId?: number | null;
   GLAccountIds?: string[];
 }
 

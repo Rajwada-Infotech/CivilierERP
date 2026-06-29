@@ -11,6 +11,7 @@ import { GLAccountMultiSelect } from "@/components/finance/GLAccountMultiSelect"
 import { usePageRights } from "@/hooks/usePageRights";
 import { toast } from "sonner";
 import { TrendingUp, Loader2 } from "lucide-react";
+import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import {
   getProfitCenters,
   addProfitCenter,
@@ -25,10 +26,17 @@ const mapRow = (row: ProfitCenterRow): Record<string, unknown> => ({
   Name: row.Name,
   Description: row.Description ?? "",
   IsActive: Boolean(row.IsActive),
+  ProjectId: row.ProjectId ? String(row.ProjectId) : "",
+  ProjectName: row.ProjectName ?? "",
   GLAccountIds: row.GLAccountIds ? row.GLAccountIds.split(",") : [],
   GLAccountNames: row.GLAccountNames ?? "",
   GLAccountCount: row.GLAccountCount ?? 0,
 });
+
+const fetchProjectOptions = async () => {
+  const opts = await getEnterpriseOptions(undefined, "P");
+  return opts.map((o) => ({ value: String(o.id), label: o.label }));
+};
 
 const ProfitCenterMaster: React.FC = () => {
   const rights = usePageRights("profit-center");
@@ -49,6 +57,13 @@ const ProfitCenterMaster: React.FC = () => {
   const fields: FieldDef[] = [
     { name: "Code", label: "Code", type: "text", required: true, uppercase: true },
     { name: "Name", label: "Name", type: "text", required: true },
+    {
+      name: "ProjectId",
+      label: "Project",
+      type: "select",
+      asyncOptions: fetchProjectOptions,
+      placeholder: "Company-wide (no project)",
+    },
     {
       name: "Description",
       label: "Description",
@@ -71,6 +86,7 @@ const ProfitCenterMaster: React.FC = () => {
   const columns: ColumnDef[] = [
     { key: "Code", label: "Code" },
     { key: "Name", label: "Name" },
+    { key: "ProjectName", label: "Project", hideOnMobile: true },
     { key: "GLAccountNames", label: "GL Accounts" },
     { key: "Description", label: "Description", hideOnMobile: true },
     { key: "IsActive", label: "Status" },
@@ -103,6 +119,11 @@ const ProfitCenterMaster: React.FC = () => {
         {value ? String(value) : "—"}
       </span>
     ),
+    ProjectName: (value: unknown) => (
+      <span className="text-xs text-muted-foreground">
+        {value ? String(value) : <span className="text-muted-foreground/50">Company-wide</span>}
+      </span>
+    ),
     IsActive: (value: unknown) => (
       <span
         className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
@@ -130,6 +151,7 @@ const ProfitCenterMaster: React.FC = () => {
           Name: String(record.Name ?? "").trim(),
           Description: String(record.Description ?? ""),
           IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
+          ProjectId: record.ProjectId ? Number(record.ProjectId) : null,
           GLAccountIds: (record.GLAccountIds as string[]) ?? [],
         });
         toast.success("Profit center added!");
@@ -141,6 +163,7 @@ const ProfitCenterMaster: React.FC = () => {
           Name: String(record.Name ?? "").trim(),
           Description: String(record.Description ?? ""),
           IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
+          ProjectId: record.ProjectId ? Number(record.ProjectId) : null,
           GLAccountIds: (record.GLAccountIds as string[]) ?? [],
         });
         toast.success("Profit center updated!");
@@ -187,6 +210,7 @@ const ProfitCenterMaster: React.FC = () => {
                     columns: [
                       { header: "Code", accessor: "Code" },
                       { header: "Name", accessor: "Name" },
+                      { header: "Project", accessor: (r) => String(r.ProjectName || "Company-wide") },
                       { header: "GL Accounts", accessor: "GLAccountNames" },
                       { header: "Description", accessor: "Description" },
                       {
