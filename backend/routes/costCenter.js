@@ -21,6 +21,7 @@ router.get("/", cache("cost-center", 300), async (req, res) => {
     const result = await pool.request().query(`
       SELECT
         cc.CostCenterId, cc.Code, cc.Name, cc.Description, cc.IsActive,
+        cc.ProjectId, ent.name AS ProjectName,
         cc.CreatedBy, cc.CreatedAt, cc.UpdatedBy, cc.UpdatedAt,
         (
           SELECT COUNT(*) FROM dbo.AccountHeadMaster ahm
@@ -37,6 +38,7 @@ router.get("/", cache("cost-center", 300), async (req, res) => {
           WHERE ahm.CostCenterId = cc.CostCenterId
         ) AS GLAccountNames
       FROM dbo.CostCenter cc
+      LEFT JOIN dbo.enterprise ent ON ent.id = cc.ProjectId
       ORDER BY cc.Name
     `);
     res.json(result.recordset);
@@ -80,7 +82,7 @@ async function syncGLTagging(pool, costCenterId, glAccountIds) {
 }
 
 router.post("/", requirePageRight("cost-center", "create"), async (req, res) => {
-  const { Code, Name, Description, IsActive, GLAccountIds } = req.body;
+  const { Code, Name, Description, IsActive, GLAccountIds, ProjectId } = req.body;
   if (!Code || !Name)
     return res.status(400).json({ error: "Code and Name are required" });
   try {
@@ -91,11 +93,12 @@ router.post("/", requirePageRight("cost-center", "create"), async (req, res) => 
       .input("Name", sql.NVarChar(200), Name)
       .input("Description", sql.NVarChar(500), Description || null)
       .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
+      .input("ProjectId", sql.Int, ProjectId || null)
       .input("CreatedBy", sql.NVarChar(150), req.user?.name || req.user?.email || null)
       .query(`
-        INSERT INTO dbo.CostCenter (Code, Name, Description, IsActive, CreatedBy, CreatedAt)
+        INSERT INTO dbo.CostCenter (Code, Name, Description, IsActive, ProjectId, CreatedBy, CreatedAt)
         OUTPUT INSERTED.CostCenterId
-        VALUES (@Code, @Name, @Description, @IsActive, @CreatedBy, SYSDATETIME())
+        VALUES (@Code, @Name, @Description, @IsActive, @ProjectId, @CreatedBy, SYSDATETIME())
       `);
     const newId = result.recordset[0].CostCenterId;
     await syncGLTagging(pool, newId, GLAccountIds);
@@ -109,7 +112,7 @@ router.post("/", requirePageRight("cost-center", "create"), async (req, res) => 
 });
 
 router.put("/:id", requirePageRight("cost-center", "edit"), async (req, res) => {
-  const { Code, Name, Description, IsActive, GLAccountIds } = req.body;
+  const { Code, Name, Description, IsActive, GLAccountIds, ProjectId } = req.body;
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
@@ -121,11 +124,12 @@ router.put("/:id", requirePageRight("cost-center", "edit"), async (req, res) => 
       .input("Name", sql.NVarChar(200), Name)
       .input("Description", sql.NVarChar(500), Description || null)
       .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
+      .input("ProjectId", sql.Int, ProjectId || null)
       .input("UpdatedBy", sql.NVarChar(150), req.user?.name || req.user?.email || null)
       .query(`
         UPDATE dbo.CostCenter
         SET Code = @Code, Name = @Name, Description = @Description,
-            IsActive = @IsActive, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
+            IsActive = @IsActive, ProjectId = @ProjectId, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
         WHERE CostCenterId = @CostCenterId
       `);
     await syncGLTagging(pool, id, GLAccountIds);
