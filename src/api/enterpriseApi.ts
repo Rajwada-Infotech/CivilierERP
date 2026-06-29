@@ -26,6 +26,8 @@ export interface Enterprise {
   pincode: string | null;
   email: string | null;
   phone_number: string | null;
+  gst_no?: string | null;
+  pan_no?: string | null;
   website: string | null;
   latitude: number | null;
   longitude: number | null;

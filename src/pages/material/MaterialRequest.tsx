@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import * as mrApi from "@/api/materialRequestApi";
 import {
   CalendarDays,
@@ -499,6 +500,17 @@ export default function MaterialRequest() {
     }
     setViewMode("view");
   };
+
+  // Deep-link support — Linked Documents panels elsewhere navigate here as
+  // /material/material-request?view=<MRId> to open this exact MR.
+  useEffect(() => {
+    const viewId = searchParams.get("view");
+    if (!viewId) return;
+    handleView({ MRId: Number(viewId) });
+    searchParams.delete("view");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onSave = () => {
     if (!canSave) {
@@ -1444,6 +1456,7 @@ export default function MaterialRequest() {
                 </div>
               </div>
             </div>
+            <DocumentChainPanel docType="mr" id={viewingRecord.MRId} />
           </CardContent>
         </Card>
 

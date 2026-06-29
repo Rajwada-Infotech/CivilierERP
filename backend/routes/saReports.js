@@ -1,0 +1,327 @@
+const express = require("express");
+const router = express.Router();
+const { getPool, sql } = require("../db");
+const { requirePageRight } = require("../middleware/requirePageRight");
+
+function dateRangeFilter(req, column) {
+  const clauses = [];
+  if (req.query.from) clauses.push(`${column} >= '${req.query.from}'`);
+  if (req.query.to) clauses.push(`${column} <= '${req.query.to}'`);
+  return clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+}
+
+// 1. Lead Source Report
+router.get("/lead-source", requirePageRight("sa-leads", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query(`
+      SELECT p.Name AS Platform, COUNT(l.Id) AS TotalLeads,
+        SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings,
+        SUM(CASE WHEN l.Status = 'Lost' THEN 1 ELSE 0 END) AS Lost
+      FROM dbo.SaSocialMediaPlatform p
+      LEFT JOIN dbo.SaLead l ON l.PlatformId = p.Id
+      GROUP BY p.Name
+      ORDER BY TotalLeads DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 2. Campaign Performance Report
+router.get("/campaign-performance", requirePageRight("sa-campaigns", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query(`
+      WITH ad_stats AS (
+        SELECT
+          a.CampaignId,
+          COUNT(*) AS TotalAds,
+          SUM(COALESCE(inv.InvoiceSpend, a.Spent, 0)) AS CostSpent
+        FROM dbo.SaAd a
+        OUTER APPLY (
+          SELECT SUM(i.TotalAmount) AS InvoiceSpend
+          FROM dbo.SaMarketingInvoice i
+          WHERE i.AdId = a.Id
+            AND i.IsActive = 1
+            AND i.PaymentStatus <> 'Cancelled'
+        ) inv
+        GROUP BY a.CampaignId
+      ),
+      lead_stats AS (
+        SELECT
+          l.CampaignId,
+          COUNT(*) AS TotalLeads,
+          SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings
+        FROM dbo.SaLead l
+        WHERE l.IsActive = 1
+        GROUP BY l.CampaignId
+      )
+      SELECT c.Id, c.CampaignCode, c.Name, c.Budget, c.Status,
+        ISNULL(a.TotalAds, 0) AS TotalAds,
+        ISNULL(l.TotalLeads, 0) AS TotalLeads,
+        ISNULL(a.CostSpent, 0) AS CostSpent,
+        ISNULL(l.Bookings, 0) AS Bookings,
+        CASE WHEN ISNULL(l.TotalLeads, 0) > 0
+          THEN CAST(ISNULL(l.Bookings, 0) AS FLOAT) / l.TotalLeads * 100
+          ELSE 0 END AS ConversionPct
+      FROM dbo.SaCampaign c
+      LEFT JOIN ad_stats a ON a.CampaignId = c.Id
+      LEFT JOIN lead_stats l ON l.CampaignId = c.Id
+      ORDER BY TotalLeads DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 3. Advertisement Performance Report
+router.get("/ad-performance", requirePageRight("sa-ads", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query(`
+      WITH lead_stats AS (
+        SELECT
+          l.AdId,
+          COUNT(*) AS LeadsGenerated,
+          SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings,
+          SUM(COALESCE(fb.TotalValue, fb.BookingAmount, 0)) AS RevenueGenerated
+        FROM dbo.SaLead l
+        LEFT JOIN dbo.FollowupBookings fb
+          ON fb.Id = l.BookingId
+         AND ISNULL(fb.IsDeleted, 0) = 0
+        WHERE l.IsActive = 1
+        GROUP BY l.AdId
+      ),
+      invoice_stats AS (
+        SELECT AdId, SUM(TotalAmount) AS InvoiceSpend
+        FROM dbo.SaMarketingInvoice
+        WHERE IsActive = 1
+          AND AdId IS NOT NULL
+          AND PaymentStatus <> 'Cancelled'
+        GROUP BY AdId
+      )
+      SELECT a.Id, a.Name, a.Status, a.Budget,
+        COALESCE(i.InvoiceSpend, a.Spent, 0) AS Spent,
+        c.Name AS CampaignName,
+        ISNULL(l.LeadsGenerated, 0) AS LeadsGenerated,
+        ISNULL(l.Bookings, 0) AS Bookings,
+        CASE WHEN ISNULL(l.LeadsGenerated, 0) > 0
+          THEN CAST(COALESCE(i.InvoiceSpend, a.Spent, 0) AS FLOAT) / l.LeadsGenerated
+          ELSE 0 END AS CostPerLead,
+        CASE WHEN ISNULL(l.LeadsGenerated, 0) > 0
+          THEN CAST(ISNULL(l.Bookings, 0) AS FLOAT) / l.LeadsGenerated * 100
+          ELSE 0 END AS ConversionRate,
+        ISNULL(l.RevenueGenerated, 0) AS RevenueGenerated,
+        CASE WHEN COALESCE(i.InvoiceSpend, a.Spent, 0) > 0
+          THEN (ISNULL(l.RevenueGenerated, 0) - COALESCE(i.InvoiceSpend, a.Spent, 0))
+            / COALESCE(i.InvoiceSpend, a.Spent, 0) * 100
+          ELSE 0 END AS RoiPercent
+      FROM dbo.SaAd a
+      LEFT JOIN dbo.SaCampaign c ON a.CampaignId = c.Id
+      LEFT JOIN lead_stats l ON l.AdId = a.Id
+      LEFT JOIN invoice_stats i ON i.AdId = a.Id
+      ORDER BY LeadsGenerated DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 4. Cost Per Lead Report
+router.get("/cost-per-lead", requirePageRight("sa-campaigns", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query(`
+      WITH campaign_spend AS (
+        SELECT
+          a.CampaignId,
+          SUM(COALESCE(inv.InvoiceSpend, a.Spent, 0)) AS TotalSpent
+        FROM dbo.SaAd a
+        OUTER APPLY (
+          SELECT SUM(i.TotalAmount) AS InvoiceSpend
+          FROM dbo.SaMarketingInvoice i
+          WHERE i.AdId = a.Id
+            AND i.IsActive = 1
+            AND i.PaymentStatus <> 'Cancelled'
+        ) inv
+        GROUP BY a.CampaignId
+      ),
+      campaign_leads AS (
+        SELECT CampaignId, COUNT(*) AS TotalLeads
+        FROM dbo.SaLead
+        WHERE IsActive = 1
+        GROUP BY CampaignId
+      )
+      SELECT c.Name AS CampaignName, c.CampaignCode,
+        ISNULL(s.TotalSpent, 0) AS TotalSpent,
+        ISNULL(l.TotalLeads, 0) AS TotalLeads,
+        CASE WHEN ISNULL(l.TotalLeads, 0) > 0 THEN ISNULL(s.TotalSpent, 0) / l.TotalLeads ELSE 0 END AS CostPerLead
+      FROM dbo.SaCampaign c
+      LEFT JOIN campaign_spend s ON s.CampaignId = c.Id
+      LEFT JOIN campaign_leads l ON l.CampaignId = c.Id
+      ORDER BY CostPerLead ASC
+    `);
+    res.json(r.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 5. Sales Performance Report
+router.get("/sales-performance", requirePageRight("sa-leads", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query(`
+      SELECT u.id AS UserId, u.name AS SalespersonName,
+        COUNT(DISTINCT l.Id) AS LeadsHandled,
+        COUNT(DISTINCT c.Id) AS CallsMade,
+        COUNT(DISTINCT v.Id) AS SiteVisits,
+        SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings
+      FROM dbo.Users u
+      INNER JOIN dbo.SaLead l ON l.AssignedSalespersonId = u.id
+      LEFT JOIN dbo.SaInquiryCall c ON c.SalespersonId = u.id
+      LEFT JOIN dbo.SaSiteVisit v ON v.ExecutiveId = u.id
+      GROUP BY u.id, u.name
+      ORDER BY Bookings DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 6. Team Leader Performance Report
+router.get("/team-leader-performance", requirePageRight("sa-lead-distribution", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query(`
+      SELECT u.id AS UserId, u.name AS TeamLeadName,
+        COUNT(DISTINCT l.Id) AS LeadsReceived,
+        SUM(CASE WHEN l.AssignedSalespersonId IS NOT NULL THEN 1 ELSE 0 END) AS LeadsDistributed,
+        SUM(CASE WHEN l.AssignedSalespersonId IS NULL THEN 1 ELSE 0 END) AS PendingDistribution,
+        SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS TeamBookings
+      FROM dbo.Users u
+      INNER JOIN dbo.SaLead l ON l.AssignedTeamLeadId = u.id
+      GROUP BY u.id, u.name
+      ORDER BY TeamBookings DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 7. Executive Performance Report (site-visit executives)
+router.get("/executive-performance", requirePageRight("sa-site-visits", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query(`
+      SELECT u.id AS UserId, u.name AS ExecutiveName,
+        COUNT(v.Id) AS VisitsAssigned,
+        SUM(CASE WHEN v.Status = 'Completed' THEN 1 ELSE 0 END) AS VisitsCompleted,
+        SUM(CASE WHEN v.Status = 'Cancelled' THEN 1 ELSE 0 END) AS VisitsCancelled
+      FROM dbo.Users u
+      INNER JOIN dbo.SaSiteVisit v ON v.ExecutiveId = u.id
+      WHERE v.IsActive = 1
+      GROUP BY u.id, u.name
+      ORDER BY VisitsCompleted DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 8. Inquiry Status Report
+router.get("/inquiry-status", requirePageRight("sa-inquiry", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query(`
+      SELECT l.Status, COUNT(*) AS Cnt
+      FROM dbo.SaLead l
+      WHERE l.IsActive = 1
+      GROUP BY l.Status
+    `);
+    res.json(r.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 9. Site Visit Report
+router.get("/site-visit", requirePageRight("sa-site-visits", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const filter = dateRangeFilter(req, "v.PreferredDate");
+    const r = await pool.request().query(`
+      SELECT v.Id, v.ProjectName, v.PreferredDate, v.Status, l.CustomerName, l.Mobile,
+        ex.name AS ExecutiveName
+      FROM dbo.SaSiteVisit v
+      JOIN dbo.SaLead l ON v.LeadId = l.Id
+      LEFT JOIN dbo.Users ex ON v.ExecutiveId = ex.id
+      ${filter}
+      ORDER BY v.PreferredDate DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 10. Booking Conversion Report
+router.get("/booking-conversion", requirePageRight("sa-leads", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query(`
+      SELECT c.Name AS CampaignName, c.CampaignCode,
+        COUNT(l.Id) AS TotalLeads,
+        SUM(CASE WHEN l.Status = 'VisitScheduled' OR l.Status = 'Visited' THEN 1 ELSE 0 END) AS Visited,
+        SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Booked,
+        CASE WHEN COUNT(l.Id) > 0
+          THEN CAST(SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS FLOAT) / COUNT(l.Id) * 100
+          ELSE 0 END AS ConversionPct
+      FROM dbo.SaCampaign c
+      LEFT JOIN dbo.SaLead l ON l.CampaignId = c.Id
+      GROUP BY c.Name, c.CampaignCode
+      ORDER BY ConversionPct DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 11. Marketing ROI Report
+router.get("/marketing-roi", requirePageRight("sa-campaigns", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query(`
+      WITH campaign_spend AS (
+        SELECT
+          a.CampaignId,
+          SUM(COALESCE(inv.InvoiceSpend, a.Spent, 0)) AS TotalSpent
+        FROM dbo.SaAd a
+        OUTER APPLY (
+          SELECT SUM(i.TotalAmount) AS InvoiceSpend
+          FROM dbo.SaMarketingInvoice i
+          WHERE i.AdId = a.Id
+            AND i.IsActive = 1
+            AND i.PaymentStatus <> 'Cancelled'
+        ) inv
+        GROUP BY a.CampaignId
+      ),
+      campaign_leads AS (
+        SELECT
+          l.CampaignId,
+          COUNT(*) AS TotalLeads,
+          SUM(CASE WHEN l.BookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings,
+          SUM(COALESCE(fb.TotalValue, fb.BookingAmount, 0)) AS RevenueGenerated
+        FROM dbo.SaLead l
+        LEFT JOIN dbo.FollowupBookings fb
+          ON fb.Id = l.BookingId
+         AND ISNULL(fb.IsDeleted, 0) = 0
+        WHERE l.IsActive = 1
+        GROUP BY l.CampaignId
+      )
+      SELECT c.Name AS CampaignName, c.CampaignCode, c.Budget,
+        ISNULL(s.TotalSpent, 0) AS TotalSpent,
+        ISNULL(l.TotalLeads, 0) AS TotalLeads,
+        ISNULL(l.Bookings, 0) AS Bookings,
+        ISNULL(l.RevenueGenerated, 0) AS RevenueGenerated,
+        CASE WHEN ISNULL(s.TotalSpent, 0) > 0
+          THEN (ISNULL(l.RevenueGenerated, 0) - ISNULL(s.TotalSpent, 0)) / ISNULL(s.TotalSpent, 0) * 100
+          ELSE 0 END AS RoiPercent
+      FROM dbo.SaCampaign c
+      LEFT JOIN campaign_spend s ON s.CampaignId = c.Id
+      LEFT JOIN campaign_leads l ON l.CampaignId = c.Id
+      ORDER BY RoiPercent DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+module.exports = router;

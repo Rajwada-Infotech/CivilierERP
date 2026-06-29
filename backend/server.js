@@ -88,6 +88,7 @@ const ALL_ROUTES = [
   { path: "/api/enterprises", file: "./routes/enterprise" },
   { path: "/api/entry-type", file: "./routes/entryType" },
   { path: "/api/expense-booking", file: "./routes/expenseBooking" },
+  { path: "/api/material-chain", file: "./routes/materialChain" },
   { path: "/api/amendments", file: "./routes/amendments" },
   { path: "/api/new-payment", file: "./routes/newPayment" },
   { path: "/api/received-payment", file: "./routes/receivedPayment" },
@@ -123,6 +124,7 @@ const ALL_ROUTES = [
   { path: "/api/work-progress", file: "./routes/workProgress" },
   { path: "/api/contractor-allocation", file: "./routes/contractorAllocation" },
   { path: "/api/daily-labour", file: "./routes/dailyLabour" },
+  { path: "/api/worker-attendance", file: "./routes/workerAttendance" },
   { path: "/api/activity-items", file: "./routes/activityItems" },
   { path: "/api/approval-workflows", file: "./routes/approvalWorkflows" },
   { path: "/api/approval-inbox", file: "./routes/approvalInbox" },
@@ -202,6 +204,17 @@ const ALL_ROUTES = [
   { path: "/api/followup-communicator", file: "./routes/followupCommunicator" },
   { path: "/api/followup-audit-log", file: "./routes/followupAuditLog" },
   { path: "/api/followup-escalation", file: "./routes/followupEscalation" },
+  { path: "/api/sa/social-media", file: "./routes/saSocialMedia" },
+  { path: "/api/sa/campaigns", file: "./routes/saCampaigns" },
+  { path: "/api/sa/ads", file: "./routes/saAds" },
+  { path: "/api/sa/leads", file: "./routes/saLeads" },
+  { path: "/api/sa/lead-distribution", file: "./routes/saLeadDistribution" },
+  { path: "/api/sa/inquiry", file: "./routes/saInquiry" },
+  { path: "/api/sa/site-visits", file: "./routes/saSiteVisits" },
+  { path: "/api/sa/marketing-invoices", file: "./routes/saMarketingInvoices" },
+  { path: "/api/sa/dashboard", file: "./routes/saDashboard" },
+  { path: "/api/sa/reports", file: "./routes/saReports" },
+  { path: "/api/sa/distribution-rules", file: "./routes/saDistributionRules" },
 ];
 
 // ─── createApp ───────────────────────────────────────────────────────────────

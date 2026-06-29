@@ -13,6 +13,7 @@ import {
   Wrench,
   Archive,
   Pickaxe,
+  Megaphone,
 } from "lucide-react";
 import { useModule } from "@/contexts/ModuleContext";
 import { MODULE_DASHBOARD_ROUTES, Module } from "@/contexts/module.utils";
@@ -96,6 +97,15 @@ const MODULES = [
     bg: "rgba(245,158,11,0.22)",
     ringRgb: "245,158,11",
   },
+  {
+    id: "sales-automation" as Module,
+    icon: Megaphone,
+    label: "Sales Automation",
+    desc: "Campaigns, leads & bookings",
+    color: "#f59e0b",
+    bg: "rgba(245,158,11,0.22)",
+    ringRgb: "245,158,11",
+  },
 ];
 
 const ADMIN_MODULE = {
@@ -144,6 +154,7 @@ export const ModuleStrip: React.FC = () => {
     ticket:      ["ticket-dashboard", "tickets"],
     sales:       ["sale-order", "sale-invoice", "sales-payment"],
     civilworkdpr: ["civilworkdpr-dashboard"],
+    "sales-automation": ["sa-social-media", "sa-campaigns", "sa-ads", "sa-leads", "sa-lead-distribution", "sa-inquiry", "sa-site-visits", "sa-marketing-invoices"],
   };
 
   const userHasModuleAccess = (moduleId: string): boolean => {

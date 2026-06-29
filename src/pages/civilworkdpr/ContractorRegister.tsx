@@ -23,6 +23,7 @@ import {
   Printer,
   CheckCircle2,
   XCircle,
+  CircleDashed,
   UserPlus2,
   ChevronDown,
 } from "lucide-react";
@@ -56,6 +57,7 @@ import {
   getLocationUnits,
   getLocationRooms,
 } from "@/api/locationMasterApi";
+import { markAttendance } from "@/api/workerAttendanceApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
@@ -69,6 +71,14 @@ import {
 const ALLOC_STATUS_OPTIONS = ["Allocated", "In Progress", "Completed", "On Hold"];
 const SHIFT_OPTIONS = ["Day", "Night", "General"];
 const ATTENDANCE_OPTIONS = ["Present", "Absent", "Partial"];
+
+const STATUS_LABEL: Record<"P" | "A" | "H", string> = { P: "Present", A: "Absent", H: "Half Day" };
+const STATUS_BADGE_CLS: Record<"P" | "A" | "H", string> = {
+  P: "border-emerald-500/30 text-emerald-600 bg-emerald-500/10",
+  A: "border-red-500/30 text-red-600 bg-red-500/10",
+  H: "border-amber-500/30 text-amber-600 bg-amber-500/10",
+};
+const STATUS_PRINT_CLS: Record<"P" | "A" | "H", string> = { P: "present", A: "absent", H: "halfday" };
 
 const inputCls = (err?: boolean) =>
   `w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground ${
@@ -376,7 +386,8 @@ const ContractorRegister: React.FC = () => {
   // each allocation added gets its OWN worker roster. Adding a second
   // activity does not duplicate or carry over names from the first; saving
   // creates one DailyLabourEntry per allocation, each with its own list.
-  type RosterRow = { name: string; type: "Skilled" | "Unskilled"; present: boolean };
+  type AttendanceStatus = "P" | "A" | "H";
+  type RosterRow = { name: string; type: "Skilled" | "Unskilled"; status: AttendanceStatus };
 
   const [selectedAllocationIds, setSelectedAllocationIds] = useState<number[]>([]);
   const [pendingAllocationId, setPendingAllocationId] = useState("");
@@ -448,10 +459,10 @@ const ContractorRegister: React.FC = () => {
       .map((s) => s.trim())
       .filter(Boolean)
       .map((entry) => {
-        const m = entry.match(/^(.*)\(([PA])\)\s*$/);
+        const m = entry.match(/^(.*)\(([PAH])\)\s*$/);
         return m
-          ? { name: m[1].trim(), type, present: m[2] === "P" }
-          : { name: entry, type, present: true };
+          ? { name: m[1].trim(), type, status: m[2] as AttendanceStatus }
+          : { name: entry, type, status: "P" as AttendanceStatus };
       });
   };
 
@@ -476,18 +487,45 @@ const ContractorRegister: React.FC = () => {
     if (!pending.name.trim()) return;
     setAllocationRosters((prev) => ({
       ...prev,
-      [allocationId]: [...(prev[allocationId] || []), { name: pending.name.trim(), type: pending.type, present: true }],
+      [allocationId]: [...(prev[allocationId] || []), { name: pending.name.trim(), type: pending.type, status: "P" }],
     }));
     setPendingWorkerByAlloc((prev) => ({ ...prev, [allocationId]: { name: "", type: pending.type } }));
   };
 
-  const presentCountFor = (allocationId: number) => getRoster(allocationId).filter((r) => r.present).length;
+  const cycleStatus = (status: AttendanceStatus): AttendanceStatus =>
+    status === "P" ? "A" : status === "A" ? "H" : "P";
+
+  // Headcount on the entry counts anyone who showed up at all (full or half
+  // day) — only full absentees are excluded.
+  const presentCountFor = (allocationId: number) => getRoster(allocationId).filter((r) => r.status !== "A").length;
 
   const encodeRoster = (allocationId: number, type: "Skilled" | "Unskilled") =>
     getRoster(allocationId)
       .filter((r) => r.type === type && r.name.trim())
-      .map((r) => `${r.name.trim()} (${r.present ? "P" : "A"})`)
+      .map((r) => `${r.name.trim()} (${r.status})`)
       .join(", ") || null;
+
+  // Feeds the per-worker attendance history (Worker Attendance page) —
+  // best-effort, one upsert per roster row. Failures here don't block the
+  // Daily Labour save itself (that's the system of record for the day).
+  const syncWorkerAttendance = async (allocationId: number, roster: RosterRow[]) => {
+    const allocation = allocations.find((a) => a.id === allocationId);
+    if (!allocation || !labourForm.entryDate) return;
+    await Promise.allSettled(
+      roster
+        .filter((r) => r.name.trim())
+        .map((r) =>
+          markAttendance({
+            name: r.name.trim(),
+            contractorId: allocation.contractorId,
+            skillType: r.type,
+            allocationId,
+            date: labourForm.entryDate,
+            status: r.status,
+          }),
+        ),
+    );
+  };
 
   const handleSaveLabour = async () => {
     if (!validateLabour()) return;
@@ -499,24 +537,26 @@ const ContractorRegister: React.FC = () => {
         await updateDailyLabourEntry(labourEditingId, {
           ...labourForm,
           allocationId,
-          skilledLabourCount: roster.filter((r) => r.type === "Skilled" && r.present).length,
-          unskilledLabourCount: roster.filter((r) => r.type === "Unskilled" && r.present).length,
+          skilledLabourCount: roster.filter((r) => r.type === "Skilled" && r.status !== "A").length,
+          unskilledLabourCount: roster.filter((r) => r.type === "Unskilled" && r.status !== "A").length,
           skilledLabourNames: encodeRoster(allocationId, "Skilled"),
           unskilledLabourNames: encodeRoster(allocationId, "Unskilled"),
         });
+        await syncWorkerAttendance(allocationId, roster);
         toast.success("Labour entry updated ✓");
       } else {
         await Promise.all(
-          selectedAllocationIds.map((allocationId) => {
+          selectedAllocationIds.map(async (allocationId) => {
             const roster = getRoster(allocationId);
-            return addDailyLabourEntry({
+            await addDailyLabourEntry({
               ...labourForm,
               allocationId,
-              skilledLabourCount: roster.filter((r) => r.type === "Skilled" && r.present).length,
-              unskilledLabourCount: roster.filter((r) => r.type === "Unskilled" && r.present).length,
+              skilledLabourCount: roster.filter((r) => r.type === "Skilled" && r.status !== "A").length,
+              unskilledLabourCount: roster.filter((r) => r.type === "Unskilled" && r.status !== "A").length,
               skilledLabourNames: encodeRoster(allocationId, "Skilled"),
               unskilledLabourNames: encodeRoster(allocationId, "Unskilled"),
             });
+            await syncWorkerAttendance(allocationId, roster);
           }),
         );
         toast.success(
@@ -595,6 +635,7 @@ const ContractorRegister: React.FC = () => {
             th { background: #f2f2f2; }
             .present { color: #047857; font-weight: 600; }
             .absent { color: #b91c1c; font-weight: 600; }
+            .halfday { color: #b45309; font-weight: 600; }
           </style>
         </head>
         <body>
@@ -608,7 +649,7 @@ const ContractorRegister: React.FC = () => {
               ${rows
                 .map(
                   (r, i) =>
-                    `<tr><td>${i + 1}</td><td>${r.name}</td><td>${r.type}</td><td class="${r.present ? "present" : "absent"}">${r.present ? "Present" : "Absent"}</td></tr>`,
+                    `<tr><td>${i + 1}</td><td>${r.name}</td><td>${r.type}</td><td class="${STATUS_PRINT_CLS[r.status]}">${STATUS_LABEL[r.status]}</td></tr>`,
                 )
                 .join("")}
             </tbody>
@@ -1184,15 +1225,14 @@ const ContractorRegister: React.FC = () => {
                                   </NativeSelect>
                                   <button
                                     type="button"
-                                    onClick={() => updateRosterRow(allocationId, i, { present: !r.present })}
-                                    className={`inline-flex items-center justify-center gap-1 px-2.5 py-2 rounded-lg text-xs font-medium border shrink-0 whitespace-nowrap w-[104px] ${
-                                      r.present
-                                        ? "border-emerald-500/30 text-emerald-600 bg-emerald-500/10"
-                                        : "border-red-500/30 text-red-600 bg-red-500/10"
-                                    }`}
+                                    onClick={() => updateRosterRow(allocationId, i, { status: cycleStatus(r.status) })}
+                                    title="Click to cycle Present → Absent → Half Day"
+                                    className={`inline-flex items-center justify-center gap-1 px-2.5 py-2 rounded-lg text-xs font-medium border shrink-0 whitespace-nowrap w-[104px] ${STATUS_BADGE_CLS[r.status]}`}
                                   >
-                                    {r.present ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
-                                    {r.present ? "Present" : "Absent"}
+                                    {r.status === "P" && <CheckCircle2 size={13} />}
+                                    {r.status === "A" && <XCircle size={13} />}
+                                    {r.status === "H" && <CircleDashed size={13} />}
+                                    {STATUS_LABEL[r.status]}
                                   </button>
                                   <button
                                     type="button"
@@ -1320,12 +1360,12 @@ const ContractorRegister: React.FC = () => {
                         <p className="text-[10px] text-muted-foreground">{r.type}</p>
                       </div>
                       <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${
-                          r.present ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-600"
-                        }`}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${STATUS_BADGE_CLS[r.status]}`}
                       >
-                        {r.present ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
-                        {r.present ? "Present" : "Absent"}
+                        {r.status === "P" && <CheckCircle2 size={11} />}
+                        {r.status === "A" && <XCircle size={11} />}
+                        {r.status === "H" && <CircleDashed size={11} />}
+                        {STATUS_LABEL[r.status]}
                       </span>
                     </div>
                   ))}

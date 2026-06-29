@@ -5,7 +5,7 @@ import {
 import { NavItem } from "./SidebarPrimitives";
 
 export const followupNavItems: NavItem[] = [
-  { label: "Dashboard", icon: LayoutDashboard, path: "/followup", pageKey: "followup-dashboard" },
+  { label: "Dashboard", icon: LayoutDashboard, path: "/followup", pageKey: "followup-dashboard", isDashboard: true },
 
   {
     label: "Sales",

@@ -10,7 +10,7 @@ import {
 import { NavItem } from "./SidebarPrimitives";
 
 export const dbaNavItems: NavItem[] = [
-  { label: "DB Console", icon: Database, path: "/dba" },
+  { label: "DB Console", icon: Database, path: "/dba", isDashboard: true },
   {
     label: "Migrations",
     icon: Terminal,
