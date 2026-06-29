@@ -2,9 +2,11 @@ const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const authMiddleware = require("../middleware/auth");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, validate: false }));
+router.use(authMiddleware);
 const { getPool, sql } = require("../db");
 
 bumpCacheVersion("sa-marketing-invoices").catch(() => {});
@@ -28,10 +30,13 @@ router.get("/", cache("sa-marketing-invoices", 300), async (req, res) => {
         i.AdId, a.Name AS AdName,
         i.InvoiceDate, i.Amount, i.GstAmount, i.TotalAmount,
         i.DueDate, i.PaymentStatus, i.Notes, i.IsActive,
+        i.ApprovalStatus, i.ApprovedBy, i.ApprovedAt, i.ApprovalNotes,
+        approver.name AS ApproverName,
         i.CreatedAt, i.UpdatedAt
       FROM dbo.SaMarketingInvoice i
       LEFT JOIN dbo.SaCampaign c ON c.Id = i.CampaignId
       LEFT JOIN dbo.SaAd a ON a.Id = i.AdId
+      LEFT JOIN dbo.Users approver ON approver.id = i.ApprovedBy
       ORDER BY i.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -47,6 +52,7 @@ router.post("/", requirePageRight("sa-marketing-invoices", "create"), async (req
   const createdBy = req.user?.userId || null;
   if (!InvoiceNumber || !String(InvoiceNumber).trim())
     return res.status(400).json({ error: "Invoice Number is required" });
+  const computedTotal = (parseFloat(Amount) || 0) + (parseFloat(GstAmount) || 0);
   try {
     const pool = getPool();
     await pool.request()
@@ -57,6 +63,7 @@ router.post("/", requirePageRight("sa-marketing-invoices", "create"), async (req
       .input("InvoiceDate", sql.Date, InvoiceDate || null)
       .input("Amount", sql.Decimal(18, 2), Amount || 0)
       .input("GstAmount", sql.Decimal(18, 2), GstAmount || 0)
+      .input("TotalAmount", sql.Decimal(18, 2), computedTotal)
       .input("DueDate", sql.Date, DueDate || null)
       .input("PaymentStatus", sql.NVarChar(20), PaymentStatus || "Pending")
       .input("Notes", sql.NVarChar(sql.MAX), Notes || null)
@@ -64,10 +71,10 @@ router.post("/", requirePageRight("sa-marketing-invoices", "create"), async (req
       .input("CreatedBy", sql.Int, createdBy)
       .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
         INSERT INTO dbo.SaMarketingInvoice
-          (InvoiceNumber, VendorName, CampaignId, AdId, InvoiceDate, Amount, GstAmount,
+          (InvoiceNumber, VendorName, CampaignId, AdId, InvoiceDate, Amount, GstAmount, TotalAmount,
            DueDate, PaymentStatus, Notes, IsActive, CreatedBy, CreatedAt)
         VALUES
-          (@InvoiceNumber, @VendorName, @CampaignId, @AdId, @InvoiceDate, @Amount, @GstAmount,
+          (@InvoiceNumber, @VendorName, @CampaignId, @AdId, @InvoiceDate, @Amount, @GstAmount, @TotalAmount,
            @DueDate, @PaymentStatus, @Notes, @IsActive, @CreatedBy, @CreatedAt)
       `);
     await invalidateMarketingInvoiceDependents();
@@ -85,6 +92,7 @@ router.put("/:id", requirePageRight("sa-marketing-invoices", "edit"), async (req
   const { id } = req.params;
   const { InvoiceNumber, VendorName, CampaignId, AdId, InvoiceDate, Amount, GstAmount, DueDate, PaymentStatus, Notes, IsActive } = req.body;
   const updatedBy = req.user?.userId || null;
+  const computedTotal = (parseFloat(Amount) || 0) + (parseFloat(GstAmount) || 0);
   try {
     const pool = getPool();
     await pool.request()
@@ -96,6 +104,7 @@ router.put("/:id", requirePageRight("sa-marketing-invoices", "edit"), async (req
       .input("InvoiceDate", sql.Date, InvoiceDate || null)
       .input("Amount", sql.Decimal(18, 2), Amount || 0)
       .input("GstAmount", sql.Decimal(18, 2), GstAmount || 0)
+      .input("TotalAmount", sql.Decimal(18, 2), computedTotal)
       .input("DueDate", sql.Date, DueDate || null)
       .input("PaymentStatus", sql.NVarChar(20), PaymentStatus || "Pending")
       .input("Notes", sql.NVarChar(sql.MAX), Notes || null)
@@ -105,7 +114,8 @@ router.put("/:id", requirePageRight("sa-marketing-invoices", "edit"), async (req
         UPDATE dbo.SaMarketingInvoice SET
           InvoiceNumber = @InvoiceNumber, VendorName = @VendorName,
           CampaignId = @CampaignId, AdId = @AdId, InvoiceDate = @InvoiceDate,
-          Amount = @Amount, GstAmount = @GstAmount, DueDate = @DueDate,
+          Amount = @Amount, GstAmount = @GstAmount, TotalAmount = @TotalAmount,
+          DueDate = @DueDate,
           PaymentStatus = @PaymentStatus, Notes = @Notes, IsActive = @IsActive,
           UpdatedBy = @UpdatedBy, UpdatedAt = @UpdatedAt
         WHERE Id = @Id
@@ -140,6 +150,70 @@ router.delete("/:id", requirePageRight("sa-marketing-invoices", "delete"), async
     res.json({ message: `Invoice "${InvoiceNumber}" deleted successfully` });
   } catch (err) {
     console.error("[sa-marketing-invoices] DELETE error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /:id/approve
+router.post("/:id/approve", requirePageRight("sa-marketing-invoices", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  const actorId = req.user?.userId || null;
+  const { ApprovalNotes } = req.body;
+  try {
+    const pool = getPool();
+    const check = await pool.request().input("Id", sql.Int, id)
+      .query("SELECT Id, ApprovalStatus FROM dbo.SaMarketingInvoice WHERE Id = @Id");
+    if (!check.recordset.length) return res.status(404).json({ error: "Invoice not found" });
+    if (check.recordset[0].ApprovalStatus === "Approved")
+      return res.status(400).json({ error: "Invoice is already approved" });
+    await pool.request()
+      .input("Id", sql.Int, id)
+      .input("ApprovedBy", sql.Int, actorId)
+      .input("ApprovedAt", sql.DateTime2(3), new Date())
+      .input("ApprovalNotes", sql.NVarChar(500), ApprovalNotes || null)
+      .query(`UPDATE dbo.SaMarketingInvoice SET
+        ApprovalStatus = 'Approved',
+        ApprovedBy     = @ApprovedBy,
+        ApprovedAt     = @ApprovedAt,
+        ApprovalNotes  = @ApprovalNotes,
+        UpdatedAt      = GETDATE()
+      WHERE Id = @Id`);
+    await invalidateMarketingInvoiceDependents();
+    res.json({ message: "Invoice approved" });
+  } catch (err) {
+    console.error("[sa-marketing-invoices] POST /approve error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /:id/reject
+router.post("/:id/reject", requirePageRight("sa-marketing-invoices", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  const actorId = req.user?.userId || null;
+  const { ApprovalNotes } = req.body;
+  try {
+    const pool = getPool();
+    const check = await pool.request().input("Id", sql.Int, id)
+      .query("SELECT Id, ApprovalStatus FROM dbo.SaMarketingInvoice WHERE Id = @Id");
+    if (!check.recordset.length) return res.status(404).json({ error: "Invoice not found" });
+    await pool.request()
+      .input("Id", sql.Int, id)
+      .input("ApprovedBy", sql.Int, actorId)
+      .input("ApprovedAt", sql.DateTime2(3), new Date())
+      .input("ApprovalNotes", sql.NVarChar(500), ApprovalNotes || null)
+      .query(`UPDATE dbo.SaMarketingInvoice SET
+        ApprovalStatus = 'Rejected',
+        ApprovedBy     = @ApprovedBy,
+        ApprovedAt     = @ApprovedAt,
+        ApprovalNotes  = @ApprovalNotes,
+        UpdatedAt      = GETDATE()
+      WHERE Id = @Id`);
+    await invalidateMarketingInvoiceDependents();
+    res.json({ message: "Invoice rejected" });
+  } catch (err) {
+    console.error("[sa-marketing-invoices] POST /reject error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

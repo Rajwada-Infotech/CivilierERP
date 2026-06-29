@@ -1,4 +1,5 @@
 import React from "react";
+import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -20,10 +21,20 @@ async function fetchCampaigns(): Promise<any[]> {
 }
 
 async function fetchPlatformOptions(): Promise<{ value: string; label: string }[]> {
-  const res = await fetchWithAuth(`${API}/platforms`);
-  if (!res.ok) throw new Error("Failed to fetch platforms");
-  const data: { Id: number; Name: string }[] = await res.json();
-  return data.map((p) => ({ value: String(p.Id), label: p.Name }));
+  try {
+    const res = await fetchWithAuth(`${API}/platforms`);
+    if (!res.ok) return [];
+    const data: { Id: number; Name: string }[] = await res.json();
+    return data.map((p) => ({ value: String(p.Id), label: p.Name }));
+  } catch { return []; }
+}
+async function fetchManagerOptions(): Promise<{ value: string; label: string }[]> {
+  try {
+    const res = await fetchWithAuth("/api/sa/leads/users");
+    if (!res.ok) return [];
+    const data: { Id: number; Name: string; role: string }[] = await res.json();
+    return data.map((u) => ({ value: String(u.Id), label: u.Name }));
+  } catch { return []; }
 }
 
 const fields: FieldDef[] = [
@@ -47,6 +58,7 @@ const fields: FieldDef[] = [
     options: ["Active", "Paused", "Completed", "Cancelled"],
     defaultValue: "Active",
   },
+  { name: "marketingManagerId", label: "Marketing Manager", type: "select", asyncOptions: fetchManagerOptions },
   { name: "isActive", label: "Active", type: "toggle", defaultValue: true },
 ];
 
@@ -59,6 +71,7 @@ const columns = [
   { key: "totalLeads", label: "Leads", hideOnMobile: true },
   { key: "costSpent", label: "Spent (Rs)", hideOnMobile: true },
   { key: "costPerLead", label: "CPL (Rs)", hideOnMobile: true },
+  { key: "marketingManagerName", label: "Manager", hideOnMobile: true },
   { key: "status", label: "Status" },
   { key: "isActive", label: "Active" },
 ];
@@ -83,6 +96,7 @@ function toNumber(value: unknown): number {
 }
 
 const SaCampaignMaster: React.FC = () => {
+  const { canDoAction } = useAuth();
   const queryClient = useQueryClient();
 
   const { data: campaigns, isLoading, error } = useQuery({
@@ -99,6 +113,8 @@ const SaCampaignMaster: React.FC = () => {
       name: item.Name ?? "",
       platformId: String(item.PlatformId ?? ""),
       platformName: item.PlatformName ?? "",
+      marketingManagerId: String(item.MarketingManagerId ?? ""),
+      marketingManagerName: item.MarketingManagerName ?? "",
       objective: item.Objective ?? "",
       startDate: item.StartDate ? String(item.StartDate).slice(0, 10) : "",
       endDate: item.EndDate ? String(item.EndDate).slice(0, 10) : "",
@@ -123,6 +139,7 @@ const SaCampaignMaster: React.FC = () => {
     EndDate: r.endDate || null,
     Budget: r.budget ? parseFloat(r.budget) : 0,
     Status: r.status || "Active",
+    MarketingManagerId: r.marketingManagerId ? parseInt(r.marketingManagerId) : null,
     IsActive: r.isActive !== false,
   });
 
@@ -172,6 +189,9 @@ const SaCampaignMaster: React.FC = () => {
           title="Campaign"
           fields={fields}
           columns={columns}
+          canCreate={canDoAction("sa-campaigns", "create")}
+          canEdit={canDoAction("sa-campaigns", "edit")}
+          canDelete={canDoAction("sa-campaigns", "delete")}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
           exportConfig={{
@@ -195,6 +215,7 @@ const SaCampaignMaster: React.FC = () => {
               { key: "costPerLead", label: "Cost Per Lead (Rs)" },
               { key: "conversionPct", label: "Conversion %" },
               { key: "activeDays", label: "Active Days" },
+              { key: "marketingManagerName", label: "Marketing Manager" },
               { key: "status", label: "Status" },
               { key: "isActive", label: "Active" },
             ],

@@ -1,4 +1,5 @@
 import React from "react";
+import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -49,6 +50,7 @@ const exportColumns: ExportColumn[] = [
 ];
 
 const SaSocialMediaMaster: React.FC = () => {
+  const { canDoAction } = useAuth();
   const queryClient = useQueryClient();
 
   const { data: platforms, isLoading, error } = useQuery({
@@ -125,6 +127,9 @@ const SaSocialMediaMaster: React.FC = () => {
           title="Social Media Platform"
           fields={fields}
           columns={columns}
+          canCreate={canDoAction("sa-social-media", "create")}
+          canEdit={canDoAction("sa-social-media", "edit")}
+          canDelete={canDoAction("sa-social-media", "delete")}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
           exportConfig={{
