@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Users, PhoneCall, Flame, MapPin, Award, Percent } from "lucide-react";
+import { MonthlyLeadTrend } from "@/components/sa/MonthlyLeadTrend";
 
 async function fetchSalesDashboard(): Promise<any> {
   const res = await fetchWithAuth("/api/sa/dashboard/sales");
@@ -55,6 +56,8 @@ const SaSalesDashboard: React.FC = () => {
           <StatCard icon={MapPin} label="Site Visits Completed" value={data?.siteVisitsCompleted ?? 0} />
           <StatCard icon={Award} label="Bookings Generated" value={data?.bookingsGenerated ?? 0} />
         </div>
+
+        <MonthlyLeadTrend />
 
         <div className="rounded-lg border border-border p-4">
           <div className="flex items-center gap-3">
