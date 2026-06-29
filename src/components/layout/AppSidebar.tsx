@@ -228,6 +228,10 @@ export const AppSidebar = () => {
 
   const role = currentUser?.role ?? "";
   const isAdminTier = ["super_admin", "admin", "dba"].includes(role);
+  // marketing_head acts as admin within Sales + SA modules
+  const isMarketingHead = role === "marketing_head";
+  const isAdminTierForModule = (mod: string | null) =>
+    isAdminTier || (isMarketingHead && (mod === "sales-automation" || mod === "sales"));
 
   // Filter nav items by user's page rights.
   // Privileged roles always see everything.
@@ -235,7 +239,7 @@ export const AppSidebar = () => {
   // Group items (children) have their children filtered — the group disappears
   // entirely if all its children are hidden.
   const filterByRights = (items: NavItem[]): NavItem[] => {
-    if (isAdminTier) return items;
+    if (isAdminTierForModule(activeModule)) return items;
     return items.reduce<NavItem[]>((acc, item) => {
       if (item.children) {
         const visibleChildren = item.children.filter(
@@ -263,6 +267,7 @@ export const AppSidebar = () => {
 
   const isSuperAdminPage =
     role === "super_admin" && location.pathname.startsWith("/superadmin");
+  // marketing_head cannot access DBA or system admin panels
   const isDbaPage = isAdminTier && location.pathname.startsWith("/dba");
   const isAdminPage =
     isAdminTier &&

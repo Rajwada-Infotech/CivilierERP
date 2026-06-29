@@ -6,21 +6,25 @@ import { exportToXlsx, exportToPdf, type ExportColumn } from "@/lib/export";
 import { Download, FileSpreadsheet } from "lucide-react";
 
 const REPORTS = [
-  { key: "lead-source", label: "Lead Source Report" },
-  { key: "campaign-performance", label: "Campaign Performance Report" },
-  { key: "ad-performance", label: "Advertisement Performance Report" },
-  { key: "cost-per-lead", label: "Cost Per Lead Report" },
-  { key: "sales-performance", label: "Sales Performance Report" },
-  { key: "team-leader-performance", label: "Team Leader Performance Report" },
-  { key: "executive-performance", label: "Executive Performance Report" },
-  { key: "inquiry-status", label: "Inquiry Status Report" },
-  { key: "site-visit", label: "Site Visit Report" },
-  { key: "booking-conversion", label: "Booking Conversion Report" },
-  { key: "marketing-roi", label: "Marketing ROI Report" },
+  { key: "lead-source", label: "Lead Source Report", cols: ["Platform", "TotalLeads", "Bookings", "Lost"] },
+  { key: "campaign-performance", label: "Campaign Performance Report", cols: ["CampaignCode", "Name", "Budget", "Status", "TotalAds", "TotalLeads", "CostSpent", "Bookings", "ConversionPct"] },
+  { key: "ad-performance", label: "Advertisement Performance Report", cols: ["Name", "CampaignName", "Status", "Budget", "Spent", "LeadsGenerated", "Bookings", "CostPerLead", "ConversionRate", "RoiPercent"] },
+  { key: "cost-per-lead", label: "Cost Per Lead Report", cols: ["CampaignName", "CampaignCode", "TotalSpent", "TotalLeads", "CostPerLead"] },
+  { key: "sales-performance", label: "Sales Performance Report", cols: ["SalespersonName", "LeadsHandled", "CallsMade", "SiteVisits", "Bookings"] },
+  { key: "team-leader-performance", label: "Team Leader Performance Report", cols: ["TeamLeadName", "LeadsReceived", "LeadsDistributed", "PendingDistribution", "TeamBookings"] },
+  { key: "executive-performance", label: "Executive Performance Report", cols: ["ExecutiveName", "VisitsAssigned", "VisitsCompleted", "VisitsCancelled"] },
+  { key: "inquiry-status", label: "Inquiry Status Report", cols: ["Status", "Cnt"] },
+  { key: "site-visit", label: "Site Visit Report", cols: ["CustomerName", "Mobile", "ProjectName", "ExecutiveName", "PreferredDate", "Status"] },
+  { key: "booking-conversion", label: "Booking Conversion Report", cols: ["CampaignName", "CampaignCode", "TotalLeads", "Visited", "Booked", "ConversionRate"] },
+  { key: "marketing-roi", label: "Marketing ROI Report", cols: ["CampaignName", "CampaignCode", "TotalSpent", "TotalRevenue", "ROI"] },
 ];
 
-async function fetchReport(key: string): Promise<any[]> {
-  const res = await fetchWithAuth(`/api/sa/reports/${key}`);
+async function fetchReport(key: string, from?: string, to?: string): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  const qs = params.toString();
+  const res = await fetchWithAuth(`/api/sa/reports/${key}${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error("Failed to fetch report");
   return res.json();
 }
@@ -45,13 +49,16 @@ function formatCell(value: any): string {
 
 const SaReports: React.FC = () => {
   const [selected, setSelected] = useState(REPORTS[0].key);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const { data: rows = [], isLoading, error } = useQuery({
-    queryKey: ["sa-report", selected],
-    queryFn: () => fetchReport(selected),
+    queryKey: ["sa-report", selected, dateFrom, dateTo],
+    queryFn: () => fetchReport(selected, dateFrom || undefined, dateTo || undefined),
     staleTime: 60_000,
   });
 
-  const columns = useMemo(() => deriveColumns(rows), [rows]);
+  const reportMeta = REPORTS.find((r) => r.key === selected);
+  const columns = useMemo(() => rows.length ? deriveColumns(rows) : (reportMeta?.cols ?? []), [rows, reportMeta]);
   const reportLabel = REPORTS.find((r) => r.key === selected)?.label || "Report";
 
   const handleExportExcel = () => {
@@ -72,7 +79,24 @@ const SaReports: React.FC = () => {
             <h1 className="text-xl font-heading font-bold text-foreground">Sales Automation Reports</h1>
             <p className="text-xs text-muted-foreground mt-0.5">Lead source, performance, conversion and ROI reports</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center flex-wrap gap-2">
+            {/* Date range filter */}
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-muted-foreground">From</label>
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+                className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-muted-foreground">To</label>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+                className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
+            </div>
+            {(dateFrom || dateTo) && (
+              <button onClick={() => { setDateFrom(""); setDateTo(""); }}
+                className="text-xs text-muted-foreground hover:text-foreground underline">
+                Clear
+              </button>
+            )}
             <button onClick={handleExportExcel} disabled={!rows.length} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-border text-muted-foreground hover:bg-accent disabled:opacity-40 transition-colors">
               <FileSpreadsheet size={14} /> Excel
             </button>

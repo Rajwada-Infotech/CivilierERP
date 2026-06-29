@@ -62,8 +62,19 @@ async function pickNextRecipient(pool, ruleId, level, campaignId, teamLeadUserId
       WHERE RuleId = @rid AND IsActive = 1
       ORDER BY SortOrder ASC
     `);
-  const members = membersResult.recordset;
+  let members = membersResult.recordset;
   if (!members.length) return null;
+
+  // For Level 2 (TL → SP), restrict candidates to the team lead's SaSalesTeam
+  // so a misconfigured rule cannot route leads outside the actual team.
+  if (level === 2 && teamLeadUserId) {
+    const teamResult = await pool.request()
+      .input("tlid", sql.Int, teamLeadUserId)
+      .query(`SELECT MemberUserId FROM dbo.SaSalesTeam WHERE TeamLeadUserId = @tlid AND IsActive = 1`);
+    const teamMemberIds = new Set(teamResult.recordset.map((r) => r.MemberUserId));
+    members = members.filter((m) => teamMemberIds.has(m.UserId));
+    if (!members.length) return null;
+  }
 
   // RunningCount derived from history, not a stored counter (avoids drift).
   // For L1: count by ToUserId + Level=1, scoped to the same rule's scope
